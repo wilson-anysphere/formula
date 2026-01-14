@@ -65,6 +65,17 @@ fn encodes_and_decodes_sheet_qualified_column_range_ref_in_function() {
 }
 
 #[test]
+fn encodes_and_decodes_sheet_qualified_absolute_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded = encode_rgce_with_context("=SUM(Sheet2!$A:$C)", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM(Sheet2!$A:$C)");
+}
+
+#[test]
 fn encodes_and_decodes_sheet_qualified_row_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
@@ -73,6 +84,17 @@ fn encodes_and_decodes_sheet_qualified_row_range_ref_in_function() {
         .expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM(Sheet2!1:1)");
+}
+
+#[test]
+fn encodes_and_decodes_sheet_qualified_absolute_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded = encode_rgce_with_context("=SUM(Sheet2!$1:$3)", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM(Sheet2!$1:$3)");
 }
 
 #[test]
@@ -87,6 +109,17 @@ fn encodes_and_decodes_implicit_intersection_on_sheet_qualified_column_range() {
 }
 
 #[test]
+fn encodes_and_decodes_implicit_intersection_on_sheet_qualified_absolute_column_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context("=@Sheet2!$A:$C", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@Sheet2!$A:$C");
+}
+
+#[test]
 fn encodes_and_decodes_implicit_intersection_on_sheet_qualified_row_range() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
@@ -95,6 +128,17 @@ fn encodes_and_decodes_implicit_intersection_on_sheet_qualified_row_range() {
         encode_rgce_with_context("=@Sheet2!1:1", &ctx, CellCoord::new(0, 0)).expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "@Sheet2!1:1");
+}
+
+#[test]
+fn encodes_and_decodes_implicit_intersection_on_sheet_qualified_absolute_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context("=@Sheet2!$1:$3", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@Sheet2!$1:$3");
 }
 
 #[test]
@@ -115,6 +159,23 @@ fn encodes_and_decodes_sheet_range_column_range_ref_in_function() {
 }
 
 #[test]
+fn encodes_and_decodes_sheet_range_absolute_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context("=SUM(Sheet1:Sheet3!$A:$C)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let encoded_quoted =
+        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!$A:$C)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!$A:$C)");
+}
+
+#[test]
 fn encodes_and_decodes_sheet_range_row_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
@@ -129,6 +190,23 @@ fn encodes_and_decodes_sheet_range_row_range_ref_in_function() {
 
     let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM('Sheet1:Sheet3'!1:1)");
+}
+
+#[test]
+fn encodes_and_decodes_sheet_range_absolute_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context("=SUM(Sheet1:Sheet3!$1:$3)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let encoded_quoted =
+        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!$1:$3)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!$1:$3)");
 }
 
 #[test]
@@ -149,6 +227,23 @@ fn encodes_and_decodes_implicit_intersection_on_sheet_range_column_range() {
 }
 
 #[test]
+fn encodes_and_decodes_implicit_intersection_on_sheet_range_absolute_column_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context("=@Sheet1:Sheet3!$A:$C", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let encoded_quoted =
+        encode_rgce_with_context("=@'Sheet1:Sheet3'!$A:$C", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'Sheet1:Sheet3'!$A:$C");
+}
+
+#[test]
 fn encodes_and_decodes_implicit_intersection_on_sheet_range_row_range() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
@@ -163,6 +258,23 @@ fn encodes_and_decodes_implicit_intersection_on_sheet_range_row_range() {
 
     let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "@'Sheet1:Sheet3'!1:1");
+}
+
+#[test]
+fn encodes_and_decodes_implicit_intersection_on_sheet_range_absolute_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context("=@Sheet1:Sheet3!$1:$3", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let encoded_quoted =
+        encode_rgce_with_context("=@'Sheet1:Sheet3'!$1:$3", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'Sheet1:Sheet3'!$1:$3");
 }
 
 #[test]
@@ -215,6 +327,29 @@ fn encodes_and_decodes_external_workbook_sheet_range_column_range_ref_in_functio
 }
 
 #[test]
+fn encodes_and_decodes_external_workbook_sheet_range_absolute_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context(
+        "=SUM([Book2.xlsb]SheetA:SheetB!$A:$C)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    let encoded_quoted = encode_rgce_with_context(
+        "=SUM('[Book2.xlsb]SheetA:SheetB'!$A:$C)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!$A:$C)");
+}
+
+#[test]
 fn encodes_and_decodes_external_workbook_sheet_range_row_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
@@ -235,6 +370,29 @@ fn encodes_and_decodes_external_workbook_sheet_range_row_range_ref_in_function()
 
     let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!1:1)");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_sheet_range_absolute_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context(
+        "=SUM([Book2.xlsb]SheetA:SheetB!$1:$3)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    let encoded_quoted = encode_rgce_with_context(
+        "=SUM('[Book2.xlsb]SheetA:SheetB'!$1:$3)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!$1:$3)");
 }
 
 #[test]
@@ -261,6 +419,30 @@ fn encodes_and_decodes_implicit_intersection_on_external_workbook_sheet_range_co
 }
 
 #[test]
+fn encodes_and_decodes_implicit_intersection_on_external_workbook_sheet_range_absolute_column_range()
+{
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context(
+        "=@[Book2.xlsb]SheetA:SheetB!$A:$C",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    let encoded_quoted = encode_rgce_with_context(
+        "=@'[Book2.xlsb]SheetA:SheetB'!$A:$C",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'[Book2.xlsb]SheetA:SheetB'!$A:$C");
+}
+
+#[test]
 fn encodes_and_decodes_implicit_intersection_on_external_workbook_sheet_range_row_range() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
@@ -281,6 +463,29 @@ fn encodes_and_decodes_implicit_intersection_on_external_workbook_sheet_range_ro
 
     let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "@'[Book2.xlsb]SheetA:SheetB'!1:1");
+}
+
+#[test]
+fn encodes_and_decodes_implicit_intersection_on_external_workbook_sheet_range_absolute_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context(
+        "=@[Book2.xlsb]SheetA:SheetB!$1:$3",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    let encoded_quoted = encode_rgce_with_context(
+        "=@'[Book2.xlsb]SheetA:SheetB'!$1:$3",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'[Book2.xlsb]SheetA:SheetB'!$1:$3");
 }
 
 #[test]
