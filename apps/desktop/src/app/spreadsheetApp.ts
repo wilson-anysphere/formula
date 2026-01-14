@@ -2594,36 +2594,38 @@ export class SpreadsheetApp {
           onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
           onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
           onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
-          onFillCommit: ({ sourceRange, targetRange, mode }) => {
-            // Fill operations should never mutate the sheet while the user is actively editing text
-            // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
-            //
-            // Note: DesktopSharedGrid will still expand the selection to the dragged target range
-            // after this callback runs. Revert the selection on the next microtask so the UI
-            // reflects that no fill occurred.
-            const isReadOnly = this.isReadOnly();
-            const isEditing = this.isEditing();
-            if (isReadOnly || isEditing) {
-              if (isReadOnly) {
-                const cell = this.selection.active;
-                showCollabEditRejectedToast([
-                  { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-                ]);
-              }
-              const selectionSnapshot = {
-                ranges: this.selection.ranges.map((r) => ({ ...r })),
-                active: { ...this.selection.active },
+           onFillCommit: ({ sourceRange, targetRange, mode }) => {
+             // Fill operations should never mutate the sheet while the user is actively editing text
+             // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
+             //
+             // Note: DesktopSharedGrid will still expand the selection to the dragged target range
+             // after this callback runs. Revert the selection on the next microtask so the UI
+             // reflects that no fill occurred.
+             const sheetId = this.sheetId;
+             const isReadOnly = this.isReadOnly();
+             const isEditing = this.isEditing();
+             if (isReadOnly || isEditing) {
+               if (isReadOnly) {
+                 const cell = this.selection.active;
+                  showCollabEditRejectedToast([
+                    { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+                  ]);
+                }
+                const selectionSnapshot = {
+                  ranges: this.selection.ranges.map((r) => ({ ...r })),
+                  active: { ...this.selection.active },
                 anchor: { ...this.selection.anchor },
                 activeRangeIndex: this.selection.activeRangeIndex
               };
-              queueMicrotask(() => {
-                if (!this.sharedGrid) return;
-                if (this.disposed) return;
-                this.selection = buildSelection(selectionSnapshot, this.limits);
-                this.syncSharedGridSelectionFromState({ scrollIntoView: false });
-                this.renderSelection();
-                this.updateStatus();
-                if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+                queueMicrotask(() => {
+                  if (!this.sharedGrid) return;
+                  if (this.disposed) return;
+                  if (this.sheetId !== sheetId) return;
+                  this.selection = buildSelection(selectionSnapshot, this.limits);
+                  this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                  this.renderSelection();
+                  this.updateStatus();
+                  if (this.formulaBar?.isEditing() || this.formulaEditCell) {
                   this.formulaBar?.focus();
                 } else {
                   this.focus();
@@ -2659,74 +2661,79 @@ export class SpreadsheetApp {
                 // `showToast` requires a #toast-root; unit tests don't always include it.
               }
 
-              // DesktopSharedGrid will still expand the selection to the dragged target range
-              // after this callback runs. Revert selection back to the pre-fill state on the
-              // next microtask turn so the UI reflects that no fill occurred.
-              const selectionSnapshot = {
+               // DesktopSharedGrid will still expand the selection to the dragged target range
+               // after this callback runs. Revert selection back to the pre-fill state on the
+               // next microtask turn so the UI reflects that no fill occurred.
+               const selectionSnapshot = {
                 ranges: this.selection.ranges.map((r) => ({ ...r })),
                 active: { ...this.selection.active },
                 anchor: { ...this.selection.anchor },
                 activeRangeIndex: this.selection.activeRangeIndex
-              };
-              queueMicrotask(() => {
-                if (!this.sharedGrid) return;
-                if (this.disposed) return;
-                this.selection = buildSelection(selectionSnapshot, this.limits);
-                this.syncSharedGridSelectionFromState({ scrollIntoView: false });
-                this.renderSelection();
-                this.updateStatus();
-                this.focus();
+               };
+               queueMicrotask(() => {
+                 if (!this.sharedGrid) return;
+                 if (this.disposed) return;
+                 if (this.sheetId !== sheetId) return;
+                 this.selection = buildSelection(selectionSnapshot, this.limits);
+                 this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                 this.renderSelection();
+                 this.updateStatus();
+                 this.focus();
               });
               return;
             }
 
-            const fillCoordScratch = { row: 0, col: 0 };
-            const getCellComputedValue = (row: number, col: number) => {
-              fillCoordScratch.row = row;
-              fillCoordScratch.col = col;
-              return this.getCellComputedValue(fillCoordScratch) as any;
-            };
+             const fillCoordScratch = { row: 0, col: 0 };
+             const getCellComputedValue = (row: number, col: number) => {
+               fillCoordScratch.row = row;
+               fillCoordScratch.col = col;
+               return this.getCellComputedValueForSheetInternal(sheetId, fillCoordScratch) as any;
+             };
 
-            // Prefer engine-backed formula shifting when available (handles A:A / 1:1 / ranges, etc).
-            const wasm = this.wasmEngine;
-            if (wasm && mode !== "copy") {
-              const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
-                document: this.document,
-                sheetId: this.sheetId,
-                sourceRange: source,
-                targetRange: target,
-                mode,
-                getCellComputedValue,
-                rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
-              })
-                .catch(() => {
-                  // Fall back to the legacy best-effort fill engine if the worker is unavailable.
-                  applyFillCommitToDocumentController({
-                    document: this.document,
-                    sheetId: this.sheetId,
-                    sourceRange: source,
-                    targetRange: target,
-                    mode,
-                    getCellComputedValue,
-                  });
-                })
-                .finally(() => {
-                  // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
-                  this.refresh();
-                  this.focus();
-                });
-              this.idle.track(task);
-              return;
-            }
+             // Prefer engine-backed formula shifting when available (handles A:A / 1:1 / ranges, etc).
+             const wasm = this.wasmEngine;
+             if (wasm && mode !== "copy") {
+               const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
+                 document: this.document,
+                 sheetId,
+                 sourceRange: source,
+                 targetRange: target,
+                 mode,
+                 getCellComputedValue,
+                 rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+               })
+                 .catch(() => {
+                   // Fall back to the legacy best-effort fill engine if the worker is unavailable.
+                   applyFillCommitToDocumentController({
+                     document: this.document,
+                     sheetId,
+                     sourceRange: source,
+                     targetRange: target,
+                     mode,
+                     getCellComputedValue,
+                   });
+                 })
+                 .finally(() => {
+                   if (this.sheetId === sheetId) {
+                     // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
+                     // Avoid stealing focus from a different sheet if the user navigated away
+                     // while the async fill commit was in-flight.
+                     this.refresh();
+                     this.focus();
+                   }
+                 });
+               this.idle.track(task);
+               return;
+             }
 
-            applyFillCommitToDocumentController({
-              document: this.document,
-              sheetId: this.sheetId,
-              sourceRange: source,
-              targetRange: target,
-              mode,
-              getCellComputedValue,
-            });
+             applyFillCommitToDocumentController({
+               document: this.document,
+               sheetId,
+               sourceRange: source,
+               targetRange: target,
+               mode,
+               getCellComputedValue,
+             });
 
             // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
             this.refresh();
