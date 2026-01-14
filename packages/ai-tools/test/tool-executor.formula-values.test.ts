@@ -145,6 +145,68 @@ describe("ToolExecutor include_formula_values", () => {
     expect(event.decision?.decision).toBe("allow");
   });
 
+  it("surfaces formula values when restricted content is explicitly allowed by DLP policy", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        include_restricted_content: true,
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: true,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 0,
+            },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+        audit_logger,
+      },
+    });
+
+    const read = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1", include_formulas: true },
+    });
+
+    expect(read.ok).toBe(true);
+    expect(read.tool).toBe("read_range");
+    if (!read.ok || read.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(read.data?.values).toEqual([[2]]);
+    expect(read.data?.formulas).toEqual([["=1+1"]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+
+    const stats = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:A1", measures: ["sum", "count"] },
+    });
+    expect(stats.ok).toBe(true);
+    expect(stats.tool).toBe("compute_statistics");
+    if (!stats.ok || stats.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(stats.data?.statistics).toEqual({ sum: 2, count: 1 });
+  });
+
   it("compute_statistics includes numeric values from formula cells when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
