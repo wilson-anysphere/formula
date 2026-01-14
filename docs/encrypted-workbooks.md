@@ -108,8 +108,28 @@ formula-io = { version = "*", default-features = false, features = ["encrypted-w
 
 ### Rust: `formula-xlsx` convenience decryption helpers (advanced)
 
-If you already have encrypted OOXML bytes in memory and want to manually decrypt to plaintext ZIP
-bytes, `formula-xlsx` exposes MS‑OFFCRYPTO helpers under `formula_xlsx::offcrypto`:
+If you already have **Office-encrypted OOXML bytes** in memory (OLE/CFB `EncryptionInfo` +
+`EncryptedPackage`) and want to work directly with `formula-xlsx`, there are two convenience
+entrypoints (native-only; not available on `wasm32`):
+
+```rust
+let encrypted = std::fs::read("encrypted.xlsx")?;
+
+// Decrypt + open as an OPC package (parts -> bytes).
+let pkg = formula_xlsx::load_from_encrypted_ole_bytes(&encrypted, "password")?;
+
+// Or decrypt + parse straight into the semantic workbook model.
+let workbook = formula_xlsx::read_workbook_from_encrypted_reader(
+    std::io::Cursor::new(encrypted),
+    "password",
+)?;
+```
+
+These helpers validate that the decrypted payload looks like an Excel workbook (e.g.
+`xl/workbook.xml` / `xl/workbook.bin`) before attempting to parse it as a ZIP/OPC container.
+
+If you want the **raw decrypted ZIP bytes** (e.g. to feed into a different ZIP pipeline),
+`formula-xlsx` also exposes MS‑OFFCRYPTO helpers under `formula_xlsx::offcrypto`:
 
 ```rust
 let encrypted = std::fs::read("encrypted.xlsx")?;
