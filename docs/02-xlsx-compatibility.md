@@ -355,6 +355,26 @@ Notes:
 | `t="inlineStr"` | Rich Text | `<is><t>text</t></is>` |
 | `t="b"` | Boolean | 0 or 1 |
 | `t="e"` | Error | Error string (#VALUE!, etc.) |
+| `t="d"` | Date (typed) | ISO-8601 text in `<v>`.<br>Excel should interpret as a date serial for calculation.<br>Round-trip must preserve `t` and the original ISO string. |
+
+### Tables (`xl/tables/table*.xml`)
+
+Excel “tables” (ListObjects) are stored in separate parts like `xl/tables/table1.xml` and linked from
+the worksheet via `<tableParts>` plus a `.../relationships/table` relationship in
+`xl/worksheets/_rels/sheetN.xml.rels`.
+
+#### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
+
+`table*.xml` can contain an `<autoFilter>` element whose schema/behavior matches the worksheet-level
+`<autoFilter>` (same `filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
+
+- Worksheet autoFilter parsing/writing lives in `crates/formula-xlsx/src/autofilter/*` and is applied
+  during round-trip patching in `crates/formula-xlsx/src/write/mod.rs`.
+- Table part parsing/writing lives in `crates/formula-xlsx/src/tables/xml.rs`.
+
+For forward compatibility, any advanced filter criteria we don’t model (e.g. newer filter elements or
+`extLst` payloads) should be preserved by storing the original XML fragments in the `raw_xml` fields
+on the AutoFilter / FilterColumn structs and re-emitting them unchanged.
 
 #### Images in Cells (`IMAGE()` / “Place in Cell”) (Rich Data + `metadata.xml`)
 
@@ -1240,6 +1260,18 @@ interface XlsxDocument {
   binaryParts: Map<PartPath, Uint8Array>;  // vbaProject.bin, etc.
 }
 ```
+
+### Worksheet protection hashing attributes (forward compatibility)
+
+`<sheetProtection>` can include newer hashing attributes like `algorithmName`, `hashValue`,
+`saltValue`, and `spinCount` (used by modern Excel versions instead of the legacy `password="ABCD"`
+hash).
+
+Even if the public model only exposes the legacy `password` hash, these newer attributes must be
+preserved byte-for-byte on round-trip unless the user explicitly edits protection settings. In the
+current writer this falls under the general “patch in place” strategy in
+`crates/formula-xlsx/src/write/mod.rs`: if we aren’t changing sheet protection, we should avoid
+rewriting `<sheetProtection>` so we don’t drop unmodeled attributes.
 
 ### Relationship ID Preservation
 
