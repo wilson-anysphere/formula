@@ -38,6 +38,8 @@ import { isFormulaInput, normalizeFormulaText } from "../backend/formula.ts";
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;
   terminate(): void;
+  addEventListener?(type: string, listener: (event: any) => void, options?: any): void;
+  removeEventListener?(type: string, listener: (event: any) => void, options?: any): void;
 }
 
 export interface MessagePortLike {
@@ -212,6 +214,7 @@ export class EngineWorker {
     // event that a mock Worker posts "ready" synchronously.
     let onAbort: (() => void) | null = null;
     let onReady: ((event: MessageEvent<unknown>) => void) | null = null;
+    let onWorkerError: ((event: any) => void) | null = null;
 
     const removeListeners = () => {
       if (onReady) {
@@ -219,6 +222,13 @@ export class EngineWorker {
       }
       if (options.signal && onAbort) {
         options.signal.removeEventListener("abort", onAbort);
+      }
+      if (onWorkerError && typeof worker.removeEventListener === "function") {
+        try {
+          worker.removeEventListener("error", onWorkerError);
+        } catch {
+          // ignore
+        }
       }
       if (timeoutId != null) {
         clearTimeout(timeoutId);
@@ -252,6 +262,27 @@ export class EngineWorker {
           return;
         }
         options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      if (typeof worker.addEventListener === "function") {
+        onWorkerError = (event: any) => {
+          if (settled) return;
+          settled = true;
+          removeListeners();
+          cleanup();
+          const message = event && typeof event === "object" && "message" in event ? String((event as any).message) : "";
+          reject(new Error(message ? `EngineWorker.connect worker error: ${message}` : "EngineWorker.connect worker error"));
+        };
+        try {
+          worker.addEventListener("error", onWorkerError, { once: true });
+        } catch {
+          // Some WorkerLike shims may not support options objects; fall back to the basic signature.
+          try {
+            worker.addEventListener("error", onWorkerError);
+          } catch {
+            // ignore
+          }
+        }
       }
 
       if (timeoutMs != null) {

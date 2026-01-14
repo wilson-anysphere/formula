@@ -1201,6 +1201,63 @@ describe("EngineWorker RPC", () => {
     vi.useRealTimers();
   });
 
+  it("rejects connect when the worker emits an error before the ready handshake", async () => {
+    class ErroringWorker implements WorkerLike {
+      terminated = false;
+      postMessageCalls = 0;
+      private readonly errorListeners = new Set<(event: any) => void>();
+      private port: MockMessagePort | null = null;
+
+      addEventListener(type: string, listener: (event: any) => void): void {
+        if (type === "error") this.errorListeners.add(listener);
+      }
+
+      removeEventListener(type: string, listener: (event: any) => void): void {
+        if (type === "error") this.errorListeners.delete(listener);
+      }
+
+      postMessage(message: unknown): void {
+        this.postMessageCalls += 1;
+        const init = message as InitMessage;
+        if (!init || typeof init !== "object" || (init as any).type !== "init") {
+          return;
+        }
+        this.port = init.port as unknown as MockMessagePort;
+        queueMicrotask(() => {
+          for (const listener of this.errorListeners) {
+            listener({ message: "worker crashed" });
+          }
+        });
+      }
+
+      terminate(): void {
+        this.terminated = true;
+        try {
+          this.port?.close();
+        } catch {
+          // ignore
+        }
+        this.port = null;
+      }
+    }
+
+    const worker = new ErroringWorker();
+    const channel = createMockChannel();
+
+    await expect(
+      EngineWorker.connect({
+        worker,
+        wasmModuleUrl: "mock://wasm",
+        channelFactory: () => channel,
+      })
+    ).rejects.toThrow(/worker error/i);
+
+    expect(worker.postMessageCalls).toBe(1);
+    expect(worker.terminated).toBe(true);
+    expect((channel.port1 as unknown as MockMessagePort).closed).toBe(true);
+    expect((channel.port2 as unknown as MockMessagePort).closed).toBe(true);
+  });
+
   it("cleans up ports + abort listener when Worker.postMessage throws", async () => {
     class ThrowingWorker implements WorkerLike {
       terminated = false;
