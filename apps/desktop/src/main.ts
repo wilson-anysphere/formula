@@ -128,6 +128,7 @@ import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCo
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
+import { getStyleNumberFormat } from "./formatting/styleFieldAccess.js";
 import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
@@ -1669,8 +1670,8 @@ function activeCellNumberFormat(): string | null {
   const cell = app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = app.getDocument() as any;
-  const format = docAny.getCellFormat?.(sheetId, cell)?.numberFormat;
-  return typeof format === "string" && format.trim() ? format : null;
+  const style = docAny.getCellFormat?.(sheetId, cell);
+  return getStyleNumberFormat(style);
 }
 
 function activeCellIndentLevel(): number {
