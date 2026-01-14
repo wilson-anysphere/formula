@@ -165,6 +165,13 @@ describe("defaultRibbonSchema", () => {
         "home.editing.clear.clearHyperlinks",
       ]),
     );
+
+    // Ensure we don't regress to legacy ribbon-only ids.
+    expect(menuIds).not.toContain("home.editing.clear.clearAll");
+    expect(menuIds).not.toContain("home.editing.clear.clearFormats");
+    expect(menuIds).not.toContain("home.editing.clear.clearContents");
+    // Clear Contents should go through the canonical edit command (not the format variant).
+    expect(menuIds).not.toContain("format.clearContents");
   });
 
   it("does not include legacy icon properties in the schema", () => {

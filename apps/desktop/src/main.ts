@@ -54,7 +54,6 @@ import {
   handleRibbonToggle as handleRibbonFormattingToggle,
 } from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
-import { resolveHomeEditingClearCommandTarget } from "./ribbon/homeEditingClearCommandRouting.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -8326,12 +8325,6 @@ function handleRibbonCommand(commandId: string): void {
         showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     };
-
-    const editingClearTarget = resolveHomeEditingClearCommandTarget(commandId);
-    if (editingClearTarget) {
-      executeBuiltinCommand(editingClearTarget);
-      return;
-    }
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
       if (commandId !== "home.styles.cellStyles.goodBadNeutral") {
