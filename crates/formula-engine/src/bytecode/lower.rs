@@ -161,6 +161,17 @@ fn external_sheet_id(prefix: &RefPrefix) -> Result<SheetId, LowerError> {
     Ok(SheetId::External(Arc::from(key)))
 }
 
+fn indirect_string_refers_to_external_workbook(text: &str) -> bool {
+    let s = text.trim();
+    let Some(bang) = s.find('!') else {
+        return false;
+    };
+    // Excel sheet names cannot contain `[` / `]`, so a `[` before the sheet separator indicates an
+    // external workbook prefix like `[Book.xlsx]Sheet1!A1` (or a path form like
+    // `'C:\\path\\[Book.xlsx]Sheet1'!A1`).
+    s[..bang].contains('[')
+}
+
 fn expand_sheet_span(
     start: &str,
     end: &str,
@@ -331,8 +342,7 @@ fn lower_range_ref(
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
 ) -> Result<BytecodeExpr, LowerError> {
-    let (left_prefix, left_rect) =
-        lower_rect_ref(left, origin, current_sheet, resolve_sheet_id)?;
+    let (left_prefix, left_rect) = lower_rect_ref(left, origin, current_sheet, resolve_sheet_id)?;
     let (right_prefix, right_rect) =
         lower_rect_ref(right, origin, current_sheet, resolve_sheet_id)?;
     let merged_prefix = merge_range_prefix(&left_prefix, &right_prefix)?;
@@ -533,23 +543,23 @@ fn lower_canonical_reference_expr(
                 resolve_sheet_id,
                 expand_sheet_span_ids,
             )? {
-                BytecodeExpr::CellRef(cell) => Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell))),
+                BytecodeExpr::CellRef(cell) => {
+                    Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell)))
+                }
                 BytecodeExpr::MultiRangeRef(r) => Ok(BytecodeExpr::MultiRangeRef(r)),
                 other => unreachable!(
                     "lower_cell_ref_expr only lowers to CellRef/MultiRangeRef, got {other:?}"
                 ),
             }
         }
-        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
-            lower_range_ref(
-                &b.left,
-                &b.right,
-                origin,
-                current_sheet,
-                resolve_sheet_id,
-                expand_sheet_span_ids,
-            )
-        }
+        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => lower_range_ref(
+            &b.left,
+            &b.right,
+            origin,
+            current_sheet,
+            resolve_sheet_id,
+            expand_sheet_span_ids,
+        ),
         crate::Expr::Binary(b)
             if matches!(b.op, crate::BinaryOp::Union | crate::BinaryOp::Intersect) =>
         {
@@ -703,16 +713,14 @@ fn lower_canonical_expr_inner(
             }
         }
         crate::Expr::Binary(b) => match b.op {
-            crate::BinaryOp::Range => {
-                lower_range_ref(
-                    &b.left,
-                    &b.right,
-                    origin,
-                    current_sheet,
-                    resolve_sheet_id,
-                    expand_sheet_span_ids,
-                )
-            }
+            crate::BinaryOp::Range => lower_range_ref(
+                &b.left,
+                &b.right,
+                origin,
+                current_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
+            ),
             crate::BinaryOp::Concat => {
                 // Flatten `a&b&c` into a single CONCAT_OP call so we avoid intermediate allocations
                 // during evaluation and maximize cache sharing between equivalent concat chains.
@@ -950,6 +958,14 @@ fn lower_canonical_expr_inner(
                         })
                     }
                     other => {
+                        if other == Function::Indirect {
+                            if let Some(crate::Expr::String(text)) = call.args.first() {
+                                if indirect_string_refers_to_external_workbook(text) {
+                                    return Err(LowerError::ExternalReference);
+                                }
+                            }
+                        }
+
                         let args = call
                             .args
                             .iter()

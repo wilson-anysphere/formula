@@ -1768,9 +1768,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
             Value::Record(v) => {
                 if let Some(display_field) = v.display_field.as_deref() {
                     if let Some(field_value) = v.get_field_case_insensitive(display_field) {
-                        let s = field_value
-                            .coerce_to_string()
-                            .map_err(ErrorKind::from)?;
+                        let s = field_value.coerce_to_string().map_err(ErrorKind::from)?;
                         return Ok(Value::Text(Arc::from(s.as_str())));
                     }
                 }
@@ -4671,7 +4669,9 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
         Value::Entity(ent) => Value::Text(Arc::from(ent.display.as_str())),
-        Value::Record(rec) => Value::Text(Arc::from(record_display_text_like(rec.as_ref()).as_str())),
+        Value::Record(rec) => {
+            Value::Text(Arc::from(record_display_text_like(rec.as_ref()).as_str()))
+        }
         Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing | Value::Lambda(_) => {
             Value::Text(Arc::from(""))
         }
@@ -4743,7 +4743,9 @@ fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     match args {
         [] => Value::Number((base.row + 1) as f64),
-        [Value::Range(r)] => eval_row_for_range(grid, &SheetId::Local(grid.sheet_id()), r.resolve(base)),
+        [Value::Range(r)] => {
+            eval_row_for_range(grid, &SheetId::Local(grid.sheet_id()), r.resolve(base))
+        }
         [Value::MultiRange(r)] => match r.areas.as_ref() {
             [] => Value::Error(ErrorKind::Ref),
             [only] => eval_row_for_range(grid, &only.sheet, only.range.resolve(base)),
@@ -4999,7 +5001,9 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let height = if let Some(arg) = args.get(3) {
         match match arg {
-            Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(arg.clone(), grid, base),
+            Value::Range(_) | Value::MultiRange(_) => {
+                apply_implicit_intersection(arg.clone(), grid, base)
+            }
             _ => arg.clone(),
         } {
             Value::Error(e) => return Value::Error(e),
@@ -5014,7 +5018,9 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let width = if let Some(arg) = args.get(4) {
         match match arg {
-            Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(arg.clone(), grid, base),
+            Value::Range(_) | Value::MultiRange(_) => {
+                apply_implicit_intersection(arg.clone(), grid, base)
+            }
             _ => arg.clone(),
         } {
             Value::Error(e) => return Value::Error(e),
@@ -5124,7 +5130,10 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
-    fn resolve_sheet(grid: &dyn Grid, sheet: &crate::eval::SheetReference<String>) -> Option<usize> {
+    fn resolve_sheet(
+        grid: &dyn Grid,
+        sheet: &crate::eval::SheetReference<String>,
+    ) -> Option<usize> {
         match sheet {
             crate::eval::SheetReference::Current => Some(thread_current_sheet_id() as usize),
             crate::eval::SheetReference::Sheet(name) => grid.resolve_sheet_name(name),
@@ -5133,9 +5142,11 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(start_id)
             }
-            // Excel's INDIRECT does not support external workbook references.
-            // Keep bytecode behavior consistent with the AST evaluator by rejecting them here.
-            crate::eval::SheetReference::External(_) => None,
+            crate::eval::SheetReference::External(_) => {
+                // Match `functions::builtins_reference::INDIRECT`: Excel's INDIRECT does not
+                // support external workbook references.
+                None
+            }
         }
     }
 
