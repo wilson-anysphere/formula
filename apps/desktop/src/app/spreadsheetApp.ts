@@ -2860,11 +2860,13 @@ export class SpreadsheetApp {
              // reflects that no fill occurred.
              const sheetId = this.sheetId;
              const isReadOnly = this.isReadOnly();
-             const isEditing = this.isEditing();
+             // Fill operations should never mutate the sheet while any editor is active, including
+             // split-view secondary editing sessions reported via `__formulaSpreadsheetIsEditing`.
+             const isEditing = this.isSpreadsheetEditingIncludingSecondary();
              if (isReadOnly || isEditing) {
                if (isReadOnly) {
                  const cell = this.selection.active;
-                  showCollabEditRejectedToast([
+                   showCollabEditRejectedToast([
                     { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
                   ]);
                 }

@@ -228,6 +228,47 @@ describe("SpreadsheetApp fill large selections", () => {
     formulaBar.remove();
   });
 
+  it("blocks shared-grid fill handle commits when the shell reports split-view editing", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+    expect(app.isEditing()).toBe(false);
+
+    const doc = app.getDocument();
+    const beginBatch = vi.spyOn(doc, "beginBatch");
+    const setCellInput = vi.spyOn(doc, "setCellInput");
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+    const sharedGrid = (app as any).sharedGrid as any;
+    const onFillCommit = sharedGrid?.callbacks?.onFillCommit as ((event: any) => void) | undefined;
+    expect(typeof onFillCommit).toBe("function");
+
+    // Grid ranges include a 1-row/1-col header at index 0.
+    // Source: A1 (1 cell). Target delta: A2 (1 cell).
+    onFillCommit!({
+      sourceRange: { startRow: 1, endRow: 2, startCol: 1, endCol: 2 },
+      targetRange: { startRow: 2, endRow: 3, startCol: 1, endCol: 2 },
+      mode: "copy",
+    });
+
+    // Allow any microtasks scheduled by the guard path to flush.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(beginBatch).not.toHaveBeenCalled();
+    expect(setCellInput).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("blocks legacy fill-drag commits when the target area is extremely large", () => {
     const root = createRoot();
     const status = {
