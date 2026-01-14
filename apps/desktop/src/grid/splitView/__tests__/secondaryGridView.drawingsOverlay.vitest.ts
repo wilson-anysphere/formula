@@ -151,6 +151,56 @@ describe("SecondaryGridView drawings overlay", () => {
     container.remove();
   });
 
+  it("does not emit an unhandled rejection when DrawingOverlay.render returns a rejected promise", async () => {
+    vi.useRealTimers();
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
+    const view = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+    });
+
+    const err = new Error("boom");
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      (view as any).drawingsOverlay.render = vi.fn(() => Promise.reject(err));
+
+      expect(() => (view as any).renderDrawings()).not.toThrow();
+
+      // Allow Node to emit any unhandled rejection events.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      view.destroy();
+      container.remove();
+    }
+  });
+
   it("passes frozen pane metadata to the drawings overlay viewport", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });

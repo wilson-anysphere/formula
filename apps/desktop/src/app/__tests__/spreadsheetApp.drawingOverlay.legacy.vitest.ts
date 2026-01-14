@@ -249,6 +249,54 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     }
   });
 
+  it("does not emit an unhandled rejection when DrawingOverlay.render returns a rejected promise", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    vi.useRealTimers();
+    try {
+      const err = new Error("boom");
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+
+      try {
+        const app = new SpreadsheetApp(root, status);
+
+        renderSpy.mockClear();
+        warnSpy.mockClear();
+        renderSpy.mockImplementationOnce(() => Promise.reject(err) as any);
+
+        (app as any).renderDrawings();
+
+        // Allow the rejection handler (and Node unhandledRejection bookkeeping) to run.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(unhandled).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith("Drawing overlay render failed", err);
+
+        app.destroy();
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        root.remove();
+      }
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("does not throw when chart selection overlay render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
