@@ -576,7 +576,6 @@ fn verify_password_standard_with_key(
         ))),
     }
 }
-
 fn verify_password_standard_with_key_and_mode(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
