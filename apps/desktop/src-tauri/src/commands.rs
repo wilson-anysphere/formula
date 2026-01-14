@@ -8565,6 +8565,12 @@ pub(crate) fn ensure_ipc_network_url_allowed(
     context: &str,
     debug_assertions: bool,
 ) -> Result<(), String> {
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(format!(
+            "{context}: URLs must not include a username/password (userinfo)"
+        ));
+    }
+
     match url.scheme() {
         "https" => Ok(()),
         "http" => {
@@ -9443,6 +9449,23 @@ mod tests {
         let url = Url::parse("http://example.com/").expect("parse url");
         ensure_ipc_network_url_allowed(&url, "test", true)
             .expect("http remote should be allowed in debug mode");
+    }
+
+    #[test]
+    fn ipc_network_scheme_policy_denies_userinfo() {
+        for candidate in [
+            "https://user:pass@example.com/",
+            "https://user@example.com/",
+            "http://user@localhost:3000/",
+        ] {
+            let url = Url::parse(candidate).expect("parse url");
+            let err = ensure_ipc_network_url_allowed(&url, "test", true)
+                .expect_err("userinfo should be denied");
+            assert!(
+                err.contains("username/password") || err.contains("userinfo"),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]
