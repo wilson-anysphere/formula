@@ -429,10 +429,10 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       expect(hideRun.mapHasCalls).toBeLessThan(500_000);
       expect(unhideRun.mapHasCalls).toBeLessThan(500_000);
 
-      // Perf numbers can fluctuate based on host load (and our test harness spins up a lot of
-      // infrastructure). Keep a generous ceiling so we still catch accidental O(maxRows/maxCols)
-      // regressions without introducing local flakiness.
-      if (!process.env.CI && !process.env.IS_ON_DEV_EC2_MACHINE) {
+      // Time-based assertions are intentionally opt-in since wall-clock performance varies wildly
+      // across machines / environments (and is especially flaky in shared CI runners).
+      // Run with `FORMULA_PERF_ASSERT=1` to enforce a local perf budget.
+      if (process.env.FORMULA_PERF_ASSERT === "1") {
         expect(hideRun.elapsedMs).toBeLessThan(2_000);
         expect(unhideRun.elapsedMs).toBeLessThan(2_000);
       }
