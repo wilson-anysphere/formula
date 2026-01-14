@@ -186,6 +186,50 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("hides and re-syncs the tooltip when switching sheets during formula editing", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+
+    const textarea = formulaBar.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+
+    // Begin editing on Sheet1, then navigate to Sheet2 and enter a sheet-qualified reference.
+    textarea!.dispatchEvent(new Event("focus"));
+    app.activateSheet("Sheet2");
+
+    textarea!.value = "=Sheet2!A1";
+    textarea!.setSelectionRange(textarea!.value.length, textarea!.value.length);
+    textarea!.dispatchEvent(new Event("input"));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    // Switching away from the referenced sheet should immediately hide the tooltip (no new hover event).
+    app.activateSheet("Sheet1");
+    expect(tooltip?.hidden).toBe(true);
+
+    // Switching back should re-sync from the current formula bar hover/caret state.
+    app.activateSheet("Sheet2");
+    expect(tooltip?.hidden).toBe(false);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("skips unqualified previews when editing a cell on another sheet", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");

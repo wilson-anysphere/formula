@@ -4806,6 +4806,11 @@ export class SpreadsheetApp {
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
+    // Sheet switches can leave formula-bar hover tooltips/overlays in a stale state (e.g. the user was
+    // hovering a ref span or editing a formula referencing a different sheet). Clear any visible tooltip
+    // and re-sync overlays from the formula bar's current hover state.
+    this.hideFormulaRangePreviewTooltip();
+    this.syncFormulaBarHoverRangeOverlays();
   }
 
   /**
@@ -4862,6 +4867,10 @@ export class SpreadsheetApp {
     }
     this.renderSelection();
     this.updateStatus();
+    if (sheetChanged) {
+      this.hideFormulaRangePreviewTooltip();
+      this.syncFormulaBarHoverRangeOverlays();
+    }
     if (sheetChanged) {
       // Sheet changes always require a full redraw (grid + charts may differ).
       this.refresh();
@@ -4933,6 +4942,10 @@ export class SpreadsheetApp {
     }
     this.renderSelection();
     this.updateStatus();
+    if (sheetChanged) {
+      this.hideFormulaRangePreviewTooltip();
+      this.syncFormulaBarHoverRangeOverlays();
+    }
     if (sheetChanged) {
       this.refresh();
     } else if (didScroll) {
@@ -6862,6 +6875,52 @@ export class SpreadsheetApp {
     if (!explicit) return true;
     if (!sheetId) return false;
     return sheetId.toLowerCase() === this.sheetId.toLowerCase();
+  }
+
+  private syncFormulaBarHoverRangeOverlays(): void {
+    const bar = this.formulaBar;
+    if (!bar || !bar.isEditing()) return;
+
+    const range = bar.model.hoveredReference();
+    const refText = bar.model.hoveredReferenceText();
+    const allowed = this.isFormulaRangePreviewAllowed(refText);
+
+    if (!allowed) {
+      this.hideFormulaRangePreviewTooltip();
+      this.referencePreview = null;
+      if (this.sharedGrid) {
+        this.sharedGrid.clearRangeSelection();
+      } else {
+        this.renderReferencePreview();
+      }
+      return;
+    }
+
+    this.updateFormulaRangePreviewTooltip(range, refText);
+
+    this.referencePreview = range
+      ? {
+          start: { row: range.start.row, col: range.start.col },
+          end: { row: range.end.row, col: range.end.col },
+        }
+      : null;
+
+    if (this.sharedGrid) {
+      if (range) {
+        const gridRange = this.gridRangeFromDocRange({
+          startRow: range.start.row,
+          endRow: range.end.row,
+          startCol: range.start.col,
+          endCol: range.end.col,
+        });
+        this.sharedGrid.setRangeSelection(gridRange);
+      } else {
+        this.sharedGrid.clearRangeSelection();
+      }
+      return;
+    }
+
+    this.renderReferencePreview();
   }
 
   private updateFormulaRangePreviewTooltip(range: A1RangeAddress | null, refText: string | null): void {
