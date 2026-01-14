@@ -36,7 +36,7 @@ fn decrypts_rc4_standard_with_long_password_truncation() {
         .expect_err("expected wrong password to fail");
     assert!(
         matches!(err, formula_xls::ImportError::InvalidPassword),
-        "expected InvalidPassword, got {err:?}"
+        "expected ImportError::InvalidPassword, got {err:?}"
     );
 }
 
@@ -64,7 +64,7 @@ fn decrypts_rc4_standard_with_empty_password() {
         .expect_err("expected wrong password to fail");
     assert!(
         matches!(err, formula_xls::ImportError::InvalidPassword),
-        "expected InvalidPassword, got {err:?}"
+        "expected ImportError::InvalidPassword, got {err:?}"
     );
 }
 
@@ -90,6 +90,6 @@ fn rc4_cryptoapi_does_not_truncate_password_to_15_chars() {
         .expect_err("expected truncated password to fail");
     assert!(
         matches!(err, formula_xls::ImportError::InvalidPassword),
-        "expected InvalidPassword, got {err:?}"
+        "expected ImportError::InvalidPassword, got {err:?}"
     );
 }
