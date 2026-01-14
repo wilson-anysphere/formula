@@ -162,4 +162,51 @@ describe("drawing resize handle hit testing", () => {
 
     controller.dispose();
   });
+
+  it("enters resize mode under zoom (hit-test index + resize math both respect viewport.zoom)", () => {
+    const { element, dispatch } = createStubElement();
+
+    const zoom = 2;
+    const viewportZoomed: Viewport = { ...viewport, zoom };
+
+    const bounds = { x: 10, y: 10, width: 20, height: 20 };
+    // Rendered bounds are scaled by zoom.
+    const rendered = { x: bounds.x * zoom, y: bounds.y * zoom, width: bounds.width * zoom, height: bounds.height * zoom };
+
+    let objects: DrawingObject[] = [createAbsoluteObject(bounds)];
+    const setCalls: DrawingObject[][] = [];
+
+    const controller = new DrawingInteractionController(element, geom, {
+      getViewport: () => viewportZoomed,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+        setCalls.push(next);
+      },
+    });
+
+    // Select first.
+    dispatch("pointerdown", createPointerEvent(rendered.x + rendered.width / 2, rendered.y + rendered.height / 2, 1));
+    dispatch("pointerup", createPointerEvent(rendered.x + rendered.width / 2, rendered.y + rendered.height / 2, 1));
+
+    // Grab the NW handle square (which extends outside the object bounds).
+    const half = RESIZE_HANDLE_SIZE_PX / 2;
+    const startX = rendered.x - half + 1;
+    const startY = rendered.y - half + 1;
+    dispatch("pointerdown", createPointerEvent(startX, startY, 1));
+    dispatch("pointermove", createPointerEvent(startX + 10, startY + 10, 1));
+
+    expect(setCalls.length).toBe(1);
+    const anchor = objects[0]!.anchor;
+    expect(anchor.type).toBe("absolute");
+    if (anchor.type !== "absolute") throw new Error("expected absolute anchor");
+
+    // Screen delta is 10px at zoom=2 => 5px document-space delta.
+    expect(anchor.pos.xEmu).toBe(pxToEmu(15));
+    expect(anchor.pos.yEmu).toBe(pxToEmu(15));
+    expect(anchor.size.cx).toBe(pxToEmu(15));
+    expect(anchor.size.cy).toBe(pxToEmu(15));
+
+    controller.dispose();
+  });
 });
