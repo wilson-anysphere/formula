@@ -123,19 +123,25 @@ function isWhitespace(ch: string): boolean {
  * - Count `(` minus `)` while ignoring any parentheses that appear inside string literals.
  * - Clamp indentation to a reasonable maximum so pathological inputs don't create huge whitespace runs.
  */
-function computeFormulaIndentation(text: string, cursor: number): string {
+function computeFormulaIndentation(
+  text: string,
+  cursor: number,
+  tokensParam?: Array<{ start: number; end: number; text: string; type?: string; kind?: string }>
+): string {
   const cursorPos = Math.max(0, Math.min(cursor, text.length));
 
   let parenDepth = 0;
   let lastSignificantOutsideString: string | null = null;
   let inString = false;
 
-  const tokens = tokenizeFormula(text);
+  const tokens = tokensParam ?? tokenizeFormula(text);
 
   for (const token of tokens) {
     if (token.start >= cursorPos) break;
 
-    if (token.type === "string") {
+    const tokenType = (token as unknown as { type?: string; kind?: string }).type ?? (token as unknown as { kind?: string }).kind;
+
+    if (tokenType === "string") {
       // `tokenizeFormula` returns unterminated strings as a single token that runs to the
       // end of the input. If the cursor is at the end of an unterminated string, treat it
       // as "inside" the string so we avoid inserting indentation into the literal.
@@ -146,12 +152,12 @@ function computeFormulaIndentation(text: string, cursor: number): string {
       continue;
     }
 
-    if (token.type === "punctuation") {
+    if (tokenType === "punctuation") {
       if (token.text === "(") parenDepth += 1;
       else if (token.text === ")") parenDepth = Math.max(0, parenDepth - 1);
     }
 
-    if (token.type !== "whitespace") {
+    if (tokenType !== "whitespace") {
       lastSignificantOutsideString = token.text;
     }
   }
@@ -2813,7 +2819,7 @@ export class FormulaBarView {
       const cursorStart = this.textarea.selectionStart ?? draftLen;
       const cursorEnd = this.textarea.selectionEnd ?? draftLen;
 
-      const indentation = computeFormulaIndentation(prevText, cursorStart);
+      const indentation = computeFormulaIndentation(prevText, cursorStart, this.model.highlightedSpans());
       const insertion = `\n${indentation}`;
 
       this.textarea.value = prevText.slice(0, cursorStart) + insertion + prevText.slice(cursorEnd);
