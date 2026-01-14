@@ -16,6 +16,11 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
 fn imports_biff8_array_formulas() {
     let bytes = xls_fixture_builder::build_array_formula_fixture_xls();
     let result = import_fixture(&bytes);
+    assert!(
+        result.warnings.is_empty(),
+        "unexpected import warnings: {:?}",
+        result.warnings
+    );
 
     let sheet = result.workbook.sheet_by_name("Array").expect("sheet");
 
@@ -27,6 +32,6 @@ fn imports_biff8_array_formulas() {
         .expect("expected formula in B2");
 
     assert_eq!(b1, b2);
+    assert_eq!(b1, "A1:A2");
     assert_parseable_formula(b1);
 }
-

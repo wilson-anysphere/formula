@@ -236,6 +236,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     sheet_offset: usize,
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<PtgExpFallbackResult, String> {
+    // Also parse SHRFMLA/ARRAY records so we can avoid emitting misleading fallback warnings for
+    // well-formed shared/array formula groups that legitimately store `PtgExp` in the base cell
+    // `FORMULA.rgce`.
+    //
+    // The base-cell fallback is intended for malformed sheets that *lack* those definition records.
+    let parsed_defs =
+        worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, sheet_offset).ok();
+
     let allows_continuation = |id: u16| {
         id == worksheet_formulas::RECORD_FORMULA || id == worksheet_formulas::RECORD_SHRFMLA
     };
@@ -371,12 +379,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     let mut recovered: HashMap<CellRef, String> = HashMap::new();
 
     for (row, col, base_row, base_col, grbit) in ptgexp_cells {
+        let cell_ref = CellRef::new(row, col);
+        let base_cell_ref = CellRef::new(base_row, base_col);
         let Some(base_rgce) = rgce_by_cell.get(&(base_row, base_col)) else {
             push_warning_bounded(
                 &mut warnings,
                 format!(
                     "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
-                    CellRef::new(row, col).to_a1(),
+                    cell_ref.to_a1(),
                     base_row,
                     base_col
                 ),
@@ -390,6 +400,23 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             if let Some(shared_rgce) = shrfmla_by_cell.get(&(base_row, base_col)) {
                 base_rgce_bytes = shared_rgce;
             } else {
+                // If a SHRFMLA/ARRAY definition exists for this base cell + range, then the base-cell
+                // fallback is not applicable and we should not emit a misleading warning about a
+                // "missing" definition.
+                if let Some(parsed) = parsed_defs.as_ref() {
+                    if parsed
+                        .shrfmla
+                        .get(&base_cell_ref)
+                        .is_some_and(|def| range_contains(def.range, cell_ref))
+                        || parsed
+                            .array
+                            .get(&base_cell_ref)
+                            .is_some_and(|def| range_contains(def.range, cell_ref))
+                    {
+                        continue;
+                    }
+                }
+
                 let expected = match grbit.membership_hint() {
                     Some(FormulaMembershipHint::Shared) => "missing SHRFMLA definition",
                     Some(FormulaMembershipHint::Array) => "missing ARRAY definition",
@@ -402,8 +429,8 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     &mut warnings,
                     format!(
                         "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
-                        CellRef::new(row, col).to_a1(),
-                        CellRef::new(base_row, base_col).to_a1()
+                        cell_ref.to_a1(),
+                        base_cell_ref.to_a1()
                     ),
                 );
                 continue;
