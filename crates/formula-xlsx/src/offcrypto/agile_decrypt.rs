@@ -2373,6 +2373,22 @@ mod fuzz_tests {
                 outcome.unwrap().is_err(),
                 "garbage input should not parse via parse_agile_encryption_info_stream"
             );
+
+            // Also cover the lightweight Agile XML parser (used for key-encryptor preflight
+            // diagnostics).
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                let opts = ParseOptions::default();
+                let xml = extract_encryption_info_xml(&bytes, &opts)?;
+                crate::offcrypto::parse_agile_encryption_info_xml(xml)
+            }));
+            prop_assert!(
+                outcome.is_ok(),
+                "parse_agile_encryption_info_xml panicked"
+            );
+            prop_assert!(
+                outcome.unwrap().is_err(),
+                "garbage input should not parse via parse_agile_encryption_info_xml"
+            );
         }
 
         #[test]
