@@ -10,8 +10,10 @@
     "CUBESET": "CUBEMENGE",
     "CUBESETCOUNT": "CUBEMENGENANZAHL",
     "CUBEVALUE": "CUBEWERT",
+    "FALSE": "FALSCH",
     "IF": "WENN",
     "SEQUENCE": "SEQUENZ",
-    "SUM": "SUMME"
+    "SUM": "SUMME",
+    "TRUE": "WAHR"
   }
 }

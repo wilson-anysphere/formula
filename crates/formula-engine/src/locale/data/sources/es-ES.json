@@ -9,8 +9,10 @@
     "CUBESET": "CONJUNTO.CUBO",
     "CUBESETCOUNT": "CONTAR.CONJUNTO.CUBO",
     "CUBEVALUE": "VALOR.CUBO",
+    "FALSE": "FALSO",
     "IF": "SI",
     "SEQUENCE": "SECUENCIA",
-    "SUM": "SUMA"
+    "SUM": "SUMA",
+    "TRUE": "VERDADERO"
   }
 }

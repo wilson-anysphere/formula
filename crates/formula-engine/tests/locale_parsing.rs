@@ -242,6 +242,23 @@ fn canonicalize_and_localize_additional_function_names_for_fr_fr() {
 }
 
 #[test]
+fn canonicalize_and_localize_true_false_functions_for_de_de_and_es_es() {
+    fn assert_roundtrip(locale: &locale::FormulaLocale, canonical: &str, localized: &str) {
+        assert_eq!(
+            locale::canonicalize_formula(localized, locale).unwrap(),
+            canonical
+        );
+        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+    }
+
+    // TRUE()/FALSE() also exist as zero-arg worksheet functions and are localized in Excel.
+    assert_roundtrip(&locale::DE_DE, "=TRUE()", "=WAHR()");
+    assert_roundtrip(&locale::DE_DE, "=FALSE()", "=FALSCH()");
+    assert_roundtrip(&locale::ES_ES, "=TRUE()", "=VERDADERO()");
+    assert_roundtrip(&locale::ES_ES, "=FALSE()", "=FALSO()");
+}
+
+#[test]
 fn structured_reference_separators_are_not_translated() {
     let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
     let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
@@ -673,6 +690,29 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
     )
     .unwrap();
     assert_eq!(displayed, "=SUMME(1,5;2,5)");
+}
+
+#[test]
+fn engine_accepts_localized_true_false_functions_and_persists_canonical() {
+    for (locale, localized_true, localized_false) in [
+        (&locale::DE_DE, "=WAHR()", "=FALSCH()"),
+        (&locale::ES_ES, "=VERDADERO()", "=FALSO()"),
+    ] {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula_localized("Sheet1", "A1", localized_true, locale)
+            .unwrap();
+        engine
+            .set_cell_formula_localized("Sheet1", "A2", localized_false, locale)
+            .unwrap();
+
+        assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=TRUE()"));
+        assert_eq!(engine.get_cell_formula("Sheet1", "A2"), Some("=FALSE()"));
+
+        engine.recalculate();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+    }
 }
 
 #[test]
