@@ -1342,7 +1342,8 @@ pub fn open_workbook_model_with_password(
     let path = path.as_ref();
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
     // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support.
+    // decryption support, and it must run *before* attempting decryption so we don't misclassify a
+    // plaintext payload as an "invalid password" error.
     if password.is_some() {
         if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
         {
@@ -1420,7 +1421,8 @@ pub fn open_workbook_with_password(
     let path = path.as_ref();
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
     // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support.
+    // decryption support, and it must run *before* attempting decryption so we don't misclassify a
+    // plaintext payload as an "invalid password" error.
     if password.is_some() {
         if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
         {
@@ -2992,7 +2994,7 @@ fn decrypt_encrypted_ooxml_package(
                 path: path.to_path_buf(),
                 version_major: 0,
                 version_minor: 0,
-            })
+            });
         }
     };
 
@@ -3015,27 +3017,20 @@ fn decrypt_encrypted_ooxml_package(
     }
 
     let decrypted = if is_agile {
+        let unsupported = || Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        };
+
         // Real-world producers vary in how they encode/wrap the Agile `EncryptionInfo` XML
         // (UTF-8/UTF-16, length prefixes, padding). Normalize to a strict UTF-8 XML payload so we
         // can reuse the `formula-xlsx` offcrypto implementation.
-        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| {
-            // Treat malformed Agile descriptors as unsupported encryption (not a wrong password).
-            Error::UnsupportedOoxmlEncryption {
-                path: path.to_path_buf(),
-                version_major,
-                version_minor,
-            }
-        })?;
+        //
+        // Treat malformed Agile descriptors as unsupported encryption (not a wrong password).
+        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| unsupported())?;
         let mut normalized_info = Vec::with_capacity(8 + xml.len());
-        normalized_info.extend_from_slice(
-            encryption_info
-                .get(..8)
-                .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
-                    path: path.to_path_buf(),
-                    version_major,
-                    version_minor,
-                })?,
-        );
+        normalized_info.extend_from_slice(encryption_info.get(..8).ok_or_else(unsupported)?);
         normalized_info.extend_from_slice(xml.as_bytes());
 
         match xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password) {
