@@ -62,6 +62,8 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   });
 
   const [isEditing, setIsEditing] = useState<boolean>(() => {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    if (typeof globalEditing === "boolean") return globalEditing;
     if (typeof app.isEditing !== "function") return false;
     try {
       return Boolean(app.isEditing());
@@ -74,7 +76,18 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
 
   useEffect(() => {
     if (typeof app.onEditStateChange !== "function") return;
-    return app.onEditStateChange((next) => setIsEditing(Boolean(next)));
+    return app.onEditStateChange(() => {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      if (typeof globalEditing === "boolean") {
+        setIsEditing(globalEditing);
+        return;
+      }
+      try {
+        setIsEditing(Boolean(app.isEditing?.()));
+      } catch {
+        setIsEditing(false);
+      }
+    });
   }, [app]);
 
   useEffect(() => {
@@ -94,6 +107,30 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     };
     window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
     return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, [app]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onEditingChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.isEditing === "boolean") {
+        setIsEditing(detail.isEditing);
+        return;
+      }
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      if (typeof globalEditing === "boolean") {
+        setIsEditing(globalEditing);
+        return;
+      }
+      if (typeof app.isEditing !== "function") return;
+      try {
+        setIsEditing(Boolean(app.isEditing()));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+    return () => window.removeEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
   }, [app]);
 
   const computeItems = useCallback(

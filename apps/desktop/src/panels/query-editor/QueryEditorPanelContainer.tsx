@@ -24,6 +24,10 @@ type Props = {
   getDocumentController: () => any;
   getActiveSheetId?: () => string;
   workbookId?: string;
+  /**
+   * Optional SpreadsheetApp-like object for read-only detection.
+   */
+  app?: { isReadOnly?: () => boolean } | null;
 };
 
 function isQuerySheetDestination(dest: unknown): dest is QuerySheetDestination {
@@ -125,6 +129,57 @@ function saveSelectedQueryId(workbookId: string, queryId: string): void {
 export function QueryEditorPanelContainer(props: Props) {
   const workbookId = props.workbookId ?? "default";
   const doc = props.getDocumentController();
+  const app = props.app ?? null;
+
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(() => {
+    if (!app || typeof app.isReadOnly !== "function") return false;
+    try {
+      return Boolean(app.isReadOnly());
+    } catch {
+      return false;
+    }
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    return globalEditing === true;
+  });
+
+  const mutationsDisabled = isReadOnly || isEditing;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onReadOnlyChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.readOnly === "boolean") {
+        setIsReadOnly(detail.readOnly);
+        return;
+      }
+      if (!app || typeof app.isReadOnly !== "function") return;
+      try {
+        setIsReadOnly(Boolean(app.isReadOnly()));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+    return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, [app]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onEditingChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.isEditing === "boolean") {
+        setIsEditing(detail.isEditing);
+        return;
+      }
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      setIsEditing(globalEditing === true);
+    };
+    window.addEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+    return () => window.removeEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+  }, []);
   const queryContext = useMemo(() => getContextForDocument(doc), [doc]);
 
   const [service, setService] = useState<DesktopPowerQueryService | null>(() => getDesktopPowerQueryService(workbookId));
@@ -397,6 +452,7 @@ export function QueryEditorPanelContainer(props: Props) {
 
   async function loadToSheet(current: Query): Promise<void> {
     setActionError(null);
+    if (mutationsDisabled) return;
     if (!service) return;
 
     const sheetId = activeSheetId();
@@ -449,6 +505,7 @@ export function QueryEditorPanelContainer(props: Props) {
 
   function refreshNow(queryId: string): void {
     setActionError(null);
+    if (mutationsDisabled) return;
     if (!service) return;
 
     try {
@@ -461,6 +518,7 @@ export function QueryEditorPanelContainer(props: Props) {
 
   function refreshAll(): void {
     setActionError(null);
+    if (mutationsDisabled) return;
     if (!service) return;
 
     try {
@@ -536,7 +594,7 @@ export function QueryEditorPanelContainer(props: Props) {
             Cancel refresh
           </button>
         ) : null}
-        <button type="button" onClick={refreshAll}>
+        <button type="button" onClick={refreshAll} disabled={mutationsDisabled}>
           Refresh all (graph)
         </button>
         {activeRefreshAll ? (
@@ -555,6 +613,7 @@ export function QueryEditorPanelContainer(props: Props) {
         engine={engine}
         context={queryContext}
         refreshEvent={refreshEvent}
+        actionsDisabled={mutationsDisabled}
         onQueryChange={(next) => persistQuery(next)}
         onLoadToSheet={loadToSheet}
         onRefreshNow={refreshNow}

@@ -12,6 +12,11 @@ export type QueryEditorPanelProps = {
   query: Query;
   engine: QueryEngine;
   context?: any;
+  /**
+   * When true, disable sheet-mutation actions (Refresh / Load to sheet). This is used by the
+   * desktop shell to match Excel-style edit-mode and read-only behavior.
+   */
+  actionsDisabled?: boolean;
   onQueryChange?: (next: Query) => void;
   onLoadToSheet?: (query: Query) => void;
   onRefreshNow?: (queryId: string) => void;
@@ -106,12 +111,12 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
         <h3 className="query-editor__title">{props.query.name}</h3>
         <div className="query-editor__sidebar-actions">
           {props.onLoadToSheet ? (
-            <button type="button" onClick={() => props.onLoadToSheet?.(props.query)}>
+            <button type="button" onClick={() => props.onLoadToSheet?.(props.query)} disabled={props.actionsDisabled}>
               Load to sheet
             </button>
           ) : null}
           {props.onRefreshNow ? (
-            <button type="button" onClick={() => props.onRefreshNow?.(props.query.id)}>
+            <button type="button" onClick={() => props.onRefreshNow?.(props.query.id)} disabled={props.actionsDisabled}>
               Refresh now
             </button>
           ) : null}

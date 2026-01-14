@@ -521,6 +521,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.QUERY_EDITOR) {
       makeBodyFillAvailableHeight(body);
+      const app = options.getSpreadsheetApp?.() ?? null;
       renderReactPanel(
         panelId,
         body,
@@ -529,6 +530,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             key={workbookId ?? "default"}
             getDocumentController={options.getDocumentController}
             getActiveSheetId={options.getActiveSheetId}
+            app={app as any}
             workbookId={workbookId}
           />
         </React.Suspense>,
@@ -591,6 +593,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.DATA_QUERIES) {
       makeBodyFillAvailableHeight(body);
+      const app = options.getSpreadsheetApp?.() ?? null;
       renderReactPanel(
         panelId,
         body,
@@ -598,6 +601,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           <LazyDataQueriesPanelContainer
             key={workbookId ?? "default"}
             getDocumentController={options.getDocumentController}
+            app={app as any}
             workbookId={workbookId}
             sheetNameResolver={options.sheetNameResolver ?? null}
           />

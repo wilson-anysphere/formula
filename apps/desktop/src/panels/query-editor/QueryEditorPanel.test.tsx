@@ -96,4 +96,31 @@ describe("QueryEditorPanel", () => {
     expect(ctx.query.steps).toHaveLength(1);
     expect(ctx.query.steps[0]?.id).toBe("s1");
   });
+
+  it("disables Load/Refresh actions when actionsDisabled is true", async () => {
+    const engine = {
+      executeQuery: vi.fn(async () => new DataTable([{ name: "Region", type: "string" }], [])),
+    } as unknown as QueryEngine;
+
+    const onLoadToSheet = vi.fn();
+    const onRefreshNow = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <QueryEditorPanel
+          query={baseQuery([])}
+          engine={engine}
+          actionsDisabled={true}
+          onLoadToSheet={onLoadToSheet}
+          onRefreshNow={onRefreshNow}
+        />,
+      );
+      await flushMicrotasks(10);
+    });
+
+    const load = findButtonByText(host!, "Load to sheet");
+    const refresh = findButtonByText(host!, "Refresh now");
+    expect(load.disabled).toBe(true);
+    expect(refresh.disabled).toBe(true);
+  });
 });

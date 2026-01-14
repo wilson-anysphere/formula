@@ -22,6 +22,13 @@ type Props = {
   getDocumentController: () => any;
   workbookId?: string;
   sheetNameResolver?: SheetNameResolver | null;
+  /**
+   * Optional SpreadsheetApp-like object for UI state (read-only) detection.
+   *
+   * The Power Query service itself operates on a DocumentController, but some panel actions
+   * (refresh/load) should be disabled in read-only roles for consistency with ribbon disabling.
+   */
+  app?: { isReadOnly?: () => boolean } | null;
 };
 
 type PendingPkce = { providerId: string; redirectUri: string };
@@ -170,6 +177,57 @@ function duplicateQueryDefinition(existing: Query): Query {
 export function DataQueriesPanelContainer(props: Props) {
   const workbookId = props.workbookId ?? "default";
   const docController = props.getDocumentController();
+  const app = props.app ?? null;
+
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(() => {
+    if (!app || typeof app.isReadOnly !== "function") return false;
+    try {
+      return Boolean(app.isReadOnly());
+    } catch {
+      return false;
+    }
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    return globalEditing === true;
+  });
+
+  const mutationsDisabled = isReadOnly || isEditing;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onReadOnlyChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.readOnly === "boolean") {
+        setIsReadOnly(detail.readOnly);
+        return;
+      }
+      if (!app || typeof app.isReadOnly !== "function") return;
+      try {
+        setIsReadOnly(Boolean(app.isReadOnly()));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+    return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, [app]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onEditingChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.isEditing === "boolean") {
+        setIsEditing(detail.isEditing);
+        return;
+      }
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      setIsEditing(globalEditing === true);
+    };
+    window.addEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+    return () => window.removeEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+  }, []);
 
   const [service, setService] = useState<DesktopPowerQueryService | null>(() => getDesktopPowerQueryService(workbookId));
 
@@ -354,6 +412,7 @@ export function DataQueriesPanelContainer(props: Props) {
   const refreshQuery = useCallback(
     (queryId: string) => {
       setGlobalError(null);
+      if (mutationsDisabled) return;
       if (!service) {
         setGlobalError("Power Query service not available.");
         return;
@@ -366,7 +425,7 @@ export function DataQueriesPanelContainer(props: Props) {
         setGlobalError(err instanceof Error ? err.message : String(err));
       }
     },
-    [service],
+    [mutationsDisabled, service],
   );
 
   const cancelQueryRefresh = useCallback((queryId: string) => {
@@ -375,6 +434,7 @@ export function DataQueriesPanelContainer(props: Props) {
 
   const refreshAll = useCallback(() => {
     setGlobalError(null);
+    if (mutationsDisabled) return;
     if (!service) {
       setGlobalError("Power Query service not available.");
       return;
@@ -408,7 +468,7 @@ export function DataQueriesPanelContainer(props: Props) {
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : String(err));
     }
-  }, [queries, service]);
+  }, [mutationsDisabled, queries, service]);
 
   const openInEditor = useCallback(
     (queryId: string) => {
@@ -907,7 +967,7 @@ export function DataQueriesPanelContainer(props: Props) {
         <button type="button" onClick={addNewQuery}>
           New query
         </button>
-        <button type="button" onClick={refreshAll} disabled={queries.length === 0}>
+        <button type="button" onClick={refreshAll} disabled={queries.length === 0 || mutationsDisabled}>
           Refresh all
         </button>
         {activeRefreshAll ? (
@@ -1111,7 +1171,7 @@ export function DataQueriesPanelContainer(props: Props) {
                     </td>
                     <td className="data-queries-table__td">
                       <div className="data-queries-actions">
-                        <button type="button" onClick={() => refreshQuery(row.id)} disabled={canCancel}>
+                        <button type="button" onClick={() => refreshQuery(row.id)} disabled={canCancel || mutationsDisabled}>
                           Refresh
                         </button>
                         {canCancel ? (

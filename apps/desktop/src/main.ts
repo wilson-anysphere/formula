@@ -1902,6 +1902,32 @@ let recomputeKeyboardContextKeys: (() => void) | null = null;
 
 const isSpreadsheetEditing = (): boolean => app.isEditing() || splitViewSecondaryIsEditing;
 
+// Some UI surfaces (panels, tab strip, etc) need to react to a unified "spreadsheet editing"
+// signal that includes both:
+// - SpreadsheetApp's primary edit state (cell editor / formula bar / inline edit), and
+// - split-view secondary pane edit state (SecondaryGridView).
+//
+// SpreadsheetApp exposes `onEditStateChange`, but it only tracks the primary editor. Publish a
+// desktop-shell-owned window event so panels can disable unsafe actions (Excel-style) without
+// needing a direct reference to split-view internals.
+const SPREADSHEET_EDITING_CHANGED_EVENT = "formula:spreadsheet-editing-changed";
+let lastEmittedSpreadsheetEditing = isSpreadsheetEditing();
+// Expose the current state for panels that mount while editing is already active.
+(globalThis as any).__formulaSpreadsheetIsEditing = lastEmittedSpreadsheetEditing;
+
+function emitSpreadsheetEditingChanged(): void {
+  const next = isSpreadsheetEditing();
+  if (next === lastEmittedSpreadsheetEditing) return;
+  lastEmittedSpreadsheetEditing = next;
+  (globalThis as any).__formulaSpreadsheetIsEditing = next;
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(SPREADSHEET_EDITING_CHANGED_EVENT, { detail: { isEditing: next } }));
+  } catch {
+    // ignore
+  }
+}
+
 // --- AutoSave wiring ---------------------------------------------------------
 // Schedule autosave whenever the document becomes dirty or changes while dirty.
 const unsubscribeAutoSaveDocChange = app.getDocument().on("change", () => {
@@ -2815,6 +2841,7 @@ app.subscribeSelection((selection) => {
 });
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 app.onEditStateChange(() => {
+  emitSpreadsheetEditingChanged();
   scheduleRibbonSelectionFormatStateUpdate();
   renderSheetTabs();
 });
@@ -4894,6 +4921,7 @@ if (
         splitViewSecondaryIsEditing = false;
         renderStatusMode();
         syncTitlebar();
+        emitSpreadsheetEditingChanged();
         scheduleRibbonSelectionFormatStateUpdate();
         renderSheetTabs();
         recomputeKeyboardContextKeys?.();
@@ -4968,6 +4996,7 @@ if (
           splitViewSecondaryIsEditing = isEditing;
           renderStatusMode();
           syncTitlebar();
+          emitSpreadsheetEditingChanged();
           scheduleRibbonSelectionFormatStateUpdate();
           renderSheetTabs();
           recomputeKeyboardContextKeys?.();
