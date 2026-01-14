@@ -370,6 +370,18 @@ describe("SpreadsheetApp drawings header clipping", () => {
       );
       expect((app as any).selectedDrawingId).toBe(1);
 
+      // Clicking the header should clear the drawing selection (clicking outside any drawing).
+      selectionCanvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: headerWidth - 5,
+          clientY: headerHeight + 5,
+        }),
+      );
+      expect((app as any).selectedDrawingId).toBe(null);
+
       app.destroy();
       root.remove();
     } finally {

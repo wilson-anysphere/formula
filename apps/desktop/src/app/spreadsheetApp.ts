@@ -13847,18 +13847,17 @@ export class SpreadsheetApp {
     const hit = hitTestDrawingsInto(index, viewport, x, y, this.drawingHitTestScratchRect);
 
     if (!hit) {
-      // Clicking outside of any drawing clears selection, but still allows normal grid selection.
+      // Clicking anywhere outside a drawing clears the drawing selection, but still allows the
+      // grid to handle the pointerdown (e.g. row/column header selection).
       if (prevSelected != null) {
-        if (x >= headerOffsetX && y >= headerOffsetY) {
-          this.selectedDrawingId = null;
-          this.selectedDrawingIndex = null;
-          this.dispatchDrawingSelectionChanged();
-          this.renderDrawings(sharedViewport);
-          // In legacy grid mode, drawing selection handles are rendered on the selection canvas. Clear them
-          // immediately when deselecting via a pointer click (even if the active cell selection does not change).
-          if (!this.sharedGrid && this.drawingInteractionController == null) {
-            this.renderSelection();
-          }
+        this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
+        this.dispatchDrawingSelectionChanged();
+        this.renderDrawings(sharedViewport);
+        // In legacy grid mode, drawing selection handles are rendered on the selection canvas. Clear them
+        // immediately when deselecting via a pointer click (even if the active cell selection does not change).
+        if (!this.sharedGrid && this.drawingInteractionController == null) {
+          this.renderSelection();
         }
       }
       return;
