@@ -12,8 +12,7 @@ fn minimal_zip_bytes() -> Vec<u8> {
     let mut zip = zip::ZipWriter::new(cursor);
 
     // Avoid optional compression backends; Stored always works.
-    let options =
-        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     zip.start_file("hello.txt", options)
         .expect("start zip file");
     zip.write_all(b"hello world").expect("write zip file");
@@ -52,6 +51,60 @@ fn build_ole(encryption_info: &[u8], encrypted_package: &[u8]) -> Vec<u8> {
         .write_all(encrypted_package)
         .expect("write EncryptedPackage");
     ole.into_inner().into_inner()
+}
+
+#[test]
+fn decrypt_agile_without_data_integrity_element() {
+    // Some real-world producers omit `<dataIntegrity>` entirely. We should still be able to
+    // decrypt the package (but without integrity verification).
+    let plaintext = minimal_zip_bytes();
+    let password = "Password";
+
+    // Use a small spinCount for test speed.
+    let opts = EncryptOptions {
+        scheme: EncryptionScheme::Agile,
+        key_bits: 256,
+        hash_algorithm: HashAlgorithm::Sha512,
+        spin_count: 512,
+    };
+
+    let baseline_ole = encrypt_package_to_ole(&plaintext, password, opts).expect("encrypt");
+    let (baseline_info, baseline_package) = extract_streams_from_ole(&baseline_ole);
+
+    // Extract the UTF-8 XML bytes by scanning for the first `<` after the version header.
+    let payload = baseline_info
+        .get(8..)
+        .expect("baseline EncryptionInfo must include version header");
+    let xml_start = payload.iter().position(|&b| b == b'<').expect("xml start");
+    let mut xml_bytes = &payload[xml_start..];
+    while xml_bytes.last() == Some(&0) {
+        xml_bytes = &xml_bytes[..xml_bytes.len() - 1];
+    }
+    let xml_str = std::str::from_utf8(xml_bytes).expect("baseline xml utf8");
+
+    // Remove the `<dataIntegrity .../>` element (self-closing in our writer).
+    let di_start = xml_str
+        .find("<dataIntegrity")
+        .expect("expected baseline XML to include <dataIntegrity>");
+    let di_end_rel = xml_str[di_start..]
+        .find("/>")
+        .expect("expected <dataIntegrity/> to be self-closing");
+    let mut di_end = di_start + di_end_rel + 2;
+    while matches!(xml_str.as_bytes().get(di_end), Some(b'\n' | b'\r')) {
+        di_end += 1;
+    }
+    let xml_no_di = format!("{}{}", &xml_str[..di_start], &xml_str[di_end..]);
+
+    // Build a new EncryptionInfo stream with just the 8-byte header + modified XML (no length
+    // prefix, which is also a known producer variant).
+    let mut info_no_di = Vec::new();
+    info_no_di.extend_from_slice(&baseline_info[..8]);
+    info_no_di.extend_from_slice(xml_no_di.as_bytes());
+
+    let ole_no_di = build_ole(&info_no_di, &baseline_package);
+    let decrypted =
+        decrypt_encrypted_package_ole(&ole_no_di, password).expect("decrypt no dataIntegrity");
+    assert_eq!(decrypted, plaintext);
 }
 
 #[test]
