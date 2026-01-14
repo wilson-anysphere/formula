@@ -143,6 +143,67 @@ fn var_names_are_case_insensitive_for_unicode_names() {
 }
 
 #[test]
+fn pivot_resolves_unicode_identifiers_case_insensitively_and_preserves_model_casing() {
+    let mut model = DataModel::new();
+    let mut table = Table::new("Straße", vec!["Kategorie", "Maß"]);
+    table.push_row(vec!["A".into(), 1.0.into()]).unwrap();
+    table.push_row(vec!["A".into(), 2.0.into()]).unwrap();
+    table.push_row(vec!["B".into(), 4.0.into()]).unwrap();
+    model.add_table(table).unwrap();
+
+    model.add_measure("Total", "SUM('Straße'[Maß])").unwrap();
+
+    let group_by = vec![GroupByColumn::new("STRASSE", "kategorie")];
+    let measures = vec![PivotMeasure::new("Total", "[TOTAL]").unwrap()];
+
+    let result = pivot(
+        &model,
+        // Use ASCII table identifier; the model stores `Straße`.
+        "strasse",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(result.columns, vec!["Straße[Kategorie]", "Total"]);
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("A"), Value::from(3.0)],
+            vec![Value::from("B"), Value::from(4.0)],
+        ]
+    );
+}
+
+#[test]
+fn unicode_identifiers_work_in_filter_context() {
+    let mut model = DataModel::new();
+    let mut table = Table::new("Straße", vec!["Maß"]);
+    table.push_row(vec![1.0.into()]).unwrap();
+    table.push_row(vec![2.0.into()]).unwrap();
+    table.push_row(vec![3.0.into()]).unwrap();
+    model.add_table(table).unwrap();
+
+    model.add_measure("Total", "SUM('Straße'[Maß])").unwrap();
+
+    let total = model
+        .evaluate_measure("[TOTAL]", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(total, Value::from(6.0));
+
+    // Filter using ASCII identifiers that casefold to the Unicode table/column names.
+    let filter = FilterContext::empty().with_column_equals("strasse", "mass", 2.0.into());
+    let filtered = model.evaluate_measure("[TOTAL]", &filter).unwrap();
+    assert_eq!(filtered, Value::from(2.0));
+
+    let filter =
+        FilterContext::empty().with_column_in("STRASSE", "MASS", [1.0.into(), 3.0.into()]);
+    let filtered = model.evaluate_measure("[TOTAL]", &filter).unwrap();
+    assert_eq!(filtered, Value::from(4.0));
+}
+
+#[test]
 fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
     // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
     let mut model = DataModel::new();
