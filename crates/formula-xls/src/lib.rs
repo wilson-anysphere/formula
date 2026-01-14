@@ -5831,6 +5831,102 @@ mod tests {
         globals
     }
 
+    fn build_minimal_workbook_stream_with_name_ptgarray_rgcb_and_description() -> Vec<u8> {
+        // Minimal BIFF8 workbook stream containing a NAME record with a PtgArray token plus
+        // trailing rgcb bytes (array constant payload), followed by a non-empty description
+        // string.
+        //
+        // Calamine has historically had sharp edges around NAME record layouts; this fixture is
+        // used to ensure `.xls` import remains panic-free even when defined names contain array
+        // constants.
+        let mut globals = Vec::<u8>::new();
+
+        push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+        push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+        push_record(&mut globals, RECORD_WINDOW1, &window1());
+        push_record(&mut globals, RECORD_FONT, &font_arial());
+
+        for _ in 0..16 {
+            push_record(&mut globals, RECORD_XF, &xf_record(true));
+        }
+        let xf_general = 16u16;
+        push_record(&mut globals, RECORD_XF, &xf_record(false));
+
+        // Single worksheet.
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, "Sheet1");
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        let boundsheet_offset_pos = boundsheet_start + 4;
+
+        let name = "ArrDesc";
+        let desc = "Hi";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // {1,2}
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 cols
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+        for n in [1.0f64, 2.0] {
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let mut name_payload = Vec::<u8>::new();
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        name_payload.push(0); // chKey
+        name_payload.push(name.len() as u8); // cch
+        name_payload.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        name_payload.extend_from_slice(&[0, desc.len() as u8, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        // XLUnicodeStringNoCch name + description (compressed).
+        name_payload.push(0); // name flags (compressed)
+        name_payload.extend_from_slice(name.as_bytes());
+        name_payload.extend_from_slice(&rgce);
+        name_payload.extend_from_slice(&rgcb);
+        name_payload.push(0); // desc flags (compressed)
+        name_payload.extend_from_slice(desc.as_bytes());
+
+        push_record(&mut globals, RECORD_NAME, &name_payload);
+
+        push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+        // -- Sheet substream ----------------------------------------------------
+        let sheet_offset = globals.len();
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 1) cols [0, 1)
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes());
+        dims.extend_from_slice(&1u32.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        dims.extend_from_slice(&1u16.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
+        push_record(&mut sheet, RECORD_EOF, &[]);
+
+        // Patch BoundSheet offset.
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+        globals
+    }
+
     fn calamine_can_open_workbook_stream(workbook_stream: &[u8]) -> bool {
         std::panic::catch_unwind(|| {
             let xls_bytes = build_in_memory_xls(workbook_stream).expect("cfb");
@@ -5839,6 +5935,18 @@ mod tests {
             let _ = workbook.defined_names();
         })
         .is_ok()
+    }
+
+    #[test]
+    fn sanitizer_allows_calamine_to_open_workbook_with_name_ptgarray_rgcb_and_description() {
+        let stream = build_minimal_workbook_stream_with_name_ptgarray_rgcb_and_description();
+        let sanitized = sanitize_biff8_stream_for_calamine(&stream);
+        let stream_for_calamine = sanitized.as_deref().unwrap_or(&stream);
+
+        assert!(
+            calamine_can_open_workbook_stream(stream_for_calamine),
+            "expected calamine to open workbook with NAME PtgArray + rgcb + description"
+        );
     }
 
     fn calamine_defined_name_names(workbook_stream: &[u8]) -> Option<Vec<String>> {
