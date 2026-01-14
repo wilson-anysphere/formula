@@ -58,7 +58,14 @@ function typedValueToString(value) {
         return String(value);
       }
     default:
-      return String(value);
+      // Defensive: if a newer engine introduces additional typed values, fall back
+      // to stable JSON rather than leaking `[object Object]` into search results.
+      try {
+        const json = JSON.stringify(value);
+        return typeof json === "string" ? json : String(value);
+      } catch {
+        return String(value);
+      }
   }
 }
 

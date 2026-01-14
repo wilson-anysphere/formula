@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { InMemoryWorkbook, findAll } from "../index.js";
+import { InMemoryWorkbook, findAll, formatCellValue } from "../index.js";
 
 test("merged cells: selection scope treats merged region as the top-left cell", async () => {
   const wb = new InMemoryWorkbook();
@@ -114,4 +114,10 @@ test("rich values (images, rich text) stringify as plain text (no [object Object
     matchEntireCell: true,
   });
   assert.deepEqual(objectMatches.map((m) => m.address), []);
+});
+
+test("unknown typed values stringify stably (no [object Object])", () => {
+  const text = formatCellValue({ t: "image", v: { imageId: "img_1" } });
+  assert.notEqual(text, "[object Object]");
+  assert.match(text, /\{\"t\":\"image\"/);
 });
