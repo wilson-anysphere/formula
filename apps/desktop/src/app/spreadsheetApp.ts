@@ -6276,7 +6276,6 @@ export class SpreadsheetApp {
     this.renderGrid();
     this.renderDrawings();
     this.renderCharts(true);
-    this.renderDrawings();
     this.renderReferencePreview();
     if (this.sharedGrid) {
       // Switching sheets updates the provider data source but does not emit document
@@ -6327,7 +6326,6 @@ export class SpreadsheetApp {
       }
       this.renderGrid();
       this.renderCharts(true);
-      this.renderDrawings();
       this.sharedProvider?.invalidateAll();
       sheetChanged = true;
     }
