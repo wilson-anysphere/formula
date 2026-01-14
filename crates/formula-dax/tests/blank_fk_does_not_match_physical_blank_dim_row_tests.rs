@@ -464,3 +464,153 @@ fn blank_fk_does_not_match_physical_blank_dim_row_for_columnar_dim_and_fact() {
         Value::Blank
     );
 }
+
+#[test]
+fn blank_fk_does_not_match_physical_blank_dim_row_with_crossfilter_override_for_columnar_dim() {
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("Phys".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Key", "Amount"]);
+    fact.push_row(vec![Value::Blank, 10.into()]).unwrap();
+    fact.push_row(vec![1.into(), 20.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    // Single-direction relationship; enable bidirectional filtering via CROSSFILTER in the query.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty().with_column_equals("Fact", "Key", Value::Blank);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(VALUES(Dim[Attr])), CROSSFILTER(Fact[Key], Dim[Key], \"BOTH\"))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn blank_fk_does_not_match_physical_blank_dim_row_with_crossfilter_override_for_columnar_dim_and_fact(
+) {
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("Phys".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[formula_columnar::Value::Null, formula_columnar::Value::Number(10.0)]);
+    fact.append_row(&[formula_columnar::Value::Number(1.0), formula_columnar::Value::Number(20.0)]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty().with_column_equals("Fact", "Key", Value::Blank);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(VALUES(Dim[Attr])), CROSSFILTER(Fact[Key], Dim[Key], \"BOTH\"))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
