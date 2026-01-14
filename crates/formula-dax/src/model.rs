@@ -546,7 +546,6 @@ impl UnmatchedFactRows {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&usize) -> bool) {
         match self {
             UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(row)),
