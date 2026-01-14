@@ -223,6 +223,8 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
         "CALCULATE(COUNTBLANK(Customers[Region]), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
     let expr_allnoblankrow =
         "CALCULATE(COUNTROWS(ALLNOBLANKROW(Customers[Region])), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
+    let expr_distinctcountnoblank =
+        "CALCULATE(DISTINCTCOUNTNOBLANK(Customers[Region]), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
 
     // Without any extra filters, the unknown member exists due to the unmatched fact key.
     assert_eq!(
@@ -242,6 +244,17 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
             .evaluate(
                 model,
                 expr_allnoblankrow,
+                &FilterContext::empty(),
+                &RowContext::default()
+            )
+            .unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                expr_distinctcountnoblank,
                 &FilterContext::empty(),
                 &RowContext::default()
             )
@@ -271,6 +284,17 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
     );
     assert_eq!(
         engine
+            .evaluate(
+                model,
+                expr_distinctcountnoblank,
+                &matched_filter,
+                &RowContext::default()
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
             .evaluate(model, expr_selected, &matched_filter, &RowContext::default())
             .unwrap(),
         Value::from("East")
@@ -294,6 +318,17 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
     assert_eq!(
         engine
             .evaluate(model, expr_allnoblankrow, &unmatched_filter, &RowContext::default())
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                expr_distinctcountnoblank,
+                &unmatched_filter,
+                &RowContext::default()
+            )
             .unwrap(),
         0.into()
     );
