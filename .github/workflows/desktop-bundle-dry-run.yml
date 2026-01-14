@@ -126,6 +126,9 @@ jobs:
         shell: bash
         run: bash scripts/ci/check-cargo-lock-reproducible.sh
 
+      - name: Fail if preflight modified tracked files
+        run: git diff --exit-code
+
   build:
     name: Build (${{ matrix.label }})
     needs: preflight
