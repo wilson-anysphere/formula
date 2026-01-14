@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-CI guardrail: verify that Linux packaging (.deb extracted root) includes a
-`.desktop` file that advertises the MIME types corresponding to our configured
-file associations and that the Exec line accepts a file/URL argument.
+CI guardrail: verify that Linux packaging includes `.desktop` metadata that
+advertises our configured file associations and deep-link scheme handler.
 
-We intentionally inspect the *built* `.desktop` file (from an extracted .deb)
-instead of only validating `tauri.conf.json` so we catch packaging regressions.
+This script operates on an extracted package/AppDir root:
+- `.deb`: output of `dpkg-deb -x`
+- `.rpm`: output of `rpm2cpio ... | cpio -idm`
+- `.AppImage`: extracted `squashfs-root` (from `--appimage-extract`)
+
+We intentionally inspect the *built* `.desktop` files rather than only validating
+`tauri.conf.json` so we catch packaging regressions.
 """
 
 from __future__ import annotations
