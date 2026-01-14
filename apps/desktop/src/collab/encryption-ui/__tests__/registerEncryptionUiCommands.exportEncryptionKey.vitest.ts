@@ -134,4 +134,40 @@ describe("registerEncryptionUiCommands", () => {
     expect(parsed.keyId).toBe("k1");
     expect(parsed.keyBytes).toEqual(keyBytes);
   });
+
+  it("exportEncryptionKey surfaces an error when the encrypted range metadata schema is unsupported (fail-closed policy)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    // Unsupported/unknown encryptedRanges schema (newer client wrote something we can't parse).
+    const metadata = doc.getMap("metadata");
+    metadata.set("encryptedRanges", { foo: "bar" } as any);
+
+    const cells = doc.getMap("cells");
+    // No enc payload present yet.
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(keyStore.getCachedKey).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/unsupported format/i), "error");
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/not inside an encrypted range/i), "warning");
+  });
 });

@@ -575,8 +575,16 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       // add/remove overrides).
       const keyIdFromEnc = keyIdFromEncryptedCellPayload(session as any, cell);
       const policy = createEncryptionPolicyFromDoc(session.doc);
-      const keyId = keyIdFromEnc ?? policy.keyIdForCell(cell);
+      const keyIdFromPolicy = policy.keyIdForCell(cell);
+      const keyId = keyIdFromEnc ?? keyIdFromPolicy;
       if (!keyId) {
+        // If the policy fails closed (unknown encryptedRanges schema), shouldEncryptCell returns true
+        // for all valid cells but keyIdForCell returns null. In that case, surface a more actionable
+        // error rather than incorrectly claiming the cell isn't encrypted.
+        if (!keyIdFromEnc && policy.shouldEncryptCell(cell)) {
+          showToast("Encrypted range metadata is in an unsupported format; cannot determine the key id for this cell.", "error");
+          return;
+        }
         showToast(`The active cell is not inside an encrypted range (${sheetName}).`, "warning");
         return;
       }
