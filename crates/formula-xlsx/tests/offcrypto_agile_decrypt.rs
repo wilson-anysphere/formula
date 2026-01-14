@@ -903,3 +903,25 @@ fn agile_decrypt_empty_password_matches_office_crypto_reference() {
     assert_eq!(office_crypto_decrypted, plain_zip);
     assert_eq!(office_crypto_decrypted, decrypted);
 }
+
+#[test]
+fn agile_decrypt_large_fixture_matches_office_crypto_reference() {
+    // Cross-check our Agile decrypt against the independent `office-crypto` implementation on a
+    // real (pre-generated) encrypted workbook fixture.
+    let password = "password";
+    let encrypted_cfb =
+        std::fs::read(fixture_path("agile-large.xlsx")).expect("read agile-large.xlsx");
+    let expected =
+        std::fs::read(fixture_path("plaintext-large.xlsx")).expect("read plaintext-large.xlsx");
+
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted =
+        decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
+    assert_eq!(decrypted, expected);
+
+    let office_crypto_decrypted = office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
+    assert_eq!(office_crypto_decrypted, expected);
+    assert_eq!(office_crypto_decrypted, decrypted);
+}
