@@ -673,12 +673,12 @@ impl DaxEngine {
                                 }
                             }
                             Ok(Value::Boolean(false))
-                                 }
-                                 TableResult::PhysicalAll {
-                                     table,
-                                     row_count,
-                                     visible_cols,
-                                 } => {
+                        }
+                        TableResult::PhysicalAll {
+                            table,
+                            row_count,
+                            visible_cols,
+                        } => {
                             let table_ref = model
                                 .table(&table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
@@ -3149,10 +3149,10 @@ impl DaxEngine {
                                     }
                                     let mut out = HashSet::new();
                                     for row in 0..row_count {
-                                        let value = table_ref
-                                            .value_by_idx(row, col_idx)
-                                            .unwrap_or(Value::Blank);
-                                        out.insert(value);
+                                     let value = table_ref
+                                         .value_by_idx(row, col_idx)
+                                         .unwrap_or(Value::Blank);
+                                     out.insert(value);
                                      }
                                      out
                                  }
@@ -3169,10 +3169,10 @@ impl DaxEngine {
                                          .collect()
                                  }
                              };
-
-                            column_filters.push((key, values));
-                            Ok(())
-                        }
+ 
+                             column_filters.push((key, values));
+                             Ok(())
+                         }
                         BinaryOp::Equals => {
                             let rhs =
                                 engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
