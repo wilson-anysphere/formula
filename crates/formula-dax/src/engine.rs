@@ -5584,4 +5584,19 @@ mod tests {
         let rows = resolve_table_rows(&model, &filter, "T").unwrap();
         assert_eq!(rows, vec![0]);
     }
+
+    #[test]
+    fn resolve_table_rows_finds_table_under_single_column_filter() {
+        // Regression guard: `resolve_table_rows` should always return a row set for every table in
+        // the model (even under filters), keyed by normalized table name.
+        let mut model = DataModel::new();
+        let mut fact = Table::new("Fact", vec!["Group", "Amount"]);
+        fact.push_row(vec![Value::from("A"), 12.34.into()]).unwrap();
+        fact.push_row(vec![Value::from("B"), 2.0.into()]).unwrap();
+        model.add_table(fact).unwrap();
+
+        let filter = FilterContext::empty().with_column_equals("Fact", "Amount", 12.34.into());
+        let rows = resolve_table_rows(&model, &filter, "Fact").unwrap();
+        assert_eq!(rows, vec![0]);
+    }
 }

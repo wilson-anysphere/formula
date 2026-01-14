@@ -581,7 +581,11 @@ fn requires_many_to_many_grouping(
     filter: &FilterContext,
 ) -> DaxResult<bool> {
     // Fast path: no relationship traversal needed.
-    if group_by.iter().all(|col| col.table == base_table) {
+    let base_table_key = normalize_ident(base_table);
+    if group_by
+        .iter()
+        .all(|col| normalize_ident(&col.table) == base_table_key)
+    {
         return Ok(false);
     }
 
@@ -1441,6 +1445,7 @@ fn pivot_columnar_star_schema_group_by(
     if table_ref.columnar_table().is_none() {
         return Ok(None);
     }
+    let base_table_key = normalize_ident(base_table);
 
     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
     for &idx in filter.relationship_overrides() {
@@ -1465,7 +1470,7 @@ fn pivot_columnar_star_schema_group_by(
     let mut base_group_idxs: HashSet<usize> = HashSet::new();
 
     for col in group_by {
-        if col.table == base_table {
+        if normalize_ident(&col.table) == base_table_key {
             let idx = table_ref
                 .column_idx(&col.column)
                 .ok_or_else(|| DaxError::UnknownColumn {
