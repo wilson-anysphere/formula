@@ -2512,6 +2512,70 @@ impl Engine {
         Value::Blank
     }
 
+    /// Bulk-read a rectangular worksheet range.
+    ///
+    /// Values are returned in **row-major** order (`values[row][col]`) and include explicit
+    /// [`Value::Blank`] entries for any unset cells within the requested rectangle.
+    ///
+    /// This is intended for performance-sensitive callers (e.g. pivot cache building) that would
+    /// otherwise issue per-cell [`Engine::get_cell_value`] calls, which require repeated sheet-name
+    /// lookups and A1 parsing.
+    pub fn get_range_values(&self, sheet: &str, range: Range) -> Result<Vec<Vec<Value>>, EngineError> {
+        let width = range.width() as usize;
+        let height = range.height() as usize;
+
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok((0..height).map(|_| vec![Value::Blank; width]).collect());
+        };
+        let Some(sheet_state) = self.workbook.sheets.get(sheet_id) else {
+            return Ok((0..height).map(|_| vec![Value::Blank; width]).collect());
+        };
+
+        let row_count = sheet_state.row_count;
+        let col_count = sheet_state.col_count;
+        let cells = &sheet_state.cells;
+
+        let provider = self.external_value_provider.as_deref();
+        let provider_sheet_name = self.workbook.sheet_name(sheet_id);
+
+        let mut out = Vec::with_capacity(height);
+        for row in range.start.row..=range.end.row {
+            let mut row_out = Vec::with_capacity(width);
+            for col in range.start.col..=range.end.col {
+                // Mirror `get_cell_value`'s #REF! semantics for out-of-bounds reads.
+                if row >= row_count || col >= col_count {
+                    row_out.push(Value::Error(ErrorKind::Ref));
+                    continue;
+                }
+
+                let addr = CellAddr { row, col };
+                let key = CellKey { sheet: sheet_id, addr };
+
+                if let Some(v) = self.spilled_cell_value(key) {
+                    row_out.push(v);
+                    continue;
+                }
+
+                if let Some(cell) = cells.get(&addr) {
+                    row_out.push(cell.value.clone());
+                    continue;
+                }
+
+                if let (Some(provider), Some(sheet_name)) = (provider, provider_sheet_name) {
+                    if let Some(v) = provider.get(sheet_name, addr) {
+                        row_out.push(v);
+                        continue;
+                    }
+                }
+
+                row_out.push(Value::Blank);
+            }
+            out.push(row_out);
+        }
+
+        Ok(out)
+    }
+
     /// Returns the spill range (origin inclusive) for a cell if it is an array-spill
     /// origin or belongs to a spilled range.
     pub fn spill_range(&self, sheet: &str, addr: &str) -> Option<(CellAddr, CellAddr)> {

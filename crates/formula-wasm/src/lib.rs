@@ -1462,18 +1462,21 @@ impl WorkbookState {
         &self,
         sheet: &str,
         range: &Range,
-    ) -> Vec<Vec<pivot_engine::PivotValue>> {
-        let mut out = Vec::with_capacity(range.height() as usize);
-        for row in range.start.row..=range.end.row {
-            let mut row_values = Vec::with_capacity(range.width() as usize);
-            for col in range.start.col..=range.end.col {
-                let address = CellRef::new(row, col).to_a1();
-                let value = self.engine.get_cell_value(sheet, &address);
+    ) -> Result<Vec<Vec<pivot_engine::PivotValue>>, JsValue> {
+        let values = self
+            .engine
+            .get_range_values(sheet, range.clone())
+            .map_err(|err| js_err(err.to_string()))?;
+
+        let mut out = Vec::with_capacity(values.len());
+        for row in values {
+            let mut row_values = Vec::with_capacity(row.len());
+            for value in row {
                 row_values.push(engine_value_to_pivot_value(value));
             }
             out.push(row_values);
         }
-        out
+        Ok(out)
     }
 
     fn get_pivot_schema_internal(
@@ -1484,7 +1487,7 @@ impl WorkbookState {
     ) -> Result<pivot_engine::PivotSchema, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
         let range = Self::parse_range(source_range_a1)?;
-        let source = self.read_range_values_as_pivot_values(&sheet, &range);
+        let source = self.read_range_values_as_pivot_values(&sheet, &range)?;
         let cache =
             pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
         Ok(cache.schema(sample_size))
@@ -1501,7 +1504,7 @@ impl WorkbookState {
         let range = Self::parse_range(source_range_a1)?;
         let destination = Self::parse_address(destination_top_left_a1)?;
 
-        let source = self.read_range_values_as_pivot_values(&sheet, &range);
+        let source = self.read_range_values_as_pivot_values(&sheet, &range)?;
         let cache =
             pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
         let result = pivot_engine::PivotEngine::calculate(&cache, config)
@@ -3655,7 +3658,7 @@ impl WasmWorkbook {
         ensure_rust_constructors_run();
         let sheet = self.inner.require_sheet(&sheet)?.to_string();
         let range = WorkbookState::parse_range(&source_range_a1)?;
-        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range);
+        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range)?;
         let cache =
             pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
 
@@ -3681,7 +3684,7 @@ impl WasmWorkbook {
         ensure_rust_constructors_run();
         let sheet = self.inner.require_sheet(&sheet)?.to_string();
         let range = WorkbookState::parse_range(&source_range_a1)?;
-        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range);
+        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range)?;
         let cache =
             pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
 

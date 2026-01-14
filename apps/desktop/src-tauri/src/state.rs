@@ -4307,14 +4307,27 @@ fn expand_precedent_nodes_to_cells(
     Ok(out)
 }
 
-fn scalar_to_pivot_value(value: &CellScalar) -> PivotValue {
+fn engine_value_to_pivot_value(value: &EngineValue) -> PivotValue {
     match value {
-        CellScalar::Empty => PivotValue::Blank,
-        CellScalar::Number(n) => PivotValue::Number(*n),
-        CellScalar::Text(s) => PivotValue::Text(s.clone()),
-        CellScalar::Bool(b) => PivotValue::Bool(*b),
+        EngineValue::Blank => PivotValue::Blank,
+        EngineValue::Number(n) => PivotValue::Number(*n),
+        EngineValue::Text(s) => PivotValue::Text(s.clone()),
+        EngineValue::Bool(b) => PivotValue::Bool(*b),
         // Errors are treated as text for pivot purposes (so aggregations won't treat them as numbers).
-        CellScalar::Error(e) => PivotValue::Text(e.clone()),
+        EngineValue::Error(e) => PivotValue::Text(e.as_code().to_string()),
+        // For rich values, use the user-visible display string so pivots behave like the grid.
+        EngineValue::Entity(v) => PivotValue::Text(v.display.clone()),
+        EngineValue::Record(v) => PivotValue::Text(v.display.clone()),
+        // Ranges should not contain these variants as stored cell values; treat them as blank to
+        // keep pivot cache building resilient to unexpected evaluator outputs.
+        EngineValue::Reference(_)
+        | EngineValue::ReferenceUnion(_)
+        | EngineValue::Lambda(_)
+        | EngineValue::Spill { .. } => PivotValue::Blank,
+        EngineValue::Array(arr) => {
+            let top_left = arr.get(0, 0).cloned().unwrap_or(EngineValue::Blank);
+            engine_value_to_pivot_value(&top_left)
+        }
     }
 }
 
@@ -4399,10 +4412,30 @@ fn refresh_pivot_registration(
     }
 
     let source_values = {
-        let sheet = workbook
+        let source_sheet = workbook
             .sheet(&pivot.source_sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(pivot.source_sheet_id.clone()))?;
-        let cells = sheet.get_range_cells(
+        let sheet_name = source_sheet.name.clone();
+
+        let start_row = u32::try_from(pivot.source_range.start_row)
+            .map_err(|_| AppStateError::Pivot("pivot source range start row out of range".to_string()))?;
+        let start_col = u32::try_from(pivot.source_range.start_col)
+            .map_err(|_| AppStateError::Pivot("pivot source range start col out of range".to_string()))?;
+        let end_row = u32::try_from(pivot.source_range.end_row)
+            .map_err(|_| AppStateError::Pivot("pivot source range end row out of range".to_string()))?;
+        let end_col = u32::try_from(pivot.source_range.end_col)
+            .map_err(|_| AppStateError::Pivot("pivot source range end col out of range".to_string()))?;
+
+        let range = formula_model::Range::new(
+            formula_model::CellRef::new(start_row, start_col),
+            formula_model::CellRef::new(end_row, end_col),
+        );
+
+        let values = engine
+            .get_range_values(&sheet_name, range)
+            .map_err(|e| AppStateError::Pivot(e.to_string()))?;
+
+        let cells = source_sheet.get_range_cells(
             pivot.source_range.start_row,
             pivot.source_range.start_col,
             pivot.source_range.end_row,
@@ -4412,7 +4445,7 @@ fn refresh_pivot_registration(
         build_pivot_source_range_with_number_formats(
             source_rows,
             source_cols,
-            |r, c| scalar_to_pivot_value(&cells[r][c].computed_value),
+            |r, c| engine_value_to_pivot_value(&values[r][c]),
             |r, c| cells[r][c].number_format.as_deref(),
             engine.date_system(),
         )
