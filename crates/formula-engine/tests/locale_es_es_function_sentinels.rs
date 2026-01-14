@@ -41,4 +41,25 @@ fn locale_parsing_es_es_financial_function_spellings_match_excel() {
             canonical_formula
         );
     }
+
+    // Also validate that we round-trip locale punctuation (argument + decimal separators) while
+    // translating these function names.
+    assert_eq!(
+        locale::localize_formula("=NPV(0.1,1,2)", &locale::ES_ES).unwrap(),
+        "=VNA(0,1;1;2)"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=VNA(0,1;1;2)", &locale::ES_ES).unwrap(),
+        "=NPV(0.1,1,2)"
+    );
+
+    // Dotted localized names should also translate correctly with arguments.
+    assert_eq!(
+        locale::localize_formula("=XNPV(0.1,1,2)", &locale::ES_ES).unwrap(),
+        "=VNA.NO.PER(0,1;1;2)"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=VNA.NO.PER(0,1;1;2)", &locale::ES_ES).unwrap(),
+        "=XNPV(0.1,1,2)"
+    );
 }
