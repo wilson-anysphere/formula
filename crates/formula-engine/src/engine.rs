@@ -601,7 +601,19 @@ impl Workbook {
 
     fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
         let idx = *self.sheet_tab_index_by_id.get(sheet)?;
-        (idx != usize::MAX).then_some(idx)
+        if idx == usize::MAX {
+            return None;
+        }
+
+        // Defensively validate the cached index against `sheet_order` so we remain correct even if
+        // internal tests (or future refactors) mutate `sheet_order` without updating the cache.
+        // In the common case (cache is valid) this is still O(1).
+        if self.sheet_order.get(idx).copied() == Some(sheet) {
+            return Some(idx);
+        }
+
+        // Fallback: linear scan. This should be rare (cache is normally kept in sync).
+        self.sheet_order.iter().position(|&id| id == sheet)
     }
 
     /// Reorder a worksheet id within the workbook's tab order.
