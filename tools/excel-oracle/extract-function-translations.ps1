@@ -302,7 +302,7 @@ if ($null -eq $catalog.functions) {
   throw "Invalid function catalog shape: missing .functions in $catalogPath"
 }
 
-$functionList = @($catalog.functions)
+$functionList = @($catalog.functions | Sort-Object -Property name)
 if ($MaxFunctions -gt 0) {
   $functionList = $functionList | Select-Object -First $MaxFunctions
 }
