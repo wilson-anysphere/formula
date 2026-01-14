@@ -3883,18 +3883,27 @@ mod tests {
         stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
 
         let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
-        assert!(
-            parsed.warnings.len() <= MAX_WARNINGS_PER_SHEET_METADATA + 1,
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
             "expected warnings to be capped at {} (+1 suppression), got {}",
             MAX_WARNINGS_PER_SHEET_METADATA,
             parsed.warnings.len()
         );
-        assert!(
+        assert_eq!(
             parsed
                 .warnings
                 .iter()
-                .any(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED),
-            "expected suppression warning, got {:?}",
+                .filter(|w| w.as_str() == SHEET_METADATA_WARNINGS_SUPPRESSED)
+                .count(),
+            1,
+            "expected exactly one suppression warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "expected suppression warning to be the final warning, got {:?}",
             parsed.warnings
         );
     }
@@ -3908,18 +3917,27 @@ mod tests {
         stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
 
         let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
-        assert!(
-            parsed.warnings.len() <= MAX_WARNINGS_PER_SHEET_METADATA + 1,
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
             "expected warnings to be capped at {} (+1 suppression), got {}",
             MAX_WARNINGS_PER_SHEET_METADATA,
             parsed.warnings.len()
         );
-        assert!(
+        assert_eq!(
             parsed
                 .warnings
                 .iter()
-                .any(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED),
-            "expected suppression warning, got {:?}",
+                .filter(|w| w.as_str() == SHEET_METADATA_WARNINGS_SUPPRESSED)
+                .count(),
+            1,
+            "expected exactly one suppression warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "expected suppression warning to be the final warning, got {:?}",
             parsed.warnings
         );
     }
