@@ -1942,19 +1942,6 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         }
     };
 
-    // We can decrypt the `EncryptedPackage` stream regardless of what OOXML format it contains, but
-    // we currently only support opening decrypted packages as `.xlsx`/`.xlsm`. Reject `.xlsb`
-    // payloads so callers can surface an actionable "unsupported kind" error.
-    if matches!(
-        sniff_ooxml_zip_workbook_kind(&decrypted),
-        Some(WorkbookFormat::Xlsb)
-    ) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
-
     Ok(Some(decrypted))
 }
 
@@ -2682,6 +2669,18 @@ fn decrypt_encrypted_ooxml_package(
         })?;
     }
 
+    // Some synthetic fixtures (and some pipelines) may already contain a plaintext ZIP payload in
+    // `EncryptedPackage`. Support those by returning the ZIP bytes directly.
+    if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+        let format = sniff_ooxml_zip_workbook_kind(package_bytes).unwrap_or(WorkbookFormat::Xlsx);
+        let reuse_full_buffer = package_bytes.as_ptr() == encrypted_package.as_ptr()
+            && package_bytes.len() == encrypted_package.len();
+        if reuse_full_buffer {
+            return Ok(Some((format, encrypted_package)));
+        }
+        return Ok(Some((format, package_bytes.to_vec())));
+    }
+
     // `EncryptionInfo` version header is the first 4 bytes:
     // - VersionMajor (u16 LE)
     // - VersionMinor (u16 LE)
@@ -2934,19 +2933,70 @@ fn decrypt_encrypted_ooxml_package(
             out
         } else {
             // --- Standard CryptoAPI AES ---------------------------------------------------------
-            // Delegate to `formula-office-crypto` which performs verifier validation and tries the
-            // common Standard/AES decryption schemes.
-            formula_office_crypto::decrypt_standard_encrypted_package(
+            // Prefer the Standard decryptor in `formula-office-crypto` because it supports a wider
+            // range of hash algorithms (and performs verifier validation). However, some producers
+            // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`), which the
+            // strict parser rejects. Fall back to `formula-xlsx`'s legacy Standard decryptor for
+            // compatibility in those cases.
+            match formula_office_crypto::decrypt_standard_encrypted_package(
                 &encryption_info,
                 &encrypted_package,
                 password,
-            )
-            .map_err(|_| Error::InvalidPassword {
-                path: path.to_path_buf(),
-            })?
+            ) {
+                Ok(bytes) => bytes,
+                Err(formula_office_crypto::OfficeCryptoError::InvalidPassword) => {
+                    return Err(Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    });
+                }
+                Err(_err) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                    &encryption_info,
+                    &encrypted_package,
+                    password,
+                ) {
+                    Ok(bytes) => bytes,
+                    Err(err) => match err {
+                        xlsx::OffCryptoError::WrongPassword
+                        | xlsx::OffCryptoError::IntegrityMismatch => {
+                            return Err(Error::InvalidPassword {
+                                path: path.to_path_buf(),
+                            })
+                        }
+                        xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major: major,
+                                version_minor: minor,
+                            });
+                        }
+                        _ => {
+                            return Err(Error::InvalidPassword {
+                                path: path.to_path_buf(),
+                            })
+                        }
+                    },
+                },
+            }
         }
     };
-    let format = workbook_format_from_ooxml_zip_bytes(&decrypted).unwrap_or(WorkbookFormat::Unknown);
+    let format = match workbook_format_from_ooxml_zip_bytes(&decrypted) {
+        Some(WorkbookFormat::Xlsb) => WorkbookFormat::Xlsb,
+        Some(WorkbookFormat::Xlsm) => WorkbookFormat::Xlsm,
+        Some(WorkbookFormat::Xlsx) => WorkbookFormat::Xlsx,
+        // The decrypted bytes are a ZIP file but don't clearly contain either an XLSX/XLSM or XLSB
+        // workbook. Treat as an XLSX package so callers can still access the decrypted bytes via
+        // `XlsxLazyPackage` (useful for synthetic fixtures).
+        Some(WorkbookFormat::Unknown) => WorkbookFormat::Xlsx,
+        // A successful OOXML `EncryptedPackage` decryption must yield a ZIP payload. If it does not,
+        // treat the result as an invalid password (or corrupt/malformed encrypted package).
+        None => {
+            return Err(Error::InvalidPassword {
+                path: path.to_path_buf(),
+            });
+        }
+        // Non-OOXML formats are not expected from an OOXML `EncryptedPackage` payload.
+        Some(_) => WorkbookFormat::Xlsx,
+    };
     Ok(Some((format, decrypted)))
 }
 

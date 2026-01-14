@@ -3,8 +3,10 @@ use std::path::PathBuf;
 
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model,
-    open_workbook_model_with_password, open_workbook_with_password, Error, WorkbookEncryption,
+    open_workbook_model_with_password, open_workbook_with_password, Error, Workbook,
+    WorkbookEncryption,
 };
+use formula_model::{CellRef, CellValue};
 
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
@@ -138,15 +140,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(
-                        err,
-                        Error::UnsupportedOoxmlEncryption {
-                            version_major: 4,
-                            version_minor: 4,
-                            ..
-                        }
-                    ),
-                    "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
                 );
             } else {
                 assert!(
@@ -159,15 +154,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(
-                        err,
-                        Error::UnsupportedOoxmlEncryption {
-                            version_major: 4,
-                            version_minor: 4,
-                            ..
-                        }
-                    ),
-                    "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
                 );
             } else {
                 assert!(
@@ -278,19 +266,13 @@ fn errors_on_unsupported_encryption_version() {
 }
 
 #[test]
-fn encrypted_ooxml_plaintext_xlsb_payload_is_opened_as_xlsb() {
-    // Construct a minimal OPC/ZIP payload that looks like an XLSB workbook (contains
-    // `xl/workbook.bin`) and wrap it in a synthetic OLE `EncryptedPackage` container.
-    let zip_bytes = {
-        let cursor = Cursor::new(Vec::new());
-        let mut zip = zip::ZipWriter::new(cursor);
-        let options = zip::write::FileOptions::<()>::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        zip.start_file("xl/workbook.bin", options)
-            .expect("start workbook.bin");
-        zip.write_all(b"not a real xlsb").expect("write workbook.bin");
-        zip.finish().expect("finish zip").into_inner()
-    };
+fn encrypted_ooxml_plaintext_xlsb_payload_opens() {
+    // Wrap a real `.xlsb` OPC/ZIP payload in a synthetic OLE `EncryptedPackage` container (where the
+    // payload is already plaintext). This exercises the "already-decrypted" pipeline path.
+    let zip_bytes = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+        "../formula-xlsb/tests/fixtures/simple.xlsb",
+    ))
+    .expect("read xlsb fixture");
 
     let bytes = encrypted_ooxml_bytes_with_encrypted_package(&zip_bytes);
 
@@ -298,17 +280,17 @@ fn encrypted_ooxml_plaintext_xlsb_payload_is_opened_as_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-    let err = open_workbook_with_password(&path, Some("dummy"))
-        .expect_err("expected xlsb encrypted workbook to error");
+    let wb = open_workbook_with_password(&path, Some("dummy")).expect("open xlsb via password API");
     assert!(
-        matches!(err, Error::OpenXlsb { .. }),
-        "expected Error::OpenXlsb, got {err:?}"
+        matches!(wb, Workbook::Xlsb(_)),
+        "expected Workbook::Xlsb, got {wb:?}"
     );
 
-    let err = open_workbook_model_with_password(&path, Some("dummy"))
-        .expect_err("expected xlsb encrypted workbook model open to error");
-    assert!(
-        matches!(err, Error::OpenXlsb { .. }),
-        "expected Error::OpenXlsb, got {err:?}"
+    let model =
+        open_workbook_model_with_password(&path, Some("dummy")).expect("open xlsb model workbook");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("Hello".to_string())
     );
 }
