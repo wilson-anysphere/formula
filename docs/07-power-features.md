@@ -976,6 +976,7 @@ export interface GoalSeekRequest {
 }
 
 export interface GoalSeekResponse {
+  // `true` iff `status === "Converged"` (matches `GoalSeekResult::success()` in Rust).
   success: boolean;
   status: GoalSeekStatus;
   solution: number;
