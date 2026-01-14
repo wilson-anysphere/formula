@@ -25,7 +25,7 @@ import {
 } from "../drawings/overlay";
 import { DrawingInteractionController, type DrawingInteractionCallbacks } from "../drawings/interaction";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
-import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
+import { createDrawingObjectId, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -4497,7 +4497,7 @@ export class SpreadsheetApp {
         const fromCol = startCol + i * (DEFAULT_PICTURE_WIDTH_COLS + DEFAULT_PICTURE_GAP_COLS);
         const fromRow = startRow;
         const drawing = {
-          id: `drawing_${uuid()}`,
+          id: createDrawingObjectId(),
           kind: { type: "image", imageId },
           anchor: {
             type: "twoCell",
