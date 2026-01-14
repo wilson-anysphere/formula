@@ -60,7 +60,7 @@ fn cell_format_code_treats_hh_mm_like_h_mm_for_time_classification() {
     let h = cell_format_code(Some("h:mm"));
     let hh = cell_format_code(Some("hh:mm"));
 
-    assert!(h.starts_with('T'), "expected time classification, got {h:?}");
+    assert_eq!(h, "D9", "expected Excel `h:mm` classification, got {h:?}");
     assert_eq!(hh, h);
 }
 
@@ -69,7 +69,7 @@ fn cell_format_code_treats_hh_mm_ss_like_h_mm_ss_for_time_classification() {
     let h = cell_format_code(Some("h:mm:ss"));
     let hh = cell_format_code(Some("hh:mm:ss"));
 
-    assert!(h.starts_with('T'), "expected time classification, got {h:?}");
+    assert_eq!(h, "D8", "expected Excel `h:mm:ss` classification, got {h:?}");
     assert_eq!(hh, h);
 }
 
@@ -83,7 +83,7 @@ fn cell_format_code_ignores_locale_override_tokens_for_datetime_classification()
 
     let base_time = cell_format_code(Some("hh:mm"));
     let with_locale = cell_format_code(Some("[$-409]hh:mm"));
-    assert!(base_time.starts_with('T'), "expected time classification, got {base_time:?}");
+    assert_eq!(base_time, "D9", "expected Excel `h:mm` classification, got {base_time:?}");
     assert_eq!(with_locale, base_time);
 }
 
@@ -193,10 +193,10 @@ fn custom_numeric_formats_compute_decimal_counts() {
 #[test]
 fn datetime_formats_map_to_cell_d_and_t_codes() {
     let cases: &[(&str, &str)] = &[
-        ("m/d/yyyy", "D1"),
-        ("h:mm:ss", "T4"),
-        ("[h]:mm:ss", "T6"),
-        ("mm:ss.0", "T7"),
+        ("m/d/yyyy", "D4"),
+        ("h:mm:ss", "D8"),
+        ("[h]:mm:ss", "D8"),
+        ("mm:ss.0", "D8"),
     ];
 
     for &(fmt, expected) in cases {

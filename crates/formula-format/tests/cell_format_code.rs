@@ -21,7 +21,7 @@ fn cell_format_code_unknown_builtin_placeholder_falls_back_to_general() {
 fn cell_format_code_builtin_datetime_placeholder_is_datetime() {
     let code = cell_format_code(Some("__builtin_numFmtId:14"));
     assert!(
-        code.starts_with('D') || code.starts_with('T'),
+        code.starts_with('D'),
         "expected date/time classification for built-in 14, got {code}"
     );
 }
@@ -30,7 +30,7 @@ fn cell_format_code_builtin_datetime_placeholder_is_datetime() {
 fn cell_format_code_reserved_datetime_builtin_placeholder_is_datetime() {
     let code = cell_format_code(Some("__builtin_numFmtId:50"));
     assert!(
-        code.starts_with('D') || code.starts_with('T'),
+        code.starts_with('D'),
         "expected date/time classification for reserved built-in 50, got {code}"
     );
 }

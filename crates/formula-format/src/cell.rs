@@ -222,51 +222,65 @@ fn classify_datetime_section(pattern: &str) -> String {
     let pattern = strip_leading_non_elapsed_bracket_tokens(pattern);
 
     // --- Exact matches for Excel built-ins (case-insensitive) ---
+    //
+    // Mappings derived from Microsoft Support `CELL` documentation ("CELL format codes"):
+    // https://support.microsoft.com/en-us/office/cell-function-51bd39a5-f338-4dbe-a33f-955d67c2b2cf
     // Date formats.
-    if pattern.eq_ignore_ascii_case("m/d/yyyy") || pattern.eq_ignore_ascii_case("m/d/yy") {
+    if pattern.eq_ignore_ascii_case("d-mmm-yy") || pattern.eq_ignore_ascii_case("dd-mmm-yy") {
         return "D1".to_string();
     }
-    if pattern.eq_ignore_ascii_case("d-mmm-yy") {
+    if pattern.eq_ignore_ascii_case("d-mmm") || pattern.eq_ignore_ascii_case("dd-mmm") {
         return "D2".to_string();
     }
-    if pattern.eq_ignore_ascii_case("d-mmm") {
+    if pattern.eq_ignore_ascii_case("mmm-yy") {
         return "D3".to_string();
     }
-    if pattern.eq_ignore_ascii_case("mmm-yy") {
+    if pattern.eq_ignore_ascii_case("m/d/yyyy")
+        || pattern.eq_ignore_ascii_case("m/d/yy")
+        || pattern.eq_ignore_ascii_case("mm/dd/yy")
+        || pattern.eq_ignore_ascii_case("mm/dd/yyyy")
+    {
         return "D4".to_string();
+    }
+    if pattern.eq_ignore_ascii_case("m/d")
+        || pattern.eq_ignore_ascii_case("mm/dd")
+        || pattern.eq_ignore_ascii_case("m/d/") // defensive: malformed but common in some exports
+    {
+        return "D5".to_string();
     }
     // Datetime built-in.
     if pattern.eq_ignore_ascii_case("m/d/yyyy h:mm") || pattern.eq_ignore_ascii_case("m/d/yy h:mm") {
-        return "D5".to_string();
+        return "D4".to_string();
     }
 
     // Time formats.
     if pattern.eq_ignore_ascii_case("h:mm am/pm") || pattern.eq_ignore_ascii_case("h:mm a/p") {
-        return "T1".to_string();
+        return "D7".to_string();
     }
     if pattern.eq_ignore_ascii_case("h:mm:ss am/pm") || pattern.eq_ignore_ascii_case("h:mm:ss a/p") {
-        return "T2".to_string();
+        return "D6".to_string();
     }
     if pattern.eq_ignore_ascii_case("h:mm") {
-        return "T3".to_string();
+        return "D9".to_string();
     }
     if pattern.eq_ignore_ascii_case("h:mm:ss") {
-        return "T4".to_string();
+        return "D8".to_string();
     }
     if pattern.eq_ignore_ascii_case("mm:ss") {
-        return "T5".to_string();
+        return "D8".to_string();
     }
     if pattern.eq_ignore_ascii_case("[h]:mm:ss") {
-        return "T6".to_string();
+        return "D8".to_string();
     }
     if pattern.eq_ignore_ascii_case("mm:ss.0") {
-        return "T7".to_string();
+        return "D8".to_string();
     }
 
     // --- Heuristic fallback for custom patterns ---
     let analysis = analyze_datetime_pattern(pattern);
     if analysis.has_date() && analysis.has_time() {
-        return "D5".to_string();
+        // Excel reports `D4` for common date+time patterns like `m/d/yy h:mm`.
+        return "D4".to_string();
     }
     if analysis.has_date() {
         return classify_custom_date_pattern(&analysis);
@@ -276,7 +290,7 @@ fn classify_datetime_section(pattern: &str) -> String {
     }
 
     // As a last resort, default to a date-like code.
-    "D1".to_string()
+    "D4".to_string()
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -430,52 +444,41 @@ fn classify_custom_date_pattern(analysis: &DateTimePatternAnalysis) -> String {
     // Best-effort mapping to Excel's D* codes.
     if analysis.has_month_name {
         if analysis.has_day && analysis.has_year {
-            return "D2".to_string();
+            return "D1".to_string();
         }
         if analysis.has_day {
-            return "D3".to_string();
+            return "D2".to_string();
         }
         if analysis.has_year {
-            return "D4".to_string();
+            return "D3".to_string();
         }
     }
 
     if analysis.has_year {
-        return "D1".to_string();
+        // Numeric dates with a year fall under Excel's `m/d/yy` family.
+        return "D4".to_string();
     }
     // Date without an explicit year: fall back to a short date variant.
     "D5".to_string()
 }
 
 fn classify_custom_time_pattern(analysis: &DateTimePatternAnalysis) -> String {
-    // Best-effort mapping to Excel's T* codes.
+    // Best-effort mapping to Excel's `D6..D9` time-of-day codes.
     if analysis.has_ampm {
-        return if analysis.has_second {
-            "T2".to_string()
+        return if analysis.has_second || analysis.has_fractional_seconds {
+            "D6".to_string()
         } else {
-            "T1".to_string()
+            "D7".to_string()
         };
     }
 
-    if analysis.has_elapsed {
-        // Excel has a dedicated code for elapsed `[h]:mm:ss` formats.
-        return "T6".to_string();
+    // Excel does not document separate `CELL("format")` codes for elapsed/duration formats
+    // (`mm:ss`, `[h]:mm:ss`, `mm:ss.0`), so map them to the closest match: time with seconds.
+    if analysis.has_elapsed || analysis.has_second || analysis.has_fractional_seconds {
+        return "D8".to_string();
     }
 
-    // Time without hour tokens is usually `mm:ss` or `mm:ss.0`.
-    if !analysis.has_hour && analysis.has_second && analysis.has_colon {
-        return if analysis.has_fractional_seconds {
-            "T7".to_string()
-        } else {
-            "T5".to_string()
-        };
-    }
-
-    if analysis.has_second {
-        return "T4".to_string();
-    }
-
-    "T3".to_string()
+    "D9".to_string()
 }
 
 fn strip_leading_non_elapsed_bracket_tokens(pattern: &str) -> &str {
@@ -516,8 +519,8 @@ fn classify_reserved_datetime_format_id(id: u16) -> &'static str {
     // Most callers encounter these via `__builtin_numFmtId:<id>` placeholders.
     match id {
         // Commonly-observed reserved ids are date/time variants. Without the concrete
-        // pattern we default to a short date.
-        _ => "D1",
+        // pattern we default to a short numeric date.
+        _ => "D4",
     }
 }
 

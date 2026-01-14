@@ -11,8 +11,7 @@ use crate::{builtin_format_code, FormatCode, BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREF
 /// - `"C<n>"` for currency formats (`n` = decimal places)
 /// - `"P<n>"` for percent formats (`n` = decimal places)
 /// - `"S<n>"` for scientific formats (`n` = decimal places)
-/// - `"D<n>"` for date formats (best-effort; Excel uses `D1`..`D9`)
-/// - `"T<n>"` for time formats (best-effort; Excel uses `T1`..`T9`)
+/// - `"D<n>"` for date/time formats (Excel uses `D1`..`D9` for both dates and times)
 /// - `"@"` for text formats
 /// - `"N"` when the format does not match any of the recognized families (e.g. fractions)
 ///
@@ -22,6 +21,22 @@ use crate::{builtin_format_code, FormatCode, BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREF
 pub fn cell_format_code(format_code: Option<&str>) -> String {
     let code = format_code.unwrap_or("General");
     let code = if code.trim().is_empty() { "General" } else { code };
+
+    // Excel's `CELL("format")` has specific `D*` classification codes for the built-in
+    // date/time number formats. Some importers preserve these built-ins as placeholder strings
+    // like `__builtin_numFmtId:14` instead of embedding the concrete format code.
+    //
+    // We map the common built-in ids directly to Excel's `D*` codes (per the Microsoft Support
+    // `CELL` docs) so callers get Excel-compatible results even when the format code isn't known.
+    //
+    // Reference: Microsoft Support → "CELL format codes"
+    // https://support.microsoft.com/en-us/office/cell-function-51bd39a5-f338-4dbe-a33f-955d67c2b2cf
+    if let Some(id) = parse_builtin_placeholder_id(code) {
+        if let Some(mapped) = builtin_datetime_cell_format_code(id) {
+            return mapped.to_string();
+        }
+    }
+
     let code = resolve_builtin_placeholder(code).unwrap_or(code);
 
     // Parse into sections so we can correctly choose the "positive" section when conditions are
@@ -181,43 +196,45 @@ fn classify_date_tokens_to_cell_code(
     has_month_name: bool,
     has_weekday: bool,
 ) -> String {
-    // Best-effort mapping to Excel's `CELL("format")` date codes `D1..D9`.
+    // Best-effort mapping to Excel's `CELL("format")` `D1..D5` date codes, based on the
+    // Microsoft Support table:
     //
-    // Observed conventions (Excel/OOXML built-ins):
-    // - D1: short numeric date (month/day/year ordering is locale-dependent)
-    // - D2: long date (month names, weekday names, etc)
-    // - D3: day + month name (no year)
-    // - D4: month name + year (no day)
-    // - D5: month/day (no year)
+    // - D1: `d-mmm-yy` / `dd-mmm-yy`
+    // - D2: `d-mmm` / `dd-mmm`
+    // - D3: `mmm-yy`
+    // - D4: `m/d/yy` (and also `m/d/yy h:mm`)
+    // - D5: `mm/dd` (month/day, no year)
     //
-    // Note: Excel has additional D codes; we map to the closest of the above.
-    if has_year && has_month && has_day_of_month {
-        if has_month_name || has_weekday {
+    // Excel also uses these codes for locale variants of the above; we classify based on the
+    // *shape* of the pattern rather than exact separators.
+    if has_month_name {
+        if has_day_of_month && has_year {
+            return "D1".to_string();
+        }
+        if has_day_of_month {
             return "D2".to_string();
         }
-        return "D1".to_string();
-    }
-
-    if has_year && has_month && !has_day_of_month {
-        if has_month_name {
-            return "D4".to_string();
-        }
-        return "D1".to_string();
-    }
-
-    if !has_year && has_month && has_day_of_month {
-        if has_month_name {
+        if has_year {
             return "D3".to_string();
         }
-        return "D5".to_string();
-    }
-
-    if has_month_name || has_weekday {
+        // Month/weekday name without day/year is uncommon; treat it as the closest "day-month name"
+        // family.
         return "D2".to_string();
     }
 
-    // Fallback for partial/ambiguous date formats.
-    "D1".to_string()
+    // Weekday-only formats like `ddd` / `dddd` don't match the Microsoft table exactly; treat them
+    // as the closest "day-month name" category.
+    if has_weekday && !has_month && !has_day_of_month && !has_year {
+        return "D2".to_string();
+    }
+
+    // Numeric month/day (no year).
+    if has_month && has_day_of_month && !has_year {
+        return "D5".to_string();
+    }
+
+    // Default for full numeric dates (including date+time).
+    "D4".to_string()
 }
 
 fn classify_time_tokens_to_cell_code(
@@ -227,47 +244,72 @@ fn classify_time_tokens_to_cell_code(
     has_ampm: bool,
     has_elapsed_hours: bool,
 ) -> String {
-    // Best-effort mapping to Excel's `CELL("format")` time codes `T1..T9`.
+    // Excel uses `D6..D9` for time-of-day formats (there are no `T*` codes).
     //
-    // Observed conventions (Excel/OOXML built-ins):
-    // - T1: h:mm AM/PM
-    // - T2: h:mm:ss AM/PM
-    // - T3: h:mm (24-hour)
-    // - T4: h:mm:ss (24-hour)
-    // - T5: mm:ss
-    // - T6: [h]:mm:ss (elapsed time)
-    // - T7: mm:ss.0 (fractional seconds)
+    // Microsoft Support table:
+    // - D6: `h:mm:ss AM/PM`
+    // - D7: `h:mm AM/PM`
+    // - D8: `h:mm:ss`
+    // - D9: `h:mm`
+    //
+    // For elapsed/duration formats like `[h]:mm:ss` and `mm:ss.0`, Excel does not document
+    // dedicated codes; we map them to the closest match (`D8`, time with seconds).
+    let has_seconds = has_second || has_fractional_seconds;
+
     if has_ampm {
-        return if has_second || has_fractional_seconds {
-            "T2".to_string()
-        } else {
-            "T1".to_string()
-        };
+        return if has_seconds { "D6".to_string() } else { "D7".to_string() };
     }
 
     if has_elapsed_hours {
-        return "T6".to_string();
+        return "D8".to_string();
     }
 
-    if has_fractional_seconds {
-        return "T7".to_string();
-    }
-
-    if has_second {
-        return if has_hour {
-            "T4".to_string()
-        } else {
-            "T5".to_string()
-        };
-    }
-
-    // No seconds.
-    if has_hour {
-        "T3".to_string()
+    if has_seconds {
+        "D8".to_string()
     } else {
-        // Time formats with no explicit hours (rare) still fall under `T3` in Excel's classification
-        // table; treat them like `h:mm`.
-        "T3".to_string()
+        // Treat `mm`-only time formats as `h:mm` for `CELL("format")` purposes.
+        // (Excel's table only distinguishes the presence of seconds and AM/PM.)
+        let _ = has_hour;
+        "D9".to_string()
+    }
+}
+
+fn parse_builtin_placeholder_id(code: &str) -> Option<u16> {
+    code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?
+        .trim()
+        .parse::<u16>()
+        .ok()
+}
+
+/// Mapping of built-in number format ids to the `CELL("format")` `D*` codes that Excel reports.
+///
+/// Derived by combining:
+/// - Microsoft Support `CELL` documentation ("CELL format codes")
+/// - ECMA-376 Part 1 §18.8.30 `numFmt` (built-in `numFmtId` assignments)
+fn builtin_datetime_cell_format_code(id: u16) -> Option<&'static str> {
+    match id {
+        // Standard date/time built-ins (OOXML 0–49).
+        14 => Some("D4"), // m/d/yy
+        15 => Some("D1"), // d-mmm-yy
+        16 => Some("D2"), // d-mmm
+        17 => Some("D3"), // mmm-yy
+        18 => Some("D7"), // h:mm AM/PM
+        19 => Some("D6"), // h:mm:ss AM/PM
+        20 => Some("D9"), // h:mm
+        21 => Some("D8"), // h:mm:ss
+        22 => Some("D4"), // m/d/yy h:mm
+
+        // Locale-reserved ids in the OOXML built-in table.
+        27..=31 => Some("D4"),
+        32..=36 => Some("D8"),
+
+        // Duration/elapsed-time built-ins.
+        45..=47 => Some("D8"),
+
+        // Excel-reserved locale date/time ids (not part of the OOXML 0–49 table).
+        50..=58 => Some("D4"),
+
+        _ => None,
     }
 }
 
