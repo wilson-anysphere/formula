@@ -72,7 +72,11 @@ export type {
 } from "@formula/workbook-backend";
 
 export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula.ts";
-export { isMissingGetRangeCompactError } from "./compat.ts";
+export {
+  isMissingGetLocaleInfoError,
+  isMissingGetRangeCompactError,
+  isMissingSupportedLocaleIdsError,
+} from "./compat.ts";
 
 export {
   EXCEL_DEFAULT_CELL_PADDING_PX,
