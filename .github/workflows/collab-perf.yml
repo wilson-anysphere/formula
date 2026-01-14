@@ -42,6 +42,18 @@ on:
           - canonical
           - legacy
           - rxc
+      include_format:
+        description: "PERF_INCLUDE_FORMAT (1 to include format/style updates)"
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+      format_variants:
+        description: "PERF_FORMAT_VARIANTS (distinct formats cycled when PERF_INCLUDE_FORMAT=1)"
+        required: true
+        default: "4"
       timeout_ms:
         description: "PERF_TIMEOUT_MS (internal wait/test timeout)"
         required: true
@@ -61,6 +73,8 @@ env:
   PERF_BATCH_SIZE: ${{ inputs.batch_size }}
   PERF_COLS: ${{ inputs.cols }}
   PERF_KEY_ENCODING: ${{ inputs.key_encoding }}
+  PERF_INCLUDE_FORMAT: ${{ inputs.include_format }}
+  PERF_FORMAT_VARIANTS: ${{ inputs.format_variants }}
   PERF_TIMEOUT_MS: ${{ inputs.timeout_ms }}
   # Keep the node:test runner conservative for perf stability.
   FORMULA_NODE_TEST_CONCURRENCY: "1"
