@@ -29,11 +29,20 @@ function run(config, { writeLicense = true, writeNotice = true } = {}) {
   const identifier =
     typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : "app.formula.desktop";
   const mimeBasename = `${identifier}.xml`;
+  const mimeXml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+    '  <mime-type type="application/vnd.apache.parquet">',
+    '    <glob pattern="*.parquet" />',
+    "  </mime-type>",
+    "</mime-info>",
+    "",
+  ].join("\n");
   mkdirSync(path.join(tmpdir, "mime"), { recursive: true });
-  writeFileSync(path.join(tmpdir, "mime", mimeBasename), "<mime-info />\n", "utf8");
+  writeFileSync(path.join(tmpdir, "mime", mimeBasename), mimeXml, "utf8");
   // Some configs may reference the MIME definition file at repo root (basename-only); create
   // a stub for that path too.
-  writeFileSync(path.join(tmpdir, mimeBasename), "<mime-info />\n", "utf8");
+  writeFileSync(path.join(tmpdir, mimeBasename), mimeXml, "utf8");
   writeFileSync(confPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
   const proc = spawnSync(process.execPath, [scriptPath], {

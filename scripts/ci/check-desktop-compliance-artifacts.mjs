@@ -194,7 +194,19 @@ function validateLinuxMimeFiles(files, kind, identifier) {
   if (typeof src !== "string") {
     die(`bundle.linux.${kind}.files[${JSON.stringify(dest)}] must be a string source path (got ${typeof src})`);
   }
-  resolveAndAssertFileExists(src, mimeFilename);
+  const resolved = resolveAndAssertFileExists(src, mimeFilename);
+  let xml = "";
+  try {
+    xml = fs.readFileSync(resolved, "utf8");
+  } catch (err) {
+    die(`failed to read Parquet shared-mime-info definition file: ${resolved} (${err instanceof Error ? err.message : err})`);
+  }
+  if (!xml.includes("application/vnd.apache.parquet") || !xml.includes("*.parquet")) {
+    die(
+      `Parquet shared-mime-info definition file is missing expected content: ${resolved}\n` +
+        `Expected to find both "application/vnd.apache.parquet" and "*.parquet"`,
+    );
+  }
 }
 
 let raw = "";
