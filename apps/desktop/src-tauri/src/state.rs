@@ -5189,6 +5189,9 @@ fn refresh_pivot_registration(
         .map_err(|e| AppStateError::Pivot(e.to_string()))?;
 
     let mut updates = Vec::new();
+    let mut style_writes: Vec<(formula_model::CellRef, u32)> =
+        Vec::with_capacity(row_count.saturating_mul(col_count));
+    let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
 
     {
         let sheet = workbook
@@ -5293,8 +5296,7 @@ fn refresh_pivot_registration(
                 let existing = sheet.get_cell(row, col);
                 let changed = existing.formula.is_some()
                     || existing.computed_value != desired_scalar
-                    || (desired_number_format.is_some()
-                        && existing.number_format.as_deref() != desired_number_format.as_deref());
+                    || existing.number_format.as_deref() != desired_number_format.as_deref();
                 if !changed {
                     continue;
                 }
@@ -5314,9 +5316,31 @@ fn refresh_pivot_registration(
                     formula: None,
                     display_value,
                 });
+
+                let style_id = desired_number_format
+                    .as_deref()
+                    .map(|fmt| {
+                        if let Some(existing) = style_ids_by_format.get(fmt) {
+                            *existing
+                        } else {
+                            let fmt = fmt.to_string();
+                            let style_id = engine.intern_style(formula_model::Style {
+                                number_format: Some(fmt.clone()),
+                                ..Default::default()
+                            });
+                            style_ids_by_format.insert(fmt, style_id);
+                            style_id
+                        }
+                    })
+                    .unwrap_or(0);
+                style_writes.push((formula_model::CellRef::new(row as u32, col as u32), style_id));
             }
         }
     }
+
+    engine
+        .set_cell_style_ids(&dest_sheet_name, &style_writes)
+        .map_err(|e| AppStateError::Engine(e.to_string()))?;
 
     // Track the *actual* rendered range so future refreshes only clear cells this pivot most
     // recently wrote. (If the output shrinks, cleared cells should be released for user edits.)
@@ -10110,6 +10134,18 @@ mod tests {
         assert_eq!(pivot_sheet.get_cell(1, 0).number_format.as_deref(), Some("m/d/yyyy"));
         assert_eq!(pivot_sheet.get_cell(2, 0).number_format.as_deref(), Some("m/d/yyyy"));
 
+        // The formula engine should also receive a date style id so pivots sourced from pivot
+        // output (or style-aware functions like `CELL()`) observe date semantics.
+        let pivot_sheet_name = pivot_sheet.name.clone();
+        let style_id = state
+            .engine
+            .get_cell_style_id(&pivot_sheet_name, "A2")
+            .unwrap()
+            .unwrap_or(0);
+        assert_ne!(style_id, 0);
+        let style = state.engine.style_table().get(style_id).unwrap();
+        assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
+
         // Numeric measure column should remain numeric (no date inference).
         assert_eq!(
             state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value,
@@ -10216,6 +10252,16 @@ mod tests {
         let workbook = state.workbook.as_ref().unwrap();
         let pivot_sheet = workbook.sheet(&pivot_sheet_id).unwrap();
         assert_eq!(pivot_sheet.get_cell(1, 0).number_format.as_deref(), Some("m/d/yyyy"));
+
+        let pivot_sheet_name = pivot_sheet.name.clone();
+        let style_id = state
+            .engine
+            .get_cell_style_id(&pivot_sheet_name, "A2")
+            .unwrap()
+            .unwrap_or(0);
+        assert_ne!(style_id, 0);
+        let style = state.engine.style_table().get(style_id).unwrap();
+        assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
     }
 
     #[test]
