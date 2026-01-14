@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FunctionRegistry, parsePartialFormula as parsePartialFormulaFallback } from "@formula/ai-completion";
 
@@ -135,5 +135,32 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     await parser(input, input.length, fnRegistry);
 
     expect(calls).toBe(1);
+  });
+
+  it("falls back to the JS parser when the engine parser times out", async () => {
+    setLocale("en-US");
+
+    const engine = {
+      // Simulate a hung worker / slow engine: never resolves.
+      parseFormulaPartial: async () => new Promise(() => {}),
+    };
+
+    const parser = createLocaleAwarePartialFormulaParser({
+      getEngineClient: () => engine,
+      timeoutMs: 5,
+    });
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUM(A";
+    const expected = parsePartialFormulaFallback(input, input.length, fnRegistry);
+
+    vi.useFakeTimers();
+    try {
+      const pending = parser(input, input.length, fnRegistry);
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(pending).resolves.toEqual(expected);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
