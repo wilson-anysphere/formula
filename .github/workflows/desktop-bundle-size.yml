@@ -17,7 +17,6 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
-      - "rust-toolchain.toml"
       - ".github/workflows/desktop-bundle-size.yml"
       - ".github/workflows/release.yml"
   pull_request:
@@ -34,7 +33,6 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
-      - "rust-toolchain.toml"
       - ".github/workflows/desktop-bundle-size.yml"
       - ".github/workflows/release.yml"
 
@@ -128,7 +126,8 @@ jobs:
             patchelf \
             fakeroot \
             squashfs-tools \
-            rpm
+            rpm \
+            rpm2cpio
 
           # Some AppImage tooling requires FUSE2 at runtime. Ubuntu 24.04 renamed the
           # package to `libfuse2t64`; try both, but don't fail the build if neither exists.
