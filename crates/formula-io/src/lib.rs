@@ -2590,7 +2590,12 @@ fn decrypt_encrypted_ooxml_package(
                     path: path.to_path_buf(),
                 })?;
             let expected_hash: [u8; 20] = Sha1::digest(verifier).into();
-            if expected_hash.get(..hash_len) != Some(decrypted_hash) {
+            let expected_hash = expected_hash
+                .get(..hash_len)
+                .ok_or_else(|| Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })?;
+            if !crate::offcrypto::standard::ct_eq(expected_hash, decrypted_hash) {
                 return Err(Error::InvalidPassword {
                     path: path.to_path_buf(),
                 });

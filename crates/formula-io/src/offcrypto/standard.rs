@@ -496,7 +496,7 @@ fn digest_len(alg_id_hash: u32) -> Result<usize, OffcryptoError> {
 /// Compare two byte slices in constant time.
 ///
 /// Use this for password verifier digests to avoid timing side channels.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
