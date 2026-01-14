@@ -88,7 +88,7 @@ const TABLE_REL_TYPE: &str =
 const SHARED_STRINGS_CONTENT_TYPE: &str = "application/vnd.ms-excel.sharedStrings";
 const STYLES_CONTENT_TYPE: &str = "application/vnd.ms-excel.styles";
 
-fn max_xlsb_zip_part_bytes() -> u64 {
+pub(crate) fn max_xlsb_zip_part_bytes() -> u64 {
     std::env::var(ENV_MAX_XLSB_ZIP_PART_BYTES)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())

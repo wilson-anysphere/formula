@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use crate::parser::{biff12, CellValue, Error};
+use crate::opc::max_xlsb_zip_part_bytes;
 
 use super::{Biff12Writer, CellEdit};
 
@@ -32,6 +33,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
     output: W,
     edits: &[CellEdit],
 ) -> Result<bool, Error> {
+    let max_sheet_bytes = max_xlsb_zip_part_bytes();
+
     if edits.is_empty() {
         let mut writer = Biff12Writer::new(output);
         copy_remaining(&mut input, &mut writer)?;
@@ -141,10 +144,28 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     let payload = read_payload(&mut input, len)?;
                     prefix_bytes.extend_from_slice(&payload);
 
+                    let prefix_len = prefix_bytes.len() as u64;
+                    if prefix_len > max_sheet_bytes {
+                        return Err(Error::PartTooLarge {
+                            part: "worksheet stream".to_string(),
+                            size: prefix_len,
+                            max: max_sheet_bytes,
+                        });
+                    }
+                    let remaining_limit =
+                        max_sheet_bytes.saturating_sub(prefix_len).saturating_add(1);
                     let mut sheet_bin = prefix_bytes;
-                    input
+                    (&mut input)
+                        .take(remaining_limit)
                         .read_to_end(&mut sheet_bin)
                         .map_err(super::map_io_error)?;
+                    if sheet_bin.len() as u64 > max_sheet_bytes {
+                        return Err(Error::PartTooLarge {
+                            part: "worksheet stream".to_string(),
+                            size: sheet_bin.len() as u64,
+                            max: max_sheet_bytes,
+                        });
+                    }
                     let patched = super::patch_sheet_bin(&sheet_bin, edits)?;
 
                     let mut writer = Biff12Writer::new(output);
@@ -162,10 +183,27 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
         if !saw_dimension {
             // End-of-stream (or malformed worksheet) without any DIMENSION record.
+            let prefix_len = prefix_bytes.len() as u64;
+            if prefix_len > max_sheet_bytes {
+                return Err(Error::PartTooLarge {
+                    part: "worksheet stream".to_string(),
+                    size: prefix_len,
+                    max: max_sheet_bytes,
+                });
+            }
+            let remaining_limit = max_sheet_bytes.saturating_sub(prefix_len).saturating_add(1);
             let mut sheet_bin = prefix_bytes;
-            input
+            (&mut input)
+                .take(remaining_limit)
                 .read_to_end(&mut sheet_bin)
                 .map_err(super::map_io_error)?;
+            if sheet_bin.len() as u64 > max_sheet_bytes {
+                return Err(Error::PartTooLarge {
+                    part: "worksheet stream".to_string(),
+                    size: sheet_bin.len() as u64,
+                    max: max_sheet_bytes,
+                });
+            }
             let patched = super::patch_sheet_bin(&sheet_bin, edits)?;
 
             let mut writer = Biff12Writer::new(output);
