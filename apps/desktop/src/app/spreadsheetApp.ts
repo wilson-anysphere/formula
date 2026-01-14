@@ -8454,6 +8454,10 @@ export class SpreadsheetApp {
     const existing = this.splitViewSecondaryDrawingInteractionController;
     if (existing) return existing;
 
+    // Track the active interaction kind so the legacy `commitObjects` fallback can
+    // preserve semantics (e.g. rotate gestures must be able to clear transforms).
+    let interactionCommitKind: "move" | "resize" | "rotate" | null = null;
+
     const headerRows = 1;
     const headerCols = 1;
 
@@ -8523,9 +8527,32 @@ export class SpreadsheetApp {
           this.scheduleDrawingsChangedWindowEvent();
         },
         commitObjects: (next) => {
-          this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
+          // Fallback only: should not be used when `onInteractionCommit` succeeds.
+          //
+          // Important: do *not* write UI objects back via `setSheetDrawings(next)` because
+          // that rewrites any non-numeric raw drawing ids (imported XLSX drawings) into the
+          // UI-layer stable hash numeric ids. Instead, commit via the same per-object mapping
+          // logic used by `onInteractionCommit`.
+          const selectedId = this.selectedDrawingId;
+          if (selectedId == null) return;
+          const after = Array.isArray(next) ? next.find((obj) => obj.id === selectedId) : null;
+          if (!after) return;
+          const kind = interactionCommitKind ?? "move";
+          try {
+            this.commitDrawingInteraction({ kind, id: selectedId, before: after, after, objects: next });
+          } catch {
+            // Best-effort: never throw from persistence fallbacks.
+          }
         },
         beginBatch: ({ label }) => {
+          interactionCommitKind =
+            label === "Move Picture"
+              ? "move"
+              : label === "Resize Picture"
+                ? "resize"
+                : label === "Rotate Picture"
+                  ? "rotate"
+                  : null;
           const mapped =
             label === "Move Picture"
               ? "Move Drawing"
@@ -8536,8 +8563,14 @@ export class SpreadsheetApp {
                   : label;
           this.document.beginBatch({ label: mapped });
         },
-        endBatch: () => this.document.endBatch(),
-        cancelBatch: () => this.document.cancelBatch(),
+        endBatch: () => {
+          interactionCommitKind = null;
+          this.document.endBatch();
+        },
+        cancelBatch: () => {
+          interactionCommitKind = null;
+          this.document.cancelBatch();
+        },
         shouldHandlePointerDown: (e) => {
           // When the formula bar is in range-selection mode, drawing hits should not steal the
           // pointerdown; let normal grid range selection continue.
