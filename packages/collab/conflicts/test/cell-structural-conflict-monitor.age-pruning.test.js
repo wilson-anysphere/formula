@@ -59,6 +59,46 @@ test("CellStructuralConflictMonitor prunes old op records opportunistically on o
   doc.destroy();
 });
 
+test("CellStructuralConflictMonitor caps age-prune work per pass and schedules follow-up", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const ops = doc.getMap("cellStructuralOps");
+
+  const now = Date.now();
+  const total = 1200;
+  doc.transact(() => {
+    for (let i = 0; i < total; i += 1) {
+      const id = `op-${i}`;
+      ops.set(id, {
+        id,
+        kind: "edit",
+        userId: "someone",
+        createdAt: now - 60_000,
+        beforeState: [],
+        afterState: [],
+      });
+    }
+  });
+
+  assert.equal(ops.size, total);
+
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "local",
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  // Pruning is capped at 1000 deletions per pass.
+  assert.equal(ops.size, total - 1000);
+  // Follow-up prune should be scheduled to clear the remaining backlog.
+  assert.equal(monitor._agePruneTimer != null, true);
+
+  monitor.dispose();
+  doc.destroy();
+});
+
 test("CellStructuralConflictMonitor prunes old shared op records by age when enabled", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
