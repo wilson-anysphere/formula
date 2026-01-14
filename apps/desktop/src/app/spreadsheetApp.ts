@@ -1504,6 +1504,26 @@ export class SpreadsheetApp {
   private readonly selectionRendererOptionsScratch: { clipRect: { x: number; y: number; width: number; height: number } } = {
     clipRect: this.selectionClipRectScratch,
   };
+  // Legacy grid renderer scratch objects (allocated once to avoid per-frame churn while scrolling).
+  private readonly legacyGridRenderCellCoordScratch: CellCoord = { row: 0, col: 0 };
+  private readonly legacyGridRenderRichTextRectScratch = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly legacyGridRenderRichTextOptionsScratch = {
+    padding: 4,
+    align: "start" as const,
+    verticalAlign: "middle" as const,
+    fontFamily: "",
+    fontSizePx: 0,
+    color: "",
+  };
+  private readonly legacyGridRenderPlainRichTextScratch: {
+    text: string;
+    runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }>;
+  } = { text: "" };
+  private readonly legacyGridRenderUnderlineRunsScratch: Array<{ start: number; end: number; style: { underline: boolean } }> = [
+    { start: 0, end: 0, style: { underline: true } },
+  ];
+  private readonly legacyGridRenderCommentIndicatorBoundsScratch = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly legacyGridRenderCommentIndicatorStyleScratch = { color: "" };
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
@@ -15012,24 +15032,23 @@ export class SpreadsheetApp {
     });
 
     // Avoid allocating per-cell `{row,col}` objects in the legacy renderer.
-    const coordScratch = { row: 0, col: 0 };
-    const richTextRectScratch = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
-    const richTextOptionsScratch = {
-      padding: 4,
-      align: "start" as const,
-      verticalAlign: "middle" as const,
-      fontFamily: cellFontFamily,
-      fontSizePx,
-      color: defaultTextColor,
-    };
-    const plainRichTextScratch: {
-      text: string;
-      runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }>;
-    } = { text: "" };
-    const underlineRunScratch = { start: 0, end: 0, style: { underline: true } };
-    const underlineRunsScratch = [underlineRunScratch];
-    const commentIndicatorBoundsScratch = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
-    const commentIndicatorStyleScratch = { color: commentIndicatorColor };
+    const coordScratch = this.legacyGridRenderCellCoordScratch;
+    const richTextRectScratch = this.legacyGridRenderRichTextRectScratch;
+    richTextRectScratch.width = this.cellWidth;
+    richTextRectScratch.height = this.cellHeight;
+    const richTextOptionsScratch = this.legacyGridRenderRichTextOptionsScratch;
+    richTextOptionsScratch.fontFamily = cellFontFamily;
+    richTextOptionsScratch.fontSizePx = fontSizePx;
+    richTextOptionsScratch.color = defaultTextColor;
+
+    const plainRichTextScratch = this.legacyGridRenderPlainRichTextScratch;
+    const underlineRunsScratch = this.legacyGridRenderUnderlineRunsScratch;
+    const underlineRunScratch = underlineRunsScratch[0]!;
+    const commentIndicatorBoundsScratch = this.legacyGridRenderCommentIndicatorBoundsScratch;
+    commentIndicatorBoundsScratch.width = this.cellWidth;
+    commentIndicatorBoundsScratch.height = this.cellHeight;
+    const commentIndicatorStyleScratch = this.legacyGridRenderCommentIndicatorStyleScratch;
+    commentIndicatorStyleScratch.color = commentIndicatorColor;
 
     const renderCellRegion = (options: {
       clipX: number;
