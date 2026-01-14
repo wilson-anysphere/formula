@@ -1389,12 +1389,22 @@ describe("SpreadsheetApp chart selection + drag", () => {
       expect(app.getSelectedChartId()).toBe(result.chart_id);
 
       dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 301 });
+      // Canvas charts use DrawingInteractionController to provide live preview during a drag,
+      // but do not commit the new anchor into `ChartStore` until pointerup. The live state is
+      // exposed via SpreadsheetApp's in-flight override list.
+      expect((app as any).chartDrawingGestureActive).toBe(true);
+      const override = (app as any).canvasChartDrawingObjectsOverride;
+      expect(override?.sheetId).toBe(app.getCurrentSheetId());
+      const previewObj = override?.objects?.find?.((obj: any) => obj?.kind?.type === "chart" && obj?.kind?.chartId === result.chart_id);
+      expect(previewObj).toBeTruthy();
+      expect((previewObj!.anchor as any)?.from?.cell?.col).toBe((beforeAnchor as any).fromCol + 1);
       const moved = app.listCharts().find((c) => c.id === result.chart_id);
       expect(moved).toBeTruthy();
-      expect((moved!.anchor as any).fromCol).toBe((beforeAnchor as any).fromCol + 1);
+      expect(moved!.anchor).toEqual(beforeAnchor);
 
       // Press Escape during the drag: should cancel the gesture and keep the chart selected.
-      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect((app as any).chartDrawingGestureActive).toBe(false);
 
       const afterEscape = app.listCharts().find((c) => c.id === result.chart_id);
       expect(afterEscape).toBeTruthy();
