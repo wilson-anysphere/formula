@@ -3315,12 +3315,16 @@ export class FormulaBarView {
       };
 
       if (!ghost) {
-        for (let i = 0; i < highlightedSpans.length; i += 1) {
-          const span = highlightedSpans[i]!;
-          const kind = spansHaveKind
-            ? (span as unknown as { kind: string }).kind
-            : (span as unknown as { type: string }).type;
-          highlightParts[i] = renderSpan(span, span.text, kind);
+        if (spansHaveKind) {
+          for (let i = 0; i < highlightedSpans.length; i += 1) {
+            const span = highlightedSpans[i] as unknown as { kind: string; text: string; start: number; end: number; className?: string };
+            highlightParts[i] = renderSpan(span, span.text, span.kind);
+          }
+        } else {
+          for (let i = 0; i < highlightedSpans.length; i += 1) {
+            const span = highlightedSpans[i] as unknown as { type: string; text: string; start: number; end: number; className?: string };
+            highlightParts[i] = renderSpan(span, span.text, span.type);
+          }
         }
       } else {
         let outIdx = 0;
@@ -3331,40 +3335,74 @@ export class FormulaBarView {
         const previewContent = previewText && ESCAPE_HTML_TEST_RE.test(previewText) ? escapeHtml(previewText) : previewText;
         const previewHtml = previewText ? `<span class="formula-bar-preview">${previewContent}</span>` : "";
 
-        for (let i = 0; i < highlightedSpans.length; i += 1) {
-          const span = highlightedSpans[i]!;
-          const kind = spansHaveKind
-            ? (span as unknown as { kind: string }).kind
-            : (span as unknown as { type: string }).type;
-          if (!ghostInserted && cursor <= span.start) {
-            highlightParts[outIdx++] = ghostHtml;
-            if (previewHtml && !previewInserted) {
-              highlightParts[outIdx++] = previewHtml;
-              previewInserted = true;
+        if (spansHaveKind) {
+          for (let i = 0; i < highlightedSpans.length; i += 1) {
+            const span = highlightedSpans[i] as unknown as { kind: string; text: string; start: number; end: number; className?: string };
+            const kind = span.kind;
+            if (!ghostInserted && cursor <= span.start) {
+              highlightParts[outIdx++] = ghostHtml;
+              if (previewHtml && !previewInserted) {
+                highlightParts[outIdx++] = previewHtml;
+                previewInserted = true;
+              }
+              ghostInserted = true;
             }
-            ghostInserted = true;
-          }
 
-          if (!ghostInserted && cursor > span.start && cursor < span.end) {
-            const split = cursor - span.start;
-            const before = span.text.slice(0, split);
-            const after = span.text.slice(split);
-            if (before) {
-              highlightParts[outIdx++] = renderSpan(span, before, kind);
+            if (!ghostInserted && cursor > span.start && cursor < span.end) {
+              const split = cursor - span.start;
+              const before = span.text.slice(0, split);
+              const after = span.text.slice(split);
+              if (before) {
+                highlightParts[outIdx++] = renderSpan(span, before, kind);
+              }
+              highlightParts[outIdx++] = ghostHtml;
+              if (previewHtml && !previewInserted) {
+                highlightParts[outIdx++] = previewHtml;
+                previewInserted = true;
+              }
+              ghostInserted = true;
+              if (after) {
+                highlightParts[outIdx++] = renderSpan(span, after, kind);
+              }
+              continue;
             }
-            highlightParts[outIdx++] = ghostHtml;
-            if (previewHtml && !previewInserted) {
-              highlightParts[outIdx++] = previewHtml;
-              previewInserted = true;
-            }
-            ghostInserted = true;
-            if (after) {
-              highlightParts[outIdx++] = renderSpan(span, after, kind);
-            }
-            continue;
-          }
 
-          highlightParts[outIdx++] = renderSpan(span, span.text, kind);
+            highlightParts[outIdx++] = renderSpan(span, span.text, kind);
+          }
+        } else {
+          for (let i = 0; i < highlightedSpans.length; i += 1) {
+            const span = highlightedSpans[i] as unknown as { type: string; text: string; start: number; end: number; className?: string };
+            const kind = span.type;
+            if (!ghostInserted && cursor <= span.start) {
+              highlightParts[outIdx++] = ghostHtml;
+              if (previewHtml && !previewInserted) {
+                highlightParts[outIdx++] = previewHtml;
+                previewInserted = true;
+              }
+              ghostInserted = true;
+            }
+
+            if (!ghostInserted && cursor > span.start && cursor < span.end) {
+              const split = cursor - span.start;
+              const before = span.text.slice(0, split);
+              const after = span.text.slice(split);
+              if (before) {
+                highlightParts[outIdx++] = renderSpan(span, before, kind);
+              }
+              highlightParts[outIdx++] = ghostHtml;
+              if (previewHtml && !previewInserted) {
+                highlightParts[outIdx++] = previewHtml;
+                previewInserted = true;
+              }
+              ghostInserted = true;
+              if (after) {
+                highlightParts[outIdx++] = renderSpan(span, after, kind);
+              }
+              continue;
+            }
+
+            highlightParts[outIdx++] = renderSpan(span, span.text, kind);
+          }
         }
 
         if (!ghostInserted) {
