@@ -1175,3 +1175,61 @@ fn cell_format_classifies_locale_variant_datetime_formats() {
         other => panic!("expected text for CELL(\"format\"), got {other:?}"),
     }
 }
+
+#[test]
+fn cell_format_uses_row_and_column_styles_when_cell_style_is_default() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    // Row 1 default: short date (D4).
+    let date_style = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    engine.set_row_style_id("Sheet1", 0, Some(date_style));
+
+    // Column A default: time (D9).
+    let time_style = engine.intern_style(Style {
+        number_format: Some("h:mm".to_string()),
+        ..Style::default()
+    });
+    engine.set_col_style_id("Sheet1", 0, Some(time_style));
+
+    // A1 should inherit from the row style (row wins over column).
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"format\",A1)")
+        .unwrap();
+    // B1 should inherit from the row style.
+    engine
+        .set_cell_formula("Sheet1", "C2", "=CELL(\"format\",B1)")
+        .unwrap();
+    // A2 should inherit from the column style.
+    engine
+        .set_cell_formula("Sheet1", "C3", "=CELL(\"format\",A2)")
+        .unwrap();
+    // B2 has no style metadata and should default to General.
+    engine
+        .set_cell_formula("Sheet1", "C4", "=CELL(\"format\",B2)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("D4".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Text("D4".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C3"),
+        Value::Text("D9".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C4"),
+        Value::Text("G".to_string())
+    );
+}
