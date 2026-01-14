@@ -1236,6 +1236,41 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn merge_chart_models_preserves_and_concatenates_model_diagnostics() {
+        let mut chart_space = minimal_model(None, None);
+        let mut chart_ex = minimal_model(None, None);
+
+        chart_ex.chart_kind = ChartKind::Unknown {
+            name: "ChartEx:histogram".to_string(),
+        };
+        chart_ex.diagnostics.push(ChartDiagnostic {
+            level: ChartDiagnosticLevel::Warning,
+            message: "chartEx diagnostic".to_string(),
+            part: None,
+            xpath: None,
+        });
+        chart_space.diagnostics.push(ChartDiagnostic {
+            level: ChartDiagnosticLevel::Warning,
+            message: "chartSpace diagnostic".to_string(),
+            part: None,
+            xpath: None,
+        });
+
+        let mut diagnostics = Vec::new();
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        assert_eq!(merged.diagnostics.len(), 2);
+        assert_eq!(merged.diagnostics[0].message, "chartEx diagnostic");
+        assert_eq!(merged.diagnostics[1].message, "chartSpace diagnostic");
+    }
 }
 
 fn normalize_relationship_target(target: &str) -> String {
