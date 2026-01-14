@@ -640,6 +640,71 @@ describe("SpreadsheetApp chart selection + drag", () => {
     }
   });
 
+  it("canvas charts mode: Escape cancels an in-progress chart drag without clearing selection", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Chart Escape Drag",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      const beforeAnchor = { ...(before!.anchor as any) };
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + 100; // move by one column
+      const endY = startY;
+
+      // Start a drag gesture (do not pointerup yet).
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 301 });
+      expect(app.getSelectedChartId()).toBe(result.chart_id);
+
+      dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 301 });
+      const moved = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(moved).toBeTruthy();
+      expect((moved!.anchor as any).fromCol).toBe((beforeAnchor as any).fromCol + 1);
+
+      // Press Escape during the drag: should cancel the gesture and keep the chart selected.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      const afterEscape = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(afterEscape).toBeTruthy();
+      expect(afterEscape!.anchor).toEqual(beforeAnchor);
+      expect(app.getSelectedChartId()).toBe(result.chart_id);
+
+      // Clean up any pending pointer state.
+      dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 301 });
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
   it("canvas charts mode: resizing a chart updates its twoCell anchor", () => {
     const prior = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "1";

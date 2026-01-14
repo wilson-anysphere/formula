@@ -363,7 +363,8 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
-        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
+        const canRotate = selectedObject.kind.type !== "chart";
+        if (canRotate && hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
           if (
             this.callbacks.onPointerDownHit &&
             this.callbacks.onPointerDownHit(e, { object: selectedObject, bounds: selectedBounds }) === false
@@ -777,7 +778,7 @@ export class DrawingInteractionController {
           selectedInFrozenRows === pointInFrozenRows
         ) {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
-          if (hitTestRotationHandle(bounds, x, y, selected.transform)) {
+          if (selected.kind.type !== "chart" && hitTestRotationHandle(bounds, x, y, selected.transform)) {
             this.element.style.cursor = cursorForRotationHandle(false);
             return;
           }

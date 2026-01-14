@@ -1402,6 +1402,7 @@ export class SpreadsheetApp {
   private chartSelectionViewportMemo: { width: number; height: number; dpr: number } | null = null;
   private chartSelectionCanvas: HTMLCanvasElement | null = null;
   private chartDrawingInteraction: DrawingInteractionController | null = null;
+  private chartDrawingGestureActive = false;
   private chartDragState:
     | {
         pointerId: number;
@@ -2678,6 +2679,9 @@ export class SpreadsheetApp {
             getViewport: () => this.getDrawingInteractionViewport(),
             getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0),
             shouldHandlePointerDown: (e) => {
+              // When the formula bar is in range-selection mode, chart hits should not steal the
+              // pointerdown; let normal grid range selection continue.
+              if (this.formulaBar?.isFormulaEditing()) return false;
               const target = e.target as HTMLElement | null;
               // Only treat pointerdown events originating from the grid surface (canvases/root) as
               // chart selection/drags. This avoids interfering with interactive DOM overlays
@@ -2705,6 +2709,20 @@ export class SpreadsheetApp {
                 this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
               }
             },
+            beginBatch: () => {
+              this.chartDrawingGestureActive = true;
+            },
+            endBatch: () => {
+              this.chartDrawingGestureActive = false;
+            },
+            cancelBatch: () => {
+              this.chartDrawingGestureActive = false;
+            },
+            onPointerDownHit: () => {
+              if (this.editor.isOpen()) {
+                this.editor.commit("command");
+              }
+            },
             onSelectionChange: (selectedId) => {
               const selected =
                 selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0).find((o) => o.id === selectedId) : null;
@@ -2722,6 +2740,7 @@ export class SpreadsheetApp {
               this.selectedChartId = nextChartId;
               this.renderDrawings();
             },
+            requestFocus: () => this.focus(),
           },
           { capture: true },
         );
@@ -15660,6 +15679,12 @@ export class SpreadsheetApp {
           this.chartDragAbort = null;
           // Revert the anchor to the initial pointerdown snapshot.
           this.chartStore.updateChartAnchor(state.chartId, state.startAnchor as any);
+          return;
+        }
+        // Canvas charts use a DrawingInteractionController (window-level Escape handler) to cancel
+        // move/resize gestures. Avoid clearing chart selection while such a gesture is active so
+        // Escape behaves like Excel (first Escape cancels the drag, second Escape deselects).
+        if (this.useCanvasCharts && this.chartDrawingGestureActive) {
           return;
         }
         if (this.selectedChartId != null) {

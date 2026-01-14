@@ -623,6 +623,7 @@ export class DrawingOverlay {
     let selectedTransform: DrawingTransform | undefined = undefined;
     const screenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
     const aabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    let selectedDrawRotationHandle = true;
 
     if (drawObjects) {
       // First pass: kick off image decodes for all visible images without awaiting so
@@ -726,6 +727,8 @@ export class DrawingOverlay {
             selectedAabb.height = aabb.height;
           }
           selectedTransform = obj.transform;
+          // Charts behave like Excel chart objects: movable/resizable but not rotatable.
+          selectedDrawRotationHandle = obj.kind.type !== "chart";
         }
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
@@ -978,7 +981,7 @@ export class DrawingOverlay {
           ctx.beginPath();
           ctx.rect(selectedClipRect.x, selectedClipRect.y, selectedClipRect.width, selectedClipRect.height);
           ctx.clip();
-          drawSelection(ctx, selectedScreenRect, colors, selectedTransform);
+          drawSelection(ctx, selectedScreenRect, colors, selectedTransform, { drawRotationHandle: selectedDrawRotationHandle });
           ctx.restore();
         }
       } else {
@@ -1014,7 +1017,7 @@ export class DrawingOverlay {
             ctx.beginPath();
             ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
             ctx.clip();
-            drawSelection(ctx, screen, colors, selected.transform);
+            drawSelection(ctx, screen, colors, selected.transform, { drawRotationHandle: selected.kind.type !== "chart" });
             ctx.restore();
           }
         }
@@ -1327,6 +1330,7 @@ function drawSelection(
   rect: Rect,
   colors: OverlayColorTokens,
   transform?: DrawingTransform,
+  opts?: { drawRotationHandle?: boolean },
 ): void {
   ctx.save();
   ctx.strokeStyle = colors.selectionStroke;
@@ -1353,13 +1357,15 @@ function drawSelection(
   }
 
   // Optional Excel-style rotation handle.
-  const rotHandle = ROTATION_HANDLE_SIZE_PX;
-  const rotHalf = rotHandle / 2;
-  const rot = getRotationHandleCenter(rect, transform);
-  ctx.beginPath();
-  ctx.rect(rot.x - rotHalf, rot.y - rotHalf, rotHandle, rotHandle);
-  ctx.fill();
-  ctx.stroke();
+  if (opts?.drawRotationHandle !== false) {
+    const rotHandle = ROTATION_HANDLE_SIZE_PX;
+    const rotHalf = rotHandle / 2;
+    const rot = getRotationHandleCenter(rect, transform);
+    ctx.beginPath();
+    ctx.rect(rot.x - rotHalf, rot.y - rotHalf, rotHandle, rotHandle);
+    ctx.fill();
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
