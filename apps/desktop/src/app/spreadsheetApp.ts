@@ -12395,6 +12395,11 @@ export class SpreadsheetApp {
     const isContextClick = isMouse && (button === 2 || isMacContextClick);
     const isPrimaryClick = !isMouse || button === 0;
     if (!(isPrimaryClick || isContextClick)) return;
+    // When a context-click already hit a drawing (handled by DrawingInteractionController), the event is
+    // tagged so downstream listeners (e.g. shared-grid selection) can ignore it. In that case, do not
+    // compete by selecting/deselecting charts underneath the drawing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (isContextClick && (e as any).__formulaDrawingContextClick) return;
 
     const target = e.target as HTMLElement | null;
     // Only treat pointerdown events originating from the grid surface (canvases/root) as

@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { pxToEmu } from "../../drawings/overlay";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -362,6 +363,66 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
     expect(app.getSelectedChartId()).toBe(chart!.id);
     expect(status.activeCell.textContent).toBe("C3");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("context-click on a drawing does not select a chart underneath when drawing interactions are enabled", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Chart Under Drawing",
+      position: "A1:H10",
+    });
+    const chart = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(chart).toBeTruthy();
+
+    // Inject a simple drawing that overlaps the chart area (absolute coords are relative to A1, under headers).
+    const doc = (app as any).document as any;
+    doc.getSheetDrawings = () => [
+      {
+        id: 1,
+        kind: { type: "shape", label: "Overlay" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(40), yEmu: pxToEmu(40) },
+          size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+        },
+        zOrder: 0,
+      },
+    ];
+    (app as any).drawingObjectsCache = null;
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    const clickX = originX + 60;
+    const clickY = originY + 60;
+
+    // Sanity: the chart hit test sees the chart at this point.
+    const hit = (app as any).hitTestChartAtClientPoint(clickX, clickY);
+    expect(hit?.chart?.id).toBe(chart!.id);
+
+    const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).not.toBeNull();
+    selectionCanvas!.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    dispatchPointerEvent(selectionCanvas!, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 91, button: 2 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 91, button: 2 });
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect(app.getSelectedChartId()).toBe(null);
 
     app.destroy();
     root.remove();
