@@ -738,8 +738,8 @@ impl fmt::Display for Value {
                 // `Display` intentionally uses Excel-like "General" formatting (en-US fallback)
                 // so any accidental `.to_string()` or `format!("{value}")` behaves like Excel.
                 let options = FormatOptions::default();
-                let formatted =
-                    formula_format::format_value(FmtValue::Number(*n), None, &options).text;
+                let fmt_value = FmtValue::Number(*n);
+                let formatted = formula_format::format_value(fmt_value, None, &options).text;
                 f.write_str(&formatted)
             }
             Value::Text(s) => f.write_str(s),

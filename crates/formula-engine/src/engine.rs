@@ -2801,8 +2801,8 @@ impl Engine {
         // If the formatted string cannot be parsed back into a number (e.g. date/time formats or
         // patterns with non-numeric literal text), we fall back to storing the full-precision value.
         let options = self.fmt_options();
-        let formatted =
-            formula_format::format_value(FmtValue::Number(number), format_pattern, &options);
+        let fmt_value = FmtValue::Number(number);
+        let formatted = formula_format::format_value(fmt_value, format_pattern, &options);
         match crate::coercion::number::parse_number_strict(
             &formatted.text,
             options.locale.decimal_sep,
