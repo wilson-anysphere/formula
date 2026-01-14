@@ -157,9 +157,19 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
+  const domStyleBracketColor = new RegExp(
+    // DOM style assignments via bracket notation (e.g. `el.style["color"] = "red"`)
+    String.raw`\.style\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    "gi",
+  );
   const canvasStyleColor = new RegExp(
     // CanvasRenderingContext2D assignments (e.g. `ctx.fillStyle = "red"`)
     String.raw`\b(?:fillStyle|strokeStyle)\b\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    "gi",
+  );
+  const canvasStyleBracketColor = new RegExp(
+    // CanvasRenderingContext2D assignments via bracket notation (e.g. `ctx["fillStyle"] = "red"`)
+    String.raw`\[\s*(?:["'\`])(?<prop>fillStyle|strokeStyle)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const styleCssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
@@ -274,7 +284,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         for (const { re, kind } of [
           { re: jsStyleColor, kind: "style object" },
           { re: domStyleColor, kind: "style assignment" },
+          { re: domStyleBracketColor, kind: "style assignment" },
           { re: canvasStyleColor, kind: "canvas style" },
+          { re: canvasStyleBracketColor, kind: "canvas style" },
           { re: setPropertyStyleColor, kind: "style.setProperty" },
           { re: setAttributeColor, kind: "setAttribute" },
           { re: jsxAttributeColor, kind: "jsx attribute" },
