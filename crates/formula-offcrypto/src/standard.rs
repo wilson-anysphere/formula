@@ -35,19 +35,21 @@ mod tests {
 
     #[test]
     fn standard_verify_verifier_mismatch_returns_invalid_password_and_uses_ct_eq() {
-        reset_ct_eq_calls();
-
         let verifier = b"standard-verifier";
-        let mut expected = HashAlgorithm::Sha1.digest(verifier);
-        expected[0] ^= 0x80;
+        for alg in [HashAlgorithm::Sha1, HashAlgorithm::Md5] {
+            reset_ct_eq_calls();
 
-        let err = verify_verifier(verifier, &expected, HashAlgorithm::Sha1)
-            .expect_err("expected verifier mismatch to return an error");
-        assert!(matches!(err, OffcryptoError::InvalidPassword));
+            let mut expected = alg.digest(verifier);
+            expected[0] ^= 0x80;
 
-        assert!(
-            ct_eq_call_count() >= 1,
-            "expected constant-time compare helper to be invoked"
-        );
+            let err = verify_verifier(verifier, &expected, alg)
+                .expect_err("expected verifier mismatch to return an error");
+            assert!(matches!(err, OffcryptoError::InvalidPassword));
+
+            assert!(
+                ct_eq_call_count() >= 1,
+                "expected constant-time compare helper to be invoked (alg={alg})"
+            );
+        }
     }
 }
