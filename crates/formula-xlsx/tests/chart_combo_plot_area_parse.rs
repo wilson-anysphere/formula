@@ -92,7 +92,7 @@ fn combo_plot_area_warns_only_for_unknown_chart_types() {
             <c:plotArea>
               <c:madeUpChart>
                 <c:ser>
-                  <c:tx><c:v>Area Series</c:v></c:tx>
+                  <c:tx><c:v>Funnel Series</c:v></c:tx>
                   <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef></c:cat>
                   <c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f></c:numRef></c:val>
                 </c:ser>

@@ -1,5 +1,6 @@
 use std::io::{Cursor, Read, Write};
 
+use formula_model::{Cell, CellRef, CellValue, Style};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use zip::write::FileOptions;
@@ -241,7 +242,25 @@ fn writer_inserts_missing_styles_relationship_using_existing_prefix(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_prefixed_workbook_rels_xlsx_missing_styles_relationship();
 
-    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+    let mut doc = formula_xlsx::load_from_bytes(&bytes)?;
+    // Ensure we actually need a styles.xml part: emitting a non-default style should
+    // force the writer to synthesize styles.xml and its workbook relationship.
+    let style_id = doc.workbook.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Default::default()
+    });
+    let sheet_id = doc.workbook.sheets[0].id;
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_cell(
+            CellRef::new(0, 0),
+            Cell {
+                value: CellValue::Number(1.0),
+                style_id,
+                ..Default::default()
+            },
+        );
     let saved = doc.save_to_vec()?;
 
     let rels_xml = String::from_utf8(zip_part(&saved, "xl/_rels/workbook.xml.rels"))?;

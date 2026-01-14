@@ -6,6 +6,8 @@ use zip::write::FileOptions;
 use zip::ZipArchive;
 use zip::{CompressionMethod, ZipWriter};
 
+const PHONETIC_TEXT: &str = "PHONETIC";
+
 fn build_inline_string_phonetic_fixture_xlsx() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -41,7 +43,8 @@ fn build_inline_string_phonetic_fixture_xlsx() -> Vec<u8> {
         <is>
           <t>Base</t>
           <phoneticPr fontId="0" type="noConversion"/>
-          <rPh sb="0" eb="4"><t>PHO</t></rPh>
+          <rPh sb="0" eb="2"><t>PHO</t></rPh>
+          <rPh sb="2" eb="4"><t>NETIC</t></rPh>
         </is>
       </c>
     </row>
@@ -72,16 +75,19 @@ fn build_inline_string_phonetic_fixture_xlsx() -> Vec<u8> {
 }
 
 #[test]
-fn load_inline_string_ignores_phonetic_text() -> Result<(), Box<dyn std::error::Error>> {
+fn load_inline_string_imports_phonetic_text() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_inline_string_phonetic_fixture_xlsx();
     let doc = load_from_bytes(&bytes)?;
 
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet(sheet_id).expect("sheet exists");
+    let cell_ref = CellRef::from_a1("A1")?;
     assert_eq!(
-        sheet.value(CellRef::from_a1("A1")?),
+        sheet.value(cell_ref),
         CellValue::String("Base".to_string())
     );
+    let cell = sheet.cell(cell_ref).expect("cell exists");
+    assert_eq!(cell.phonetic.as_deref(), Some(PHONETIC_TEXT));
 
     Ok(())
 }

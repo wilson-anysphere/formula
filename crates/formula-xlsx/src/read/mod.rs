@@ -2390,6 +2390,7 @@ fn parse_worksheet_into_model(
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
+    let mut current_inline_phonetic: Option<String> = None;
     let mut in_v = false;
     let mut in_f = false;
     let mut pending_vm_cells: Vec<(CellRef, u32)> = Vec::new();
@@ -2619,6 +2620,7 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
+                current_inline_phonetic = None;
                 in_v = false;
                 in_f = false;
 
@@ -2761,6 +2763,10 @@ fn parse_worksheet_into_model(
                         let mut cell = Cell::default();
                         cell.value = value;
                         cell.formula = formula_in_model;
+                        cell.phonetic = match current_t.as_deref() {
+                            Some("inlineStr") => current_inline_phonetic.take(),
+                            _ => None,
+                        };
                         cell.style_id = current_style;
 
                         if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) = (
@@ -2806,6 +2812,7 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
+                current_inline_phonetic = None;
                 in_v = false;
                 in_f = false;
             }
@@ -2878,7 +2885,9 @@ fn parse_worksheet_into_model(
                     && current_t.as_deref() == Some("inlineStr")
                     && e.local_name().as_ref() == b"is" =>
             {
-                current_inline_text = Some(parse_inline_is_text(&mut reader)?);
+                let (visible, phonetic) = parse_inline_is_text(&mut reader)?;
+                current_inline_text = Some(visible);
+                current_inline_phonetic = phonetic;
             }
             Event::Empty(e)
                 if in_sheet_data
@@ -2887,6 +2896,7 @@ fn parse_worksheet_into_model(
                     && e.local_name().as_ref() == b"is" =>
             {
                 current_inline_text = Some(String::new());
+                current_inline_phonetic = None;
             }
 
             Event::Eof => break,
@@ -3124,16 +3134,27 @@ fn parse_sheet_drawing_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
     Ok(out)
 }
 
-fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
+fn parse_inline_is_text<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+) -> Result<(String, Option<String>), ReadError> {
     let mut buf = Vec::new();
-    let mut out = String::new();
+    let mut visible = String::new();
+    let mut phonetic: Option<String> = None;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"t" => {
-                out.push_str(&read_text(reader, b"t")?);
+                visible.push_str(&read_text(reader, b"t")?);
             }
             Event::Start(e) if e.local_name().as_ref() == b"r" => {
-                out.push_str(&parse_inline_r_text(reader)?);
+                visible.push_str(&parse_inline_r_text(reader)?);
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"rPh" => {
+                let run = parse_inline_rph_text(reader)?;
+                phonetic.get_or_insert_with(String::new).push_str(&run);
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"rPh" => {
+                // Presence of `<rPh/>` implies phonetic metadata even if it contains no text.
+                phonetic.get_or_insert_with(String::new);
             }
             Event::Start(e) => {
                 reader.read_to_end_into(e.name(), &mut Vec::new())?;
@@ -3148,7 +3169,7 @@ fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<S
         }
         buf.clear();
     }
-    Ok(out)
+    Ok((visible, phonetic))
 }
 
 fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
@@ -3166,6 +3187,30 @@ fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<St
             Event::Eof => {
                 return Err(ReadError::Xlsx(XlsxError::Invalid(
                     "unexpected EOF while parsing inline string <r>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn parse_inline_rph_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
+    let mut buf = Vec::new();
+    let mut out = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"t" => {
+                out.push_str(&read_text(reader, b"t")?);
+            }
+            Event::Start(e) => {
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"rPh" => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <rPh>".to_string(),
                 )))
             }
             _ => {}
