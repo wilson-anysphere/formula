@@ -6,6 +6,11 @@
 */
 
 .dialog {
+  border: 1px solid var(--dialog-border);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  background: var(--dialog-bg);
+  color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
 }
 
