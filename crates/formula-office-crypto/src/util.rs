@@ -2,10 +2,14 @@ use crate::error::OfficeCryptoError;
 use subtle::{Choice, ConstantTimeEq};
 
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
+// Unit tests run in parallel by default. Use a thread-local counter so tests that reset/inspect
+// the counter don't race each other.
 #[cfg(test)]
-static CT_EQ_CALLS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
 
 /// Compare two byte slices in (mostly) constant time.
 ///
@@ -14,7 +18,7 @@ static CT_EQ_CALLS: AtomicUsize = AtomicUsize::new(0);
 /// mismatched byte.
 pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     #[cfg(test)]
-    CT_EQ_CALLS.fetch_add(1, Ordering::Relaxed);
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
 
     // We treat lengths as non-secret metadata, but still avoid early returns so callers don't
     // accidentally reintroduce short-circuit timing differences.
@@ -32,12 +36,12 @@ pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 pub(crate) fn reset_ct_eq_calls() {
-    CT_EQ_CALLS.store(0, Ordering::Relaxed);
+    CT_EQ_CALLS.with(|calls| calls.set(0));
 }
 
 #[cfg(test)]
 pub(crate) fn ct_eq_call_count() -> usize {
-    CT_EQ_CALLS.load(Ordering::Relaxed)
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
