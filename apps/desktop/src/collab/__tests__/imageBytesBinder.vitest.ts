@@ -268,4 +268,47 @@ describe("imageBytesBinder", () => {
 
     binder.destroy();
   });
+
+  it("ignores invalid base64 payloads without throwing", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    // Invalid base64: length % 4 === 1 is never valid.
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: "a",
+      },
+    });
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    expect(store.get("img-1")).toBeUndefined();
+
+    binder.destroy();
+  });
+
+  it("enforces maxImageBytes when hydrating remote base64 payloads", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: Buffer.from([1, 2, 3]).toString("base64"), // 3 bytes
+      },
+    });
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store, maxImageBytes: 2 });
+
+    expect(store.get("img-1")).toBeUndefined();
+
+    binder.destroy();
+  });
 });  
