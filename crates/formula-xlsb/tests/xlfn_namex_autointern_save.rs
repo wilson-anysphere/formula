@@ -530,3 +530,175 @@ fn save_with_cell_formula_text_edits_auto_interns_xlfn_xludf_namespaced_function
         "expected ExternName for _xlfn._xludf.SOME_FUTURE_UDF in workbook.bin"
     );
 }
+
+#[test]
+fn save_with_cell_formula_text_edits_reuses_existing_addin_supbook() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/udf.xlsb");
+
+    let tmpdir = tempdir().expect("tempdir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::copy(&fixture_path, &input_path).expect("copy fixture");
+
+    // Count how many AddIn SupBooks the fixture already has so we can ensure the patcher inserts
+    // into an existing one rather than synthesizing a new entry.
+    let file = std::fs::File::open(&input_path).expect("open input");
+    let mut zip = zip::ZipArchive::new(file).expect("open zip");
+    let mut wb_entry = zip.by_name("xl/workbook.bin").expect("workbook.bin");
+    let mut workbook_bin = Vec::new();
+    wb_entry
+        .read_to_end(&mut workbook_bin)
+        .expect("read workbook.bin");
+
+    let mut cursor = Cursor::new(workbook_bin.as_slice());
+    let mut addin_supbook_count_before = 0usize;
+    loop {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)
+            .expect("read record id")
+        else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)
+            .expect("read record len")
+        else {
+            break;
+        };
+        let mut payload = vec![0u8; len as usize];
+        cursor.read_exact(&mut payload).expect("read payload");
+
+        if id == 0x00AE {
+            if payload.len() < 2 {
+                continue;
+            }
+            let mut off = 2usize;
+            if let Some(raw_name) = read_xl_wide_string(&payload, &mut off) {
+                if raw_name == "\u{0001}" {
+                    addin_supbook_count_before += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        addin_supbook_count_before >= 1,
+        "expected udf.xlsb fixture to include an AddIn SupBook"
+    );
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+
+    // Insert a new `_xlfn.*` future function; udf.xlsb already has an AddIn SupBook + NameX table,
+    // so the patcher should *reuse* it.
+    let row = 10;
+    let col = 10;
+    let formula_text = "=_xlfn.FUTURE_FUNC_IN_EXISTING_SUPBOOK(1)";
+
+    wb.save_with_cell_formula_text_edits(
+        &output_path,
+        0,
+        &[FormulaTextCellEdit {
+            row,
+            col,
+            new_value: CellValue::Number(0.0),
+            formula: formula_text.to_string(),
+        }],
+    )
+    .expect("save_with_cell_formula_text_edits");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open saved workbook");
+
+    // Existing NameX functions should still encode using the same token sequence (stable indices).
+    let encoded = formula_xlsb::rgce::encode_rgce_with_context_ast(
+        "=MyAddinFunc(1,2)",
+        wb2.workbook_context(),
+        CellCoord::new(0, 0),
+    )
+    .expect("encode MyAddinFunc after patch");
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x1E, 0x01, 0x00, // 1
+            0x1E, 0x02, 0x00, // 2
+            0x39, 0x00, 0x00, 0x01, 0x00, // PtgNameX(ixti=0, nameIndex=1)
+            0x22, 0x03, 0xFF, 0x00, // PtgFuncVar(argc=3, iftab=0x00FF)
+        ]
+    );
+
+    // New future function should be encodable using the updated workbook context.
+    formula_xlsb::rgce::encode_rgce_with_context_ast(
+        formula_text,
+        wb2.workbook_context(),
+        CellCoord::new(row, col),
+    )
+    .expect("encode future function using updated workbook context");
+
+    // Verify workbook.bin still has the same number of AddIn SupBooks, and includes the new
+    // ExternName entry.
+    let file = std::fs::File::open(&output_path).expect("open output");
+    let mut zip = zip::ZipArchive::new(file).expect("open zip");
+    let mut wb_entry = zip.by_name("xl/workbook.bin").expect("workbook.bin");
+    let mut workbook_bin = Vec::new();
+    wb_entry
+        .read_to_end(&mut workbook_bin)
+        .expect("read workbook.bin");
+
+    let mut cursor = Cursor::new(workbook_bin.as_slice());
+    let mut addin_supbook_count_after = 0usize;
+    let mut saw_my_addin_func = false;
+    let mut saw_new_future_func = false;
+
+    loop {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)
+            .expect("read record id")
+        else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)
+            .expect("read record len")
+        else {
+            break;
+        };
+        let mut payload = vec![0u8; len as usize];
+        cursor.read_exact(&mut payload).expect("read payload");
+
+        match id {
+            0x00AE => {
+                if payload.len() < 2 {
+                    continue;
+                }
+                let mut off = 2usize;
+                if let Some(raw_name) = read_xl_wide_string(&payload, &mut off) {
+                    if raw_name == "\u{0001}" {
+                        addin_supbook_count_after += 1;
+                    }
+                }
+            }
+            0x0023 | 0x0168 => {
+                if payload.len() < 4 {
+                    continue;
+                }
+                let mut off = 4usize;
+                if let Some(name) = read_xl_wide_string(&payload, &mut off) {
+                    if name.eq_ignore_ascii_case("MyAddinFunc") {
+                        saw_my_addin_func = true;
+                    }
+                    if name.eq_ignore_ascii_case("_xlfn.FUTURE_FUNC_IN_EXISTING_SUPBOOK") {
+                        saw_new_future_func = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        addin_supbook_count_after, addin_supbook_count_before,
+        "expected save_with_cell_formula_text_edits to reuse existing AddIn SupBook"
+    );
+    assert!(
+        saw_my_addin_func,
+        "expected workbook.bin to retain existing MyAddinFunc extern name"
+    );
+    assert!(
+        saw_new_future_func,
+        "expected workbook.bin to include ExternName for _xlfn.FUTURE_FUNC_IN_EXISTING_SUPBOOK"
+    );
+}
