@@ -23437,30 +23437,36 @@ export class SpreadsheetApp {
         await new Promise<void>((resolve, reject) => {
           const timeoutMs = 5_000;
           let timeoutId: ReturnType<typeof setTimeout> | null = null;
+          let settled = false;
 
-          const clear = () => {
-            if (timeoutId === null) return;
-            try {
-              clearTimeout(timeoutId);
-            } catch {
-              // Ignore clear failures (best-effort).
+          const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            if (timeoutId !== null) {
+              try {
+                clearTimeout(timeoutId);
+              } catch {
+                // Ignore clear failures (best-effort).
+              }
+              timeoutId = null;
             }
-            timeoutId = null;
+            // Drop references to callbacks to allow GC even if the image object remains alive.
+            img.onload = null;
+            img.onerror = null;
+            fn();
           };
 
           img.onload = () => {
-            clear();
-            resolve();
+            finish(resolve);
           };
           img.onerror = () => {
-            clear();
-            reject(new Error("image decode failed"));
+            finish(() => reject(new Error("image decode failed")));
           };
 
           if (typeof setTimeout === "function") {
             timeoutId = setTimeout(() => {
               timeoutId = null;
-              reject(new Error("image decode timed out"));
+              finish(() => reject(new Error("image decode timed out")));
             }, timeoutMs);
           }
 
