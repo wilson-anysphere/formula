@@ -55,6 +55,40 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     }
   });
 
+  it("uses the provided getLocaleId() for signature previews (even if document.lang differs)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "en-US";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} }, { getLocaleId: () => "de-DE" });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=ZÄH";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      const item = host.querySelector<HTMLButtonElement>(
+        '[data-testid="formula-function-autocomplete-item"][data-name="ZÄHLENWENN"]',
+      );
+      expect(item).not.toBeNull();
+
+      const signatureText =
+        item?.querySelector<HTMLElement>(".formula-bar-function-autocomplete-signature")?.textContent ?? "";
+      // COUNTIF signature mapped for the de-DE localized alias:
+      // `(range; criteria) — ...`
+      expect(signatureText).toContain("range");
+      expect(signatureText).toContain("criteria");
+      expect(signatureText).toContain(";");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("does not suppress 2-letter localized function names inside arguments in es-ES (=SUM(SI → includes SI)", () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "es-ES";

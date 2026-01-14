@@ -313,7 +313,7 @@ function renderFunctionPickerList(opts: {
 }
 
 function functionPickerItemFromName(name: string): FunctionPickerItem {
-  const sig = getFunctionSignature(name);
+  const sig = getFunctionSignature(name, { localeId });
   const signature = sig ? formatSignature(sig) : undefined;
   const summary = sig?.summary?.trim?.() ? sig.summary.trim() : undefined;
   return { name, signature, summary };
