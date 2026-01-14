@@ -10,6 +10,7 @@
 mod agile;
 mod crypto;
 mod error;
+mod ole;
 mod standard;
 mod util;
 
@@ -17,6 +18,7 @@ use std::io::{Cursor, Read};
 
 pub use crate::crypto::HashAlgorithm;
 pub use crate::error::OfficeCryptoError;
+pub use crate::ole::{extract_ole_entries, OleEntries, OleEntry, OleStream};
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
@@ -168,6 +170,21 @@ pub fn encrypt_package_to_ole(
     password: &str,
     opts: EncryptOptions,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
+    encrypt_package_to_ole_with_entries(zip_bytes, password, opts, None)
+}
+
+/// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper, optionally
+/// preserving extra OLE streams/storages from a source container.
+///
+/// `preserve` should typically contain the non-encryption streams/storages extracted from the
+/// original encrypted file (e.g. `\u{0005}SummaryInformation`). The `EncryptionInfo` and
+/// `EncryptedPackage` streams are **always** replaced with freshly generated values.
+pub fn encrypt_package_to_ole_with_entries(
+    zip_bytes: &[u8],
+    password: &str,
+    opts: EncryptOptions,
+    preserve: Option<&OleEntries>,
+) -> Result<Vec<u8>, OfficeCryptoError> {
     use std::io::Write as _;
 
     let (encryption_info, encrypted_package) = match opts.scheme {
@@ -181,6 +198,10 @@ pub fn encrypt_package_to_ole(
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor)?;
+
+    if let Some(entries) = preserve {
+        ole::copy_entries_into_ole(&mut ole, entries)?;
+    }
 
     ole.create_stream("EncryptionInfo")?
         .write_all(&encryption_info)?;
@@ -277,6 +298,7 @@ mod tests {
     use super::*;
     use crate::crypto::{HashAlgorithm, StandardKeyDerivation, StandardKeyDeriver};
     use crate::test_alloc::MAX_ALLOC;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -590,6 +612,25 @@ mod tests {
             max_alloc < 16 * 1024 * 1024,
             "expected no large allocation attempts, observed max allocation request: {max_alloc} bytes"
         );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn decrypts_repo_standard_basic_xlsm_fixture() {
+        fn fixture_path(rel: &str) -> PathBuf {
+            Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/"))
+                .join(rel)
+        }
+
+        let encrypted =
+            std::fs::read(fixture_path("standard-basic.xlsm")).expect("read standard-basic.xlsm");
+        let expected = std::fs::read(fixture_path("plaintext-basic.xlsm"))
+            .expect("read plaintext-basic.xlsm");
+
+        let decrypted =
+            decrypt_encrypted_package_ole(&encrypted, "password").expect("decrypt standard-basic");
+        assert!(decrypted.starts_with(b"PK"));
+        assert_eq!(decrypted, expected);
     }
 }
 

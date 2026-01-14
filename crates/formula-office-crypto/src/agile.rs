@@ -465,7 +465,6 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let key_bytes = opts.key_bits / 8;
     let block_size = 16usize;
     let hash_alg = opts.hash_algorithm;
-    let hash_size = hash_alg.digest_len();
 
     let pw_utf16 = password_to_utf16le(password);
 
@@ -569,26 +568,29 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let enc_hmac_key_b64 = b64.encode(encrypted_hmac_key);
     let enc_hmac_value_b64 = b64.encode(encrypted_hmac_value);
 
+    let hash_size = hash_alg.digest_len();
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
-  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashAlgorithm="{hash_alg_name}" hashSize="{hash_size}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashSize="{hash_size}" hashAlgorithm="{hash_alg_name}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
   <dataIntegrity encryptedHmacKey="{enc_hmac_key_b64}" encryptedHmacValue="{enc_hmac_value_b64}"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
-        saltSize="16" blockSize="16" keyBits="{key_bits}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" hashSize="{hash_size}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
-        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
-        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
-        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
-      </p:encryptedKey>
+      <p:encryptedKey saltSize="16" blockSize="16" keyBits="{key_bits}" hashSize="{hash_size}" spinCount="{spin_count}"
+                      hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                      saltValue="{salt_key_encryptor_b64}"
+                      encryptedVerifierHashInput="{enc_vhi_b64}"
+                      encryptedVerifierHashValue="{enc_vhv_b64}"
+                      encryptedKeyValue="{enc_kv_b64}"/>
     </keyEncryptor>
   </keyEncryptors>
 </encryption>"#,
         key_bits = opts.key_bits,
+        hash_size = hash_size,
         spin_count = opts.spin_count,
         hash_alg_name = hash_alg.as_ooxml_name(),
-        hash_size = hash_size,
         salt_key_data_b64 = salt_key_data_b64,
         salt_key_encryptor_b64 = salt_key_encryptor_b64,
         enc_vhi_b64 = enc_vhi_b64,
@@ -598,14 +600,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
         enc_hmac_value_b64 = enc_hmac_value_b64,
     );
 
-    // Build EncryptionInfo stream: version header + xml length + xml bytes.
+    // Build EncryptionInfo stream: version header + xml bytes.
     let flags: u32 = 0x0000_0040;
-    let xml_len = xml.as_bytes().len() as u32;
     let mut encryption_info = Vec::new();
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&flags.to_le_bytes());
-    encryption_info.extend_from_slice(&xml_len.to_le_bytes());
     encryption_info.extend_from_slice(xml.as_bytes());
 
     Ok((encryption_info, encrypted_package))

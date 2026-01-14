@@ -152,6 +152,13 @@ pub enum Error {
         #[source]
         source: xlsb::Error,
     },
+    #[cfg(feature = "encrypted-workbooks")]
+    #[error("failed to encrypt workbook `{path}`: {source}")]
+    SaveOoxmlEncryption {
+        path: PathBuf,
+        #[source]
+        source: formula_office_crypto::OfficeCryptoError,
+    },
 }
 
 /// A workbook opened from disk.
@@ -1324,7 +1331,69 @@ pub fn open_workbook_with_password(
         },
     )
 }
+/// A workbook opened from disk with optional preserved OLE metadata streams.
+///
+/// When an Office-encrypted OOXML workbook (OLE/CFB wrapper with `EncryptionInfo` +
+/// `EncryptedPackage`) is opened with password support enabled (`formula-io/encrypted-workbooks`),
+/// Formula decrypts the underlying ZIP package into memory and additionally captures any other OLE
+/// streams/storages (e.g. `\u{0005}SummaryInformation`) so they can be re-emitted when saving back
+/// as an encrypted workbook.
+#[cfg(feature = "encrypted-workbooks")]
+#[derive(Debug)]
+pub struct OpenedWorkbookWithPreservedOle {
+    pub workbook: Workbook,
+    pub preserved_ole: Option<formula_office_crypto::OleEntries>,
+}
 
+#[cfg(feature = "encrypted-workbooks")]
+impl OpenedWorkbookWithPreservedOle {
+    /// Save the workbook, preserving Office encryption when the input was an encrypted OOXML OLE
+    /// wrapper.
+    ///
+    /// - For non-encrypted inputs, this falls back to [`save_workbook`].
+    /// - For encrypted OOXML inputs, this writes an OLE/CFB `EncryptionInfo` + `EncryptedPackage`
+    ///   wrapper and copies preserved non-encryption OLE streams byte-for-byte.
+    ///
+    /// Note: the password is required at save time because this type does not store it.
+    pub fn save_preserving_encryption(
+        &self,
+        path: impl AsRef<Path>,
+        password: &str,
+    ) -> Result<(), Error> {
+        let path = path.as_ref();
+        if let Some(preserved) = &self.preserved_ole {
+            save_workbook_encrypted_ooxml(&self.workbook, path, password, preserved)
+        } else {
+            save_workbook(&self.workbook, path)
+        }
+    }
+}
+
+/// Open a workbook and, when it is an Office-encrypted OOXML OLE container, also preserve any
+/// additional non-encryption OLE streams/storages for round-trip.
+#[cfg(feature = "encrypted-workbooks")]
+pub fn open_workbook_with_password_and_preserved_ole(
+    path: impl AsRef<Path>,
+    password: Option<&str>,
+) -> Result<OpenedWorkbookWithPreservedOle, Error> {
+    let path = path.as_ref();
+
+    if let Some((bytes, preserved)) =
+        try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(path, password)?
+    {
+        let workbook = open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes)?;
+        return Ok(OpenedWorkbookWithPreservedOle {
+            workbook,
+            preserved_ole: Some(preserved),
+        });
+    }
+
+    let workbook = open_workbook_with_password(path, password)?;
+    Ok(OpenedWorkbookWithPreservedOle {
+        workbook,
+        preserved_ole: None,
+    })
+}
 fn encrypted_ooxml_error_from_path(path: &Path, password: Option<&str>) -> Option<Error> {
     use std::io::{Read as _, Seek as _, SeekFrom};
 
@@ -1904,6 +1973,233 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
     None
 }
 
+#[cfg(feature = "encrypted-workbooks")]
+fn zip_contains_workbook_bin(package_bytes: &[u8]) -> bool {
+    matches!(
+        sniff_ooxml_zip_workbook_kind(package_bytes),
+        Some(WorkbookFormat::Xlsb)
+    )
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
+    path: &Path,
+    password: Option<&str>,
+) -> Result<Option<(Vec<u8>, formula_office_crypto::OleEntries)>, Error> {
+    use std::io::{Read as _, Seek as _};
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.rewind().map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; fall back to non-encrypted open paths.
+        return Ok(None);
+    };
+
+    // Read the required encryption streams first so we can fail fast on non-encrypted inputs and
+    // wrong-password errors before doing any preservation work.
+    let encryption_info = match read_stream_bytes_case_insensitive(&mut ole, "EncryptionInfo") {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })
+        }
+    };
+    let encrypted_package = match read_stream_bytes_case_insensitive(&mut ole, "EncryptedPackage") {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })
+        }
+    };
+
+    let decrypted = if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+        if password.is_none() {
+            return Err(Error::PasswordRequired {
+                path: path.to_path_buf(),
+            });
+        }
+        package_bytes.to_vec()
+    } else {
+        if encryption_info.len() < 4 {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            });
+        }
+        let version_major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
+        let version_minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
+
+        let is_agile = version_major == 4 && version_minor == 4;
+        let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
+        if !is_agile && !is_standard {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major,
+                version_minor,
+            });
+        }
+
+        let Some(password) = password else {
+            return Err(Error::PasswordRequired {
+                path: path.to_path_buf(),
+            });
+        };
+
+        if is_standard {
+            match formula_office_crypto::decrypt_standard_encrypted_package(
+                &encryption_info,
+                &encrypted_package,
+                password,
+            ) {
+                Ok(bytes) => bytes,
+                Err(err) => match err {
+                    formula_office_crypto::OfficeCryptoError::InvalidPassword
+                    | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
+                        return Err(Error::InvalidPassword {
+                            path: path.to_path_buf(),
+                        })
+                    }
+                    formula_office_crypto::OfficeCryptoError::Io(source) => {
+                        return Err(Error::OpenIo {
+                            path: path.to_path_buf(),
+                            source,
+                        })
+                    }
+                    _ => {
+                        return Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major,
+                            version_minor,
+                        })
+                    }
+                },
+            }
+        } else {
+            match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                &encryption_info,
+                &encrypted_package,
+                password,
+            ) {
+                Ok(bytes) => bytes,
+                Err(err) => match err {
+                    xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
+                        return Err(Error::InvalidPassword {
+                            path: path.to_path_buf(),
+                        })
+                    }
+                    xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                        return Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major: major,
+                            version_minor: minor,
+                        })
+                    }
+                    xlsx::OffCryptoError::MissingRequiredElement { ref element }
+                        if element.eq_ignore_ascii_case("dataIntegrity") =>
+                    {
+                        // The `EncryptedPackage` stream starts with an 8-byte plaintext length prefix.
+                        if encrypted_package.len() < 8 {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            });
+                        }
+                        let mut len_bytes = [0u8; 8];
+                        len_bytes.copy_from_slice(&encrypted_package[..8]);
+                        let plaintext_len = u64::from_le_bytes(len_bytes);
+                        let ciphertext = &encrypted_package[8..];
+
+                        let reader = encrypted_ooxml::decrypted_package_reader(
+                            std::io::Cursor::new(ciphertext),
+                            plaintext_len,
+                            &encryption_info,
+                            password,
+                        )
+                        .map_err(|err| match err {
+                            encrypted_ooxml::DecryptError::InvalidPassword => Error::InvalidPassword {
+                                path: path.to_path_buf(),
+                            },
+                            encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
+                                Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major: major,
+                                    version_minor: minor,
+                                }
+                            }
+                            encrypted_ooxml::DecryptError::InvalidInfo(_)
+                            | encrypted_ooxml::DecryptError::Io(_) => Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            },
+                        })?;
+
+                        let mut buf = Vec::new();
+                        let mut reader = reader;
+                        reader
+                            .read_to_end(&mut buf)
+                            .map_err(|_source| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        buf
+                    }
+                    _ => {
+                        return Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major,
+                            version_minor,
+                        })
+                    }
+                },
+            }
+        }
+    };
+
+    // Best-effort: preserve all other OLE streams/storages so they can be re-emitted on save.
+    let preserved = match formula_office_crypto::extract_ole_entries(&mut ole) {
+        Ok(entries) => entries,
+        Err(err) => {
+            let source = match err {
+                formula_office_crypto::OfficeCryptoError::Io(e) => e,
+                other => std::io::Error::new(std::io::ErrorKind::Other, other),
+            };
+            return Err(Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    Ok(Some((decrypted, preserved)))
+}
 fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> {
     // Most XLSX/ZIP containers start with `PK`.
     if encrypted_package.starts_with(b"PK") {
@@ -2237,13 +2533,6 @@ fn open_encrypted_ooxml_model_workbook(
     };
 
     match format {
-        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
-            let cursor = std::io::Cursor::new(decrypted);
-            xlsx::read_workbook_from_reader(cursor).map(Some).map_err(|source| Error::OpenXlsx {
-                path: path.to_path_buf(),
-                source,
-            })
-        }
         WorkbookFormat::Xlsb => {
             let wb = xlsb::XlsbWorkbook::open_from_vec_with_options(
                 decrypted,
@@ -2260,6 +2549,13 @@ fn open_encrypted_ooxml_model_workbook(
                 source,
             })?;
             xlsb_to_model_workbook(&wb).map(Some).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm | WorkbookFormat::Unknown => {
+            let cursor = std::io::Cursor::new(decrypted);
+            xlsx::read_workbook_from_reader(cursor).map(Some).map_err(|source| Error::OpenXlsx {
                 path: path.to_path_buf(),
                 source,
             })
@@ -3210,6 +3506,153 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                 extension: other.to_string(),
             }),
         },
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn save_workbook_encrypted_ooxml(
+    workbook: &Workbook,
+    path: &Path,
+    password: &str,
+    preserved_ole: &formula_office_crypto::OleEntries,
+) -> Result<(), Error> {
+    use std::io::{Cursor, Write as _};
+
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    // Serialize the workbook to an OOXML ZIP package in memory (avoid writing plaintext to disk).
+    let zip_bytes: Vec<u8> = match workbook {
+        Workbook::Xlsx(package) => match ext.as_str() {
+            "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+
+                let mut out = package.clone();
+                if kind.is_macro_free() && out.macro_presence().any() {
+                    out.remove_vba_project()
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                }
+                out.enforce_workbook_kind(kind)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+
+                out.write_to_bytes().map_err(|source| Error::SaveXlsxPackage {
+                    path: path.to_path_buf(),
+                    source,
+                })?
+            }
+            other => {
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: other.to_string(),
+                })
+            }
+        },
+        Workbook::Xls(result) => match ext.as_str() {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(&result.workbook, &mut cursor, kind)
+                    .map_err(|source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                cursor.into_inner()
+            }
+            other => {
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: other.to_string(),
+                })
+            }
+        },
+        Workbook::Xlsb(wb) => match ext.as_str() {
+            "xlsb" => {
+                let mut cursor = Cursor::new(Vec::new());
+                wb.save_as_to_writer(&mut cursor)
+                    .map_err(|source| Error::SaveXlsbPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                cursor.into_inner()
+            }
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
+                let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(&model, &mut cursor, kind).map_err(
+                    |source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                )?;
+                cursor.into_inner()
+            }
+            other => {
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: other.to_string(),
+                })
+            }
+        },
+        Workbook::Model(model) => match ext.as_str() {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(model, &mut cursor, kind).map_err(
+                    |source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                )?;
+                cursor.into_inner()
+            }
+            other => {
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: other.to_string(),
+                })
+            }
+        },
+    };
+
+    let ole_bytes = formula_office_crypto::encrypt_package_to_ole_with_entries(
+        &zip_bytes,
+        password,
+        formula_office_crypto::EncryptOptions::default(),
+        Some(preserved_ole),
+    )
+    .map_err(|source| Error::SaveOoxmlEncryption {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let res = atomic_write(path, |file| file.write_all(&ole_bytes));
+    match res {
+        Ok(()) => Ok(()),
+        Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
+            path: path.to_path_buf(),
+            source,
+        }),
+        Err(AtomicWriteError::Writer(source)) => Err(Error::SaveIo {
+            path: path.to_path_buf(),
+            source,
+        }),
     }
 }
 
