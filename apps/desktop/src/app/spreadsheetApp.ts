@@ -1174,6 +1174,9 @@ export class SpreadsheetApp {
   private readonly drawingChartRenderer: ChartRendererAdapter;
   private readonly drawingsDemoEnabled: boolean = resolveDrawingsDemoEnabledFromUrl();
   private drawingInteractionController: DrawingInteractionController | null = null;
+  // Backwards-compatibility alias for `drawingInteractionController`.
+  // Some tests and legacy call sites still reference `drawingsInteraction`.
+  private drawingsInteraction: DrawingInteractionController | null = null;
   private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
   private readonly drawingImages: ImageStore;
   private drawingObjectsCache: { sheetId: string; objects: DrawingObject[]; source: unknown } | null = null;
@@ -2600,9 +2603,11 @@ export class SpreadsheetApp {
       };
       this.drawingInteractionCallbacks = callbacks;
       const interactionElement = this.gridMode === "shared" ? this.selectionCanvas : this.root;
-      this.drawingInteractionController = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
+      const controller = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
         capture: this.gridMode === "shared",
       });
+      this.drawingInteractionController = controller;
+      this.drawingsInteraction = controller;
     }
 
     if (this.sharedGrid) {
@@ -3768,6 +3773,7 @@ export class SpreadsheetApp {
     // Ensure any drawing interaction controller listeners are released promptly.
     this.drawingInteractionController?.dispose();
     this.drawingInteractionController = null;
+    this.drawingsInteraction = null;
     this.drawingInteractionCallbacks = null;
 
     // Clear any cached image bytes kept in the drawing ImageStore.
@@ -6956,6 +6962,7 @@ export class SpreadsheetApp {
     }
 
     // Keep any active interaction controller in sync without implicitly enabling interactions.
+    this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
 
     const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
@@ -7683,6 +7690,7 @@ export class SpreadsheetApp {
     // Keep all drawing interaction controllers in sync so keyboard-driven selection changes
     // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
     // selected (which could enable invisible resize/rotate handles).
+    this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
     const drawSelectionInOverlay = this.gridMode === "shared" || this.drawingInteractionController != null;
     this.drawingOverlay.setSelectedId(drawSelectionInOverlay ? id : null);
@@ -8769,6 +8777,7 @@ export class SpreadsheetApp {
       capture: this.gridMode === "shared",
     });
     this.drawingInteractionController = controller;
+    this.drawingsInteraction = controller;
     return controller;
   }
 
