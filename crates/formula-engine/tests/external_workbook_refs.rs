@@ -538,6 +538,25 @@ fn degenerate_external_3d_sheet_range_ref_matches_endpoints_nfkc_case_insensitiv
 }
 
 #[test]
+fn sheet_function_matches_external_sheet_order_nfkc_case_insensitively() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec!["Kelvin".to_string(), "Sheet2".to_string()],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Kelvin!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    // "Kelvin" is sheet 1 in the external workbook sheet order.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+}
+
+#[test]
 fn external_3d_sheet_span_with_quoted_sheet_names_expands_via_provider_sheet_order() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(

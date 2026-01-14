@@ -95,7 +95,6 @@ fn pivot_key_part_to_pivot_value(part: &PivotKeyPart) -> PivotValue {
         PivotKeyPart::Bool(b) => PivotValue::Bool(*b),
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PivotKey(pub Vec<PivotKeyPart>);
 
