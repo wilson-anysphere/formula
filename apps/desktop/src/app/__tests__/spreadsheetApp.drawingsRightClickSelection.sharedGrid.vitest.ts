@@ -406,4 +406,45 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not treat the rotation handle area as a context-click hit for chart drawings", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    const chartDrawing: DrawingObject = {
+      id: 1,
+      kind: { type: "chart", chartId: "chart_1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([chartDrawing]);
+    app.selectDrawingById(1);
+
+    const viewport = app.getDrawingInteractionViewport();
+    const bounds = drawingObjectToViewportRect(chartDrawing, viewport, (app as any).drawingGeom);
+    const handleCenter = getRotationHandleCenter(bounds, chartDrawing.transform);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX: handleCenter.x, clientY: handleCenter.y, button: 2 });
+    selectionCanvas.dispatchEvent(down);
+
+    // No visible rotation handle for charts, so this should behave like a miss (selection clears, no tag).
+    expect(app.getSelectedDrawingId()).toBeNull();
+    expect((down as any).__formulaDrawingContextClick).toBeUndefined();
+    expect(down.defaultPrevented).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
 });

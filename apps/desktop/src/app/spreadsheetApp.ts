@@ -12812,7 +12812,9 @@ export class SpreadsheetApp {
         bounds.width = sheetRect.width;
         bounds.height = sheetRect.height;
 
-        if (hitTestRotationHandle(bounds, x, y, selected.transform) || hitTestResizeHandle(bounds, x, y, selected.transform)) {
+        const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
+        const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+        if ((canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) || hitTestResizeHandle(bounds, x, y, selected.transform)) {
           if (editorWasOpen) {
             this.editor.commit("command");
           }
