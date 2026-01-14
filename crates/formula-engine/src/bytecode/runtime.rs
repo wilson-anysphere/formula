@@ -5253,6 +5253,9 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Some(SheetId::Local(grid.resolve_sheet_name(name)?))
             }
             crate::eval::SheetReference::SheetRange(start, end) => {
+                if start.starts_with('[') || end.starts_with('[') {
+                    return None;
+                }
                 let start_id = grid.resolve_sheet_name(start)?;
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(SheetId::Local(start_id))
