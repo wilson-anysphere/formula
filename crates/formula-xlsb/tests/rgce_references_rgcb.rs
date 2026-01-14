@@ -1,7 +1,9 @@
 use std::io;
 use std::io::{Cursor, Read};
 
-use formula_xlsb::{patch_sheet_bin, rgce_references_rgcb, CellEdit, CellValue, Error};
+use formula_xlsb::{
+    patch_sheet_bin, patch_sheet_bin_streaming, rgce_references_rgcb, CellEdit, CellValue, Error,
+};
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
@@ -155,6 +157,44 @@ fn assert_patch_does_not_require_rgcb(new_rgce: Vec<u8>) {
     .expect("expected patch to succeed without rgcb bytes");
 }
 
+fn assert_streaming_patch_requires_rgcb(new_rgce: Vec<u8>) {
+    // Create a minimal worksheet with a single numeric formula that has no trailing `rgcb` bytes.
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_num(0, 0, 1.0, vec![0x1E, 0x01, 0x00], vec![]);
+
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet1_bin_from_fixture(&xlsb_bytes);
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(
+        Cursor::new(&sheet_bin),
+        &mut out,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(1.0),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(new_rgce),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected streaming patch to reject missing rgcb bytes for PtgArray");
+
+    let Error::Io(io_err) = err else {
+        panic!("expected Error::Io, got {err:?}");
+    };
+    assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+    assert!(
+        io_err
+            .to_string()
+            .contains("requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb"),
+        "unexpected error message: {io_err}"
+    );
+}
+
 #[test]
 fn rgce_references_rgcb_detects_ptgarray_inside_memfunc() {
     let rgce = rgce_memfunc_with_array();
@@ -184,6 +224,13 @@ fn patch_sheet_bin_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
     assert_patch_requires_rgcb(rgce_memfunc_with_array());
     assert_patch_requires_rgcb(rgce_extend_list_then_array());
     assert_patch_requires_rgcb(rgce_referr_then_array());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
+    assert_streaming_patch_requires_rgcb(rgce_memfunc_with_array());
+    assert_streaming_patch_requires_rgcb(rgce_extend_list_then_array());
+    assert_streaming_patch_requires_rgcb(rgce_referr_then_array());
 }
 
 #[test]
