@@ -376,12 +376,15 @@ fn detect_standard_scheme(
     // Enforce basic framing invariants up front.
     let ciphertext_total = reader.remaining();
     let ciphertext_total_len = ciphertext_total.len() as u64;
-    let total_size =
-        if len_hi != 0 && total_size_u64 > ciphertext_total_len && len_lo <= ciphertext_total_len {
-            len_lo
-        } else {
-            total_size_u64
-        };
+    let total_size = if len_hi != 0
+        && total_size_u64 > ciphertext_total_len
+        && len_lo != 0
+        && len_lo <= ciphertext_total_len
+    {
+        len_lo
+    } else {
+        total_size_u64
+    };
     let plaintext_len = std::cmp::min(total_size, ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
     let ciphertext_len = padded_aes_len(plaintext_len);
     if ciphertext_total.len() % AES_BLOCK_LEN != 0 {
