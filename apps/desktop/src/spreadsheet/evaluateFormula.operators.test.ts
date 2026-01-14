@@ -66,6 +66,10 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula('=WENNFEHLER(#ÜBERLAUF!; "fallback")', () => null, { localeId: "de-DE" })).toBe("fallback");
     // es-ES #¡VALOR! -> #VALUE!
     expect(evaluateFormula('=SI.ERROR(#¡VALOR!; "fallback")', () => null, { localeId: "es-ES" })).toBe("fallback");
+    // es-ES #¿NOMBRE? -> #NAME?
+    expect(evaluateFormula('=SI.ERROR(#¿NOMBRE?; "fallback")', () => null, { localeId: "es-ES" })).toBe("fallback");
+    // fr-FR #NOM? -> #NAME?
+    expect(evaluateFormula('=SIERREUR(#NOM?; "fallback")', () => null, { localeId: "fr-FR" })).toBe("fallback");
   });
 
   it("parses decimal commas and thousands separators when a comma-decimal localeId is provided", () => {

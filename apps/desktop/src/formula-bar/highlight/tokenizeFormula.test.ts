@@ -97,6 +97,26 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("tokenizes localized error literals with inverted question marks (es-ES #¿NOMBRE?)", () => {
+    const tokens = tokenizeFormula("=#¿NOMBRE? + 1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["error", "#¿NOMBRE?"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
+  it("tokenizes localized error literals with short localized names (fr-FR #NOM?)", () => {
+    const tokens = tokenizeFormula("=#NOM? + 1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["error", "#NOM?"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
   it("tokenizes localized error literals with non-ASCII letters (de-DE #ÜBERLAUF!)", () => {
     const tokens = tokenizeFormula("=#ÜBERLAUF! + 1").filter((t) => t.type !== "whitespace");
     expect(tokens.map((t) => [t.type, t.text])).toEqual([
