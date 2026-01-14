@@ -1091,19 +1091,31 @@ export function registerBuiltinCommands(params: {
       // Defense-in-depth: even if some UI surface executes this command while the current
       // role cannot comment (viewer), surface a message and avoid focusing the disabled
       // composer.
-      try {
-        const session = app.getCollabSession?.() ?? null;
-        if (session && typeof (session as any).canComment === "function" && !(session as any).canComment()) {
-          try {
-            showToast(t("comments.readOnlyHint"), "warning");
-          } catch {
-            // Best-effort: do not crash if the toast root is missing (tests/minimal harnesses).
-          }
-          app.openCommentsPanel();
-          return;
+      const canComment = (() => {
+        // Fail closed for collab sessions: if permissions are unset/unknown or the
+        // capability check throws, treat the user as unable to comment so we don't
+        // surface comment write actions pre-permissions.
+        let session: any = null;
+        try {
+          session = app.getCollabSession?.() ?? null;
+        } catch {
+          session = null;
         }
-      } catch {
-        // ignore
+        if (!session) return true;
+        try {
+          return typeof session.canComment === "function" ? Boolean(session.canComment()) : false;
+        } catch {
+          return false;
+        }
+      })();
+      if (!canComment) {
+        try {
+          showToast(t("comments.readOnlyHint"), "warning");
+        } catch {
+          // Best-effort: do not crash if the toast root is missing (tests/minimal harnesses).
+        }
+        app.openCommentsPanel();
+        return;
       }
       app.openCommentsPanel();
       app.focusNewCommentInput();

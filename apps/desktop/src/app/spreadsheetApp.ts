@@ -1909,7 +1909,7 @@ export class SpreadsheetApp {
         // Gate comment writes on the current CollabSession permissions. We pass a
         // callback (rather than a snapshot boolean) so role updates (if any) are
         // reflected in subsequent comment mutations.
-        canComment: () => this.collabSession?.canComment() ?? true,
+        canComment: () => this.canUserComment(),
         // Ensure comment edits are tracked by the binder-origin collaborative UndoManager
         // (so Cmd/Ctrl+Z reverts comment add/edit/reply/resolve just like cell edits).
         transact: (fn) => {
@@ -12133,7 +12133,22 @@ export class SpreadsheetApp {
   }
 
   private canUserComment(): boolean {
-    return this.collabMode ? (this.collabSession?.canComment() ?? true) : true;
+    if (!this.collabMode) return true;
+
+    // When there is no collab session, default to permissive behavior so local/
+    // non-collab and test harnesses (which may set `collabMode` for sheet-qualified
+    // comment refs) can still create comments.
+    const session = this.collabSession as any;
+    if (!session) return true;
+
+    // Defensive: some lightweight test stubs may not implement `canComment`, and
+    // permission helpers should never crash UI surfaces like the comments panel.
+    try {
+      return typeof session.canComment === "function" ? Boolean(session.canComment()) : false;
+    } catch {
+      // Fail closed for permission-gated comment actions.
+      return false;
+    }
   }
 
   private syncCommentsPanelPermissions(): void {

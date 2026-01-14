@@ -147,6 +147,91 @@ describe("SpreadsheetApp comment permissions", () => {
     }
   });
 
+  it("fails closed (and does not crash) when the collab session is missing canComment()", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      // Simulate an incomplete collab session stub (missing `canComment`).
+      (app as any).collabSession = {};
+
+      expect(() => app.toggleCommentsPanel()).not.toThrow();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+
+      const submit = panel.querySelector('[data-testid="submit-comment"]') as HTMLButtonElement | null;
+      if (!submit) throw new Error("Missing submit button");
+
+      const hint = panel.querySelector('[data-testid="comments-readonly-hint"]') as HTMLDivElement | null;
+      if (!hint) throw new Error("Missing read-only hint");
+
+      expect(input.disabled).toBe(true);
+      expect(submit.disabled).toBe(true);
+      expect(hint.hidden).toBe(false);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+
+  it("fails closed (and does not crash) when canComment() throws", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      (app as any).collabSession = {
+        canComment: () => {
+          throw new Error("boom");
+        },
+      };
+
+      expect(() => app.toggleCommentsPanel()).not.toThrow();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+
+      const submit = panel.querySelector('[data-testid="submit-comment"]') as HTMLButtonElement | null;
+      if (!submit) throw new Error("Missing submit button");
+
+      const hint = panel.querySelector('[data-testid="comments-readonly-hint"]') as HTMLDivElement | null;
+      if (!hint) throw new Error("Missing read-only hint");
+
+      expect(input.disabled).toBe(true);
+      expect(submit.disabled).toBe(true);
+      expect(hint.hidden).toBe(false);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+
   it("keeps the comments panel composer enabled for commenters even when the session is read-only", () => {
     const priorGridMode = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
