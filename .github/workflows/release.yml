@@ -1139,6 +1139,10 @@ jobs:
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
 
+      - name: Validate macOS bundle (DMG + codesign/notarization)
+        if: runner.os == 'macOS'
+        run: bash scripts/validate-macos-bundle.sh
+
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
         if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != ''
