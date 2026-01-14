@@ -17,6 +17,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
+use formula_model::StyleTable;
+
+#[cfg(not(target_arch = "wasm32"))]
 use crate::WorkbookCellPatches;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,6 +27,15 @@ use crate::streaming::strip_vba_project_streaming_with_kind;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::streaming::patch_xlsx_streaming_workbook_cell_patches_with_part_overrides;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::streaming::{
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy,
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::RecalcPolicy;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tempfile::tempfile;
@@ -448,6 +460,134 @@ impl XlsxLazyPackage {
         Err(XlsxError::Invalid(
             "XlsxLazyPackage::write_to is not supported on wasm32".to_string(),
         ))
+    }
+
+    /// Stream a patched workbook package to `output`, rewriting only affected worksheet XML parts
+    /// (plus any required workbook plumbing like shared strings or styles).
+    ///
+    /// This composes cell patches with any existing [`PartOverride`] entries stored on the lazy
+    /// package.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn patch_cells_to_writer<W: Write + Seek>(
+        &self,
+        output: W,
+        patches: &WorkbookCellPatches,
+        recalc_policy: RecalcPolicy,
+        style_table: Option<&StyleTable>,
+    ) -> Result<(), XlsxError> {
+        let needs_style_table = patches.sheets().any(|(_sheet, sheet_patches)| {
+            sheet_patches.iter().any(|(_cell, patch)| {
+                patch
+                    .style_id()
+                    .is_some_and(|style_id| style_id != 0)
+            })
+        });
+
+        fn apply_streaming_patch<R: Read + Seek, W: Write + Seek>(
+            input: R,
+            output: W,
+            patches: &WorkbookCellPatches,
+            overrides: &HashMap<String, PartOverride>,
+            recalc_policy: RecalcPolicy,
+            needs_style_table: bool,
+            style_table: Option<&StyleTable>,
+        ) -> Result<(), XlsxError> {
+            if needs_style_table {
+                let style_table = style_table.ok_or_else(|| {
+                    XlsxError::Invalid(
+                        "style_table is required when WorkbookCellPatches contains non-zero style_id edits"
+                            .to_string(),
+                    )
+                })?;
+
+                patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy(
+                    input,
+                    output,
+                    patches,
+                    style_table,
+                    overrides,
+                    recalc_policy,
+                )?;
+            } else {
+                patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy(
+                    input,
+                    output,
+                    patches,
+                    overrides,
+                    recalc_policy,
+                )?;
+            }
+            Ok(())
+        }
+
+        // Match `write_to` macro stripping behavior:
+        // - strip macros if requested,
+        // - and (when needed) apply part overrides / cell patches on top of the stripped base using
+        //   a second streaming rewrite pass.
+        if let Some(_target_kind) = self.strip_macros {
+            let source_has_macros = self.part_names.iter().any(|name| is_macro_part_name(name));
+
+            if !source_has_macros {
+                // Source is already macro-free; just apply patches + overrides after forcing
+                // macro-related overrides to `Remove` and patching workbook kind.
+                let overrides = self.build_part_overrides(/*kind_already_handled=*/ false)?;
+                let input = self.source.open_reader()?;
+                return apply_streaming_patch(
+                    input,
+                    output,
+                    patches,
+                    &overrides,
+                    recalc_policy,
+                    needs_style_table,
+                    style_table,
+                );
+            }
+
+            // Source contains macro-capable parts; strip macros first.
+            let kind = self.workbook_kind.unwrap_or(WorkbookKind::Workbook);
+
+            // If there are no non-macro changes (no patches + no non-macro overrides), we can stream
+            // macro stripping directly into the output.
+            let has_non_macro_overrides = !patches.is_empty()
+                || self.overrides.keys().any(|name| !is_macro_part_name(name));
+            if !has_non_macro_overrides {
+                let input = self.source.open_reader()?;
+                strip_vba_project_streaming_with_kind(input, output, kind)?;
+                return Ok(());
+            }
+
+            // Otherwise, use an intermediate temp file so we can apply patches/overrides on top of
+            // the macro-stripped base without inflating all parts into memory.
+            let mut tmp = tempfile()?;
+            let input = self.source.open_reader()?;
+            strip_vba_project_streaming_with_kind(input, &mut tmp, kind)?;
+
+            // Second pass: apply explicit part overrides + cell patches on top of the macro-stripped
+            // package. Note: workbook kind is already handled by the macro-strip streaming pass.
+            let overrides = self.build_part_overrides(/*kind_already_handled=*/ true)?;
+            tmp.seek(SeekFrom::Start(0))?;
+            return apply_streaming_patch(
+                &mut tmp,
+                output,
+                patches,
+                &overrides,
+                recalc_policy,
+                needs_style_table,
+                style_table,
+            );
+        }
+
+        let overrides = self.build_part_overrides(/*kind_already_handled=*/ false)?;
+        let input = self.source.open_reader()?;
+        apply_streaming_patch(
+            input,
+            output,
+            patches,
+            &overrides,
+            recalc_policy,
+            needs_style_table,
+            style_table,
+        )
     }
 
     fn effective_part_names(&self) -> impl Iterator<Item = &str> {

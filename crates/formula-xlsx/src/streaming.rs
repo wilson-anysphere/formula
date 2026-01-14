@@ -357,7 +357,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
         for (_, patch) in sheet_patches.iter() {
             if patch.style_id().is_some_and(|id| id != 0) {
                 return Err(crate::XlsxError::Invalid(
-                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles"
+                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy"
                         .to_string(),
                 )
                 .into());
@@ -516,7 +516,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
         for (_, patch) in sheet_patches.iter() {
             if patch.style_id().is_some_and(|id| id != 0) {
                 return Err(crate::XlsxError::Invalid(
-                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles"
+                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy"
                         .to_string(),
                 )
                 .into());
@@ -1824,6 +1824,25 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
     part_overrides: &HashMap<String, PartOverride>,
     policy_on_formula_change: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
+    fn find_part_override<'a>(
+        part_name: &str,
+        overrides: &'a HashMap<String, PartOverride>,
+        sorted_keys: &[&'a String],
+    ) -> Option<(&'a str, &'a PartOverride)> {
+        if let Some((key, op)) = overrides.get_key_value(part_name) {
+            return Some((key.as_str(), op));
+        }
+        for key in sorted_keys {
+            if crate::zip_util::zip_part_names_equivalent(key.as_str(), part_name) {
+                let op = overrides
+                    .get(key.as_str())
+                    .expect("override key came from override map");
+                return Some((key.as_str(), op));
+            }
+        }
+        None
+    }
+
     if patches.is_empty() {
         let mut archive = ZipArchive::new(input)?;
         patch_xlsx_streaming_with_archive(
@@ -1839,20 +1858,41 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
         return Ok(());
     }
 
+    let mut override_keys: Vec<&String> = part_overrides.keys().collect();
+    override_keys.sort();
+    let mut effective_part_overrides: HashMap<String, PartOverride> =
+        part_overrides.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+
     let mut archive = ZipArchive::new(input)?;
     let part_names = list_zip_part_names(&mut archive)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
     let mut updated_parts: HashMap<String, Vec<u8>> = HashMap::new();
-    let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
-    let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
+
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml_bytes = match find_part_override(workbook_part, part_overrides, &override_keys)
+    {
+        Some((_key, PartOverride::Remove)) => {
+            return Err(crate::XlsxError::MissingPart(workbook_part.to_string()).into());
+        }
+        Some((_key, PartOverride::Replace(bytes) | PartOverride::Add(bytes))) => bytes.clone(),
+        None => read_zip_part(&mut archive, workbook_part, &mut pre_read_parts)?,
+    };
+    pre_read_parts.insert(workbook_part.to_string(), workbook_xml_bytes.clone());
+    let workbook_xml = String::from_utf8(workbook_xml_bytes).map_err(crate::XlsxError::from)?;
     let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
 
-    let workbook_rels_bytes = read_zip_part(
-        &mut archive,
-        "xl/_rels/workbook.xml.rels",
-        &mut pre_read_parts,
-    )?;
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    let workbook_rels_bytes = match find_part_override(workbook_rels_part, part_overrides, &override_keys)
+    {
+        Some((_key, PartOverride::Remove)) => {
+            return Err(crate::XlsxError::MissingPart(workbook_rels_part.to_string()).into());
+        }
+        Some((_key, PartOverride::Replace(bytes) | PartOverride::Add(bytes))) => bytes.clone(),
+        None => read_zip_part(&mut archive, workbook_rels_part, &mut pre_read_parts)?,
+    };
+    pre_read_parts.insert(workbook_rels_part.to_string(), workbook_rels_bytes.clone());
+
     let rels = parse_relationships(&workbook_rels_bytes)?;
     let mut rel_targets: HashMap<String, String> = HashMap::new();
     let mut styles_part: Option<String> = None;
@@ -1888,7 +1928,13 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
             crate::XlsxError::Invalid("workbook.xml.rels missing styles relationship".to_string())
         })?;
 
-        let styles_bytes = read_zip_part(&mut archive, &styles_part, &mut pre_read_parts)?;
+        let styles_bytes = match find_part_override(&styles_part, part_overrides, &override_keys) {
+            Some((_key, PartOverride::Remove)) => {
+                return Err(crate::XlsxError::MissingPart(styles_part).into());
+            }
+            Some((_key, PartOverride::Replace(bytes) | PartOverride::Add(bytes))) => bytes.clone(),
+            None => read_zip_part(&mut archive, &styles_part, &mut pre_read_parts)?,
+        };
         let mut style_table = style_table.clone();
         let mut styles_editor =
             XlsxStylesEditor::parse_or_default(Some(styles_bytes.as_slice()), &mut style_table)
@@ -1901,7 +1947,19 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
         let after_xfs = styles_editor.styles_part().cell_xfs_count();
 
         if before_xfs != after_xfs {
-            updated_parts.insert(styles_part.clone(), styles_editor.to_styles_xml_bytes());
+            let updated_styles_xml = styles_editor.to_styles_xml_bytes();
+            // If the caller already overrides the styles part, update that override in-place so the
+            // output includes the new xfs needed for the patched cells.
+            if let Some((override_key, _override_op)) =
+                find_part_override(&styles_part, part_overrides, &override_keys)
+            {
+                effective_part_overrides.insert(
+                    override_key.to_string(),
+                    PartOverride::Replace(updated_styles_xml),
+                );
+            } else {
+                updated_parts.insert(styles_part.clone(), updated_styles_xml);
+            }
         }
 
         Some(style_id_to_xf)
@@ -1980,7 +2038,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
         &col_properties_by_part,
         &pre_read_parts,
         &updated_parts,
-        part_overrides,
+        &effective_part_overrides,
         recalc_policy,
     )?;
     Ok(())
