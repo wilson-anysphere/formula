@@ -1998,6 +1998,12 @@ export class ContextManager {
       const attachmentsClassification = heuristicToPolicyClassification(attachmentsHeuristic);
       overallClassification = maxClassification(overallClassification, attachmentsClassification);
     }
+
+    // When structured DLP requires redaction anywhere in the workbook, treat the workbook id as
+    // disallowed metadata too. Workbook ids can be user-controlled and may contain non-heuristic
+    // sensitive strings that a no-op redactor cannot detect.
+    const workbookIdTokenDisallowed =
+      Boolean(dlp) && structuredOverallDecision && structuredOverallDecision.decision !== DLP_DECISION.ALLOW;
     /** @type {ReturnType<typeof evaluatePolicy> | null} */
     let overallDecision = null;
     let redactedChunkCount = 0;
@@ -2144,7 +2150,7 @@ export class ContextManager {
         sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
       const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
       const shouldRedactTitleToken = Boolean(dlp) && (rangeDisallowed || titleTokenDisallowed);
-      const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken;
+      const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken || workbookIdTokenDisallowed;
 
       const safeSheetName = shouldRedactSheetNameToken
         ? "[REDACTED]"
@@ -2212,6 +2218,7 @@ export class ContextManager {
       const safeMetaOut = { ...safeMeta };
       if (shouldRedactSheetNameToken) safeMetaOut.sheetName = "[REDACTED]";
       if (shouldRedactTitleToken) safeMetaOut.title = "[REDACTED]";
+      if (workbookIdTokenDisallowed) safeMetaOut.workbookId = "[REDACTED]";
 
       return {
         id: shouldRedactChunkId ? `redacted:${idx + 1}` : hit.id,

@@ -864,6 +864,57 @@ test("buildWorkbookContext: structured DLP also redacts non-heuristic table name
   assert.doesNotMatch(joined, /TopSecretTable/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic workbook ids in retrieved metadata/ids (no-op redactor)", async () => {
+  const workbook = {
+    id: "TopSecretWorkbook",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "SecretA" }, { v: "SecretB" }]],
+      },
+      {
+        name: "PublicSheet",
+        cells: [[{ v: "Hello" }, { v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "Hello",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(out.promptContext, /TopSecretWorkbook/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecretWorkbook/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: redacts sensitive query before embedding even when includeRestrictedContent=true but policy blocks", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });
