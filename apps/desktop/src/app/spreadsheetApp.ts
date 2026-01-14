@@ -7837,8 +7837,46 @@ export class SpreadsheetApp {
         else if ("preserved" in next) delete next.preserved;
       }
 
-      // Only update explicit extracted `size` when present on the UI object.
-      if (after.size) next.size = after.size;
+      // Keep the extracted `size` field (when present) aligned with the anchor size.
+      //
+      // `convertDocumentSheetDrawingsToUiDrawingObjects` prefers the top-level `size` field when
+      // constructing UI anchors. If the drawing is resized and we update `anchor.size` but leave
+      // `size` stale, subsequent cache invalidations can make the drawing "snap back" visually.
+      const shouldUpdateSize = Object.prototype.hasOwnProperty.call(drawing, "size") || (after as any).size !== undefined;
+      if (shouldUpdateSize) {
+        const derivedSize = (() => {
+          const anchor = after.anchor as any;
+          if (anchor?.type === "absolute" || anchor?.type === "oneCell") {
+            return { cx: anchor.size.cx, cy: anchor.size.cy };
+          }
+          if (anchor?.type === "twoCell") {
+            // Best-effort derived size (in EMUs) for two-cell anchors.
+            const zoom = (() => {
+              const raw = this.getZoom();
+              return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
+            })();
+            try {
+              const fromOrigin = this.drawingGeom.cellOriginPx(anchor.from.cell);
+              const toOrigin = this.drawingGeom.cellOriginPx(anchor.to.cell);
+              const x1 = pxToEmu(fromOrigin.x / zoom) + anchor.from.offset.xEmu;
+              const y1 = pxToEmu(fromOrigin.y / zoom) + anchor.from.offset.yEmu;
+              const x2 = pxToEmu(toOrigin.x / zoom) + anchor.to.offset.xEmu;
+              const y2 = pxToEmu(toOrigin.y / zoom) + anchor.to.offset.yEmu;
+              return { cx: Math.abs(x2 - x1), cy: Math.abs(y2 - y1) };
+            } catch {
+              return after.size ?? (drawing as any).size;
+            }
+          }
+
+          return after.size ?? (drawing as any).size;
+        })();
+
+        if (derivedSize != null) {
+          next.size = derivedSize;
+        } else if ("size" in next) {
+          delete next.size;
+        }
+      }
 
       // Ensure stable identity + z-order even if callers accidentally include them in `after`.
       if (stableId != null) next.id = stableId;

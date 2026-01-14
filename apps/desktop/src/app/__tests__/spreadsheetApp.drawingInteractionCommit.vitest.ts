@@ -183,4 +183,67 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     app.dispose();
     root.remove();
   });
+
+  it("updates top-level size when present so resizes persist across adapter re-reads", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const startCx = pxToEmu(120);
+    const startCy = pxToEmu(80);
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: startCx, cy: startCy },
+      },
+      // Explicit size field (common for picture inserts).
+      size: { cx: startCx, cy: startCy },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("absolute");
+    if (before.anchor.type !== "absolute") {
+      throw new Error("Expected absolute anchor for test drawing");
+    }
+
+    // Simulate a resize: update anchor.size but leave `size` stale (DrawingInteractionController
+    // updates anchors during resize but does not update the optional `size` field).
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        size: { cx: pxToEmu(200), cy: pxToEmu(150) },
+      },
+      // NOTE: intentionally do not update `size` here.
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "resize", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.size).toEqual({ cx: pxToEmu(200), cy: pxToEmu(150) });
+    expect(updated?.size).toEqual({ cx: pxToEmu(200), cy: pxToEmu(150) });
+
+    if (typeof doc.undo === "function") {
+      expect(doc.undo()).toBe(true);
+      const reverted = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+      expect(reverted?.anchor?.size).toEqual({ cx: startCx, cy: startCy });
+      expect(reverted?.size).toEqual({ cx: startCx, cy: startCy });
+    }
+
+    app.dispose();
+    root.remove();
+  });
 });
