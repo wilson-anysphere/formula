@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 import {
   defaultDesktopBinPath,
   percentile,
   buildDesktopStartupProfileRoot,
   parseDesktopStartupMode,
+  repoRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupArgv,
@@ -243,8 +244,8 @@ async function main(): Promise<void> {
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
       "- targets env (full): FORMULA_DESKTOP_{COLD,WARM}_{WINDOW_VISIBLE,FIRST_RENDER,TTI}_TARGET_MS + FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS\n" +
       "- targets env (shell overrides): FORMULA_DESKTOP_SHELL_{COLD,WARM}_{WINDOW_VISIBLE,TTI}_TARGET_MS + FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS\n" +
-      `- perf-home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
-      `- profile-root: ${profileRoot}\n` +
+      `- perf-home: ${relative(repoRoot, perfHome) || perfHome} (override with FORMULA_PERF_HOME)\n` +
+      `- profile-root: ${relative(repoRoot, profileRoot) || profileRoot}\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
