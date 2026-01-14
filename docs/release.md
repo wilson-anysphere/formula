@@ -1309,8 +1309,8 @@ format the updater will apply:
    - Inspect:
       - `jq '.platforms | keys' latest.json`
       - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
-       - (Recommended) confirm each platform entry has a non-empty `signature` string:
-         - `jq -r '.platforms | to_entries[] | select((.value.signature // "") == "") | .key' latest.json`
+      - (Recommended) confirm each platform entry has a non-empty `signature` string:
+        - `jq -r '.platforms | to_entries[] | select((.value.signature // "") == "") | .key' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
    - macOS: updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
