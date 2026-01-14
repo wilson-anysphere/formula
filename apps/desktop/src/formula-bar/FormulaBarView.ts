@@ -3246,9 +3246,27 @@ export class FormulaBarView {
         }
 
         // If the draft contains any HTML-significant characters, escape only the tokens that
-        // actually include them. This avoids paying the `replace` cost on every token span when
+        // can actually include them. This avoids paying the regex test cost on every token when
         // the formula includes a single `&` operator or comparison like "<".
-        const content = needsEscapeDraft && ESCAPE_HTML_TEST_RE.test(text) ? escapeHtml(text) : text;
+        let content = text;
+        if (needsEscapeDraft) {
+          // Only a few token kinds can plausibly contain `<`, `>`, or `&`:
+          // - operators: `&`, `<`, `>`, `<=`, `<>`, ...
+          // - strings: user-entered string literals can contain them
+          // - unknown: defensive fallback
+          if (kind === "operator") {
+            if (text === "&") content = "&amp;";
+            else if (text === "<") content = "&lt;";
+            else if (text === ">") content = "&gt;";
+            else if (text.indexOf("&") !== -1 || text.indexOf("<") !== -1 || text.indexOf(">") !== -1) {
+              content = escapeHtml(text);
+            }
+          } else if (kind === "string" || kind === "unknown") {
+            if (text.indexOf("&") !== -1 || text.indexOf("<") !== -1 || text.indexOf(">") !== -1) {
+              content = escapeHtml(text);
+            }
+          }
+        }
 
         // Identifier spans are only needed:
         // - in view mode when we have a name resolver (so hover previews can resolve named ranges), or
