@@ -684,7 +684,7 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     }
 
     // MS-OFFCRYPTO / ECMA-376 identifies "Standard" encryption via `versionMinor == 2`, but
-    // real-world files vary `versionMajor` across 2/3/4 (see nolze/msoffcrypto-tool).
+    // real-world files vary `versionMajor` across 2/3/4 (for example, Apache POI emits 4.2).
     //
     // Treat everything else (including "Extensible" encryption, versionMinor == 3) as unsupported
     // for now so callers can surface an actionable error.
@@ -2295,7 +2295,7 @@ fn sha1(data: &[u8]) -> [u8; SHA1_LEN] {
     Sha1::digest(data).into()
 }
 
-fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
+pub(crate) fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
     if buf.len() % 16 != 0 {
         return Err(OffcryptoError::InvalidCiphertextLength { len: buf.len() });
     }

@@ -405,10 +405,7 @@ pub(crate) fn aes_ecb_decrypt_in_place(
 }
 
 #[allow(dead_code)]
-pub(crate) fn aes_ecb_decrypt(
-    key: &[u8],
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, OfficeCryptoError> {
+pub(crate) fn aes_ecb_decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, OfficeCryptoError> {
     let mut buf = ciphertext.to_vec();
     aes_ecb_decrypt_in_place(key, &mut buf)?;
     Ok(buf)
@@ -492,33 +489,39 @@ pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), Office
 
     match key.len() {
         3 => {
-            let mut cipher = Rc4::<U3>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U3>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         4 => {
-            let mut cipher = Rc4::<U4>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U4>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         5 => {
-            let mut cipher = Rc4::<U5>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U5>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         6 => {
-            let mut cipher = Rc4::<U6>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U6>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         7 => {
-            let mut cipher = Rc4::<U7>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U7>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         16 => {
-            let mut cipher = Rc4::<U16>::new_from_slice(key)
-                .map_err(|_| OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string()))?;
+            let mut cipher = Rc4::<U16>::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::UnsupportedEncryption("invalid RC4 key".to_string())
+            })?;
             cipher.apply_keystream(data);
         }
         other => {
@@ -539,6 +542,12 @@ pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), Office
 pub(crate) enum StandardKeyDerivation {
     /// AES-based Standard encryption uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion).
     Aes,
+    /// Compatibility AES derivation used by some producers: apply MS-OFFCRYPTO `TruncateHash`
+    /// semantics to the per-block hash output.
+    ///
+    /// In practice, this is equivalent to truncating the hash output when `key_bytes <= digest_len`
+    /// (e.g. AES-128 + SHA1) and padding with `0x36` when a longer key is requested.
+    AesTruncateHash,
     /// RC4-based Standard encryption uses key truncation (`key = H_block[..key_len]`).
     Rc4,
 }
@@ -609,6 +618,9 @@ impl StandardKeyDeriver {
 
         match self.derivation {
             StandardKeyDerivation::Aes => crypt_derive_key_aes(self.hash_alg, h, self.key_bytes),
+            StandardKeyDerivation::AesTruncateHash => {
+                Ok(Zeroizing::new(normalize_key_material(h, self.key_bytes)))
+            }
             StandardKeyDerivation::Rc4 => {
                 if self.key_bytes > h.len() {
                     return Err(OfficeCryptoError::UnsupportedEncryption(format!(
@@ -720,8 +732,8 @@ mod tests {
         assert_eq!(
             h.as_slice(),
             &[
-                0x2B, 0x39, 0xE1, 0x55, 0x98, 0x6F, 0x47, 0x22, 0x96, 0x14, 0xE2, 0xBA, 0xED,
-                0x8F, 0xB6, 0x0A
+                0x2B, 0x39, 0xE1, 0x55, 0x98, 0x6F, 0x47, 0x22, 0x96, 0x14, 0xE2, 0xBA, 0xED, 0x8F,
+                0xB6, 0x0A
             ],
             "hash_password MD5 output mismatch"
         );
@@ -740,29 +752,29 @@ mod tests {
             (
                 0,
                 [
-                    0x69, 0xBA, 0xDC, 0xAE, 0x24, 0x48, 0x68, 0xE2, 0x09, 0xD4, 0xE0, 0x53,
-                    0xCC, 0xD2, 0xA3, 0xBC,
+                    0x69, 0xBA, 0xDC, 0xAE, 0x24, 0x48, 0x68, 0xE2, 0x09, 0xD4, 0xE0, 0x53, 0xCC,
+                    0xD2, 0xA3, 0xBC,
                 ],
             ),
             (
                 1,
                 [
-                    0x6F, 0x4D, 0x50, 0x2A, 0xB3, 0x77, 0x00, 0xFF, 0xDA, 0xB5, 0x70, 0x41,
-                    0x60, 0x45, 0x5B, 0x47,
+                    0x6F, 0x4D, 0x50, 0x2A, 0xB3, 0x77, 0x00, 0xFF, 0xDA, 0xB5, 0x70, 0x41, 0x60,
+                    0x45, 0x5B, 0x47,
                 ],
             ),
             (
                 2,
                 [
-                    0xAC, 0x69, 0x02, 0x2E, 0x39, 0x6C, 0x77, 0x50, 0x87, 0x21, 0x33, 0xF3,
-                    0x7E, 0x2C, 0x7A, 0xFC,
+                    0xAC, 0x69, 0x02, 0x2E, 0x39, 0x6C, 0x77, 0x50, 0x87, 0x21, 0x33, 0xF3, 0x7E,
+                    0x2C, 0x7A, 0xFC,
                 ],
             ),
             (
                 3,
                 [
-                    0x1B, 0x05, 0x6E, 0x71, 0x18, 0xAB, 0x8D, 0x35, 0xE9, 0xD6, 0x7A, 0xDE,
-                    0xE8, 0xB1, 0x11, 0x04,
+                    0x1B, 0x05, 0x6E, 0x71, 0x18, 0xAB, 0x8D, 0x35, 0xE9, 0xD6, 0x7A, 0xDE, 0xE8,
+                    0xB1, 0x11, 0x04,
                 ],
             ),
         ];
@@ -814,8 +826,8 @@ mod tests {
                 b"Secret",
                 b"Attack at dawn",
                 &[
-                    0x45, 0xa0, 0x1f, 0x64, 0x5f, 0xc3, 0x5b, 0x38, 0x35, 0x52, 0x54,
-                    0x4b, 0x9b, 0xf5,
+                    0x45, 0xa0, 0x1f, 0x64, 0x5f, 0xc3, 0x5b, 0x38, 0x35, 0x52, 0x54, 0x4b, 0x9b,
+                    0xf5,
                 ],
             ),
         ];

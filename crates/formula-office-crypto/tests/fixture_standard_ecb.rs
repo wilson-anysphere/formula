@@ -18,7 +18,10 @@ fn decrypts_repo_standard_fixture() {
 fn decrypts_repo_standard_basic_xlsm_fixture() {
     // Standard-encrypted macro-enabled workbook fixture.
     //
-    // This exercises Standard/CryptoAPI compatibility beyond the minimal `.xlsx` case.
+    // It uses the baseline AES-ECB layout, but with a key-derivation variant that truncates the
+    // per-block hash output ("TruncateHash") rather than using CryptoAPI `CryptDeriveKey` expansion
+    // (used by `standard.xlsx`). This exercises Standard/CryptoAPI compatibility beyond the minimal
+    // `.xlsx` case.
     let encrypted = include_bytes!("../../../fixtures/encrypted/ooxml/standard-basic.xlsm");
     let expected = include_bytes!("../../../fixtures/encrypted/ooxml/plaintext-basic.xlsm");
 

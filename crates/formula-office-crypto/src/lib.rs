@@ -236,7 +236,28 @@ pub fn encrypt_package_to_ole_with_entries(
     Ok(ole.into_inner().into_inner())
 }
 
-fn decrypt_encrypted_package_streams_with_options(
+/// Decrypt an Office-encrypted OOXML container given the raw stream bytes.
+///
+/// Inputs are the raw bytes of the OLE streams:
+/// - `EncryptionInfo`
+/// - `EncryptedPackage`
+///
+/// The output is the decrypted OOXML ZIP/OPC package bytes (should start with `PK`).
+pub fn decrypt_encrypted_package_streams(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    decrypt_encrypted_package_streams_with_options(
+        encryption_info,
+        encrypted_package,
+        password,
+        &DecryptOptions::default(),
+    )
+}
+
+/// Like [`decrypt_encrypted_package_streams`], but allows overriding resource limits.
+pub fn decrypt_encrypted_package_streams_with_options(
     encryption_info: &[u8],
     encrypted_package: &[u8],
     password: &str,
@@ -275,7 +296,11 @@ fn open_stream_case_tolerant<R: Read + std::io::Seek>(
     let mut all_not_found = true;
     let mut first_err: Option<std::io::Error> = None;
 
-    fn record_err(all_not_found: &mut bool, first_err: &mut Option<std::io::Error>, err: std::io::Error) {
+    fn record_err(
+        all_not_found: &mut bool,
+        first_err: &mut Option<std::io::Error>,
+        err: std::io::Error,
+    ) {
         if err.kind() != std::io::ErrorKind::NotFound {
             *all_not_found = false;
         }

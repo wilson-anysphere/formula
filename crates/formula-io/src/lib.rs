@@ -3197,6 +3197,8 @@ fn decrypt_encrypted_ooxml_package(
             out
         } else {
             // --- Standard CryptoAPI AES ---------------------------------------------------------
+            // Standard/CryptoAPI encrypted packages have multiple variants in the wild.
+            //
             // Prefer the Standard decryptor in `formula-office-crypto` because it supports a wider
             // range of hash algorithms (and performs verifier validation). However, some producers
             // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`). When we

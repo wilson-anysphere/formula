@@ -313,10 +313,22 @@ Implementation status:
 - HMAC verification is strongly recommended when possible to distinguish wrong passwords from “ZIP
   happened to parse”.
 
-### Standard (CryptoAPI): password KDF + verifier (ECMA-376)
+### Standard (CryptoAPI): password KDF + verifier (ECMA-376 + compatibility)
 
-Standard encryption key derivation is **not PBKDF2**. It is CryptoAPI/ECMA-376’s iterative hash loop
-(`spinCount = 50,000`) plus CryptoAPI `CryptDeriveKey`-style key material expansion.
+Standard encryption key derivation is **not PBKDF2**. It is the ECMA-376/MS-OFFCRYPTO iterative hash
+loop (`spinCount = 50,000`) followed by an additional step to turn the per-block hash output into
+AES key bytes.
+
+Important compatibility note: real-world “Standard” (minor=2) OOXML files differ in the *final*
+key-material derivation step:
+
+- Some producers use CryptoAPI `CryptDeriveKey`-style ipad/opad expansion.
+- Some producers use MS-OFFCRYPTO `TruncateHash` semantics (truncate, or pad with `0x36`).
+
+`crates/formula-office-crypto` attempts **both** for AES, because the repo’s fixtures exercise both:
+
+- `fixtures/encrypted/ooxml/standard.xlsx` ⇒ `CryptDeriveKey`
+- `fixtures/encrypted/ooxml/standard-basic.xlsm` ⇒ `TruncateHash`
 
 Hash algorithm nuance:
 
@@ -332,7 +344,7 @@ In this repo, the reference implementation is `crates/formula-offcrypto/src/lib.
 (`StandardKeyDeriver`) but supports additional `AlgIDHash` values (SHA-256/384/512) for
 compatibility.
 
-High-level shape (Excel-default SHA-1):
+High-level shape (Excel-default SHA-1) up to the per-block digest:
 
 ```text
 pw = UTF16LE(password)                      // no BOM, no NUL
@@ -340,9 +352,18 @@ H  = SHA1(salt || pw)
 for i in 0..50000:
   H = SHA1(LE32(i) || H)
 
-Hfinal = SHA1(H || LE32(0))
-keyMaterial = SHA1((0x36*64) XOR Hfinal) || SHA1((0x5c*64) XOR Hfinal)
+Hblock0 = SHA1(H || LE32(0))
+```
+
+Key material derivation variants:
+
+```text
+// Variant A: CryptoAPI CryptDeriveKey (ipad/opad expansion)
+keyMaterial = SHA1((0x36*64) XOR Hblock0) || SHA1((0x5c*64) XOR Hblock0)
 key = keyMaterial[0..keySizeBytes]          // keySizeBytes = keySizeBits/8
+
+// Variant B: MS-OFFCRYPTO TruncateHash
+key = TruncateHash(Hblock0, keySizeBytes)   // truncate, or pad with 0x36
 ```
 
 Verifier nuances (very common bug source):
@@ -372,17 +393,45 @@ Where:
 
 - `orig_size` is the 8-byte little-endian size prefix at the start of the `EncryptedPackage` stream.
 - `ciphertext` is the remaining bytes after the prefix and must be a multiple of 16 bytes.
-- Do **not** “unpad” decrypted bytes; always truncate to `orig_size` (padding/trailing bytes are
-  not reliable PKCS#7).
+- The physical `EncryptedPackage` stream can be **larger** than `orig_size` due to block padding
+  and/or OLE sector slack. Always decrypt the full ciphertext and then **truncate** to `orig_size`.
+  - Example: our `msoffcrypto-tool`-generated `fixtures/encrypted/ooxml/standard.xlsx` has an
+    `EncryptedPackage` ciphertext length of **4096 bytes** even though the decrypted ZIP is much smaller.
+- Do **not** “unpad” decrypted bytes; always truncate to `orig_size` (padding/trailing bytes are not
+  reliable PKCS#7).
 
 See `docs/offcrypto-standard-encryptedpackage.md` for framing/padding/truncation edge cases.
 
-Implementation nuance:
+Implementation pointers:
 
-- `crates/formula-offcrypto/src/encrypted_package.rs` implements Standard AES `EncryptedPackage`
-  decryption via AES-ECB and truncation to `orig_size`.
-- `crates/formula-office-crypto` implements end-to-end Standard decryption and is intentionally more
-  permissive about Standard parameter variants for compatibility.
+- `crates/formula-offcrypto`: `decrypt_encrypted_package_ecb` (and the convenience wrapper
+  `decrypt_from_bytes`).
+- `crates/formula-office-crypto`: end-to-end Standard decryptor (tries multiple key-derivation
+  variants for compatibility).
+- `crates/formula-xlsx::offcrypto`: end-to-end OOXML decryptor (Agile + Standard), with additional
+  compatibility fallbacks and ZIP validation.
+
+### Standard variants in this repo
+
+This repo currently includes multiple Standard-encrypted OOXML fixtures under
+`fixtures/encrypted/ooxml/` that differ in crypto behavior:
+
+1. `standard.xlsx` — Standard AES-ECB (msoffcrypto-tool output):
+   - Password KDF: **50,000** iterations
+   - Key derivation: `CryptDeriveKey` ipad/opad expansion
+   - Verifier encryption: **AES-ECB**
+   - `EncryptedPackage` encryption: **AES-ECB**
+   - Decryptors: `crates/formula-offcrypto`, `crates/formula-office-crypto`
+
+2. `standard-basic.xlsm` — Standard AES-ECB (macro-enabled workbook):
+   - Password KDF: **50,000** iterations
+   - Key derivation: `TruncateHash` (truncate, or pad with `0x36`)
+   - Verifier encryption: **AES-ECB**
+   - `EncryptedPackage` encryption: **AES-ECB**
+   - Decryptor: `crates/formula-office-crypto`
+
+3. `standard-large.xlsx` — Standard AES-ECB, larger package regression fixture (exercises truncation
+   behavior and more realistic ciphertext sizes).
 
 ### Standard (CryptoAPI): RC4 `EncryptedPackage` decryption (0x200 blocks)
 

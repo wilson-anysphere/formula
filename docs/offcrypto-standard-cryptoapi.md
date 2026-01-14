@@ -376,7 +376,30 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `inner || outer` yields 40 bytes for SHA‑1.
 
-### 5.3) IV derivation: none for Standard AES-ECB
+#### 5.2.3) Compatibility: AES key = `TruncateHash(H_block)`
+
+Some Standard-encrypted OOXML files in the wild derive AES key bytes by **truncating** the per-block
+hash output directly (MS-OFFCRYPTO `TruncateHash` semantics), rather than using CryptoAPI
+`CryptDeriveKey` expansion.
+
+This repo’s fixtures exercise both behaviors:
+
+- `fixtures/encrypted/ooxml/standard.xlsx` ⇒ `CryptDeriveKey` (this section)
+- `fixtures/encrypted/ooxml/standard-basic.xlsm` ⇒ `TruncateHash(H_block)` (truncate to 16 bytes for AES-128)
+
+Pseudocode:
+
+```text
+// If keyLen <= digestLen (e.g. AES-128 + SHA1):
+key = H_block[0:keyLen]
+
+// More generally (matches MS-OFFCRYPTO TruncateHash):
+key = TruncateHash(H_block, keyLen)   // truncate, or pad with 0x36
+```
+
+For maximum compatibility, a decryptor can try both derivations.
+
+### 5.3) IV derivation: none for Standard AES-ECB (compatibility notes)
 
 RC4 is a stream cipher and has no IV.
 

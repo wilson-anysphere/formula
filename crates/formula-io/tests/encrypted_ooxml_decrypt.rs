@@ -467,8 +467,8 @@ fn assert_detects_xlsm(decrypted: &[u8]) {
 fn decrypts_agile_and_standard_fixtures_with_correct_password() {
     let plaintext_path = fixture_path("plaintext.xlsx");
     let agile_path = fixture_path("agile.xlsx");
-    let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
+    let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_4_2_path = fixture_path("standard-4.2.xlsx");
 
     let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
@@ -477,11 +477,11 @@ fn decrypts_agile_and_standard_fixtures_with_correct_password() {
     let agile = open_model_with_password(&agile_path, "password");
     assert_expected_contents(&agile);
 
-    let agile_empty = open_model_with_password(&agile_empty_password_path, "");
-    assert_expected_contents(&agile_empty);
-
     let standard = open_model_with_password(&standard_path, "password");
     assert_expected_contents(&standard);
+
+    let agile_empty = open_model_with_password(&agile_empty_password_path, "");
+    assert_expected_contents(&agile_empty);
 
     let standard_4_2 = open_model_with_password(&standard_4_2_path, "password");
     assert_expected_contents(&standard_4_2);
@@ -866,4 +866,38 @@ fn agile_unicode_excel_password_different_normalization_fails() {
         ),
         "expected InvalidPassword error for NFD-normalized password"
     );
+}
+
+#[test]
+fn decrypts_large_fixtures_and_matches_plaintext_package_parts() {
+    let plaintext_path = fixture_path("plaintext-large.xlsx");
+    let agile_path = fixture_path("agile-large.xlsx");
+    let standard_path = fixture_path("standard-large.xlsx");
+
+    let plaintext =
+        open_workbook_with_password(&plaintext_path, None).expect("open plaintext-large.xlsx");
+    let Workbook::Xlsx(plaintext_pkg) = plaintext else {
+        panic!("expected plaintext-large.xlsx to open as Workbook::Xlsx");
+    };
+
+    for path in [&agile_path, &standard_path] {
+        let decrypted =
+            open_workbook_with_password(path, Some("password")).expect("open decrypted workbook");
+        let Workbook::Xlsx(pkg) = decrypted else {
+            panic!("expected {path:?} to decrypt to Workbook::Xlsx");
+        };
+
+        // Compare a handful of stable parts to ensure decryption yields the same underlying package.
+        for part_name in ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml"] {
+            let expected = plaintext_pkg
+                .read_part(part_name)
+                .expect("read plaintext package part")
+                .unwrap_or_else(|| panic!("plaintext package missing part {part_name}"));
+            let got = pkg
+                .read_part(part_name)
+                .expect("read decrypted package part")
+                .unwrap_or_else(|| panic!("decrypted package missing part {part_name}"));
+            assert_eq!(got, expected, "part mismatch for {part_name} in {path:?}");
+        }
+    }
 }

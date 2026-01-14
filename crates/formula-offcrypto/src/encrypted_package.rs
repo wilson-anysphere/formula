@@ -438,6 +438,17 @@ pub fn decrypt_standard_encrypted_package_auto(
     }
 }
 
+/// Decrypt a Standard/CryptoAPI `EncryptedPackage` stream using AES-ECB with the provided key.
+///
+/// This is a convenience wrapper around [`decrypt_standard_encrypted_package`] with argument order
+/// matching other decrypt helpers in this crate.
+pub fn decrypt_encrypted_package_aes_ecb(
+    encrypted_package: &[u8],
+    key: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    decrypt_standard_encrypted_package(key, encrypted_package)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
