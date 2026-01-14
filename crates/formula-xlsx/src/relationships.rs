@@ -70,18 +70,17 @@ impl Relationships {
                 continue;
             }
 
-            let id = node
-                .attribute("Id")
-                .ok_or_else(|| XlsxError::MissingAttr("Id"))?
-                .to_string();
-            let type_ = node
-                .attribute("Type")
-                .ok_or_else(|| XlsxError::MissingAttr("Type"))?
-                .to_string();
-            let target = node
-                .attribute("Target")
-                .ok_or_else(|| XlsxError::MissingAttr("Target"))?
-                .to_string();
+            // Best-effort: some producers emit incomplete relationship entries (missing `Type`).
+            // For traversal/preservation, `Id` + `Target` are sufficient.
+            let Some(id) = node.attribute("Id") else {
+                continue;
+            };
+            let Some(target) = node.attribute("Target") else {
+                continue;
+            };
+            let id = id.to_string();
+            let target = target.to_string();
+            let type_ = node.attribute("Type").unwrap_or_default().to_string();
             let target_mode = node.attribute("TargetMode").map(str::to_string);
 
             rels.push(Relationship {
