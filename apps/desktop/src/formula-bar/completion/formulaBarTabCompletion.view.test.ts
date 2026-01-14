@@ -151,7 +151,7 @@ describe("FormulaBarView tab completion (integration)", () => {
         calls.push(args);
         // In de-DE, `COUNTIF` is localized as `ZÄHLENWENN`. The WASM parser returns the canonical
         // function name (`COUNTIF`) so completion can still use `FunctionRegistry` metadata even
-        // when the user types a localized, non-ASCII name that the JS parser can’t recognize.
+        // when the user types a localized name (which does not exist in the canonical function catalog).
         return { context: { function: { name: "COUNTIF", argIndex: 0 } }, error: null, ast: {} };
       },
     };
@@ -203,9 +203,9 @@ describe("FormulaBarView tab completion (integration)", () => {
     const engineStub = {
       parseFormulaPartial: async (...args: unknown[]) => {
         calls.push(args);
-        // In some locales, function names may be non-ASCII and the lightweight JS parser can’t
-        // reliably infer the function context. The WASM engine returns canonical function
-        // metadata so the completion engine can still suggest appropriate argument values/ranges.
+        // In some locales, function names may be localized/non-ASCII and won't match the canonical
+        // function catalog. The WASM engine returns canonical function metadata so the completion
+        // engine can still suggest appropriate argument values/ranges (e.g. range args for SUM).
         return { context: { function: { name: "SUM", argIndex: 0 } }, error: null, ast: {} };
       },
     };
