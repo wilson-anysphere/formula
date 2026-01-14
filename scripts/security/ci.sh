@@ -5,6 +5,17 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+# globally (often to `stable`), which would bypass the pinned toolchain and can cause this script
+# to silently skip Rust checks (e.g. if cargo-installed tooling is present only for the pinned
+# toolchain).
+#
+# Clear it so `cargo` invocations (direct or via `scripts/cargo_agent.sh`) respect the pinned
+# toolchain.
+if [[ -n "${RUSTUP_TOOLCHAIN:-}" && -f "${ROOT_DIR}/rust-toolchain.toml" ]]; then
+  unset RUSTUP_TOOLCHAIN
+fi
+
 # Fail fast if unresolved merge conflict markers are present. These can hide in
 # unbuilt paths and cause confusing downstream CI failures.
 bash scripts/ci/check-merge-conflict-markers.sh
