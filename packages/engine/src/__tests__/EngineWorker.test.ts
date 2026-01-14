@@ -97,6 +97,32 @@ class MockWorker implements WorkerLike {
           this.serverPort?.postMessage(response);
           return;
         }
+        if (req.method === "getCalcSettings") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: {
+              calculationMode: "manual",
+              calculateBeforeSave: true,
+              fullPrecision: true,
+              fullCalcOnLoad: false,
+              iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 }
+            }
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
+        if (req.method === "setCalcSettings") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: null
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
         if (req.method === "setSheetDimensions") {
           const response: WorkerOutboundMessage = {
             type: "response",
@@ -673,6 +699,46 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ op });
+  });
+
+  it("supports getCalcSettings / setCalcSettings RPCs", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const settings = await engine.getCalcSettings();
+    expect(settings).toEqual({
+      calculationMode: "manual",
+      calculateBeforeSave: true,
+      fullPrecision: true,
+      fullCalcOnLoad: false,
+      iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 }
+    });
+
+    await engine.setCalcSettings({
+      calculationMode: "automatic",
+      calculateBeforeSave: false,
+      fullPrecision: true,
+      fullCalcOnLoad: true,
+      iterative: { enabled: true, maxIterations: 10, maxChange: 0.0001 }
+    });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setCalcSettings"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      settings: {
+        calculationMode: "automatic",
+        calculateBeforeSave: false,
+        fullPrecision: true,
+        fullCalcOnLoad: true,
+        iterative: { enabled: true, maxIterations: 10, maxChange: 0.0001 }
+      }
+    });
   });
 
   it("sends setWorkbookFileMetadata RPC requests with the expected params", async () => {

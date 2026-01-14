@@ -1,4 +1,5 @@
 import type {
+  CalcSettings,
   CellChange,
   CellData,
   CellDataRich,
@@ -302,12 +303,31 @@ export class EngineWorker {
     return (await this.invoke("setLocale", { localeId }, options)) as boolean;
   }
 
-  async setWorkbookFileMetadata(directory: string | null, filename: string | null, options?: RpcOptions): Promise<void> {
+  async getCalcSettings(options?: RpcOptions): Promise<CalcSettings> {
+    await this.flush();
+    return (await this.invoke("getCalcSettings", {}, options)) as CalcSettings;
+  }
+
+  async setCalcSettings(settings: CalcSettings, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setCalcSettings", { settings }, options);
+  }
+
+  async setWorkbookFileMetadata(
+    directory: string | null,
+    filename: string | null,
+    options?: RpcOptions
+  ): Promise<void> {
     await this.flush();
     await this.invoke("setWorkbookFileMetadata", { directory, filename }, options);
   }
 
-  async setCellStyleId(address: string, styleId: number, sheet?: string, options?: RpcOptions): Promise<void> {
+  async setCellStyleId(
+    address: string,
+    styleId: number,
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<void> {
     await this.flush();
     await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
   }

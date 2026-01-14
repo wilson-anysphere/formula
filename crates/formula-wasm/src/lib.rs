@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
@@ -268,6 +269,69 @@ fn parse_reference_style(
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum CalcModeDto {
+    Automatic,
+    AutomaticNoTable,
+    Manual,
+}
+
+impl From<CalculationMode> for CalcModeDto {
+    fn from(mode: CalculationMode) -> Self {
+        match mode {
+            CalculationMode::Automatic => CalcModeDto::Automatic,
+            CalculationMode::AutomaticNoTable => CalcModeDto::AutomaticNoTable,
+            CalculationMode::Manual => CalcModeDto::Manual,
+        }
+    }
+}
+
+impl From<CalcModeDto> for CalculationMode {
+    fn from(mode: CalcModeDto) -> Self {
+        match mode {
+            CalcModeDto::Automatic => CalculationMode::Automatic,
+            CalcModeDto::AutomaticNoTable => CalculationMode::AutomaticNoTable,
+            CalcModeDto::Manual => CalculationMode::Manual,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct IterativeCalcSettingsDto {
+    enabled: bool,
+    max_iterations: u32,
+    max_change: f64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IterativeCalcSettingsInputDto {
+    enabled: bool,
+    max_iterations: f64,
+    max_change: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct CalcSettingsDto {
+    calculation_mode: CalcModeDto,
+    calculate_before_save: bool,
+    full_precision: bool,
+    full_calc_on_load: bool,
+    iterative: IterativeCalcSettingsDto,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CalcSettingsInputDto {
+    calculation_mode: CalcModeDto,
+    calculate_before_save: bool,
+    full_precision: bool,
+    full_calc_on_load: bool,
+    iterative: IterativeCalcSettingsInputDto,
+}
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ParseOptionsJsDto {
@@ -1575,6 +1639,29 @@ impl WorkbookState {
         wb
     }
 
+    /// Run `f` with the engine forced into manual calculation mode, restoring the original workbook
+    /// calc settings afterwards.
+    ///
+    /// The WASM worker protocol relies on explicit `recalculate()` calls to produce value-change
+    /// deltas. Excel workbooks often default to automatic calculation mode (`calcMode="auto"`), so
+    /// we must prevent the engine from performing automatic recalculations during edits or the JS
+    /// layer would miss those notifications.
+    fn with_manual_calc_mode<T>(
+        &mut self,
+        f: impl FnOnce(&mut WorkbookState) -> Result<T, JsValue>,
+    ) -> Result<T, JsValue> {
+        let previous = self.engine.calc_settings().clone();
+        if previous.calculation_mode != CalculationMode::Manual {
+            let mut manual = previous.clone();
+            manual.calculation_mode = CalculationMode::Manual;
+            self.engine.set_calc_settings(manual);
+        }
+
+        let result = f(self);
+        self.engine.set_calc_settings(previous);
+        result
+    }
+
     fn ensure_sheet(&mut self, name: &str) -> String {
         let key = normalize_sheet_key(name);
         if let Some(existing) = self.sheet_lookup.get(&key) {
@@ -1595,10 +1682,12 @@ impl WorkbookState {
         rows: u32,
         cols: u32,
     ) -> Result<(), JsValue> {
-        let sheet = self.ensure_sheet(name);
-        self.engine
-            .set_sheet_dimensions(&sheet, rows, cols)
-            .map_err(|err| js_err(err.to_string()))
+        self.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(name);
+            this.engine
+                .set_sheet_dimensions(&sheet, rows, cols)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
 
     fn set_col_width_chars_internal(
@@ -1766,131 +1855,131 @@ impl WorkbookState {
         address: &str,
         input: JsonValue,
     ) -> Result<(), JsValue> {
-        if !is_scalar_json(&input) {
-            return Err(js_err(format!("invalid cell value: {address}")));
-        }
+        self.with_manual_calc_mode(|this| {
+            if !is_scalar_json(&input) {
+                return Err(js_err(format!("invalid cell value: {address}")));
+            }
 
-        let sheet = self.ensure_sheet(sheet);
-        let cell_ref = Self::parse_address(address)?;
-        let address = cell_ref.to_a1();
+            let sheet = this.ensure_sheet(sheet);
+            let cell_ref = Self::parse_address(address)?;
+            let address = cell_ref.to_a1();
 
-        // Legacy scalar edits overwrite any previous rich input for this cell.
-        if let Some(rich_cells) = self.sheets_rich.get_mut(&sheet) {
-            rich_cells.remove(&address);
-        }
+            // Legacy scalar edits overwrite any previous rich input for this cell.
+            if let Some(rich_cells) = this.sheets_rich.get_mut(&sheet) {
+                rich_cells.remove(&address);
+            }
 
-        if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
-            let edited_row = cell_ref.row;
-            let edited_col = cell_ref.col;
-            let edited_is_formula = is_formula_input(&input);
-            for row in origin.row..=end.row {
-                for col in origin.col..=end.col {
-                    // Skip the origin cell (top-left); we only need to clear spill outputs.
-                    if row == origin.row && col == origin.col {
-                        continue;
+            if let Some((origin, end)) = this.engine.spill_range(&sheet, &address) {
+                let edited_row = cell_ref.row;
+                let edited_col = cell_ref.col;
+                let edited_is_formula = is_formula_input(&input);
+                for row in origin.row..=end.row {
+                    for col in origin.col..=end.col {
+                        // Skip the origin cell (top-left); we only need to clear spill outputs.
+                        if row == origin.row && col == origin.col {
+                            continue;
+                        }
+                        // If the user overwrote a spill output cell with a literal value, don't emit a
+                        // spill-clear change for that cell; the caller already knows its new input.
+                        if !edited_is_formula && row == edited_row && col == edited_col {
+                            continue;
+                        }
+                        this.pending_spill_clears
+                            .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
                     }
-                    // If the user overwrote a spill output cell with a literal value, don't emit a
-                    // spill-clear change for that cell; the caller already knows its new input.
-                    if !edited_is_formula && row == edited_row && col == edited_col {
-                        continue;
-                    }
-                    self.pending_spill_clears
-                        .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
                 }
             }
-        }
 
-        let sheet_cells = self
-            .sheets
-            .get_mut(&sheet)
-            .expect("sheet just ensured must exist");
+            let sheet_cells = this
+                .sheets
+                .get_mut(&sheet)
+                .expect("sheet just ensured must exist");
 
-        // `null` represents an empty cell in the JS protocol. Preserve sparse semantics in the
-        // JSON input map by removing the stored entry instead of storing an explicit blank.
-        //
-        // In the engine, treat this as "clear contents" (value/formula -> blank) so formatting can
-        // be preserved when a cell has a non-default style.
-        if input.is_null() {
-            self.engine
-                .set_cell_value(&sheet, &address, EngineValue::Blank)
-                .map_err(|err| js_err(err.to_string()))?;
-
-            sheet_cells.remove(&address);
-            // If this cell was previously tracked as part of a spill-clear batch, drop it so we
-            // don't report direct input edits as recalc changes.
-            self.pending_spill_clears
-                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-            self.pending_formula_baselines
-                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-            return Ok(());
-        }
-
-        if is_formula_input(&input) {
-            let raw = input.as_str().expect("formula input must be string");
-            // Match `formula-model`'s display semantics so the worker protocol doesn't
-            // drift from other layers (trim both ends, strip a single leading '=', and
-            // treat bare '=' as empty).
-            let normalized = display_formula_text(raw);
-            if normalized.is_empty() {
-                // This should be unreachable because `is_formula_input` requires
-                // non-whitespace content after '=', but keep a defensive fallback so
-                // we never store a literal "=" formula.
-                self.engine
+            // `null` represents an empty cell in the JS protocol. Preserve sparse semantics in the
+            // JSON input map by removing the stored entry instead of storing an explicit blank.
+            //
+            // In the engine, treat this as "clear contents" (value/formula -> blank) so formatting can
+            // be preserved when a cell has a non-default style.
+            if input.is_null() {
+                this.engine
                     .set_cell_value(&sheet, &address, EngineValue::Blank)
                     .map_err(|err| js_err(err.to_string()))?;
+
                 sheet_cells.remove(&address);
-                self.pending_spill_clears
+                // If this cell was previously tracked as part of a spill-clear batch, drop it so we
+                // don't report direct input edits as recalc changes.
+                this.pending_spill_clears
                     .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-                self.pending_formula_baselines
+                this.pending_formula_baselines
                     .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
                 return Ok(());
             }
 
-            let canonical = if self.formula_locale.id == EN_US.id {
-                normalized
-            } else {
-                canonicalize_formula_with_style(
-                    &normalized,
-                    self.formula_locale,
-                    formula_engine::ReferenceStyle::A1,
-                )
-                .map_err(|err| js_err(err.to_string()))?
-            };
+            if is_formula_input(&input) {
+                let raw = input.as_str().expect("formula input must be string");
+                // Match `formula-model`'s display semantics so the worker protocol doesn't
+                // drift from other layers (trim both ends, strip a single leading '=', and
+                // treat bare '=' as empty).
+                let normalized = display_formula_text(raw);
+                if normalized.is_empty() {
+                    // This should be unreachable because `is_formula_input` requires
+                    // non-whitespace content after '=', but keep a defensive fallback so
+                    // we never store a literal "=" formula.
+                    this.engine
+                        .set_cell_value(&sheet, &address, EngineValue::Blank)
+                        .map_err(|err| js_err(err.to_string()))?;
+                    sheet_cells.remove(&address);
+                    this.pending_spill_clears
+                        .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                    this.pending_formula_baselines
+                        .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                    return Ok(());
+                }
 
-            let key = FormulaCellKey::new(sheet.clone(), cell_ref);
-            self.pending_formula_baselines
-                .entry(key)
-                .or_insert_with(|| {
-                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
-                });
+                let canonical = if this.formula_locale.id == EN_US.id {
+                    normalized
+                } else {
+                    canonicalize_formula_with_style(
+                        &normalized,
+                        this.formula_locale,
+                        formula_engine::ReferenceStyle::A1,
+                    )
+                        .map_err(|err| js_err(err.to_string()))?
+                };
 
-            // Reset the stored value to blank so `getCell` returns null until the next recalc,
-            // matching the existing worker semantics.
-            self.engine
-                .set_cell_value(&sheet, &address, EngineValue::Blank)
+                let key = FormulaCellKey::new(sheet.clone(), cell_ref);
+                this.pending_formula_baselines
+                    .entry(key)
+                    .or_insert_with(|| engine_value_to_json(this.engine.get_cell_value(&sheet, &address)));
+
+                // Reset the stored value to blank so `getCell` returns null until the next recalc,
+                // matching the existing worker semantics.
+                this.engine
+                    .set_cell_value(&sheet, &address, EngineValue::Blank)
+                    .map_err(|err| js_err(err.to_string()))?;
+                this.engine
+                    .set_cell_formula(&sheet, &address, &canonical)
+                    .map_err(|err| js_err(err.to_string()))?;
+
+                sheet_cells.insert(address.clone(), JsonValue::String(canonical));
+                return Ok(());
+            }
+
+            // Non-formula scalar value.
+            this.engine
+                .set_cell_value(&sheet, &address, json_to_engine_value(&input))
                 .map_err(|err| js_err(err.to_string()))?;
-            self.engine
-                .set_cell_formula(&sheet, &address, &canonical)
-                .map_err(|err| js_err(err.to_string()))?;
 
-            sheet_cells.insert(address.clone(), JsonValue::String(canonical));
-            return Ok(());
-        }
-
-        // Non-formula scalar value.
-        self.engine
-            .set_cell_value(&sheet, &address, json_to_engine_value(&input))
-            .map_err(|err| js_err(err.to_string()))?;
-
-        sheet_cells.insert(address.clone(), input);
-        // If this cell was previously tracked as part of a spill-clear batch (e.g. a multi-cell
-        // paste over a spill range), drop it so we don't report direct input edits as recalc
-        // changes.
-        self.pending_spill_clears
-            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-        self.pending_formula_baselines
-            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-        Ok(())
+            sheet_cells.insert(address.clone(), input);
+            // If this cell was previously tracked as part of a spill-clear batch (e.g. a multi-cell
+            // paste over a spill range), drop it so we don't report direct input edits as recalc
+            // changes.
+            this.pending_spill_clears
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            this.pending_formula_baselines
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            Ok(())
+        })
     }
 
     fn set_cell_rich_internal(
@@ -1899,104 +1988,106 @@ impl WorkbookState {
         address: &str,
         input: CellValue,
     ) -> Result<(), JsValue> {
-        // Preserve the legacy scalar JS worker protocol by delegating for values that can already
-        // be represented as scalars. This keeps behavior consistent for numbers, booleans, strings,
-        // rich text, and error values while still allowing structured rich values (entity/record,
-        // images, arrays) to round-trip through `getCellRich`.
-        if matches!(
-            &input,
-            CellValue::Empty
-                | CellValue::Number(_)
-                | CellValue::Boolean(_)
-                | CellValue::String(_)
-                | CellValue::Error(_)
-                | CellValue::RichText(_)
-        ) {
-            let scalar_input = cell_value_to_scalar_json_input(&input);
-            self.set_cell_internal(sheet, address, scalar_input)?;
+        self.with_manual_calc_mode(|this| {
+            // Preserve the legacy scalar JS worker protocol by delegating for values that can already
+            // be represented as scalars. This keeps behavior consistent for numbers, booleans, strings,
+            // rich text, and error values while still allowing structured rich values (entity/record,
+            // images, arrays) to round-trip through `getCellRich`.
+            if matches!(
+                &input,
+                CellValue::Empty
+                    | CellValue::Number(_)
+                    | CellValue::Boolean(_)
+                    | CellValue::String(_)
+                    | CellValue::Error(_)
+                    | CellValue::RichText(_)
+            ) {
+                let scalar_input = cell_value_to_scalar_json_input(&input);
+                this.set_cell_internal(sheet, address, scalar_input)?;
 
-            // Preserve the typed representation for `getCellRich.input`.
-            //
-            // Note: For rich text values, the engine currently only stores the plain string value.
-            // Persisting the input here allows callers to round-trip rich text styling even though
-            // `getCellRich.value` will still reflect the scalar engine value.
-            if !input.is_empty() {
-                let sheet = self.ensure_sheet(sheet);
-                let address = Self::parse_address(address)?.to_a1();
-                self.sheets_rich
-                    .entry(sheet)
-                    .or_default()
-                    .insert(address, input);
+                // Preserve the typed representation for `getCellRich.input`.
+                //
+                // Note: For rich text values, the engine currently only stores the plain string value.
+                // Persisting the input here allows callers to round-trip rich text styling even though
+                // `getCellRich.value` will still reflect the scalar engine value.
+                if !input.is_empty() {
+                    let sheet = this.ensure_sheet(sheet);
+                    let address = Self::parse_address(address)?.to_a1();
+                    this.sheets_rich
+                        .entry(sheet)
+                        .or_default()
+                        .insert(address, input);
+                }
+
+                return Ok(());
             }
 
-            return Ok(());
-        }
+            let sheet = this.ensure_sheet(sheet);
+            let cell_ref = Self::parse_address(address)?;
+            let address = cell_ref.to_a1();
 
-        let sheet = self.ensure_sheet(sheet);
-        let cell_ref = Self::parse_address(address)?;
-        let address = cell_ref.to_a1();
-
-        if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
-            let edited_row = cell_ref.row;
-            let edited_col = cell_ref.col;
-            for row in origin.row..=end.row {
-                for col in origin.col..=end.col {
-                    // Skip the origin cell (top-left); we only need to clear spill outputs.
-                    if row == origin.row && col == origin.col {
-                        continue;
+            if let Some((origin, end)) = this.engine.spill_range(&sheet, &address) {
+                let edited_row = cell_ref.row;
+                let edited_col = cell_ref.col;
+                for row in origin.row..=end.row {
+                    for col in origin.col..=end.col {
+                        // Skip the origin cell (top-left); we only need to clear spill outputs.
+                        if row == origin.row && col == origin.col {
+                            continue;
+                        }
+                        // If the user overwrote a spill output cell with a literal value, don't emit a
+                        // spill-clear change for that cell; the caller already knows its new input.
+                        if row == edited_row && col == edited_col {
+                            continue;
+                        }
+                        this.pending_spill_clears
+                            .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
                     }
-                    // If the user overwrote a spill output cell with a literal value, don't emit a
-                    // spill-clear change for that cell; the caller already knows its new input.
-                    if row == edited_row && col == edited_col {
-                        continue;
-                    }
-                    self.pending_spill_clears
-                        .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
                 }
             }
-        }
 
-        let sheet_cells = self
-            .sheets
-            .get_mut(&sheet)
-            .expect("sheet just ensured must exist");
-        let sheet_cells_rich = self
-            .sheets_rich
-            .get_mut(&sheet)
-            .expect("sheet just ensured must exist");
+            let sheet_cells = this
+                .sheets
+                .get_mut(&sheet)
+                .expect("sheet just ensured must exist");
+            let sheet_cells_rich = this
+                .sheets_rich
+                .get_mut(&sheet)
+                .expect("sheet just ensured must exist");
 
-        // Convert model cell value into the engine's runtime value.
-        //
-        // NOTE: Today we do not support directly setting dynamic arrays/spill markers via the WASM
-        // worker API. If callers send `array`/`spill` values, feed a `#SPILL!` error into the engine
-        // but still store the rich input for round-tripping through `getCellRich`.
-        let engine_value = match &input {
-            CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Error(ErrorKind::Spill),
-            CellValue::Image(image) => EngineValue::Text(
-                image
-                    .alt_text
-                    .clone()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "[Image]".to_string()),
-            ),
-            _ => cell_value_to_engine_rich(&input)?,
-        };
-        self.engine
-            .set_cell_value(&sheet, &address, engine_value)
-            .map_err(|err| js_err(err.to_string()))?;
+            // Convert model cell value into the engine's runtime value.
+            //
+            // NOTE: Today we do not support directly setting dynamic arrays/spill markers via the WASM
+            // worker API. If callers send `array`/`spill` values, feed a `#SPILL!` error into the engine
+            // but still store the rich input for round-tripping through `getCellRich`.
+            let engine_value = match &input {
+                CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Error(ErrorKind::Spill),
+                CellValue::Image(image) => EngineValue::Text(
+                    image
+                        .alt_text
+                        .clone()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "[Image]".to_string()),
+                ),
+                _ => cell_value_to_engine_rich(&input)?,
+            };
+            this.engine
+                .set_cell_value(&sheet, &address, engine_value)
+                .map_err(|err| js_err(err.to_string()))?;
 
-        // Rich values are not representable in the scalar workbook input schema; preserve scalar
-        // compatibility by removing any stored scalar input for this cell.
-        sheet_cells.remove(&address);
+            // Rich values are not representable in the scalar workbook input schema; preserve scalar
+            // compatibility by removing any stored scalar input for this cell.
+            sheet_cells.remove(&address);
 
-        // Store the full rich input for `getCellRich.input`.
-        sheet_cells_rich.insert(address.clone(), input);
+            // Store the full rich input for `getCellRich.input`.
+            sheet_cells_rich.insert(address.clone(), input);
 
-        self.pending_spill_clears
-            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-        self.pending_formula_baselines
-            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-        Ok(())
+            this.pending_spill_clears
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            this.pending_formula_baselines
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            Ok(())
+        })
     }
     fn get_cell_data(&self, sheet: &str, address: &str) -> Result<CellData, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
@@ -2517,151 +2608,161 @@ impl WorkbookState {
     }
 
     fn apply_operation_internal(&mut self, dto: EditOpDto) -> Result<EditResultDto, JsValue> {
-        let spill_outputs_before = self.collect_spill_output_cells();
-        let op = self.edit_op_from_dto(dto)?;
-        self.remap_pending_keys_for_edit(&op);
+        let previous = self.engine.calc_settings().clone();
+        if previous.calculation_mode != CalculationMode::Manual {
+            let mut manual = previous.clone();
+            manual.calculation_mode = CalculationMode::Manual;
+            self.engine.set_calc_settings(manual);
+        }
 
-        let result: EngineEditResult = self
-            .engine
-            .apply_operation(op)
-            .map_err(|err| js_err(edit_error_to_string(err)))?;
+        let out = (|| {
+            let spill_outputs_before = self.collect_spill_output_cells();
+            let op = self.edit_op_from_dto(dto)?;
+            self.remap_pending_keys_for_edit(&op);
 
-        // Update the persisted input map used by `toJson` and `getCell.input`.
-        for change in &result.changed_cells {
-            let sheet = self.ensure_sheet(&change.sheet);
-            let address = change.cell.to_a1();
-            let sheet_cells = self
-                .sheets
-                .get_mut(&sheet)
-                .expect("sheet just ensured must exist");
+            let result: EngineEditResult = self
+                .engine
+                .apply_operation(op)
+                .map_err(|err| js_err(edit_error_to_string(err)))?;
 
-            match &change.after {
-                None => {
-                    sheet_cells.remove(&address);
-                }
-                Some(after) => {
-                    if let Some(formula) = after.formula.as_deref() {
-                        sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
-                    } else {
-                        let Some(value) = engine_value_to_scalar_json_input(after.value.clone())
-                        else {
-                            sheet_cells.remove(&address);
-                            continue;
-                        };
-                        sheet_cells.insert(address.clone(), value);
+            // Update the persisted input map used by `toJson` and `getCell.input`.
+            for change in &result.changed_cells {
+                let sheet = self.ensure_sheet(&change.sheet);
+                let address = change.cell.to_a1();
+                let sheet_cells = self
+                    .sheets
+                    .get_mut(&sheet)
+                    .expect("sheet just ensured must exist");
+
+                match &change.after {
+                    None => {
+                        sheet_cells.remove(&address);
+                    }
+                    Some(after) => {
+                        if let Some(formula) = after.formula.as_deref() {
+                            sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
+                        } else {
+                            let Some(value) = engine_value_to_scalar_json_input(after.value.clone())
+                            else {
+                                sheet_cells.remove(&address);
+                                continue;
+                            };
+                            sheet_cells.insert(address.clone(), value);
+                        }
                     }
                 }
             }
-        }
 
-        // Preserve the WASM worker semantics where formula cells return blank values until the next
-        // explicit `recalculate()` call.
-        for change in &result.changed_cells {
-            let Some(after) = &change.after else {
+            // Preserve the WASM worker semantics where formula cells return blank values until the next
+            // explicit `recalculate()` call.
+            for change in &result.changed_cells {
+                let Some(after) = &change.after else {
+                    let sheet = self.ensure_sheet(&change.sheet);
+                    self.pending_spill_clears
+                        .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
+                    self.pending_formula_baselines
+                        .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
+                    continue;
+                };
+
                 let sheet = self.ensure_sheet(&change.sheet);
-                self.pending_spill_clears
-                    .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
-                self.pending_formula_baselines
-                    .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
-                continue;
-            };
+                let address = change.cell.to_a1();
+                let key = FormulaCellKey::new(sheet.clone(), change.cell);
 
-            let sheet = self.ensure_sheet(&change.sheet);
-            let address = change.cell.to_a1();
-            let key = FormulaCellKey::new(sheet.clone(), change.cell);
+                if let Some(formula) = after.formula.as_deref() {
+                    self.pending_formula_baselines
+                        .entry(key)
+                        .or_insert_with(|| engine_value_to_json(self.engine.get_cell_value(&sheet, &address)));
 
-            if let Some(formula) = after.formula.as_deref() {
-                self.pending_formula_baselines
-                    .entry(key)
-                    .or_insert_with(|| {
-                        engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
-                    });
-
-                // Reset stored value to blank while preserving the formula. This matches the
-                // `setCell` behavior where formula results are treated as unknown until recalc.
-                self.engine
-                    .set_cell_value(&sheet, &address, EngineValue::Blank)
-                    .map_err(|err| js_err(err.to_string()))?;
-                self.engine
-                    .set_cell_formula(&sheet, &address, formula)
-                    .map_err(|err| js_err(err.to_string()))?;
-            } else {
-                // This cell is now a literal (or empty) value; remove any stale baseline.
-                self.pending_formula_baselines.remove(&key);
-            }
-        }
-
-        // Spill ranges are maintained by the engine across recalc ticks, but `apply_operation`
-        // rebuilds the dependency graph (and clears spill metadata). Capture spill output cells from
-        // before the edit so the next `recalculate()` call can emit `null` deltas for any now-stale
-        // spill values that would otherwise be lost.
-        for key in spill_outputs_before {
-            let address = key.address();
-            let has_input = self
-                .sheets
-                .get(&key.sheet)
-                .and_then(|cells| cells.get(&address))
-                .is_some();
-            if has_input {
-                continue;
-            }
-            self.pending_spill_clears.insert(key);
-        }
-
-        // Convert to JS-friendly DTO.
-        let mut changed_cells = Vec::with_capacity(result.changed_cells.len());
-        for change in &result.changed_cells {
-            let address = change.cell.to_a1();
-            let before = change.before.as_ref().map(|snap| EditCellSnapshotDto {
-                value: engine_value_to_json(snap.value.clone()),
-                formula: snap.formula.clone(),
-            });
-            let after = change.after.as_ref().map(|snap| {
-                let is_formula = snap.formula.is_some();
-                EditCellSnapshotDto {
-                    value: if is_formula {
-                        JsonValue::Null
-                    } else {
-                        engine_value_to_json(snap.value.clone())
-                    },
-                    formula: snap.formula.clone(),
+                    // Reset stored value to blank while preserving the formula. This matches the
+                    // `setCell` behavior where formula results are treated as unknown until recalc.
+                    self.engine
+                        .set_cell_value(&sheet, &address, EngineValue::Blank)
+                        .map_err(|err| js_err(err.to_string()))?;
+                    self.engine
+                        .set_cell_formula(&sheet, &address, formula)
+                        .map_err(|err| js_err(err.to_string()))?;
+                } else {
+                    // This cell is now a literal (or empty) value; remove any stale baseline.
+                    self.pending_formula_baselines.remove(&key);
                 }
-            });
+            }
 
-            changed_cells.push(EditCellChangeDto {
-                sheet: change.sheet.clone(),
-                address,
-                before,
-                after,
-            });
-        }
+            // Spill ranges are maintained by the engine across recalc ticks, but `apply_operation`
+            // rebuilds the dependency graph (and clears spill metadata). Capture spill output cells from
+            // before the edit so the next `recalculate()` call can emit `null` deltas for any now-stale
+            // spill values that would otherwise be lost.
+            for key in spill_outputs_before {
+                let address = key.address();
+                let has_input = self
+                    .sheets
+                    .get(&key.sheet)
+                    .and_then(|cells| cells.get(&address))
+                    .is_some();
+                if has_input {
+                    continue;
+                }
+                self.pending_spill_clears.insert(key);
+            }
 
-        let moved_ranges = result
-            .moved_ranges
-            .iter()
-            .map(|m| EditMovedRangeDto {
-                sheet: m.sheet.clone(),
-                from: m.from.to_string(),
-                to: m.to.to_string(),
+            // Convert to JS-friendly DTO.
+            let mut changed_cells = Vec::with_capacity(result.changed_cells.len());
+            for change in &result.changed_cells {
+                let address = change.cell.to_a1();
+                let before = change.before.as_ref().map(|snap| EditCellSnapshotDto {
+                    value: engine_value_to_json(snap.value.clone()),
+                    formula: snap.formula.clone(),
+                });
+                let after = change.after.as_ref().map(|snap| {
+                    let is_formula = snap.formula.is_some();
+                    EditCellSnapshotDto {
+                        value: if is_formula {
+                            JsonValue::Null
+                        } else {
+                            engine_value_to_json(snap.value.clone())
+                        },
+                        formula: snap.formula.clone(),
+                    }
+                });
+
+                changed_cells.push(EditCellChangeDto {
+                    sheet: change.sheet.clone(),
+                    address,
+                    before,
+                    after,
+                });
+            }
+
+            let moved_ranges = result
+                .moved_ranges
+                .iter()
+                .map(|m| EditMovedRangeDto {
+                    sheet: m.sheet.clone(),
+                    from: m.from.to_string(),
+                    to: m.to.to_string(),
+                })
+                .collect();
+
+            let formula_rewrites = result
+                .formula_rewrites
+                .iter()
+                .map(|r| EditFormulaRewriteDto {
+                    sheet: r.sheet.clone(),
+                    address: r.cell.to_a1(),
+                    before: r.before.clone(),
+                    after: r.after.clone(),
+                })
+                .collect();
+
+            Ok(EditResultDto {
+                changed_cells,
+                moved_ranges,
+                formula_rewrites,
             })
-            .collect();
+        })();
 
-        let formula_rewrites = result
-            .formula_rewrites
-            .iter()
-            .map(|r| EditFormulaRewriteDto {
-                sheet: r.sheet.clone(),
-                address: r.cell.to_a1(),
-                before: r.before.clone(),
-                after: r.after.clone(),
-            })
-            .collect();
-
-        Ok(EditResultDto {
-            changed_cells,
-            moved_ranges,
-            formula_rewrites,
-        })
+        self.engine.set_calc_settings(previous);
+        out
     }
 
     fn set_locale_id(&mut self, locale_id: &str) -> bool {
@@ -2672,9 +2773,16 @@ impl WorkbookState {
             return false;
         };
 
+        let previous = self.engine.calc_settings().clone();
+        if previous.calculation_mode != CalculationMode::Manual {
+            let mut manual = previous.clone();
+            manual.calculation_mode = CalculationMode::Manual;
+            self.engine.set_calc_settings(manual);
+        }
         self.formula_locale = formula_locale;
         self.engine.set_locale_config(formula_locale.config.clone());
         self.engine.set_value_locale(value_locale);
+        self.engine.set_calc_settings(previous);
         true
     }
 }
@@ -3124,6 +3232,66 @@ impl WasmWorkbook {
         }
     }
 
+    #[wasm_bindgen(js_name = "getCalcSettings")]
+    pub fn get_calc_settings(&self) -> Result<JsValue, JsValue> {
+        let settings = self.inner.engine.calc_settings();
+        let dto = CalcSettingsDto {
+            calculation_mode: settings.calculation_mode.into(),
+            calculate_before_save: settings.calculate_before_save,
+            full_precision: settings.full_precision,
+            full_calc_on_load: settings.full_calc_on_load,
+            iterative: IterativeCalcSettingsDto {
+                enabled: settings.iterative.enabled,
+                max_iterations: settings.iterative.max_iterations,
+                max_change: settings.iterative.max_change,
+            },
+        };
+
+        use serde::ser::Serialize as _;
+        dto.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "setCalcSettings")]
+    pub fn set_calc_settings(&mut self, settings: JsValue) -> Result<(), JsValue> {
+        if settings.is_null() || settings.is_undefined() {
+            return Err(js_err("settings must be an object"));
+        }
+
+        let dto: CalcSettingsInputDto = serde_wasm_bindgen::from_value(settings)
+            .map_err(|err| js_err(format!("invalid calc settings: {err}")))?;
+
+        if !dto.iterative.max_iterations.is_finite()
+            || dto.iterative.max_iterations < 0.0
+            || dto.iterative.max_iterations > u32::MAX as f64
+            || dto.iterative.max_iterations.fract() != 0.0
+        {
+            return Err(js_err(
+                "iterative.maxIterations must be a non-negative integer",
+            ));
+        }
+        let max_iterations = dto.iterative.max_iterations as u32;
+        if !dto.iterative.max_change.is_finite() || dto.iterative.max_change < 0.0 {
+            return Err(js_err(
+                "iterative.maxChange must be a finite number greater than or equal to 0",
+            ));
+        }
+
+        self.inner.engine.set_calc_settings(CalcSettings {
+            calculation_mode: dto.calculation_mode.into(),
+            calculate_before_save: dto.calculate_before_save,
+            iterative: IterativeCalculationSettings {
+                enabled: dto.iterative.enabled,
+                max_iterations,
+                max_change: dto.iterative.max_change,
+            },
+            full_precision: dto.full_precision,
+            full_calc_on_load: dto.full_calc_on_load,
+        });
+
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = "fromJson")]
     pub fn from_json(json: &str) -> Result<WasmWorkbook, JsValue> {
         #[derive(Debug, Deserialize)]
@@ -3326,6 +3494,9 @@ impl WasmWorkbook {
                 sheet_cells.insert(address, cell_value_to_scalar_json_input(&cell.value));
             }
         }
+
+        // Propagate workbook calculation settings into the engine.
+        wb.engine.set_calc_settings(model.calc_settings.clone());
 
         if wb.sheets.is_empty() {
             wb.ensure_sheet(DEFAULT_SHEET);
@@ -4983,6 +5154,28 @@ mod tests {
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
         assert_eq!(parsed2["sheets"]["Sheet1"]["cells"]["A2"], json!("=A1*2"));
+    }
+
+    #[test]
+    fn from_xlsx_bytes_imports_calc_settings_into_engine() {
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsx/tests/fixtures/calc_settings.xlsx"
+        ));
+
+        let wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+        let settings = wb.inner.engine.calc_settings();
+
+        assert_eq!(settings.calculation_mode, CalculationMode::Manual);
+        assert!(settings.calculate_before_save);
+        assert!(settings.iterative.enabled);
+        assert_eq!(settings.iterative.max_iterations, 10);
+        assert!((settings.iterative.max_change - 0.0001).abs() < 1e-12);
+        assert!(settings.full_precision);
+        assert!(
+            !settings.full_calc_on_load,
+            "fixture does not set fullCalcOnLoad, default should be false"
+        );
     }
 
     #[test]

@@ -1,6 +1,9 @@
 export { createEngineClient } from "./client.ts";
 export type { EngineClient } from "./client.ts";
 export type {
+  CalcSettings,
+  CalculationMode,
+  IterativeCalcSettings,
   CellChange,
   CellData,
   CellDataRich,

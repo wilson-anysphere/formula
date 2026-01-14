@@ -9274,6 +9274,24 @@ const ribbonActions = createRibbonActionsFromCommands({
   onCommandError: onRibbonCommandError,
   onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
   commandOverrides: {
+    "pageLayout.arrange.selectionPane": () => {
+      // Excel-style: "Selection Pane" should be idempotent. If the panel is already open,
+      // activate/focus it instead of toggling it closed.
+      openRibbonPanel(PanelIds.SELECTION_PANE);
+      // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
+      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>("[data-testid=\"selection-pane\"]");
+            try {
+              el?.focus();
+            } catch {
+              // Best-effort.
+            }
+          }),
+        );
+      }
+    },
     // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
     // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
     // and command palette stay consistent.

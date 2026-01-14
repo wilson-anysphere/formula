@@ -63,6 +63,14 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => ({
+        calculationMode: "manual",
+        calculateBeforeSave: true,
+        fullPrecision: true,
+        fullCalcOnLoad: false,
+        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
+      })),
+      setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
@@ -136,6 +144,14 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => ({
+        calculationMode: "manual",
+        calculateBeforeSave: true,
+        fullPrecision: true,
+        fullCalcOnLoad: false,
+        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
+      })),
+      setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => {
         calls.push("recalculate");
         return [];
@@ -308,6 +324,14 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => ({
+        calculationMode: "manual",
+        calculateBeforeSave: true,
+        fullPrecision: true,
+        fullCalcOnLoad: false,
+        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
+      })),
+      setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),

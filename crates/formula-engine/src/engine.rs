@@ -436,11 +436,9 @@ impl Workbook {
         );
         self.sheet_order = new_order;
     }
-
     fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
         self.sheet_order.iter().position(|&id| id == sheet)
     }
-
     /// Reorder a worksheet id within the workbook's tab order.
     ///
     /// This only affects `sheet_order` (sheet ids are stable and do not change).

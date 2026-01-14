@@ -28,6 +28,8 @@ type WasmWorkbookInstance = {
   setCellRich?: (address: string, value: unknown, sheet?: string) => void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
   setLocale?: (localeId: string) => boolean;
+  getCalcSettings?: () => unknown;
+  setCalcSettings?: (settings: unknown) => void;
   getRange(range: string, sheet?: string): unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
@@ -571,6 +573,19 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               } else {
                 result = false;
               }
+              break;
+            case "getCalcSettings":
+              if (typeof (wb as any).getCalcSettings !== "function") {
+                throw new Error("getCalcSettings: WasmWorkbook.getCalcSettings is not available in this WASM build");
+              }
+              result = cloneToPlainData((wb as any).getCalcSettings());
+              break;
+            case "setCalcSettings":
+              if (typeof (wb as any).setCalcSettings !== "function") {
+                throw new Error("setCalcSettings: WasmWorkbook.setCalcSettings is not available in this WASM build");
+              }
+              (wb as any).setCalcSettings(params.settings);
+              result = null;
               break;
             case "setWorkbookFileMetadata":
               if (typeof (wb as any).setWorkbookFileMetadata !== "function") {

@@ -647,9 +647,27 @@ validate_static() {
     local label="$1"
     local left_re="$2"
     local right_re="$3"
-    local pattern
-    pattern="(${left_re}).*\\bor\\b.*(${right_re})|(${right_re}).*\\bor\\b.*(${left_re})"
-    if ! printf '%s\n' "${requires}" | grep -Eqi "${pattern}"; then
+    # The RPM metadata should express these dependencies as a single "rich dependency"
+    # OR expression (e.g. `(gtk3 or libgtk-3-0)`), not as two independent requirements.
+    #
+    # Avoid `\b` word-boundary regex constructs here: they're not portable across grep
+    # implementations (BSD vs GNU). Instead, treat any non-word character as a boundary.
+    local word_boundary_or_re
+    word_boundary_or_re='(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
+
+    local matched=0
+    local line
+    while IFS= read -r line; do
+      if printf '%s\n' "$line" | grep -Eqi "${left_re}" &&
+        printf '%s\n' "$line" | grep -Eqi "${right_re}" &&
+        printf '%s\n' "$line" | grep -Eqi "${word_boundary_or_re}"
+      then
+        matched=1
+        break
+      fi
+    done <<<"${requires}"
+
+    if [[ "${matched}" -ne 1 ]]; then
       die "RPM metadata missing rich dependency OR expression (${label}); expected a line containing both '${left_re}' and '${right_re}' joined by 'or'"
     fi
   }

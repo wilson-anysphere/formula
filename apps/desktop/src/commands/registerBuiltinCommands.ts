@@ -426,6 +426,22 @@ export function registerBuiltinCommands(params: {
   let fontColorPicker: HTMLInputElement | null = null;
   let fillColorPicker: HTMLInputElement | null = null;
 
+  const refresh = (): void => {
+    try {
+      refreshRibbonUiState?.();
+    } catch {
+      // ignore
+    }
+  };
+
+  const focusApp = (): void => {
+    try {
+      (app as any)?.focus?.();
+    } catch {
+      // ignore
+    }
+  };
+
   const openColorPicker = (
     input: HTMLInputElement,
     label: string,

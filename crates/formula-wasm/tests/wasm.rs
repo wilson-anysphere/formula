@@ -97,6 +97,24 @@ struct CellData {
     value: JsonValue,
 }
 
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct CalcSettings {
+    calculation_mode: String,
+    calculate_before_save: bool,
+    full_precision: bool,
+    full_calc_on_load: bool,
+    iterative: IterativeCalcSettings,
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct IterativeCalcSettings {
+    enabled: bool,
+    max_iterations: u32,
+    max_change: f64,
+}
+
 #[wasm_bindgen_test]
 fn debug_function_registry_contains_builtins() {
     // Ensure the wasm module invoked Rust global constructors before touching the
@@ -2249,4 +2267,21 @@ fn get_pivot_field_items_deduplicates_and_sorts() {
             PivotValue::Blank
         ]
     );
+}
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_populates_calc_settings_via_get_calc_settings() {
+    let bytes = include_bytes!("../../formula-xlsx/tests/fixtures/calc_settings.xlsx");
+    let wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    let settings_js = wb.get_calc_settings().unwrap();
+    let settings: CalcSettings = serde_wasm_bindgen::from_value(settings_js).unwrap();
+
+    assert_eq!(settings.calculation_mode, "manual");
+    assert!(settings.calculate_before_save);
+    assert!(settings.full_precision);
+    assert!(!settings.full_calc_on_load);
+    assert!(settings.iterative.enabled);
+    assert_eq!(settings.iterative.max_iterations, 10);
+    assert!((settings.iterative.max_change - 0.0001).abs() < 1e-12);
 }

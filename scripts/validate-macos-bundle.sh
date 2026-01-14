@@ -481,6 +481,7 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
                     normalized = ext.strip().lower().lstrip(".")
                     if normalized:
                         found_exts.add(normalized)
+                        found_exts.add(normalized)
 
 if not found_exts:
     print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")

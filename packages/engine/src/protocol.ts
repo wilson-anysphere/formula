@@ -11,6 +11,28 @@
 export type CellScalar = number | string | boolean | null;
 
 /**
+ * Workbook-wide calculation settings (Excel `calcPr`).
+ *
+ * This mirrors the JS-friendly DTO exposed by `crates/formula-wasm` via
+ * `WasmWorkbook.getCalcSettings()` / `WasmWorkbook.setCalcSettings()`.
+ */
+export type CalculationMode = "automatic" | "automaticNoTable" | "manual";
+
+export interface IterativeCalcSettings {
+  enabled: boolean;
+  maxIterations: number;
+  maxChange: number;
+}
+
+export interface CalcSettings {
+  calculationMode: CalculationMode;
+  calculateBeforeSave: boolean;
+  fullPrecision: boolean;
+  fullCalcOnLoad: boolean;
+  iterative: IterativeCalcSettings;
+}
+
+/**
  * JSON-friendly rich cell value transported over the worker RPC boundary.
  *
  * This mirrors `formula_model::CellValue`'s `{type,value}` tagged schema.

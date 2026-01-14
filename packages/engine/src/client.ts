@@ -1,4 +1,5 @@
 import type {
+  CalcSettings,
   CellChange,
   CellData,
   CellDataRich,
@@ -135,6 +136,16 @@ export interface EngineClient {
    * Returns `false` when the locale id is not supported by the engine build.
    */
   setLocale(localeId: string, options?: RpcOptions): Promise<boolean>;
+
+  /**
+   * Read the workbook calculation settings (`calcPr`).
+   */
+  getCalcSettings(options?: RpcOptions): Promise<CalcSettings>;
+
+  /**
+   * Replace the workbook calculation settings (`calcPr`).
+   */
+  setCalcSettings(settings: CalcSettings, options?: RpcOptions): Promise<void>;
   /**
    * Recalculate the workbook and return value-change deltas.
    *
@@ -389,6 +400,9 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setColHidden(col, hidden, sheet, rpcOptions)),
     internStyle: async (style, rpcOptions) => await withEngine((connected) => connected.internStyle(style, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
+    getCalcSettings: async (rpcOptions) => await withEngine((connected) => connected.getCalcSettings(rpcOptions)),
+    setCalcSettings: async (settings, rpcOptions) =>
+      await withEngine((connected) => connected.setCalcSettings(settings, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
       await withEngine((connected) => connected.getPivotSchema(sheet, sourceRangeA1, sampleSize, rpcOptions)),
