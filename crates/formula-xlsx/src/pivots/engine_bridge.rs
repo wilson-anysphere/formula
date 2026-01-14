@@ -458,7 +458,7 @@ pub fn pivot_table_to_engine_config(
             });
 
             Some(FilterField {
-                source_field,
+                source_field: source_field.into(),
                 allowed,
             })
         })

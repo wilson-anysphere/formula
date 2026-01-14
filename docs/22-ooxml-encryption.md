@@ -39,8 +39,8 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `crates/formula-io/src/encrypted_package_reader.rs`
   - Verifies the password and unwraps the package key, then decrypts `EncryptedPackage` on demand as
     a `Read + Seek` stream.
-- **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification):**
-  `crates/formula-xlsx/src/offcrypto/*`
+ - **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification when present):**
+   `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
   `crates/formula-office-crypto`
   - Note: `formula-office-crypto` also validates `dataIntegrity` (HMAC) and returns
@@ -65,7 +65,7 @@ uses today: **Agile Encryption (version 4.4) with password-based key encryption*
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` HMAC verification (required by `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto`; algorithm documented below). `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`. |
+| Integrity | `dataIntegrity` HMAC verification **when `<dataIntegrity>` is present** (algorithm documented below). Some real-world producers omit the `<dataIntegrity>` element; in that case `crates/formula-xlsx::offcrypto` will still decrypt `EncryptedPackage` but **skips integrity verification** (and `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`). `crates/formula-office-crypto` still requires `dataIntegrity`. `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`. |
 
 ### Explicitly unsupported (hard errors)
 
@@ -327,15 +327,25 @@ Agile encryption can include a package-level integrity check via:
 <dataIntegrity encryptedHmacKey="..." encryptedHmacValue="..."/>
 ```
 
-In Formula, this is **not optional** for correctness when we want good error semantics:
+In Formula, validating this HMAC (when the metadata is available) is important for good error
+semantics:
 
 - “password wrong” should not surface as “ZIP is corrupt”
 - file tampering/corruption should be detected even if the decrypted ZIP happens to parse
 
-Implementation note: the strict Agile decryptors in this repo currently **require** the
-`<dataIntegrity>` element to be present (they will treat a missing `dataIntegrity` as a malformed
-wrapper). `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`, so it
-may successfully open some inputs that the strict decryptors reject.
+When `<dataIntegrity>` is absent, Formula can still decrypt the package, but cannot verify integrity
+(and callers should treat the decrypted bytes as unauthenticated).
+
+Implementation note:
+
+- `crates/formula-xlsx::offcrypto` treats `<dataIntegrity>` as **optional**:
+  - if present: Formula validates the HMAC as described below
+  - if absent: Formula decrypts successfully but does **not** verify integrity (and
+    `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`)
+- `crates/formula-office-crypto` currently requires `<dataIntegrity>` and treats a missing element as
+  a malformed wrapper.
+- `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`, so it may
+  successfully open some inputs even when integrity metadata is missing or inconsistent.
 
 ### What bytes are authenticated (critical)
 

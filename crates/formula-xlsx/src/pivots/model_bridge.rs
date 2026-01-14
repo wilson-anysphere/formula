@@ -47,7 +47,7 @@ pub fn pivot_table_to_model_value_fields(
 
             let source_field = PivotFieldRef::CacheFieldName(source_field_name);
             Some(ValueField {
-                source_field,
+                source_field: source_field.into(),
                 name,
                 aggregation,
                 number_format,

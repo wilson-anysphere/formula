@@ -467,3 +467,55 @@ fn agile_decrypt_warns_on_multiple_password_key_encryptors() {
         "expected MultiplePasswordKeyEncryptors warning, got: {warnings:?}"
     );
 }
+
+#[test]
+fn agile_decrypt_succeeds_without_data_integrity_and_warns() {
+    // Some non-Excel producers omit the `<dataIntegrity>` element. Formula should still be able to
+    // decrypt, but must skip integrity verification and surface a warning through the warnings API.
+    let encrypted_cfb = std::fs::read(fixture_path("agile.xlsx")).expect("read agile.xlsx");
+    let expected = std::fs::read(fixture_path("plaintext.xlsx")).expect("read plaintext.xlsx");
+
+    let mut encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Remove the `<dataIntegrity .../>` element from the XML.
+    let xml_start = encryption_info
+        .iter()
+        .position(|b| *b == b'<')
+        .expect("EncryptionInfo must contain XML");
+    let header = encryption_info[..xml_start].to_vec();
+    let xml = std::str::from_utf8(&encryption_info[xml_start..]).expect("EncryptionInfo XML is UTF-8");
+
+    let start = xml
+        .find("<dataIntegrity")
+        .expect("expected <dataIntegrity> element");
+    let end = if let Some(end_rel) = xml[start..].find("/>") {
+        start + end_rel + 2
+    } else if let Some(end_rel) = xml[start..].find("</dataIntegrity>") {
+        start + end_rel + "</dataIntegrity>".len()
+    } else {
+        panic!("expected </dataIntegrity> or />");
+    };
+
+    let mut patched_xml = String::new();
+    patched_xml.push_str(&xml[..start]);
+    patched_xml.push_str(&xml[end..]);
+
+    encryption_info = header.into_iter().chain(patched_xml.into_bytes()).collect();
+
+    let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "password")
+        .expect("decrypt without dataIntegrity should succeed");
+    assert_eq!(decrypted, expected);
+
+    let (decrypted, warnings) = decrypt_agile_encrypted_package_with_warnings(
+        &encryption_info,
+        &encrypted_package,
+        "password",
+    )
+    .expect("decrypt with warnings should succeed");
+    assert_eq!(decrypted, expected);
+    assert!(
+        warnings.contains(&OffCryptoWarning::MissingDataIntegrity),
+        "expected MissingDataIntegrity warning, got: {warnings:?}"
+    );
+}

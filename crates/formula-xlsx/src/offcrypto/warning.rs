@@ -11,10 +11,10 @@ pub enum OffCryptoWarning {
     /// Decryption is deterministic: the first password key encryptor wins.
     MultiplePasswordKeyEncryptors { count: usize },
 
-    /// The `EncryptionInfo` XML omitted the `<dataIntegrity>` element.
+    /// The Agile `EncryptionInfo` XML omitted the `<dataIntegrity>` element.
     ///
-    /// Formula can still decrypt the document (after password verification), but cannot validate the
-    /// encrypted package integrity (HMAC).
+    /// Formula can still decrypt the `EncryptedPackage`, but cannot verify integrity (HMAC) without
+    /// the encrypted HMAC key/value blobs.
     MissingDataIntegrity,
 
     /// The document declared a `hashSize` that differs from the typical default for the selected
