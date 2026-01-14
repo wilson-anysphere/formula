@@ -4,10 +4,31 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const tauriConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
-const infoPlistPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "Info.plist");
+
+/**
+ * Resolve a path that may be absolute or repo-relative.
+ * @param {string | undefined} value
+ * @param {string} fallback
+ */
+function resolvePath(value, fallback) {
+  if (value && String(value).trim()) {
+    const p = String(value).trim();
+    return path.isAbsolute(p) ? p : path.join(repoRoot, p);
+  }
+  return fallback;
+}
+
+const tauriConfigPath = resolvePath(
+  process.env.FORMULA_TAURI_CONF_PATH,
+  path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"),
+);
+const infoPlistPath = resolvePath(
+  process.env.FORMULA_INFO_PLIST_PATH,
+  path.join(repoRoot, "apps", "desktop", "src-tauri", "Info.plist"),
+);
 
 const REQUIRED_SCHEME = "formula";
+const REQUIRED_FILE_EXT = "xlsx";
 
 /**
  * @param {string} message
@@ -100,6 +121,19 @@ function main() {
       "Expected apps/desktop/src-tauri/tauri.conf.json to include bundle.fileAssociations so Linux .desktop metadata can include file MIME types.",
     ]);
   } else {
+    const hasRequiredExt = fileAssociations.some((assoc) => {
+      const rawExt = /** @type {any} */ (assoc)?.ext;
+      const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
+      return exts.some((e) => String(e).trim().toLowerCase().replace(/^\./, "") === REQUIRED_FILE_EXT);
+    });
+
+    if (!hasRequiredExt) {
+      errBlock("Missing desktop file association configuration (tauri.conf.json)", [
+        `Expected apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations to include an entry for .${REQUIRED_FILE_EXT}.`,
+        `Fix: add { ext: [\"${REQUIRED_FILE_EXT}\"], mimeType: \"...\" } to bundle.fileAssociations.`,
+      ]);
+    }
+
     const missingMime = fileAssociations
       .map((assoc, i) => ({ assoc, i }))
       .filter(({ assoc }) => typeof assoc?.mimeType !== "string" || assoc.mimeType.trim().length === 0);
@@ -127,4 +161,3 @@ function main() {
 }
 
 main();
-

@@ -60,6 +60,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run manifest unit tests (fast, dependency-free)
         run: node --test scripts/__tests__/release-manifest.test.mjs
+      - name: Run desktop bundle validator unit tests (fast, dependency-free)
+        run: |
+          node --test \
+            scripts/check-desktop-url-scheme.test.js \
+            scripts/validate-linux-appimage.test.js \
+            scripts/validate-linux-rpm.test.js \
+            scripts/validate-macos-bundle.test.js
 
       - name: "Guard: desktop Linux packaging compliance config (LICENSE/NOTICE/MIME)"
         run: node scripts/ci/check-desktop-compliance-artifacts.mjs
