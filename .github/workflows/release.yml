@@ -1155,7 +1155,7 @@ jobs:
               target/*|*/target/*) loc="workspace-target" ;;
             esac
 
-            out="debug-symbols/${ARTIFACT_LABEL}-${CACHE_TARGET}-${loc}-${base}.zip"
+            out="debug-symbols/debug-symbols-${ARTIFACT_LABEL}-${CACHE_TARGET}-${loc}-${base}.zip"
             echo "debug-symbols: zipping $dsym -> $out"
             rm -f "$out"
             # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
@@ -1398,7 +1398,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "debug-symbols" | Out-Null
           Copy-Item -Force $pdbPath "debug-symbols/formula-desktop.pdb"
 
-          $zipPath = "debug-symbols/$label-$cacheTarget-formula-desktop.pdb.zip"
+          $zipPath = "debug-symbols/debug-symbols-$label-$cacheTarget-formula-desktop.pdb.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path "debug-symbols/formula-desktop.pdb" -DestinationPath $zipPath
 
