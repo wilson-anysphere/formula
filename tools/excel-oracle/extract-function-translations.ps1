@@ -176,13 +176,16 @@ function Parse-LocalizedFunctionName {
   param([Parameter(Mandatory = $true)][string]$FormulaLocal)
 
   $s = $FormulaLocal.Trim()
-  if ($s.StartsWith("=")) {
-    $s = $s.Substring(1)
-  }
 
-  # Strip leading implicit-intersection marker if present.
-  if ($s.StartsWith("@")) {
-    $s = $s.Substring(1)
+  # Defensive: Excel sometimes serializes formulas with extra leading markers
+  # like `=+SUM(...)` or `=@SUM(...)`. Strip these before inspecting prefixes.
+  while ($s.Length -gt 0) {
+    $ch = $s.Substring(0, 1)
+    if ($ch -eq "=" -or $ch -eq "@" -or $ch -eq "+") {
+      $s = $s.Substring(1)
+      continue
+    }
+    break
   }
 
   # Some older Excel builds prefix unknown/new functions with `_xlfn.`.
@@ -196,11 +199,6 @@ function Parse-LocalizedFunctionName {
   # a newer Excel build / correct language pack.
   if ($s.StartsWith("_xludf.")) {
     throw "Excel treated function as user-defined (_xludf.). FormulaLocal=$FormulaLocal"
-  }
-
-  # Defensive: Excel occasionally emits formulas with a leading '+'.
-  if ($s.StartsWith("+")) {
-    $s = $s.Substring(1)
   }
 
   $idx = $s.IndexOf("(")
