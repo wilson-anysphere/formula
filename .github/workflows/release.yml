@@ -1581,7 +1581,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for cmd in dpkg dpkg-deb ldd awk sort grep file timeout; do
+          for cmd in dpkg dpkg-deb ldd awk sort grep file timeout Xvfb; do
             if ! command -v "${cmd}" >/dev/null 2>&1; then
               echo "::error::Missing required command '${cmd}' on PATH (expected on ubuntu runner)" >&2
               exit 1
