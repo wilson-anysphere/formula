@@ -310,6 +310,10 @@ jobs:
     needs: measure
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    concurrency:
+      # Avoid concurrent gh-pages pushes from multiple benchmark workflows (platform matrix, perf, etc).
+      group: benchmark-gh-pages-publish
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
@@ -326,6 +330,7 @@ jobs:
           path: artifacts/desktop-memory-perf
 
       - name: Publish benchmark results (non-gating)
+        continue-on-error: true
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter

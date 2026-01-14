@@ -752,6 +752,10 @@ jobs:
     needs: [desktop-perf, merge]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    concurrency:
+      # Avoid concurrent gh-pages pushes from multiple benchmark workflows.
+      group: benchmark-gh-pages-publish
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
