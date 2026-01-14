@@ -53,6 +53,19 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=PROMEDIO(1;2;3)", () => null, { localeId: "es-ES" })).toBe(2);
   });
 
+  it("treats localized boolean literals as booleans when a localeId is provided", () => {
+    expect(evaluateFormula("=WENN(1>0; WAHR; FALSCH)", () => null, { localeId: "de-DE" })).toBe(true);
+    expect(evaluateFormula("=SI(1>0; VRAI; FAUX)", () => null, { localeId: "fr-FR" })).toBe(true);
+    expect(evaluateFormula("=SI(1>0; VERDADERO; FALSO)", () => null, { localeId: "es-ES" })).toBe(true);
+  });
+
+  it("canonicalizes localized error literals (including inverted punctuation) when a localeId is provided", () => {
+    // de-DE #WERT! -> #VALUE!
+    expect(evaluateFormula('=WENNFEHLER(#WERT!; "fallback")', () => null, { localeId: "de-DE" })).toBe("fallback");
+    // es-ES #¡VALOR! -> #VALUE!
+    expect(evaluateFormula('=SI.ERROR(#¡VALOR!; "fallback")', () => null, { localeId: "es-ES" })).toBe("fallback");
+  });
+
   it("parses decimal commas and thousands separators when a comma-decimal localeId is provided", () => {
     // de-DE uses `,` decimals + `.` thousands separators.
     expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "de-DE" })).toBe(4);

@@ -140,6 +140,8 @@ function isIdentifierPart(ch: string): boolean {
 
 function isErrorBodyChar(ch: string): boolean {
   return (
+    ch === "¡" ||
+    ch === "¿" ||
     ch === "_" ||
     ch === "/" ||
     ch === "." ||

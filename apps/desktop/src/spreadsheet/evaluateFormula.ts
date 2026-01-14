@@ -11,6 +11,10 @@ import DE_DE_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/dat
 import ES_ES_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
 import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
 
+import DE_DE_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.errors.tsv?raw";
+import ES_ES_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.errors.tsv?raw";
+import FR_FR_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.errors.tsv?raw";
+
 export type SpreadsheetValue = number | string | boolean | null;
 export const PROVENANCE_REF_SEPARATOR = "\u001f";
 export type ProvenanceCellValue = { __cellRef: string; value: SpreadsheetValue };
@@ -155,6 +159,34 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = 
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
 };
 
+type ErrorTranslationMap = Map<string, string>;
+
+function parseErrorTranslationsTsv(tsv: string): ErrorTranslationMap {
+  const localizedToCanonical: ErrorTranslationMap = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    // Comment/header rows may begin with `#` but won't have `#...` in both columns.
+    if (!canonical.trim().startsWith("#") || !localized.trim().startsWith("#")) continue;
+
+    const canonUpper = casefoldIdent(canonical.trim());
+    const locUpper = casefoldIdent(localized.trim());
+    // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
+    if (canonUpper && locUpper && canonUpper !== locUpper) {
+      localizedToCanonical.set(locUpper, canonUpper);
+    }
+  }
+  return localizedToCanonical;
+}
+
+const ERROR_TRANSLATIONS_BY_LOCALE: Record<string, ErrorTranslationMap> = {
+  "de-DE": parseErrorTranslationsTsv(DE_DE_ERRORS_TSV),
+  "fr-FR": parseErrorTranslationsTsv(FR_FR_ERRORS_TSV),
+  "es-ES": parseErrorTranslationsTsv(ES_ES_ERRORS_TSV),
+};
+
 type NumberLocaleConfig = {
   decimalSeparator: "." | ",";
   thousandsSeparator: "." | "\u00A0" | "\u202F" | null;
@@ -273,6 +305,43 @@ function canonicalizeFunctionNameForLocale(name: string, localeId?: string): str
   const upper = casefoldIdent(base);
   const mapped = map?.get(upper) ?? upper;
   return hasPrefix ? `${PREFIX}${mapped}` : mapped;
+}
+
+function localizedBooleanLiteral(identUpper: string, localeId?: string): boolean | null {
+  switch (localeId) {
+    case "de-DE": {
+      if (identUpper === "WAHR") return true;
+      if (identUpper === "FALSCH") return false;
+      return null;
+    }
+    case "fr-FR": {
+      if (identUpper === "VRAI") return true;
+      if (identUpper === "FAUX") return false;
+      return null;
+    }
+    case "es-ES": {
+      if (identUpper === "VERDADERO") return true;
+      if (identUpper === "FALSO") return false;
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+function canonicalizeErrorCodeForLocale(errorLiteral: string, localeId?: string): string {
+  const raw = String(errorLiteral ?? "").trim();
+  if (!raw.startsWith("#")) return raw;
+  const upper = casefoldIdent(raw);
+
+  // Excel (and our engine) treat `#N/A` as the canonical form, but many spreadsheets emit `#N/A!`.
+  if (upper === "#N/A!") return "#N/A";
+
+  if (isSpreadsheetErrorCode(upper)) return upper;
+
+  const map = localeId ? ERROR_TRANSLATIONS_BY_LOCALE[localeId] : undefined;
+  const mapped = map?.get(upper) ?? upper;
+  return isSpreadsheetErrorCode(mapped) ? mapped : raw;
 }
 
 function isErrorCode(value: unknown): value is string {
@@ -426,7 +495,7 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
         out.push({ type: "string", value: token.text.slice(1, token.text.endsWith('"') ? -1 : token.text.length) });
         break;
       case "error":
-        out.push({ type: "error", value: token.text });
+        out.push({ type: "error", value: canonicalizeErrorCodeForLocale(token.text, options.localeId) });
         break;
       case "reference":
         out.push({ type: "reference", value: token.text });
@@ -435,13 +504,18 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
         out.push({ type: "function", value: canonicalizeFunctionNameForLocale(token.text, options.localeId) });
         break;
       case "identifier": {
-        const upper = token.text.toUpperCase();
+        const upper = casefoldIdent(token.text);
         if (upper === "TRUE") {
           out.push({ type: "boolean", value: true });
           break;
         }
         if (upper === "FALSE") {
           out.push({ type: "boolean", value: false });
+          break;
+        }
+        const localizedBool = localizedBooleanLiteral(upper, options.localeId);
+        if (localizedBool !== null) {
+          out.push({ type: "boolean", value: localizedBool });
           break;
         }
         const resolved = options.resolveNameToReference?.(token.text);
