@@ -403,6 +403,51 @@ mod tests {
     }
 
     #[test]
+    fn str_cache_duplicate_idx_warns_and_last_value_wins() {
+        let xml = r#"
+            <root>
+              <strCache>
+                <ptCount val="1"/>
+                <pt idx="0"><v>a</v></pt>
+                <pt idx="0"><v>b</v></pt>
+              </strCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "strCache");
+        let mut diagnostics = Vec::new();
+        let cache = parse_str_cache(node, &mut diagnostics, "ctx").expect("cache");
+
+        assert_eq!(cache, vec!["b".to_string()]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "ctx: duplicate cache point idx=0");
+    }
+
+    #[test]
+    fn num_cache_duplicate_idx_warns_and_last_value_wins() {
+        let xml = r#"
+            <root>
+              <numCache>
+                <ptCount val="1"/>
+                <pt idx="0"><v>1</v></pt>
+                <pt idx="0"><v>2</v></pt>
+              </numCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "numCache");
+        let mut diagnostics = Vec::new();
+        let (cache, _format_code) = parse_num_cache(node, &mut diagnostics, "ctx");
+        let cache = cache.expect("cache");
+
+        assert_eq!(cache, vec![2.0]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "ctx: duplicate cache point idx=0");
+    }
+
+    #[test]
     fn empty_caches_return_none() {
         let xml = r#"
             <root>
