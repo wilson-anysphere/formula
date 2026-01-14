@@ -270,6 +270,7 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
   - `update(id: string, patch: Partial<...>): void`
     - Like `add`, `patch.sheetId` is best-effort resolved from sheet display name → stable id when possible.
   - `remove(id: string): void`
+    - Note: removing an encrypted range only updates the shared **policy metadata**; it does **not** decrypt cells that are already stored with an `enc` payload. Those cells remain encrypted until rewritten by a client with the correct key.
 - `createEncryptedRangeManagerForSession(session)` → `EncryptedRangeManager`
   - Uses `session.transactLocal(...)` so range edits participate in the session’s local-origin collaborative undo scope (when undo is enabled).
   - If your application uses a separate Yjs `UndoManager` / origin token, prefer `new EncryptedRangeManager({ doc, transact })` with a `transact` that uses that origin so range edits are undoable.

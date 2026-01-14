@@ -246,11 +246,11 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      showToast("Encrypted range removed.", "info");
+      showToast("Encrypted range removed (existing encrypted cells remain encrypted).", "info");
     },
     {
       category: COMMAND_CATEGORY,
-      description: "Remove encrypted range metadata overlapping the current selection.",
+      description: "Remove encrypted range metadata overlapping the current selection (does not decrypt existing cells).",
       keywords: ["encrypt", "encryption", "remove", "protected range", "collaboration", "collaboration:"],
     },
   );

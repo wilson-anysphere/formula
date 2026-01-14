@@ -48,7 +48,7 @@ describe("registerEncryptionUiCommands", () => {
 
     expect(showQuickPick).not.toHaveBeenCalled();
     expect(manager.remove).toHaveBeenCalledWith("r1");
-    expect(showToast).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Encrypted range removed/), "info");
   });
 
   it("removeEncryptedRange prompts when multiple encrypted ranges overlap selection", async () => {
