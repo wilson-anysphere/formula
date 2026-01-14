@@ -76,13 +76,13 @@ test("Reduced motion overrides set motion tokens to 0ms", () => {
   // Smooth scrolling is also motion-heavy; ensure reduced motion forces it off globally.
   assert.match(
     css,
-    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\][\s\S]*scroll-behavior:\s*auto\s*;/,
+    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\][\s\S]*scroll-behavior:\s*auto(?:\s*!important)?\s*;/,
     "Expected tokens.css to disable smooth scrolling (scroll-behavior: auto) when data-reduced-motion=\"true\"",
   );
 
   assert.match(
     css,
-    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\]\s*\*\s*\{[\s\S]*scroll-behavior:\s*auto\s*;/,
+    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\]\s*\*\s*\{[\s\S]*scroll-behavior:\s*auto(?:\s*!important)?\s*;/,
     "Expected tokens.css to disable smooth scrolling for all descendants when data-reduced-motion=\"true\"",
   );
 
@@ -94,7 +94,7 @@ test("Reduced motion overrides set motion tokens to 0ms", () => {
 
   assert.match(
     css,
-    /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*:root[\s\S]*scroll-behavior:\s*auto\s*;/,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*:root[\s\S]*scroll-behavior:\s*auto(?:\s*!important)?\s*;/,
     "Expected tokens.css to disable smooth scrolling (scroll-behavior: auto) under prefers-reduced-motion: reduce",
   );
 });
