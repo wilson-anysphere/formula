@@ -13774,7 +13774,10 @@ mod tests {
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
-        assert!(column_cache.by_sheet[sheet_id].is_empty());
+        assert!(
+            column_cache.by_sheet[sheet_id].is_empty(),
+            "expected full-sheet range to skip column-slice cache allocation"
+        );
 
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
