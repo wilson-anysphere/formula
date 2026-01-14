@@ -95,6 +95,18 @@ fn has_scheme_prefix(value: &str, scheme: &str) -> bool {
         .map_or(false, |prefix| prefix.eq_ignore_ascii_case(scheme))
 }
 
+fn raw_url_has_userinfo(raw: &str) -> bool {
+    let Some(after_scheme) = raw.splitn(2, "://").nth(1) else {
+        // URLs without an authority (`scheme:...`) cannot contain userinfo.
+        return false;
+    };
+    let authority_end = after_scheme
+        .find(&['/', '?', '#'][..])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    authority.contains('@')
+}
+
 fn starts_with_any_scheme(trimmed: &str, schemes: &[String]) -> bool {
     for scheme in schemes {
         if has_scheme_prefix(trimmed, scheme) {
@@ -132,6 +144,9 @@ pub fn normalize_oauth_redirect_request_urls_with_schemes(
         }
 
         let is_custom_scheme = starts_with_any_scheme(trimmed, schemes);
+        if is_custom_scheme && raw_url_has_userinfo(trimmed) {
+            continue;
+        }
 
         let is_loopback = if !is_custom_scheme {
             crate::oauth_loopback::parse_loopback_redirect_uri(trimmed).is_ok()
@@ -250,6 +265,17 @@ mod tests {
         ]);
 
         assert_eq!(out, vec!["formula://oauth/callback?code=123".to_string()]);
+    }
+
+    #[test]
+    fn rejects_custom_scheme_urls_with_userinfo() {
+        let out = normalize_oauth_redirect_request_urls(vec![
+            "formula://user@oauth/callback?code=123".to_string(),
+            "FORMULA://user:pass@oauth/callback?code=456".to_string(),
+            "formula://oauth/callback?code=789".to_string(),
+        ]);
+
+        assert_eq!(out, vec!["formula://oauth/callback?code=789".to_string()]);
     }
 
     #[test]
