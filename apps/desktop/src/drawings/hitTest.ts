@@ -1,5 +1,5 @@
 import type { DrawingObject, DrawingTransform, Rect } from "./types";
-import { anchorToRectPx, effectiveScrollForAnchor } from "./overlay";
+import { anchorToRectPx } from "./overlay";
 import type { GridGeometry, Viewport } from "./overlay";
 
 export interface HitTestResult {
@@ -19,7 +19,13 @@ const CELL_SCRATCH = { row: 0, col: 0 };
 export function drawingObjectToViewportRect(object: DrawingObject, viewport: Viewport, geom: GridGeometry): Rect {
   const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
   const rect = anchorToRectPx(object.anchor, geom, zoom);
-  const { scrollX, scrollY } = effectiveScrollForAnchor(object.anchor, viewport);
+  const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+  const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+  const anchor = object.anchor;
+  const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+  const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+  const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
+  const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   return {

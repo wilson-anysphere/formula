@@ -7922,10 +7922,23 @@ export class SpreadsheetApp {
           const selectedIndex = index.byId.get(selectedId);
           const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
           if (selectedObject) {
-            const selectedBounds = drawingObjectToViewportRect(selectedObject, viewport, this.drawingGeom);
+            const sheetRect = index.bounds[selectedIndex!]!;
+            const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+            const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+            const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+            const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+            const anchor = selectedObject.anchor;
+            const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+            const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+            const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
+            const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
+            scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
+            scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
+            scratchBounds.width = sheetRect.width;
+            scratchBounds.height = sheetRect.height;
             if (
-              hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform) ||
-              hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform)
+              hitTestRotationHandle(scratchBounds, x, y, selectedObject.transform) ||
+              hitTestResizeHandle(scratchBounds, x, y, selectedObject.transform)
             ) {
               return { id: selectedId };
             }
@@ -7996,10 +8009,19 @@ export class SpreadsheetApp {
         const selectedIndex = index.byId.get(selectedId);
         const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
         if (selectedObject) {
-          const selectedBounds = drawingObjectToViewportRect(selectedObject, viewport, geom);
+          const sheetRect = index.bounds[selectedIndex!]!;
+          const anchor = selectedObject.anchor;
+          const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+          const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+          const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
+          const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
+          scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
+          scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
+          scratchBounds.width = sheetRect.width;
+          scratchBounds.height = sheetRect.height;
           if (
-            hitTestRotationHandle(selectedBounds, sx, sy, selectedObject.transform) ||
-            hitTestResizeHandle(selectedBounds, sx, sy, selectedObject.transform)
+            hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform) ||
+            hitTestResizeHandle(scratchBounds, sx, sy, selectedObject.transform)
           ) {
             return { id: selectedId };
           }
@@ -10062,11 +10084,17 @@ export class SpreadsheetApp {
       const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
       if (selected) {
         const sheetRect = index.bounds[selectedIndex!]!;
-        const scroll = effectiveScrollForAnchor(selected.anchor, viewport);
+        const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+        const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+        const anchor = selected.anchor;
+        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+        const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
         const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
         const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-        bounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
-        bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+        bounds.x = sheetRect.x - scrollX + headerOffsetX;
+        bounds.y = sheetRect.y - scrollY + headerOffsetY;
         bounds.width = sheetRect.width;
         bounds.height = sheetRect.height;
         // Charts behave like Excel chart objects: movable/resizable but not rotatable.
