@@ -355,6 +355,31 @@ fn canonicalize_supports_narrow_nbsp_thousands_separator_in_fr_fr() {
 }
 
 #[test]
+fn canonicalize_supports_multiple_nbsp_thousands_separators_in_fr_fr() {
+    let fr = "=SOMME(1\u{00A0}234\u{00A0}567,89;0,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(1234567.89,0.5)");
+}
+
+#[test]
+fn canonicalize_supports_mixed_nbsp_and_narrow_nbsp_thousands_separators_in_fr_fr() {
+    let fr = "=SOMME(1\u{00A0}234\u{202F}567,89;0,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(1234567.89,0.5)");
+}
+
+#[test]
+fn localize_inserts_multiple_thousands_separators_in_fr_fr() {
+    let canon = "=SUM(1234567.89,0.5)";
+    let localized = locale::localize_formula(canon, &locale::FR_FR).unwrap();
+    assert!(
+        localized == "=SOMME(1\u{00A0}234\u{00A0}567,89;0,5)"
+            || localized == "=SOMME(1\u{202F}234\u{202F}567,89;0,5)",
+        "unexpected localized output: {localized:?}"
+    );
+}
+
+#[test]
 fn fr_fr_does_not_treat_ascii_spaces_as_thousands_separators() {
     // ASCII spaces are still significant for Excel (whitespace / intersection operator) and must
     // not be silently stripped out of numeric literals.
