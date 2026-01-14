@@ -23,7 +23,6 @@ pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
 /// Sort order applied to pivot fields.
 
-/// Sort order applied to pivot fields.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortOrder {
