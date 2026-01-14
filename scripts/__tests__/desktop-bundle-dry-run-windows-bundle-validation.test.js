@@ -151,4 +151,11 @@ test("desktop-bundle-dry-run workflow uploads bundles without recursive target/*
     /apps\/desktop\/src-tauri\/target\/\*\/release\/bundle\/dmg\/\*\.dmg/,
     `Expected upload step to include the target-triple DMG path pattern.\nSaw snippet:\n${snippet}`,
   );
+
+  // Updater manifests are written to the bundle root (not inside a platform subdir).
+  assert.match(
+    snippet,
+    /apps\/desktop\/src-tauri\/target\/release\/bundle\/latest\.json/,
+    `Expected upload step to include the bundle-root latest.json pattern.\nSaw snippet:\n${snippet}`,
+  );
 });

@@ -1119,10 +1119,16 @@ jobs:
             apps/desktop/src-tauri/target/*/release/bundle/*/*.tar.gz
             apps/desktop/src-tauri/target/release/bundle/*/*.tgz
             apps/desktop/src-tauri/target/*/release/bundle/*/*.tgz
+            apps/desktop/src-tauri/target/release/bundle/*.sig
+            apps/desktop/src-tauri/target/*/release/bundle/*.sig
             apps/desktop/src-tauri/target/release/bundle/*/*.sig
             apps/desktop/src-tauri/target/*/release/bundle/*/*.sig
+            apps/desktop/src-tauri/target/release/bundle/latest.json
+            apps/desktop/src-tauri/target/*/release/bundle/latest.json
             apps/desktop/src-tauri/target/release/bundle/*/latest.json
             apps/desktop/src-tauri/target/*/release/bundle/*/latest.json
+            apps/desktop/src-tauri/target/release/bundle/update.json
+            apps/desktop/src-tauri/target/*/release/bundle/update.json
             apps/desktop/src-tauri/target/release/bundle/*/update.json
             apps/desktop/src-tauri/target/*/release/bundle/*/update.json
             apps/desktop/target/release/bundle/dmg/*.dmg
@@ -1147,10 +1153,16 @@ jobs:
             apps/desktop/target/*/release/bundle/*/*.tar.gz
             apps/desktop/target/release/bundle/*/*.tgz
             apps/desktop/target/*/release/bundle/*/*.tgz
+            apps/desktop/target/release/bundle/*.sig
+            apps/desktop/target/*/release/bundle/*.sig
             apps/desktop/target/release/bundle/*/*.sig
             apps/desktop/target/*/release/bundle/*/*.sig
+            apps/desktop/target/release/bundle/latest.json
+            apps/desktop/target/*/release/bundle/latest.json
             apps/desktop/target/release/bundle/*/latest.json
             apps/desktop/target/*/release/bundle/*/latest.json
+            apps/desktop/target/release/bundle/update.json
+            apps/desktop/target/*/release/bundle/update.json
             apps/desktop/target/release/bundle/*/update.json
             apps/desktop/target/*/release/bundle/*/update.json
             target/release/bundle/dmg/*.dmg
@@ -1175,9 +1187,15 @@ jobs:
             target/*/release/bundle/*/*.tar.gz
             target/release/bundle/*/*.tgz
             target/*/release/bundle/*/*.tgz
+            target/release/bundle/*.sig
+            target/*/release/bundle/*.sig
             target/release/bundle/*/*.sig
             target/*/release/bundle/*/*.sig
+            target/release/bundle/latest.json
+            target/*/release/bundle/latest.json
             target/release/bundle/*/latest.json
             target/*/release/bundle/*/latest.json
+            target/release/bundle/update.json
+            target/*/release/bundle/update.json
             target/release/bundle/*/update.json
             target/*/release/bundle/*/update.json
