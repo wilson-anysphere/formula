@@ -180,7 +180,9 @@ fn translate_formula_with_style(
                 ));
                 idx += 1;
             }
-            TokenKind::Ident(raw) if is_function_ident(&tokens, idx) => {
+            TokenKind::Ident(raw)
+                if is_function_ident(&tokens, idx) && !is_field_access_selector(&tokens, idx) =>
+            {
                 match dir {
                     Direction::ToCanonical => out.push_str(&locale.canonical_function_name(raw)),
                     Direction::ToLocalized => out.push_str(&locale.localized_function_name(raw)),
@@ -191,7 +193,10 @@ fn translate_formula_with_style(
                 // Boolean keywords are locale-specific (e.g. `WAHR`/`FALSCH` for German), but those
                 // tokens can also appear as identifiers (e.g. table names, sheet prefixes). Only
                 // translate them when they are used as standalone scalar literals.
-                if !is_sheet_prefix_ident(&tokens, idx) && !is_table_name_ident(&tokens, idx) {
+                if !is_sheet_prefix_ident(&tokens, idx)
+                    && !is_table_name_ident(&tokens, idx)
+                    && !is_field_access_selector(&tokens, idx)
+                {
                     if let Some(value) = locale.canonical_boolean_literal(raw) {
                         out.push_str(bool_literal(value));
                     } else {
@@ -238,6 +243,24 @@ fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
     }
 
     matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::LParen))
+}
+
+fn is_field_access_selector(tokens: &[Token], idx: usize) -> bool {
+    if !matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Ident(_))) {
+        return false;
+    }
+
+    let mut j = idx;
+    while j > 0 {
+        j -= 1;
+        match tokens.get(j).map(|t| &t.kind) {
+            Some(TokenKind::Whitespace(_)) => continue,
+            Some(TokenKind::Dot) => return true,
+            _ => return false,
+        }
+    }
+
+    false
 }
 
 fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a TokenKind> {

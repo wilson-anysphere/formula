@@ -136,6 +136,36 @@ fn canonicalize_and_localize_round_trip_for_fr_fr_and_es_es() {
 }
 
 #[test]
+fn field_access_function_names_are_not_translated() {
+    // The identifier after `.` is a field-access selector, not a function name. Even when it is
+    // called with `(`, locale function translation must never rewrite it.
+
+    let de_localized = "=A1.SUMME(1,5;2,5)";
+    let de_canon = locale::canonicalize_formula(de_localized, &locale::DE_DE).unwrap();
+    assert_eq!(de_canon, "=A1.SUMME(1.5,2.5)");
+    assert_eq!(
+        locale::localize_formula(&de_canon, &locale::DE_DE).unwrap(),
+        de_localized
+    );
+
+    let fr_localized = "=A1.SOMME(1,5;2,5)";
+    let fr_canon = locale::canonicalize_formula(fr_localized, &locale::FR_FR).unwrap();
+    assert_eq!(fr_canon, "=A1.SOMME(1.5,2.5)");
+    assert_eq!(
+        locale::localize_formula(&fr_canon, &locale::FR_FR).unwrap(),
+        fr_localized
+    );
+
+    let es_localized = "=A1.SUMA(1,5;2,5)";
+    let es_canon = locale::canonicalize_formula(es_localized, &locale::ES_ES).unwrap();
+    assert_eq!(es_canon, "=A1.SUMA(1.5,2.5)");
+    assert_eq!(
+        locale::localize_formula(&es_canon, &locale::ES_ES).unwrap(),
+        es_localized
+    );
+}
+
+#[test]
 fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
     // French Excel commonly uses NBSP (U+00A0) for thousands grouping.
     let fr = "=SOMME(1\u{00A0}234,56;0,5)";
