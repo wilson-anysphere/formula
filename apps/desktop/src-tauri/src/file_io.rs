@@ -57,6 +57,9 @@ const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEn
 ///
 /// This helper enforces a non-empty password and uses defaults that match Excel's common "Agile"
 /// encryption settings.
+//
+// This is only referenced by the Tauri command layer (behind the `desktop` feature) and by unit
+// tests, so keep it behind the same gate to avoid dead_code warnings in headless builds.
 #[cfg(any(feature = "desktop", test))]
 pub(crate) fn encrypt_package_to_ole_bytes(
     zip_bytes: &[u8],

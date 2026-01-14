@@ -2528,6 +2528,9 @@ impl Engine {
         }
     }
 
+    // Style-layer resolution helper retained for upcoming formatting APIs. This is currently not
+    // referenced by the engine core, but keeping it here makes the intended precedence rules
+    // explicit and avoids duplicating the logic across future call sites.
     #[allow(dead_code)]
     fn effective_style_id_at(&self, key: CellKey) -> u32 {
         // If this cell is part of a spilled array, use the spill origin's formatting (Excel
