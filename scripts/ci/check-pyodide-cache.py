@@ -60,7 +60,19 @@ def check_job(
     errors: list[str] = []
     text = "\n".join(line for _, line in job_lines)
 
-    build_lines = [ln for ln, line in job_lines if "run: pnpm build:desktop" in line]
+    def is_comment(line: str) -> bool:
+        stripped = line.lstrip()
+        return stripped.startswith("#")
+
+    def is_desktop_build_cmd(line: str) -> bool:
+        # Match both:
+        # - `run: pnpm build:desktop`
+        # - multiline run blocks that contain `pnpm build:desktop`
+        if is_comment(line):
+            return False
+        return bool(re.search(r"\bpnpm\b.*\bbuild:desktop\b", line))
+
+    build_lines = [ln for ln, line in job_lines if is_desktop_build_cmd(line)]
     if not build_lines:
         return errors
 
@@ -129,4 +141,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
