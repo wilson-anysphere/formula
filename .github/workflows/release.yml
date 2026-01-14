@@ -1449,7 +1449,9 @@ jobs:
                 next
               }
               in_dep==1 {
-                if ($0 ~ /^[[:space:]]+[A-Za-z0-9-]+:/) { exit }
+                # Stop when the next control field begins. Debian control field names begin with a letter
+                # (e.g. "Description:"), so avoid treating dependency version epochs like "1:1.2.3" as fields.
+                if ($0 ~ /^[[:space:]]+[A-Za-z][A-Za-z0-9-]*:/) { exit }
                 sub(/^[[:space:]]+/, "", $0)
                 if (out == "") out=$0; else out=out " " $0
               }
