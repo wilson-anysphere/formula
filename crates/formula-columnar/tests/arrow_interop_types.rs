@@ -396,3 +396,41 @@ fn record_batch_to_columnar_accepts_date_and_timestamp_types_as_datetime(
 
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_accepts_large_utf8_and_dictionary_large_utf8(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::{DictionaryArray, Int16Array, LargeStringArray};
+
+    let large: ArrayRef = Arc::new(LargeStringArray::from(vec![Some("L1"), None, Some("L2")]));
+
+    let dict_values: ArrayRef = Arc::new(LargeStringArray::from(vec!["A", "BB"]));
+    let dict_keys = Int16Array::from(vec![Some(0), Some(1), None]);
+    let dict: ArrayRef = Arc::new(DictionaryArray::<arrow_array::types::Int16Type>::try_new(
+        dict_keys,
+        dict_values,
+    )?);
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("large", DataType::LargeUtf8, true),
+        Field::new(
+            "dict_large",
+            DataType::Dictionary(Box::new(DataType::Int16), Box::new(DataType::LargeUtf8)),
+            true,
+        ),
+    ]));
+    let batch = RecordBatch::try_new(schema, vec![large, dict])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::String);
+    assert_eq!(table.schema()[1].column_type, ColumnType::String);
+
+    assert_eq!(table.get_cell(0, 0), Value::String(Arc::<str>::from("L1")));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::String(Arc::<str>::from("L2")));
+
+    assert_eq!(table.get_cell(0, 1), Value::String(Arc::<str>::from("A")));
+    assert_eq!(table.get_cell(1, 1), Value::String(Arc::<str>::from("BB")));
+    assert_eq!(table.get_cell(2, 1), Value::Null);
+    Ok(())
+}
