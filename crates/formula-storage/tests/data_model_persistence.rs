@@ -228,6 +228,32 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .expect("evaluate before save");
     assert_eq!(total_before, formula_dax::Value::from(84.0));
 
+    let pivot_measures = vec![PivotMeasure::new("Total Double Amount", "[Total Double Amount]")
+        .expect("pivot measure")];
+    let pivot_group_by = vec![GroupByColumn::new("DimProduct", "Category")];
+    let pivot_before = pivot(
+        &model,
+        "FactSales",
+        &pivot_group_by,
+        &pivot_measures,
+        &FilterContext::empty(),
+    )
+    .expect("pivot before save");
+    assert_eq!(
+        pivot_before.rows,
+        vec![
+            vec![
+                formula_dax::Value::from("A"),
+                formula_dax::Value::from(70.0)
+            ],
+            vec![
+                formula_dax::Value::from("B"),
+                formula_dax::Value::from(14.0)
+            ],
+        ],
+        "pivot should see calculated column values before persistence"
+    );
+
     let fact_before = model.table("FactSales").expect("fact table");
     let double_before: Vec<formula_dax::Value> = (0..fact_before.row_count())
         .map(|row| {
@@ -392,6 +418,19 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .evaluate_measure("Total Double Amount", &FilterContext::empty())
         .expect("evaluate after load");
     assert_eq!(total_after, total_before);
+
+    let pivot_after = pivot(
+        &loaded,
+        "FactSales",
+        &pivot_group_by,
+        &pivot_measures,
+        &FilterContext::empty(),
+    )
+    .expect("pivot after load");
+    assert_eq!(
+        pivot_after, pivot_before,
+        "pivot should see the same calculated column values after persistence"
+    );
 
     let fact_after = loaded.table("FactSales").expect("loaded fact");
     assert!(
