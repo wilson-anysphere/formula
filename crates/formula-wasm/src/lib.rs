@@ -3525,13 +3525,6 @@ impl WasmWorkbook {
         Ok(obj.into())
     }
 
-    #[wasm_bindgen(js_name = "internStyle")]
-    pub fn intern_style(&mut self, style: JsValue) -> Result<u32, JsValue> {
-        let style: Style =
-            serde_wasm_bindgen::from_value(style).map_err(|err| js_err(err.to_string()))?;
-        Ok(self.inner.engine.intern_style(style))
-    }
-
     /// Set (or clear) a per-column width override for a sheet.
     ///
     /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
