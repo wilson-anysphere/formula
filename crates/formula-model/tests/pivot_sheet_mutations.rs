@@ -60,8 +60,9 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         },
         needs_refresh: false,
     });
+    let pivot1_id = uuid::Uuid::from_u128(11);
     wb.pivot_tables.push(PivotTableModel {
-        id: uuid::Uuid::from_u128(11),
+        id: pivot1_id,
         name: "PivotTable1".to_string(),
         source: PivotSource::Range {
             sheet_id: sheet1,
@@ -83,8 +84,9 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         },
         needs_refresh: false,
     });
+    let pivot2_id = uuid::Uuid::from_u128(12);
     wb.pivot_tables.push(PivotTableModel {
-        id: uuid::Uuid::from_u128(12),
+        id: pivot2_id,
         name: "PivotTable2".to_string(),
         source: PivotSource::Table {
             table: TableIdentifier::Id(1),
@@ -117,6 +119,20 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         },
         config: PivotConfig::default(),
         cache_id: Some(cache_name_id),
+    });
+
+    wb.pivot_charts.push(PivotChartModel {
+        id: uuid::Uuid::from_u128(21),
+        name: "PivotChart1".to_string(),
+        pivot_table_id: pivot1_id,
+        sheet_id: Some(sheet1),
+    });
+
+    wb.slicers.push(SlicerModel {
+        id: uuid::Uuid::from_u128(31),
+        name: "Slicer1".to_string(),
+        connected_pivots: vec![pivot1_id, pivot2_id],
+        sheet_id: sheet1,
     });
 
     let copied_sheet = wb.duplicate_sheet(sheet1, None).unwrap();
@@ -205,6 +221,22 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
             name: DefinedNameIdentifier::Id(name_id)
         }
     );
+
+    assert_eq!(wb.pivot_charts.len(), 2);
+    let chart_copy = wb
+        .pivot_charts
+        .iter()
+        .find(|c| c.sheet_id == Some(copied_sheet))
+        .expect("expected duplicated pivot chart");
+    assert_eq!(chart_copy.pivot_table_id, p1_copy.id);
+
+    assert_eq!(wb.slicers.len(), 2);
+    let slicer_copy = wb
+        .slicers
+        .iter()
+        .find(|s| s.sheet_id == copied_sheet)
+        .expect("expected duplicated slicer");
+    assert_eq!(slicer_copy.connected_pivots, vec![p1_copy.id, p2_copy.id]);
 }
 
 #[test]

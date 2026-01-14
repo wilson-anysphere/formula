@@ -522,7 +522,7 @@ impl Workbook {
         // Excel inserts the copy immediately after the source sheet.
         self.sheets.insert(source_index + 1, new_sheet);
 
-        self.duplicate_pivots_for_sheet(
+        let duplicated_pivots = self.duplicate_pivots_for_sheet(
             source_id,
             &source_name,
             new_sheet_id,
@@ -530,6 +530,9 @@ impl Workbook {
             &table_renames,
             &table_id_renames,
         );
+        self.duplicate_pivot_charts_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
+        self.duplicate_slicers_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
+        self.duplicate_timelines_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
 
         // Copy print settings (print area/titles, page setup, manual breaks) if present.
         if let Some(settings) = self
@@ -564,7 +567,7 @@ impl Workbook {
         new_sheet_name: &str,
         table_renames: &[(String, String)],
         table_id_renames: &[(u32, u32)],
-    ) {
+    ) -> HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId> {
         let pivots_to_duplicate: Vec<PivotTableModel> = self
             .pivot_tables
             .iter()
@@ -575,9 +578,11 @@ impl Workbook {
             .collect();
 
         if pivots_to_duplicate.is_empty() {
-            return;
+            return HashMap::new();
         }
 
+        let mut id_map: HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId> =
+            HashMap::with_capacity(pivots_to_duplicate.len());
         let mut used_names = collect_pivot_table_names(&self.pivot_tables);
         let table_id_map: HashMap<u32, u32> = table_id_renames.iter().copied().collect();
 
@@ -585,6 +590,7 @@ impl Workbook {
             let mut duplicated = pivot.clone();
             duplicated.id = crate::new_uuid();
             duplicated.name = generate_duplicate_pivot_table_name(&pivot.name, &mut used_names);
+            id_map.insert(pivot.id, duplicated.id);
 
             // Retarget the destination to the new sheet.
             match &mut duplicated.destination {
@@ -648,16 +654,97 @@ impl Workbook {
             }
 
             if source_changed {
-                let cache_id: PivotCacheId = crate::new_uuid();
-                duplicated.cache_id = Some(cache_id);
-                self.pivot_caches.push(PivotCacheModel {
-                    id: cache_id,
-                    source: duplicated.source.clone(),
-                    needs_refresh: true,
-                });
+                // Only allocate a new cache if the original pivot already had one; otherwise keep
+                // the model minimal and let higher layers decide when to assign a cache id.
+                if pivot.cache_id.is_some() {
+                    let cache_id: PivotCacheId = crate::new_uuid();
+                    duplicated.cache_id = Some(cache_id);
+                    self.pivot_caches.push(PivotCacheModel {
+                        id: cache_id,
+                        source: duplicated.source.clone(),
+                        needs_refresh: true,
+                    });
+                } else {
+                    duplicated.cache_id = None;
+                }
             }
 
             self.pivot_tables.push(duplicated);
+        }
+
+        id_map
+    }
+
+    fn duplicate_pivot_charts_for_sheet(
+        &mut self,
+        source_sheet_id: WorksheetId,
+        new_sheet_id: WorksheetId,
+        duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
+    ) {
+        let charts_to_duplicate: Vec<PivotChartModel> = self
+            .pivot_charts
+            .iter()
+            .filter(|chart| chart.sheet_id == Some(source_sheet_id))
+            .cloned()
+            .collect();
+
+        for mut chart in charts_to_duplicate {
+            chart.id = crate::new_uuid();
+            chart.sheet_id = Some(new_sheet_id);
+            if let Some(new_pivot_id) = duplicated_pivots.get(&chart.pivot_table_id) {
+                chart.pivot_table_id = *new_pivot_id;
+            }
+            self.pivot_charts.push(chart);
+        }
+    }
+
+    fn duplicate_slicers_for_sheet(
+        &mut self,
+        source_sheet_id: WorksheetId,
+        new_sheet_id: WorksheetId,
+        duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
+    ) {
+        let slicers_to_duplicate: Vec<SlicerModel> = self
+            .slicers
+            .iter()
+            .filter(|slicer| slicer.sheet_id == source_sheet_id)
+            .cloned()
+            .collect();
+
+        for mut slicer in slicers_to_duplicate {
+            slicer.id = crate::new_uuid();
+            slicer.sheet_id = new_sheet_id;
+            for pivot_id in &mut slicer.connected_pivots {
+                if let Some(new_pivot_id) = duplicated_pivots.get(pivot_id) {
+                    *pivot_id = *new_pivot_id;
+                }
+            }
+            self.slicers.push(slicer);
+        }
+    }
+
+    fn duplicate_timelines_for_sheet(
+        &mut self,
+        source_sheet_id: WorksheetId,
+        new_sheet_id: WorksheetId,
+        duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
+    ) {
+        let timelines_to_duplicate: Vec<TimelineModel> = self
+            .timelines
+            .iter()
+            .filter(|timeline| timeline.sheet_id == source_sheet_id)
+            .cloned()
+            .collect();
+
+        for mut timeline in timelines_to_duplicate {
+            timeline.id = crate::new_uuid();
+            timeline.sheet_id = new_sheet_id;
+            for pivot_id in &mut timeline.connected_pivots {
+                if let Some(new_pivot_id) = duplicated_pivots.get(pivot_id) {
+                    *pivot_id = *new_pivot_id;
+                }
+            }
+            self.timelines.push(timeline);
         }
     }
 
