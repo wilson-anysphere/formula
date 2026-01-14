@@ -7,6 +7,51 @@ import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { CLASSIFICATION_SCOPE } from "../../security/dlp/src/selectors.js";
 
+function restrictedCellRecord(
+  row: number,
+  col: number,
+  opts: { documentId?: string; sheetId?: string; level?: string } = {}
+) {
+  return {
+    selector: {
+      scope: CLASSIFICATION_SCOPE.CELL,
+      documentId: opts.documentId ?? "doc-1",
+      sheetId: opts.sheetId ?? "Sheet1",
+      row,
+      col,
+    },
+    classification: { level: opts.level ?? "Restricted", labels: [] },
+  };
+}
+
+function makeDlp(options: {
+  document_id?: string;
+  allowRestrictedContent?: boolean;
+  include_restricted_content?: boolean;
+  classification_records?: Array<{ selector: any; classification: any }>;
+  audit_logger?: { log(event: any): void };
+} = {}) {
+  return {
+    document_id: options.document_id ?? "doc-1",
+    ...(options.include_restricted_content !== undefined
+      ? { include_restricted_content: options.include_restricted_content }
+      : {}),
+    policy: {
+      version: 1,
+      allowDocumentOverrides: true,
+      rules: {
+        [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+          maxAllowed: "Internal",
+          allowRestrictedContent: options.allowRestrictedContent ?? false,
+          redactDisallowed: true,
+        },
+      },
+    },
+    ...(options.classification_records ? { classification_records: options.classification_records } : {}),
+    ...(options.audit_logger ? { audit_logger: options.audit_logger } : {}),
+  };
+}
+
 describe("ToolExecutor include_formula_values", () => {
   it("defaults to treating formula cells as null even when a computed value is present", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
@@ -112,21 +157,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -152,34 +183,12 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
+      dlp: makeDlp({
+        allowRestrictedContent: true,
         include_restricted_content: true,
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: true,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 0,
-              col: 0,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
+        classification_records: [restrictedCellRecord(0, 0)],
         audit_logger,
-      },
+      }),
     });
 
     const read = await executor.execute({
@@ -268,21 +277,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -311,21 +306,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -355,32 +336,7 @@ describe("ToolExecutor include_formula_values", () => {
 
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 2,
-              col: 1,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
-      },
+      dlp: makeDlp({ classification_records: [restrictedCellRecord(2, 1)] }),
     });
 
     const result = await executor.execute({
@@ -448,21 +404,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -564,21 +506,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -653,21 +581,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -744,21 +658,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -801,21 +701,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        audit_logger,
-      },
+      dlp: makeDlp({ audit_logger }),
     });
 
     const result = await executor.execute({
@@ -849,33 +735,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 0,
-              col: 1,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
-        audit_logger,
-      },
+      dlp: makeDlp({ classification_records: [restrictedCellRecord(0, 1)], audit_logger }),
     });
 
     const read = await executor.execute({
@@ -921,33 +781,7 @@ describe("ToolExecutor include_formula_values", () => {
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 0,
-              col: 0,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
-        audit_logger,
-      },
+      dlp: makeDlp({ classification_records: [restrictedCellRecord(0, 0)], audit_logger }),
     });
 
     const result = await executor.execute({
@@ -978,32 +812,7 @@ describe("ToolExecutor include_formula_values", () => {
 
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 1,
-              col: 1,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
-      },
+      dlp: makeDlp({ classification_records: [restrictedCellRecord(1, 1)] }),
     });
 
     const result = await executor.execute({
@@ -1038,32 +847,7 @@ describe("ToolExecutor include_formula_values", () => {
 
     const executor = new ToolExecutor(workbook, {
       include_formula_values: true,
-      dlp: {
-        document_id: "doc-1",
-        policy: {
-          version: 1,
-          allowDocumentOverrides: true,
-          rules: {
-            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
-              maxAllowed: "Internal",
-              allowRestrictedContent: false,
-              redactDisallowed: true,
-            },
-          },
-        },
-        classification_records: [
-          {
-            selector: {
-              scope: CLASSIFICATION_SCOPE.CELL,
-              documentId: "doc-1",
-              sheetId: "Sheet1",
-              row: 1,
-              col: 2,
-            },
-            classification: { level: "Restricted", labels: [] },
-          },
-        ],
-      },
+      dlp: makeDlp({ classification_records: [restrictedCellRecord(1, 2)] }),
     });
 
     const result = await executor.execute({
