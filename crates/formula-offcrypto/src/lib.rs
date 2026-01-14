@@ -1825,7 +1825,7 @@ pub fn parse_encrypted_package_header(
     // combined 64-bit value is not plausible for the available ciphertext, fall back to the low
     // DWORD for compatibility.
     let original_size =
-        if len_hi != 0 && original_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+        if len_lo != 0 && len_hi != 0 && original_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
             len_lo
         } else {
             original_size_u64
@@ -2225,7 +2225,7 @@ pub fn decrypt_encrypted_package_ecb(
     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
     // Compatibility: treat a non-zero high DWORD as "reserved" when the resulting 64-bit value is
     // not plausible for the available ciphertext.
-    let total_size = if len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+    let total_size = if len_lo != 0 && len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
         len_lo
     } else {
         total_size_u64

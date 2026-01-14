@@ -74,7 +74,11 @@ where
     // `u32 totalSize` + `u32 reserved` (often 0). When the high DWORD is non-zero but the combined
     // 64-bit value is not plausible for the available ciphertext, fall back to the low DWORD.
     let total_size =
-        if len_hi != 0 && total_size_u64 > ciphertext_len_u64 && len_lo <= ciphertext_len_u64 {
+        if len_lo != 0
+            && len_hi != 0
+            && total_size_u64 > ciphertext_len_u64
+            && len_lo <= ciphertext_len_u64
+        {
             len_lo
         } else {
             total_size_u64
@@ -181,7 +185,8 @@ pub fn agile_decrypt_package(
     let total_size_u64 = len_lo | (len_hi << 32);
     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
     let total_size =
-        if len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+        if len_lo != 0 && len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len
+        {
             len_lo
         } else {
             total_size_u64
