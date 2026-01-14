@@ -50,6 +50,27 @@ function connectDocs(docA, docB) {
   };
 }
 
+function createMockProvider() {
+  /** @type {Map<string, Set<(...args: any[]) => void>>} */
+  const listeners = new Map();
+  return {
+    synced: false,
+    on: (event, cb) => {
+      const set = listeners.get(event) ?? new Set();
+      set.add(cb);
+      listeners.set(event, set);
+    },
+    off: (event, cb) => {
+      listeners.get(event)?.delete(cb);
+    },
+    emit: (event, ...args) => {
+      for (const cb of Array.from(listeners.get(event) ?? [])) {
+        cb(...args);
+      }
+    },
+  };
+}
+
 test("CollabSession undo captures comment edits when comments root is created lazily (in-memory sync)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
@@ -137,6 +158,58 @@ test("CollabSession undo captures comment edits when comments root is created la
   sessionA.destroy();
   sessionB.destroy();
   disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession undo does not clobber legacy Array-backed comments root when undo is enabled before provider sync", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+
+  const legacyRoot = docA.getArray("comments");
+  legacyRoot.push([
+    createYComment({
+      id: "c_legacy",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "legacy",
+      author: { id: "u_legacy", name: "Legacy User" },
+      now: 1,
+    }),
+  ]);
+
+  const provider = createMockProvider();
+
+  const sessionB = createCollabSession({ doc: docB, provider, undo: {} });
+  sessionB.setPermissions({ role: "editor", userId: "u-b", rangeRestrictions: [] });
+
+  // Regression: enabling undo used to eagerly call `doc.getMap("comments")` when
+  // the doc hadn't been hydrated yet, clobbering legacy Array-backed docs.
+  assert.equal(docB.share.get("comments"), undefined);
+
+  // Simulate initial provider hydration, where remote updates are applied before
+  // the provider reports `sync=true`.
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA), REMOTE_ORIGIN);
+  assert.ok(docB.share.get("comments"));
+
+  provider.synced = true;
+  provider.emit("sync", true);
+
+  assert.ok(docB.share.get("comments") instanceof Y.Array);
+
+  const commentsB = createCommentManagerForSession(sessionB);
+  const getContent = () => commentsB.listAll().find((c) => c.id === "c_legacy")?.content ?? null;
+
+  assert.equal(getContent(), "legacy");
+
+  commentsB.setCommentContent({ commentId: "c_legacy", content: "legacy (edited)", now: 2 });
+  assert.equal(getContent(), "legacy (edited)");
+
+  assert.equal(sessionB.undo?.canUndo(), true);
+  sessionB.undo?.undo();
+  assert.equal(getContent(), "legacy");
+
+  sessionB.destroy();
   docA.destroy();
   docB.destroy();
 });

@@ -650,6 +650,7 @@ export class CollabSession {
   private providerStatusListener: ((event: any) => void) | null = null;
   private providerSyncListener: ((isSynced: boolean) => void) | null = null;
   private commentsMigrationPermissionsUnsubscribe: (() => void) | null = null;
+  private commentsUndoScopePermissionsUnsubscribe: (() => void) | null = null;
 
   private readonly recentOutgoingUpdateBytes: number[] = [];
   private docUpdateListener: ((update: Uint8Array, origin: any) => void) | null = null;
@@ -948,12 +949,17 @@ export class CollabSession {
     if (options.undo) {
       const scope = new Set<Y.AbstractType<any>>([this.cells, this.sheets, this.metadata, this.namedRanges]);
 
-      // Include comments in the undo scope deterministically.
+      // Comments root selection is special: historical documents may store the
+      // root under a legacy Array schema. Calling `doc.getMap("comments")` on a
+      // fresh Doc (before provider/persistence hydration) can permanently define
+      // the root as a Map and make legacy array content inaccessible.
       //
-      // Callers typically create the comments root lazily (e.g. via
-      // `doc.getMap("comments")` in CommentManager). If the session builds its
-      // undo scope before that happens, comment edits won't be undoable.
-      scope.add(getCommentsRootForUndoScope(this.doc));
+      // To avoid clobbering legacy docs, we add the comments root to the undo
+      // scope lazily once hydration is complete (or once the root already exists).
+      //
+      // See regression test: `CollabSession undo does not clobber legacy comments root when undo is enabled before sync`.
+      const shouldWaitForLocalPersistence = this.hasLocalPersistence;
+      let localPersistenceReady = !shouldWaitForLocalPersistence;
 
       // Root names that are either already part of the built-in undo scope, or
       // should never be added via `undo.scopeNames`.
@@ -983,6 +989,100 @@ export class CollabSession {
 
       this.undo = undo;
       if (undo.localOrigins) this.localOrigins = undo.localOrigins;
+
+      const ensureCommentsUndoScope = () => {
+        if (this.isDestroyed) return;
+
+        // Only attempt to normalize/extend undo scope when the role allows comment
+        // writes. This avoids viewer clients generating best-effort Yjs updates
+        // during normalization/re-wrapping of foreign comment types.
+        let allowed = false;
+        try {
+          allowed = this.canComment();
+        } catch {
+          allowed = false;
+        }
+        if (!allowed) return;
+
+        const hasRoot = Boolean(this.doc.share.get("comments"));
+        const provider = this.provider;
+        const providerSynced =
+          provider && typeof provider.on === "function" ? Boolean((provider as any).synced) : true;
+
+        // If the doc is still hydrating and the root doesn't exist yet, do not
+        // instantiate it (it could clobber legacy Array-backed docs).
+        if (!hasRoot && (!providerSynced || !localPersistenceReady)) return;
+
+        let root: Y.AbstractType<any> | null = null;
+        try {
+          root = getCommentsRootForUndoScope(this.doc);
+        } catch {
+          root = null;
+        }
+        if (!root) return;
+
+        // Add to all known UndoManagers (session + any downstream binder-origin
+        // managers) so comment edits remain undoable regardless of origin.
+        const undoManagers = Array.from(this.localOrigins).filter((value) => {
+          if (value instanceof Y.UndoManager) return true;
+          if (!value || typeof value !== "object") return false;
+          const maybe = value as any;
+          return (
+            typeof maybe.addToScope === "function" &&
+            typeof maybe.undo === "function" &&
+            typeof maybe.redo === "function" &&
+            typeof maybe.stopCapturing === "function"
+          );
+        });
+        for (const undoManager of undoManagers) {
+          try {
+            (undoManager as any).addToScope(root);
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      // Re-attempt once permissions are configured (and on future role upgrades).
+      if (this.commentsUndoScopePermissionsUnsubscribe) {
+        try {
+          this.commentsUndoScopePermissionsUnsubscribe();
+        } catch {
+          // ignore
+        }
+        this.commentsUndoScopePermissionsUnsubscribe = null;
+      }
+      this.commentsUndoScopePermissionsUnsubscribe = this.onPermissionsChanged(() => {
+        ensureCommentsUndoScope();
+      });
+
+      // Re-attempt once local persistence hydration completes (if enabled).
+      if (shouldWaitForLocalPersistence) {
+        void this.localPersistenceLoaded
+          .catch(() => {
+            // Ignore load failures; allow undo-scope setup to continue based on
+            // provider hydration alone.
+          })
+          .finally(() => {
+            localPersistenceReady = true;
+            ensureCommentsUndoScope();
+          });
+      }
+
+      // Re-attempt once the sync provider reports hydration complete.
+      const provider = this.provider;
+      if (provider && typeof provider.on === "function") {
+        const handler = (isSynced: boolean) => {
+          if (!isSynced) return;
+          provider.off?.("sync", handler);
+          ensureCommentsUndoScope();
+        };
+        provider.on("sync", handler);
+        if ((provider as any).synced) handler(true);
+      } else {
+        // No sync provider: the caller-provided doc is already in memory.
+        ensureCommentsUndoScope();
+      }
     }
 
     // Certain transactions are intentional, bulk "time travel" operations (e.g.
@@ -1545,6 +1645,14 @@ export class CollabSession {
         // ignore
       }
       this.commentsMigrationPermissionsUnsubscribe = null;
+    }
+    if (this.commentsUndoScopePermissionsUnsubscribe) {
+      try {
+        this.commentsUndoScopePermissionsUnsubscribe();
+      } catch {
+        // ignore
+      }
+      this.commentsUndoScopePermissionsUnsubscribe = null;
     }
     if (this.sheetsSchemaObserver) {
       this.sheets.unobserve(this.sheetsSchemaObserver);
