@@ -1512,10 +1512,10 @@ impl DaxEngine {
                     1
                 };
 
-                let table_key = normalize_ident(table);
                 let Some((row, visible_cols)) =
-                    row_ctx.physical_row_for_level(&table_key, level_from_inner)
+                    row_ctx.physical_row_for_level(table, level_from_inner)
                 else {
+                    let table_key = normalize_ident(table);
                     let available = row_ctx
                         .stack
                         .iter()
@@ -1525,28 +1525,27 @@ impl DaxEngine {
                         .count();
                     return Err(DaxError::Eval(format!(
                         "EARLIER refers to an outer row context that does not exist for {table}[{column}] (requested level {level_from_inner}, available {available})"
-                    )));
+                        )));
                 };
 
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let col_idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
                     table: table.clone(),
                     column: column.clone(),
                 })?;
                 if let Some(visible_cols) = visible_cols {
-                    if !visible_cols.contains(&col_idx) {
+                    if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
-                            "column {}[{column}] is not available in the current row context",
-                            table_ref.name()
+                            "column {table}[{column}] is not available in the current row context"
                         )));
                     }
                 }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                Ok(table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank))
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             "EARLIEST" => {
                 let [arg] = args else {
@@ -1567,22 +1566,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let col_idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
                     table: table.clone(),
                     column: column.clone(),
                 })?;
                 if let Some(visible_cols) = visible_cols {
-                    if !visible_cols.contains(&col_idx) {
+                    if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
-                            "column {}[{column}] is not available in the current row context",
-                            table_ref.name()
+                            "column {table}[{column}] is not available in the current row context"
                         )));
                     }
                 }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                Ok(table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank))
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
         }
@@ -5130,10 +5128,6 @@ fn propagate_filter(
                     .table(from_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
 
-                let allowed_keys: Vec<Value> = allowed_keys
-                    .into_iter()
-                    .filter(|key| !key.is_blank())
-                    .collect();
                 if !allowed_keys.is_empty() {
                     if let Some(rows) = from_table.filter_in(relationship.from_idx, &allowed_keys) {
                         for row in rows {
