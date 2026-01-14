@@ -55,6 +55,56 @@ function errBlock(heading, details) {
 }
 
 /**
+ * Best-effort extraction of the `<array>...</array>` block immediately following a
+ * `<key>...</key>` in an XML plist.
+ *
+ * This avoids false positives where a `<string>xlsx</string>` appears elsewhere
+ * (e.g. UT*TypeDeclarations) but not under CFBundleDocumentTypes.
+ *
+ * @param {string} plistXml
+ * @param {string} keyName
+ * @returns {string | null}
+ */
+function extractPlistArrayBlock(plistXml, keyName) {
+  const keyRe = new RegExp(`<key>\\s*${keyName}\\s*<\\/key>`, "i");
+  const keyMatch = keyRe.exec(plistXml);
+  if (!keyMatch || keyMatch.index == null) return null;
+
+  // Find the `<array>` that follows this key.
+  const afterKeyIdx = keyMatch.index + keyMatch[0].length;
+  const arrayOpenRe = /<array\b[^>]*>/gi;
+  arrayOpenRe.lastIndex = afterKeyIdx;
+  const openMatch = arrayOpenRe.exec(plistXml);
+  if (!openMatch || openMatch.index == null) return null;
+
+  const startIdx = openMatch.index;
+
+  // Scan forward tracking nested <array> depth until we close the initial array.
+  const tagRe = /<\/?array\b[^>]*>/gi;
+  tagRe.lastIndex = startIdx;
+  let depth = 0;
+  let endIdx = -1;
+  while (true) {
+    const m = tagRe.exec(plistXml);
+    if (!m || m.index == null) break;
+
+    const tag = m[0].toLowerCase();
+    if (tag.startsWith("</array")) {
+      depth -= 1;
+      if (depth === 0) {
+        endIdx = m.index + m[0].length;
+        break;
+      }
+    } else {
+      depth += 1;
+    }
+  }
+
+  if (endIdx < 0) return null;
+  return plistXml.slice(startIdx, endIdx);
+}
+
+/**
  * @param {unknown} pluginConfig
  * @returns {string[]}
  */
@@ -185,8 +235,9 @@ function main() {
   // ---- macOS: Info.plist contains CFBundleURLSchemes -> formula, and CFBundleDocumentTypes includes xlsx.
   try {
     const plist = readFileSync(infoPlistPath, "utf8");
-    // Keep this lightweight: we just need to know the scheme is present.
-    if (!plist.includes("<key>CFBundleURLSchemes</key>") || !plist.includes(`<string>${REQUIRED_SCHEME}</string>`)) {
+    const schemeBlock = extractPlistArrayBlock(plist, "CFBundleURLSchemes");
+    const schemeRe = new RegExp(`<string>\\s*${REQUIRED_SCHEME}\\s*<\\/string>`, "i");
+    if (!schemeBlock || !schemeRe.test(schemeBlock)) {
       errBlock("Missing macOS URL scheme registration (Info.plist)", [
         "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleURLSchemes including:",
         `  - ${REQUIRED_SCHEME}`,
@@ -194,9 +245,9 @@ function main() {
       ]);
     }
 
-    const hasDocumentTypes = /<key>\s*CFBundleDocumentTypes\s*<\/key>/i.test(plist);
-    const hasXlsxExt = new RegExp(`<string>\\s*${REQUIRED_FILE_EXT}\\s*<\\/string>`, "i").test(plist);
-    if (!hasDocumentTypes || !hasXlsxExt) {
+    const docTypesBlock = extractPlistArrayBlock(plist, "CFBundleDocumentTypes");
+    const xlsxRe = new RegExp(`<string>\\s*${REQUIRED_FILE_EXT}\\s*<\\/string>`, "i");
+    if (!docTypesBlock || !xlsxRe.test(docTypesBlock)) {
       errBlock("Missing macOS file association registration (Info.plist)", [
         "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleDocumentTypes including:",
         `  - ${REQUIRED_FILE_EXT}`,
