@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
@@ -131,6 +132,10 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
 
   /** @type {string[]} */
   const violations = [];
+  /** @type {Set<string>} */
+  const borderRadiusCssVarRefs = new Set();
+  const cssVarRef = /\bvar\(\s*(--[-\w]+)\b/g;
+  const unitRegex = /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
@@ -200,9 +205,15 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
       while ((match = re.exec(stripped))) {
         const valueString = match.groups?.value;
         if (typeof valueString === "string") {
+          // Capture CSS vars referenced by border-radius declarations so hardcoded units cannot be
+          // hidden behind custom properties (possibly in a different stylesheet).
+          let varMatch;
+          while ((varMatch = cssVarRef.exec(valueString))) {
+            borderRadiusCssVarRefs.add(varMatch[1]);
+          }
+          cssVarRef.lastIndex = 0;
+
           // Scan the matched value for any hardcoded length units (e.g. `calc(4px)` or `var(--radius, 4px)`).
-          const unitRegex =
-            /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
           const valueStart = match[0].indexOf(valueString);
           let unitMatch;
           while ((unitMatch = unitRegex.exec(valueString))) {
@@ -218,6 +229,7 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
               `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}${unit}`,
             );
           }
+          unitRegex.lastIndex = 0;
           continue;
         }
 
@@ -232,6 +244,117 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
         const absIndex = match.index + (relative >= 0 ? relative : 0);
         const line = getLineNumber(stripped, absIndex);
         violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}px`);
+      }
+    }
+  }
+
+  // Also ensure that any CSS variables used by border-radius assignments in scripts do not themselves
+  // hide hardcoded unit values (except canonical `--radius*` tokens).
+  const nonTokenVarRefs = [...borderRadiusCssVarRefs].filter((ref) => !ref.startsWith("--radius"));
+  if (nonTokenVarRefs.length > 0) {
+    /**
+     * @param {string} dirPath
+     * @returns {string[]}
+     */
+    function walkCssFiles(dirPath) {
+      /** @type {string[]} */
+      const files = [];
+      for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          files.push(...walkCssFiles(fullPath));
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (!entry.name.endsWith(".css")) continue;
+        files.push(fullPath);
+      }
+      return files;
+    }
+
+    const cssFiles = walkCssFiles(srcRoot).filter((file) => {
+      const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
+      // Demo/sandbox assets are not part of the shipped UI bundle.
+      if (rel.startsWith("grid/presence-renderer/")) return false;
+      if (rel.includes("/demo/")) return false;
+      if (rel.includes("/__tests__/")) return false;
+      return true;
+    });
+
+    /** @type {Map<string, string>} */
+    const strippedByFile = new Map();
+    /** @type {Map<string, Array<{ file: string, value: string, valueStart: number }>>} */
+    const customPropDecls = new Map();
+    const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+
+    for (const file of cssFiles) {
+      const css = fs.readFileSync(file, "utf8");
+      const strippedCss = stripCssNonSemanticText(css);
+      strippedByFile.set(file, strippedCss);
+
+      cssDeclaration.lastIndex = 0;
+      let decl;
+      while ((decl = cssDeclaration.exec(strippedCss))) {
+        const prop = decl?.groups?.prop ?? "";
+        if (!prop.startsWith("--")) continue;
+
+        const value = decl?.groups?.value ?? "";
+        const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+        let entries = customPropDecls.get(prop);
+        if (!entries) {
+          entries = [];
+          customPropDecls.set(prop, entries);
+        }
+        entries.push({ file, value, valueStart });
+      }
+      cssDeclaration.lastIndex = 0;
+    }
+
+    /** @type {Set<string>} */
+    const expandedVarRefs = new Set(nonTokenVarRefs);
+    const queue = [...nonTokenVarRefs];
+    while (queue.length > 0) {
+      const varName = queue.pop();
+      if (varName.startsWith("--radius")) continue;
+      const declsForVar = customPropDecls.get(varName);
+      if (!declsForVar) continue;
+
+      for (const { value } of declsForVar) {
+        let varMatch;
+        while ((varMatch = cssVarRef.exec(value))) {
+          const ref = varMatch[1];
+          if (expandedVarRefs.has(ref)) continue;
+          expandedVarRefs.add(ref);
+          queue.push(ref);
+        }
+        cssVarRef.lastIndex = 0;
+      }
+    }
+
+    for (const [prop, declsForVar] of customPropDecls) {
+      if (!expandedVarRefs.has(prop)) continue;
+      if (prop.startsWith("--radius")) continue;
+
+      for (const { file, value, valueStart } of declsForVar) {
+        const strippedCss = strippedByFile.get(file) ?? "";
+        let unitMatch;
+        while ((unitMatch = unitRegex.exec(value))) {
+          const numeric = unitMatch[1];
+          const unit = unitMatch[2] ?? "";
+          const n = Number(numeric);
+          if (!Number.isFinite(n)) continue;
+          if (n === 0) continue;
+
+          const absIndex = valueStart + unitMatch.index;
+          const line = getLineNumber(strippedCss, absIndex);
+          const rawUnit = unitMatch[0] ?? `${numeric}${unit}`;
+          violations.push(
+            `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()} (found ${rawUnit})`,
+          );
+        }
+
+        unitRegex.lastIndex = 0;
       }
     }
   }
