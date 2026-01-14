@@ -3176,11 +3176,31 @@ export class ContextManager {
                */
               const rectDisallowed = (sheetName, rect) => {
                 const rawSheet = typeof sheetName === "string" ? sheetName : "";
-                if (!rawSheet) return false;
+                if (!rawSheet) {
+                  // If we can't determine the sheet, we can't evaluate the structured selector. Under
+                  // structured DLP redaction, be conservative so untrusted metadata tokens (table/namedRange
+                  // names) cannot leak non-heuristic secrets.
+                  if (structuredOverallDecision?.decision && structuredOverallDecision.decision !== DLP_DECISION.ALLOW) {
+                    return true;
+                  }
+                  return false;
+                }
                 const sheetId = resolveDlpSheetId(rawSheet);
-                if (!sheetId) return false;
+                if (!sheetId) {
+                  if (structuredOverallDecision?.decision && structuredOverallDecision.decision !== DLP_DECISION.ALLOW) {
+                    return true;
+                  }
+                  return false;
+                }
                 const range = rectToRange(rect);
-                if (!range) return false;
+                if (!range) {
+                  // If we can't compute a range selector for this rect, we can't evaluate structured DLP.
+                  // Be conservative under structured redaction so names/metadata can't leak.
+                  if (structuredOverallDecision?.decision && structuredOverallDecision.decision !== DLP_DECISION.ALLOW) {
+                    return true;
+                  }
+                  return false;
+                }
                 const recordClassification = index
                   ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
                   : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);

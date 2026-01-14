@@ -1183,6 +1183,70 @@ test("buildWorkbookContext: workbook_summary redacts heuristic-sensitive sheet n
   assert.match(summarySection, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: workbook_summary redacts table/namedRange names when rect metadata is missing under structured DLP REDACT (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-summary-missing-rect",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }, { v: "World" }]],
+      },
+      {
+        name: "OtherSheet",
+        // Single-cell region -> no workbook chunks needed for this test.
+        cells: [[{ v: "Secret" }]],
+      },
+    ],
+    // Missing rect metadata: we cannot evaluate structured selectors for this table, so its name
+    // must be treated as disallowed metadata under structured DLP redaction.
+    tables: [{ name: "TopSecretTable", sheetName: "Sheet1" }],
+    namedRanges: [{ name: "TopSecretRange", sheetName: "Sheet1" }],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    // No-op redactor to ensure structured DLP redaction doesn't rely on heuristic regexes.
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 0, // no retrieval needed
+    // Avoid indexing: this test intentionally includes malformed table/namedRange metadata
+    // to ensure workbook_summary redaction is conservative.
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "OtherSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  const summarySection =
+    out.promptContext.match(/## workbook_summary\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+
+  assert.match(out.promptContext, /## workbook_summary/i);
+  assert.doesNotMatch(summarySection, /TopSecretTable/);
+  assert.doesNotMatch(summarySection, /TopSecretRange/);
+  assert.match(summarySection, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: redacts heuristic-sensitive sheet names (schema + summary) even with a no-op redactor (DLP REDACT)", async () => {
   const workbook = {
     id: "wb-dlp-sheetname-email",
