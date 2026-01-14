@@ -420,6 +420,11 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
       autoNumbers.delete(level);
       if (bulletDef?.kind === "char") {
         textRuns.push({ text: `${indent}${bulletDef.char} `, ...paraDefaultStyle });
+      } else if (indent) {
+        // Even when bullets are disabled (e.g. `<a:buNone/>`), the paragraph level still implies
+        // indentation. Preserve a minimal amount of indentation so nested list-like structures
+        // remain readable.
+        textRuns.push({ text: indent, ...paraDefaultStyle });
       }
     }
 
@@ -649,6 +654,8 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
       autoNumbers.delete(level);
       if (bulletDef?.kind === "char") {
         textRuns.push({ text: `${indent}${bulletDef.char} `, ...paraDefaultStyle });
+      } else if (indent) {
+        textRuns.push({ text: indent, ...paraDefaultStyle });
       }
     }
 

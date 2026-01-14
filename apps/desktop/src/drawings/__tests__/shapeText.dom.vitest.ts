@@ -96,4 +96,33 @@ describe("parseDrawingMLShapeText (DOMParser path)", () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Top\n  ◦ Nested");
   });
+
+  it("indents lvl paragraphs even when bullets are disabled via <a:buNone/>", () => {
+    const rawXml = `
+      <xdr:sp
+        xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+      >
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle>
+            <a:lvl1pPr><a:buChar char="•"/></a:lvl1pPr>
+            <a:lvl2pPr><a:buChar char="◦"/></a:lvl2pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr lvl="0"/>
+            <a:r><a:t>Top</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:pPr lvl="1"><a:buNone/></a:pPr>
+            <a:r><a:t>No bullet but indented</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Top\n  No bullet but indented");
+  });
 });
