@@ -2264,6 +2264,9 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
         }
     };
 
+    // Ensure `EncryptedPackage` exists before doing expensive password key derivation.
+    ensure_stream_exists(&mut ole, "EncryptedPackage")?;
+
     // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password attempts
     // don't leave key material lingering in heap allocations.
     let key = Zeroizing::new(make_key_from_password(

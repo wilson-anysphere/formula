@@ -158,6 +158,39 @@ fn missing_encryptedpackage_stream_returns_error() {
 }
 
 #[test]
+fn missing_encryptedpackage_stream_returns_error_even_with_wrong_password() {
+    // Missing `EncryptedPackage` should be treated as a structural error regardless of password.
+    // This also ensures we don't do expensive password derivation before confirming required
+    // streams exist.
+    let encrypted =
+        std::fs::read(fixture("inputs/ecma376standard_password.docx")).expect("read fixture");
+    let mut ole_fixture = cfb::CompoundFile::open(Cursor::new(encrypted)).expect("open fixture cfb");
+    let mut encryption_info = Vec::new();
+    ole_fixture
+        .open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo stream");
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo stream");
+
+    let err = decrypt_standard_ooxml_from_bytes(ole.into_inner().into_inner(), "wrong-password")
+        .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            OffcryptoError::InvalidStructure(msg) if msg.contains("missing `EncryptedPackage` stream")
+        ),
+        "expected InvalidStructure missing EncryptedPackage, got {err:?}"
+    );
+}
+
+#[test]
 fn supports_encryptedpackage_with_leading_slash_stream_name() {
     // Ensure we can read an absolute `/EncryptedPackage` stream path.
     let encrypted =
