@@ -882,7 +882,7 @@ function patchDrawingXmlForResize(obj: DrawingObject, cxEmu: number, cyEmu: numb
   return patchDrawingInnerXml(obj, (xml) => patchXfrmExt(xml, cxEmu, cyEmu));
 }
 
-function patchDrawingXmlForMove(obj: DrawingObject, dxEmu: number, dyEmu: number): DrawingObject {
+export function patchDrawingXmlForMove(obj: DrawingObject, dxEmu: number, dyEmu: number): DrawingObject {
   // Only patch a:xfrm/a:off when the existing representation uses non-zero off
   // values. When off is already 0, we keep it at 0 and rely on anchors.
   return patchDrawingInnerXml(obj, (xml) => {

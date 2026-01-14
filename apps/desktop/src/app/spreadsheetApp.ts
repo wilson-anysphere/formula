@@ -16,6 +16,7 @@ import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawingsInto, type HitTestIndex } from "../drawings/hitTest";
 import {
   DrawingInteractionController,
+  patchDrawingXmlForMove,
   resizeAnchor,
   shiftAnchor,
   type DrawingInteractionCallbacks,
@@ -12838,7 +12839,15 @@ export class SpreadsheetApp {
     const nextAnchor = shiftAnchor(selected.anchor, dxPx, dyPx, this.drawingGeom, zoom);
     if (nextAnchor === selected.anchor) return;
 
-    const nextObjects = objects.map((obj) => (obj.id === selectedId ? { ...obj, anchor: nextAnchor } : obj));
+    const dxEmu = pxToEmu(dxPx / zoom);
+    const dyEmu = pxToEmu(dyPx / zoom);
+    const nextObjects = objects.map((obj) => {
+      if (obj.id !== selectedId) return obj;
+      const moved = { ...obj, anchor: nextAnchor };
+      // Keep preserved DrawingML payloads (rawXml/xlsx.pic_xml) in sync with anchor edits so
+      // export/roundtrip remains faithful (mirrors DrawingInteractionController pointerup behavior).
+      return dxEmu !== 0 || dyEmu !== 0 ? patchDrawingXmlForMove(moved, dxEmu, dyEmu) : moved;
+    });
 
     // Update in-memory caches immediately so render/hit-test paths see the new positions even if
     // the DocumentController publishes drawing changes asynchronously.
