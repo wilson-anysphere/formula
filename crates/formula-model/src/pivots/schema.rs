@@ -236,13 +236,19 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     let Some(first) = chars.next() else {
         return true;
     };
-    if !matches!(first, 'A'..='Z' | 'a'..='z' | '_') {
+
+    // DAX allows unquoted identifiers in a conservative "C identifier" form. If the identifier
+    // contains anything other than ASCII alphanumerics/underscore, or starts with a non-letter /
+    // underscore, quote it.
+    if !first.is_ascii_alphabetic() && first != '_' {
         return true;
     }
+
     let is_keyword = raw.eq_ignore_ascii_case("VAR")
         || raw.eq_ignore_ascii_case("RETURN")
         || raw.eq_ignore_ascii_case("IN");
-    chars.any(|c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_')) || is_keyword
+
+    chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_')) || is_keyword
 }
 
 fn quote_dax_identifier(raw: &str) -> String {
