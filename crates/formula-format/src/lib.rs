@@ -32,6 +32,22 @@ pub use crate::cell_format::cell_format_code;
 pub use crate::datetime::DateSystem;
 pub use crate::parse::{locale_for_lcid, FormatCode, ParseError};
 
+/// Format-related flags exposed by Excel's `CELL` function.
+///
+/// These correspond to:
+/// - `CELL("color")`
+/// - `CELL("parentheses")`
+///
+/// Note: this reflects *number format string* semantics only (e.g. `0;[Red]0`),
+/// not Excel conditional formatting rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellFormatInfo {
+    /// `CELL("color")`: `1` if the number format specifies a color for negative numbers.
+    pub color: u8,
+    /// `CELL("parentheses")`: `1` if the number format specifies parentheses for negative numbers.
+    pub parentheses: u8,
+}
+
 /// Prefix used for placeholder format codes that indicate an Excel built-in number
 /// format ID without embedding a concrete format string.
 ///
@@ -431,4 +447,85 @@ pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
             }
         }
     }
+}
+
+/// Inspect an Excel/OOXML number format code and return the flags used by Excel's `CELL` function
+/// for `CELL("color")` and `CELL("parentheses")`.
+///
+/// The result depends only on the format string (not on conditional formatting rules).
+///
+/// This helper follows Excel's section selection rules for negative values, including conditional
+/// format sections like `[<0]...;...`.
+pub fn cell_format_info(format_code: Option<&str>, options: &FormatOptions) -> CellFormatInfo {
+    let code_str = format_code.unwrap_or("General");
+    let code_str = if code_str.trim().is_empty() {
+        "General"
+    } else {
+        code_str
+    };
+
+    let resolved_placeholder = resolve_builtin_placeholder_format_code(code_str, options.locale);
+    let code_str = resolved_placeholder.as_deref().unwrap_or(code_str);
+    let code = FormatCode::parse(code_str).unwrap_or_else(|_| FormatCode::general());
+
+    // Excel's `CELL("color")` / `CELL("parentheses")` are concerned with how *negative* values are
+    // formatted. Pick a representative negative number and select the format section for it.
+    let negative_section = code.select_section_for_number(-1.0);
+
+    // Excel reports 0/0 for one-section formats (where negatives use the first section and Excel
+    // automatically prefixes a '-' sign).
+    //
+    // Even if the first section contains a color token or parentheses literals, there is no
+    // explicit negative section in the format code.
+    if negative_section.auto_negative_sign {
+        return CellFormatInfo {
+            color: 0,
+            parentheses: 0,
+        };
+    }
+
+    CellFormatInfo {
+        color: u8::from(negative_section.color.is_some()),
+        parentheses: u8::from(section_has_unescaped_parentheses(negative_section.pattern)),
+    }
+}
+
+fn section_has_unescaped_parentheses(pattern: &str) -> bool {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+    let mut has_open = false;
+    let mut has_close = false;
+
+    for ch in pattern.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            '(' => has_open = true,
+            ')' => has_close = true,
+            _ => {}
+        }
+    }
+
+    has_open && has_close
 }
