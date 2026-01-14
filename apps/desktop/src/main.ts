@@ -162,6 +162,11 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
+import {
+  FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
+  FORMAT_FONT_SIZE_PRESET_COMMAND_IDS,
+  FORMAT_FONT_SIZE_STEP_COMMAND_IDS,
+} from "./commands/registerBuiltinFormatFontCommands.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
@@ -2267,26 +2272,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.superscript": true,
             "home.font.fontName": true,
             "home.font.fontSize": true,
-            "format.fontName.calibri": true,
-            "format.fontName.arial": true,
-            "format.fontName.times": true,
-            "format.fontName.courier": true,
-            "format.fontSize.8": true,
-            "format.fontSize.9": true,
-            "format.fontSize.10": true,
-            "format.fontSize.11": true,
-            "format.fontSize.12": true,
-            "format.fontSize.14": true,
-            "format.fontSize.16": true,
-            "format.fontSize.18": true,
-            "format.fontSize.20": true,
-            "format.fontSize.24": true,
-            "format.fontSize.28": true,
-            "format.fontSize.36": true,
-            "format.fontSize.48": true,
-            "format.fontSize.72": true,
-            "format.increaseFontSize": true,
-            "format.decreaseFontSize": true,
+            ...RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING,
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
@@ -2595,6 +2581,12 @@ function currentSelectionRect(): SelectionRect {
 
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
+
+const RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING: Record<string, true> = Object.fromEntries(
+  [...FORMAT_FONT_NAME_PRESET_COMMAND_IDS, ...FORMAT_FONT_SIZE_PRESET_COMMAND_IDS, ...FORMAT_FONT_SIZE_STEP_COMMAND_IDS].map(
+    (id) => [id, true] as const,
+  ),
+);
 
 // --- Ribbon: auto-disable unimplemented CommandRegistry-backed controls ----------
 //
