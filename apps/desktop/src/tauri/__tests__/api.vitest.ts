@@ -149,6 +149,20 @@ describe("tauri/api dynamic accessors", () => {
       (globalThis as any).__TAURI__ = { dialog: { alert } };
       expect(getTauriDialogMessageOrNull()).toBe(alert);
     });
+
+    it("detects confirm/message under plugin container shapes too", () => {
+      const confirm = vi.fn();
+      const message = vi.fn();
+      (globalThis as any).__TAURI__ = { plugin: { dialog: { confirm, message } } };
+      expect(getTauriDialogConfirmOrNull()).toBe(confirm);
+      expect(getTauriDialogMessageOrNull()).toBe(message);
+
+      const confirm2 = vi.fn();
+      const alert2 = vi.fn();
+      (globalThis as any).__TAURI__ = { plugins: { dialog: { confirm: confirm2, alert: alert2 } } };
+      expect(getTauriDialogConfirmOrNull()).toBe(confirm2);
+      expect(getTauriDialogMessageOrNull()).toBe(alert2);
+    });
   });
 
   describe("getTauriEventApi*", () => {
