@@ -466,6 +466,21 @@ fn verify_password_standard_rc4_key_style(
     }
 }
 
+fn verify_password_standard_with_key(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<(), OfficeCryptoError> {
+    match verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0) {
+        Ok(StandardAesCipherMode::Ecb) => Ok(()),
+        // When probing multiple encryption schemes, treat CBC verifier success as "not verified" so
+        // callers can attempt a scheme-specific verification step.
+        Ok(StandardAesCipherMode::Cbc { .. }) => Err(OfficeCryptoError::InvalidPassword),
+        Err(e) => Err(e),
+    }
+}
+
 fn verify_password_standard_with_key_and_mode(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
