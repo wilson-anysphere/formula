@@ -1,6 +1,7 @@
 use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, FilterContext, Relationship, Table, Value,
+    Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, Relationship, RowContext,
+    Table, Value,
 };
 use pretty_assertions::assert_eq;
 
@@ -228,6 +229,134 @@ fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys() {
     assert_eq!(
         model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
         Value::Blank
+    );
+}
+
+#[test]
+fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), 999.into(), 7.0.into()]).unwrap();
+    fact.push_row(vec![3.into(), Value::Blank, 5.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let blank_row = model.table("Dim").unwrap().row_count();
+
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", blank_row);
+
+    // The "virtual blank" member should expose fact rows whose FK is BLANK or has no match.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        12.0.into()
+    );
+}
+
+#[test]
+fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m_for_columnar_fact() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let blank_row = model.table("Dim").unwrap().row_count();
+
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", blank_row);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        12.0.into()
     );
 }
 
