@@ -88,6 +88,9 @@ jobs:
             scripts/validate-windows-bundles.test.js \
             scripts/ci/check-desktop-compliance-artifacts.test.js \
             scripts/ci/generate-release-checksums.test.js \
+            scripts/ci/check-gha-action-sha-pins.test.js \
+            scripts/ci/check-gha-runner-pins.test.js \
+            scripts/ci/check-benchmark-gh-pages-concurrency.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive-sigs.test.js \
