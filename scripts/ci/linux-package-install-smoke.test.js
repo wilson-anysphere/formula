@@ -71,14 +71,20 @@ test("linux-package-install-smoke: can print --help without a working python3/no
   try {
     const binDir = path.join(tmp, "bin");
     mkdirSync(binDir, { recursive: true });
-    // Stub python3 so the script cannot JSON-parse via Python; it should fall back to `sed`
-    // for reading `identifier` (needed when Parquet association is configured).
+    // Stub python3/node so the script cannot JSON-parse via either runtime; it should fall
+    // back to `sed` for reading `identifier` (needed when Parquet association is configured).
     writeFileSync(
       path.join(binDir, "python3"),
       `#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null || true\nexit 0\n`,
       "utf8",
     );
     chmodSync(path.join(binDir, "python3"), 0o755);
+    writeFileSync(
+      path.join(binDir, "node"),
+      `#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null || true\nexit 0\n`,
+      "utf8",
+    );
+    chmodSync(path.join(binDir, "node"), 0o755);
 
     const proc = spawnSync("bash", [scriptPath, "--help"], {
       cwd: repoRoot,
