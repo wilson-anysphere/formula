@@ -486,6 +486,7 @@ Notable keys:
     - We also include `com.apple.security.network.client` so outbound network access (updater/HTTPS) keeps working if the App Sandbox is ever enabled.
     - If `com.apple.security.app-sandbox` is enabled, we also need `com.apple.security.network.server` for the OAuth loopback redirect listener.
     - Guardrail: `node scripts/check-macos-entitlements.mjs` (also run in CI; enforces required + forbidden keys and rejects unexpected entitlements).
+    - Signed bundle guardrail: `bash scripts/validate-macos-bundle.sh` also checks that Hardened Runtime is enabled for signed builds (via `codesign -dv`).
   - `bundle.windows.timestampUrl` should be an **HTTPS** timestamp server (avoid plaintext HTTP Authenticode timestamping). Release CI guardrails enforce this (see `scripts/ci/check-windows-timestamp-url.mjs` and `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
   - `bundle.windows.webviewInstallMode` controls how Windows installers ensure the Microsoft Edge **WebView2** runtime is present.
   - This repo pins the Evergreen bootstrapper mode (`downloadBootstrapper`, `silent: true`) so installs work on machines without WebView2 (requires internet if the runtime is missing). See `docs/release.md` for details and offline alternatives.

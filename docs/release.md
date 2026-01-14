@@ -549,7 +549,7 @@ CI guardrail (tagged releases when secrets are configured):
 - The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
   - `xcrun stapler validate` (requires a stapled notarization ticket)
   - `spctl --assess` (Gatekeeper evaluation)
-  - See `scripts/validate-macos-bundle.sh` (also checks basic bundle metadata like the `formula://` URL scheme and verifies the app is **universal** via `lipo`).
+  - See `scripts/validate-macos-bundle.sh` (also checks Hardened Runtime is enabled for signed builds, validates basic bundle metadata like the `formula://` URL scheme, and verifies the app is **universal** via `lipo`).
 
 #### Hardened runtime entitlements (WKWebView / WASM)
 
@@ -616,6 +616,8 @@ then revert the change—do not commit it).
    test -n "$app" || { echo "No .app bundle found under apps/desktop/src-tauri/target/release/bundle/macos/*.app (or apps/desktop/src-tauri/target/*/release/bundle/macos/*.app)" >&2; exit 1; }
    echo "Checking app at: $app"
    codesign --verify --deep --strict --verbose=2 "$app"
+   # Confirm Hardened Runtime is enabled (Developer ID builds should be signed with `--options runtime`).
+   codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Runtime Version=|\\(runtime\\)"
    codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory|network\\.client"
    spctl --assess --type execute -vv "$app"
 

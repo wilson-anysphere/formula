@@ -8,6 +8,7 @@
 # - Missing/incorrect Info.plist metadata (URL scheme, file associations)
 # - Missing universal binary slices (Intel + Apple Silicon)
 # - Invalid code signing / Gatekeeper assessment when signing is enabled
+# - Signed app missing the Hardened Runtime flag (Developer ID distribution should use `--options runtime`)
 # - Missing stapled notarization tickets when notarization is configured
 #
 # Usage:
