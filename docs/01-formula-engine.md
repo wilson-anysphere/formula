@@ -251,6 +251,9 @@ canonicalization would appear as:
 
 * **Bytecode backend:** formulas that contain external workbook references currently do **not** compile
   to bytecode (they fall back to the AST evaluator).
+  * Note: this is about **external workbook references** like `[Book.xlsx]Sheet1!A1`. The bytecode
+    backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a multi-area
+    reference) when all referenced sheets exist.
 * **External structured references:** structured refs cannot be workbook/sheet-qualified today
   (e.g. `[Book.xlsx]Table1[Col]` evaluates to `#REF!`).
 * **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
