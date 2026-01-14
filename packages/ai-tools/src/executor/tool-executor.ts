@@ -84,12 +84,9 @@ function looksLikeExcelRichTextValue(value: unknown): value is { text: string; r
   const obj = value as Record<string, unknown>;
   if (typeof obj.text !== "string") return false;
 
-  // Rich text values returned from Excel are typically plain objects with just these keys. We
-  // intentionally reject objects with extra keys to avoid surprising behavior for generic
-  // `{ text: string, ... }` payloads users might store in cells.
-  for (const key of Object.keys(obj)) {
-    if (key !== "text" && key !== "runs") return false;
-  }
+  // Rich text values are commonly represented as `{ text, runs }`, but some backends may attach
+  // additional metadata. Treat any plain object with a string `text` field as rich text so we
+  // don't leak large nested payloads via JSON stringification.
   return true;
 }
 
@@ -98,14 +95,16 @@ function looksLikeExcelInCellImageValue(value: unknown): boolean {
   const obj = value as any;
 
   // Direct payload shape: `{ imageId: string, altText?: string, width?: number, height?: number }`
-  if (typeof obj.imageId === "string" && obj.imageId.trim().length > 0) return true;
+  const imageId = obj.imageId ?? obj.image_id;
+  if (typeof imageId === "string" && imageId.trim().length > 0) return true;
 
   // Envelope shape: `{ type: "image", value: { imageId: string, altText?: string } }`
   const type = obj.type;
   if (typeof type === "string" && type.toLowerCase() === "image") {
     const inner = obj.value;
-    if (inner && typeof inner === "object" && !Array.isArray(inner) && typeof (inner as any).imageId === "string") {
-      return (inner as any).imageId.trim().length > 0;
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      const innerImageId = (inner as any).imageId ?? (inner as any).image_id;
+      if (typeof innerImageId === "string") return innerImageId.trim().length > 0;
     }
   }
 
@@ -121,13 +120,13 @@ function formatExcelInCellImageValue(value: unknown): string | null {
   if (typeof type === "string" && type.toLowerCase() === "image") {
     const inner = obj.value;
     if (inner && typeof inner === "object" && !Array.isArray(inner)) {
-      const altText = formatAltTextOrFallback((inner as any).altText);
+      const altText = formatAltTextOrFallback((inner as any).altText ?? (inner as any).alt_text ?? (inner as any).alt);
       return altText ?? DEFAULT_IN_CELL_IMAGE_PLACEHOLDER;
     }
   }
 
   // Direct payload shape.
-  const altText = formatAltTextOrFallback(obj.altText);
+  const altText = formatAltTextOrFallback(obj.altText ?? obj.alt_text ?? obj.alt);
   return altText ?? DEFAULT_IN_CELL_IMAGE_PLACEHOLDER;
 }
 

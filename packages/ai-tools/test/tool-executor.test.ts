@@ -499,17 +499,25 @@ describe("ToolExecutor", () => {
         runs: [{ text: "Hello" }, { text: " world" }],
       } as any,
     });
+    // Some backends attach extra metadata fields; still prefer the plain text.
+    workbook.setCell(parseA1Cell("Sheet1!A2"), {
+      value: {
+        text: "Hello with metadata",
+        runs: [],
+        meta: { foo: "bar" },
+      } as any,
+    });
 
     const result = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:A1" },
+      parameters: { range: "Sheet1!A1:A2" },
     });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("read_range");
     if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
 
-    expect(result.data?.values).toEqual([["Hello world"]]);
+    expect(result.data?.values).toEqual([["Hello world"], ["Hello with metadata"]]);
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
@@ -532,17 +540,20 @@ describe("ToolExecutor", () => {
     workbook.setCell(parseA1Cell("Sheet1!A4"), {
       value: { imageId: "img_4", altText: "   " } as any,
     });
+    workbook.setCell(parseA1Cell("Sheet1!A5"), {
+      value: { type: "image", value: { image_id: "img_5", alt_text: "Alt (snake_case)" } } as any,
+    });
 
     const result = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:A4" },
+      parameters: { range: "Sheet1!A1:A5" },
     });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("read_range");
     if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
 
-    expect(result.data?.values).toEqual([["Product photo"], ["[Image]"], ["Logo"], ["[Image]"]]);
+    expect(result.data?.values).toEqual([["Product photo"], ["[Image]"], ["Logo"], ["[Image]"], ["Alt (snake_case)"]]);
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
