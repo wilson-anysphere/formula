@@ -117,6 +117,14 @@ Quick verification checklist (especially for `es-ES`):
   - `IF` → `SI`
   - financial functions like `NPV`/`IRR` should also localize (e.g. `NPV` → `VNA`, `IRR` → `TIR`).
 
+CI/tests also provide guard rails:
+
+- `crates/formula-engine/tests/locale_function_tsv_completeness.rs` enforces that each locale TSV
+  contains exactly one entry per catalog function and has no ambiguous localized collisions.
+- `crates/formula-engine/tests/locale_es_es_function_sentinels.rs` is an explicit regression test
+  for Spanish financial function spellings (including `NPV`/`IRR`), since missing entries otherwise
+  silently fall back to English.
+
 ### Error translations (`<locale>.errors.tsv`)
 
 Locale-specific error literal spellings are tracked in TSV files in this directory
