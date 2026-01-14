@@ -21,21 +21,6 @@ env:
   # `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1`.
   FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX }}
 
-  # Optional: tighten targets via GitHub Actions variables (the runners also have defaults).
-  # (Includes legacy unscoped vars so maintainers can reuse existing CI settings.)
-  FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS }}
-  FORMULA_DESKTOP_TTI_TARGET_MS: ${{ vars.FORMULA_DESKTOP_TTI_TARGET_MS }}
-  FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS: ${{ vars.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS }}
-  FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS: ${{ vars.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS }}
-  FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS: ${{ vars.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS }}
-  FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS }}
-  FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS }}
-  FORMULA_DESKTOP_COLD_TTI_TARGET_MS: ${{ vars.FORMULA_DESKTOP_COLD_TTI_TARGET_MS }}
-  FORMULA_DESKTOP_WARM_TTI_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WARM_TTI_TARGET_MS }}
-  FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS }}
-  FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB }}
-  FORMULA_DESKTOP_MEMORY_TARGET_MB: ${{ vars.FORMULA_DESKTOP_MEMORY_TARGET_MB }}
-
 jobs:
   guard:
     name: Guard (label + same-repo PR)
@@ -149,6 +134,43 @@ jobs:
           PR_NUMBER: ${{ needs.guard.outputs.pr_number }}
           PR_LABEL: ${{ needs.guard.outputs.label }}
           PR_HEAD_SHA: ${{ needs.guard.outputs.head_sha }}
+
+      - name: Export desktop perf target env vars (from GitHub Actions variables)
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          maybe_set() {
+            local name="$1"
+            local raw="$2"
+            if [[ -n "${!name:-}" ]]; then
+              echo "Keeping existing $name=${!name}"
+              return 0
+            fi
+            # Strip newlines/CRs to keep $GITHUB_ENV parsing happy.
+            local value="${raw//$'\r'/}"
+            value="${value//$'\n'/}"
+            if [[ -n "$value" ]]; then
+              echo "$name=$value" >> "$GITHUB_ENV"
+              echo "Set $name=$value"
+            fi
+          }
+          
+          # Startup targets (includes legacy unscoped fallbacks so maintainers can reuse existing CI settings).
+          maybe_set FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS "${{ vars.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_TTI_TARGET_MS "${{ vars.FORMULA_DESKTOP_TTI_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS "${{ vars.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS "${{ vars.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS "${{ vars.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_COLD_TTI_TARGET_MS "${{ vars.FORMULA_DESKTOP_COLD_TTI_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS "${{ vars.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS "${{ vars.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_WARM_TTI_TARGET_MS "${{ vars.FORMULA_DESKTOP_WARM_TTI_TARGET_MS }}"
+          maybe_set FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS "${{ vars.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS }}"
+          
+          # Idle memory targets.
+          maybe_set FORMULA_DESKTOP_IDLE_RSS_TARGET_MB "${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB }}"
+          maybe_set FORMULA_DESKTOP_MEMORY_TARGET_MB "${{ vars.FORMULA_DESKTOP_MEMORY_TARGET_MB }}"
 
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         shell: bash
