@@ -37,6 +37,10 @@
   - Excel versions can differ in which error literals they recognize (e.g. #SPILL!).
     If your Excel build does not support a newer error kind, this script may fail with
     an "unexpected error literal" message to avoid writing a misleading TSV.
+  - Locale-specific TSVs can include multiple localized spellings for the same canonical
+    error literal (aliases) to match Excel behavior across versions and input variants.
+    If the output TSV already exists, this script preserves any existing alias spellings
+    and appends newly extracted spellings.
 #>
 
 [CmdletBinding()]
@@ -105,6 +109,102 @@ function Parse-FormulaLocalErrorLiteral {
     return $candidate
   }
   return $null
+}
+
+function Is-ErrorTsvCommentLine {
+  param([Parameter(Mandatory = $true)][string]$TrimmedLine)
+
+  if ($TrimmedLine -eq "#") { return $true }
+  if ($TrimmedLine.StartsWith("#") -and $TrimmedLine.Length -gt 1) {
+    $second = $TrimmedLine.Substring(1, 1)
+    if ($second -match "\s") { return $true }
+  }
+  return $false
+}
+
+function Read-ExistingErrorTsv {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $map = @{}
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $map
+  }
+
+  $lines = Get-Content -LiteralPath $Path -Encoding UTF8
+  $lineNo = 0
+  foreach ($rawLine in $lines) {
+    $lineNo++
+    $trimmed = $rawLine.Trim()
+    if (-not $trimmed) { continue }
+    if (Is-ErrorTsvCommentLine -TrimmedLine $trimmed) { continue }
+
+    $parts = $rawLine -split "`t", 3
+    if ($parts.Count -lt 2) {
+      throw "Invalid TSV line in existing error mapping: $Path:$lineNo (expected 2 columns): $rawLine"
+    }
+    $canonical = $parts[0].Trim()
+    $localized = $parts[1].Trim()
+    if (-not $canonical -or -not $localized) {
+      throw "Invalid TSV line in existing error mapping: $Path:$lineNo (empty field): $rawLine"
+    }
+
+    if (-not $map.ContainsKey($canonical)) {
+      $list = New-Object System.Collections.Generic.List[string]
+      $list.Add($localized) | Out-Null
+      $map[$canonical] = $list
+    } else {
+      Add-UniqueLocalizedVariant -List $map[$canonical] -Value $localized
+    }
+  }
+
+  return $map
+}
+
+function Add-UniqueLocalizedVariant {
+  param(
+    [Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$List,
+    [Parameter(Mandatory = $true)][string]$Value
+  )
+
+  foreach ($existing in $List) {
+    if ($existing -ieq $Value) { return }
+  }
+  $List.Add($Value) | Out-Null
+}
+
+function Expand-EsEsErrorVariants {
+  param(
+    [Parameter(Mandatory = $true)][string]$Canonical,
+    [Parameter(Mandatory = $true)][string]$Localized
+  )
+
+  $out = New-Object System.Collections.Generic.List[string]
+  if (-not $Localized.StartsWith("#")) {
+    Add-UniqueLocalizedVariant -List $out -Value $Localized
+    return $out
+  }
+
+  $last = $Canonical.Substring($Canonical.Length - 1, 1)
+  if (($last -ne "!") -and ($last -ne "?")) {
+    Add-UniqueLocalizedVariant -List $out -Value $Localized
+    return $out
+  }
+
+  $inverted = if ($last -eq "?") { "¿" } else { "¡" }
+
+  $base = $Localized
+  if ($Localized.Length -gt 1) {
+    $second = $Localized.Substring(1, 1)
+    if (($second -eq "¡") -or ($second -eq "¿")) {
+      $base = "#" + $Localized.Substring(2)
+    }
+  }
+
+  $withInverted = "#" + $inverted + $base.Substring(1)
+  # Keep ordering stable: prefer inverted spellings first, then non-inverted.
+  Add-UniqueLocalizedVariant -List $out -Value $withInverted
+  Add-UniqueLocalizedVariant -List $out -Value $base
+  return $out
 }
 
 function Expected-SentinelErrorTranslations {
@@ -272,6 +372,10 @@ try {
     $OutPath = Join-Path $OutPath "$Locale.tsv"
   }
 
+  # Preserve any existing alias spellings recorded in the upstream TSV so rerunning this extractor
+  # does not accidentally drop known Excel-compatible variants.
+  $localizedByCanonical = Read-ExistingErrorTsv -Path $OutPath
+
   $excelVersion = $null
   $excelBuild = $null
   try { $excelVersion = [string]$excel.Version } catch {}
@@ -290,13 +394,6 @@ try {
 
   Warn-IfExcelErrorLocaleSeemsMisconfigured -ExcelObj $excel -RangeObj $cell -LocaleId $Locale
 
-  # Guardrail: if we ever get the same displayed error for multiple canonical codes,
-  # it likely means this Excel build doesn't recognize one of the newer error kinds
-  # and substituted a different error (often #NAME?). Fail rather than emitting an
-  # ambiguous/incorrect mapping.
-  $seenLocalized = @{}
-
-  $rows = New-Object System.Collections.Generic.List[object]
   foreach ($code in $canonicalCodes) {
     $formula = "=" + $code
     Set-RangeFormula -RangeObj $cell -Formula $formula
@@ -310,9 +407,9 @@ try {
 
     $candidate = Parse-FormulaLocalErrorLiteral -FormulaLocal $formulaLocal
 
-    $localized = $null
+    $primaryLocalized = $null
     if ($candidate -is [string] -and $candidate.StartsWith("#")) {
-      $localized = $candidate
+      $primaryLocalized = $candidate
       # If FormulaLocal didn't translate the literal but the displayed value did, trust `.Text`.
       if (
         $candidate -ceq $code -and
@@ -320,10 +417,10 @@ try {
         $displayText.StartsWith("#") -and
         -not ($displayText -ceq $code)
       ) {
-        $localized = $displayText
+        $primaryLocalized = $displayText
       }
     } elseif ($displayText -is [string] -and $displayText.StartsWith("#")) {
-      $localized = $displayText
+      $primaryLocalized = $displayText
     } else {
       throw "Failed to extract error literal for $code (FormulaLocal=$formulaLocal, Text=$displayText)"
     }
@@ -332,29 +429,66 @@ try {
     # when asked for `#GETTING_DATA`), fail rather than writing a misleading mapping. This can
     # happen when a given Excel build does not recognize a newer error kind.
     foreach ($other in $canonicalCodes) {
-      if (($other -ieq $localized) -and -not ($other -ieq $code)) {
-        throw "Excel returned canonical error literal $localized when extracting $code (expected the same error kind). This may indicate your Excel build does not recognize $code."
+      if (($other -ieq $primaryLocalized) -and -not ($other -ieq $code)) {
+        throw "Excel returned canonical error literal $primaryLocalized when extracting $code (expected the same error kind). This may indicate your Excel build does not recognize $code."
       }
     }
-
-    $folded = $localized.ToUpperInvariant()
-    if ($seenLocalized.ContainsKey($folded) -and -not ($seenLocalized[$folded] -ieq $code)) {
-      $prev = [string]$seenLocalized[$folded]
-      throw "Excel returned the same localized error literal for multiple canonical codes: $prev and $code both mapped to $localized. This may indicate your Excel build does not recognize one of the error kinds."
-    }
-    $seenLocalized[$folded] = $code
 
     # Guardrail: for most errors, the trailing punctuation should be stable across locales.
     $last = $code.Substring($code.Length - 1, 1)
     if (($last -eq "!") -or ($last -eq "?")) {
-      if (-not $localized.EndsWith($last)) {
-        throw "Excel returned unexpected error literal for $code: $localized (expected to end with '$last'). This may indicate your Excel build does not recognize $code."
+      if (-not $primaryLocalized.EndsWith($last)) {
+        throw "Excel returned unexpected error literal for $code: $primaryLocalized (expected to end with '$last'). This may indicate your Excel build does not recognize $code."
       }
     }
 
-    Write-Verbose ("{0} -> {1} (FormulaLocal={2}, Text={3})" -f $code, $localized, $formulaLocal, $displayText)
+    $variants = New-Object System.Collections.Generic.List[string]
+    Add-UniqueLocalizedVariant -List $variants -Value $primaryLocalized
+    if ($candidate -is [string] -and $candidate.StartsWith("#")) {
+      Add-UniqueLocalizedVariant -List $variants -Value $candidate
+    }
+    if ($displayText -is [string] -and $displayText.StartsWith("#")) {
+      Add-UniqueLocalizedVariant -List $variants -Value $displayText
+    }
 
-    $rows.Add([ordered]@{ canonical = $code; localized = $localized }) | Out-Null
+    # Spanish Excel accepts both inverted and non-inverted punctuation variants for many errors.
+    if ($Locale -ieq "es-ES") {
+      $expanded = New-Object System.Collections.Generic.List[string]
+      foreach ($v in $variants) {
+        $esVariants = Expand-EsEsErrorVariants -Canonical $code -Localized $v
+        foreach ($ev in $esVariants) {
+          Add-UniqueLocalizedVariant -List $expanded -Value $ev
+        }
+      }
+      $variants = $expanded
+    }
+
+    if (-not $localizedByCanonical.ContainsKey($code)) {
+      $localizedByCanonical[$code] = New-Object System.Collections.Generic.List[string]
+    }
+    foreach ($v in $variants) {
+      Add-UniqueLocalizedVariant -List $localizedByCanonical[$code] -Value $v
+    }
+
+    Write-Verbose ("{0} -> {1} (FormulaLocal={2}, Text={3})" -f $code, ($variants -join ", "), $formulaLocal, $displayText)
+  }
+
+  # Guardrail: ensure there are no ambiguous localized spellings across canonical error codes
+  # after merging existing alias spellings + freshly extracted spellings.
+  $seenLocalized = @{}
+  foreach ($code in $canonicalCodes) {
+    if (-not $localizedByCanonical.ContainsKey($code) -or $localizedByCanonical[$code].Count -eq 0) {
+      throw "Missing error literal mapping for $code in output TSV ($OutPath)"
+    }
+
+    foreach ($localized in $localizedByCanonical[$code]) {
+      $folded = $localized.ToUpperInvariant()
+      if ($seenLocalized.ContainsKey($folded) -and -not ($seenLocalized[$folded] -ieq $code)) {
+        $prev = [string]$seenLocalized[$folded]
+        throw "Duplicate localized error spelling across canonical codes: $localized maps to both $prev and $code"
+      }
+      $seenLocalized[$folded] = $code
+    }
   }
 
   $outLines = New-Object System.Collections.Generic.List[string]
@@ -364,8 +498,14 @@ try {
     $outLines.Add("# Excel UI locale: $excelUiLocale") | Out-Null
   }
   $outLines.Add("#") | Out-Null
-  foreach ($r in $rows) {
-    $outLines.Add("$($r.canonical)`t$($r.localized)") | Out-Null
+  if ($Locale -ieq "es-ES") {
+    $outLines.Add("# Note: Spanish Excel error literals can use leading inverted punctuation (e.g. #¡VALOR!, #¡DESBORDAMIENTO!, #¿NOMBRE?).") | Out-Null
+    $outLines.Add("# The formula engine lexer and locale tables accept these spellings for localized formula round-tripping.") | Out-Null
+  }
+  foreach ($code in $canonicalCodes) {
+    foreach ($localized in $localizedByCanonical[$code]) {
+      $outLines.Add("$code`t$localized") | Out-Null
+    }
   }
 
   $outDir = Split-Path -Parent $OutPath
