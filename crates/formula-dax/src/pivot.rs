@@ -2050,38 +2050,11 @@ fn pivot_row_scan_many_to_many(
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
 
-    let base_rows = (!filter.is_empty())
-        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
 
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
-
-    // Precompute the set of allowed rows per hop table so group construction respects the existing
-    // filter context (including relationship propagation).
-    let mut allowed_rows: HashMap<String, Vec<bool>> = HashMap::new();
-    if !filter.is_empty() {
-        let mut tables: HashSet<String> = HashSet::new();
-        for accessor in &group_key_accessors {
-            if let GroupKeyAccessor::RelatedPath { hops, .. } = accessor {
-                for hop in hops {
-                    tables.insert(hop.to_table.name().to_string());
-                }
-            }
-        }
-
-        for table in tables {
-            let table_ref = model
-                .table(&table)
-                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-            let mut allowed = vec![false; table_ref.row_count()];
-            for row in crate::engine::resolve_table_rows(model, filter, &table)? {
-                if row < allowed.len() {
-                    allowed[row] = true;
-                }
-            }
-            allowed_rows.insert(table, allowed);
-        }
-    }
 
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     #[derive(Clone)]
@@ -2162,7 +2135,9 @@ fn pivot_row_scan_many_to_many(
                     let mut current_table = table_ref;
                     let mut current_rows: Vec<usize> = vec![row];
                     for hop in hops {
-                        let allowed = allowed_rows.get(hop.to_table.name());
+                        let allowed = row_sets
+                            .as_ref()
+                            .and_then(|sets| sets.get(hop.to_table.name()));
                         let mut next_rows: HashSet<usize> = HashSet::new();
                         for &current_row in &current_rows {
                             let key = current_table
@@ -2176,7 +2151,7 @@ fn pivot_row_scan_many_to_many(
                             };
                             to_row_set.for_each_row(|to_row| {
                                 if allowed
-                                    .map(|set| set.get(to_row).copied().unwrap_or(false))
+                                    .map(|set| to_row < set.len() && set.get(to_row))
                                     .unwrap_or(true)
                                 {
                                     next_rows.insert(to_row);
@@ -2227,8 +2202,11 @@ fn pivot_row_scan_many_to_many(
         Ok(())
     };
 
-    if let Some(rows) = base_rows {
-        for row in rows {
+    if let Some(sets) = row_sets.as_ref() {
+        let allowed = sets
+            .get(base_table)
+            .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+        for row in allowed.iter_ones() {
             process_row(row)?;
         }
     } else {

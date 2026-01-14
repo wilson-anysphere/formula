@@ -4636,7 +4636,7 @@ pub(crate) fn resolve_table_rows(
 /// For [`Cardinality::ManyToMany`], propagation is based on the distinct set of keys visible on the
 /// source side (a key is considered visible if *any* row with that key is allowed), rather than a
 /// unique lookup row.
-fn resolve_row_sets(
+pub(crate) fn resolve_row_sets(
     model: &DataModel,
     filter: &FilterContext,
 ) -> DaxResult<HashMap<String, BitVec>> {
