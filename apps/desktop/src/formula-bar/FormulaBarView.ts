@@ -1489,7 +1489,8 @@ export class FormulaBarView {
       // Excel-like behavior: Tab/Shift+Tab commits the edit (and the app navigates selection).
       // Exception: plain Tab accepts an AI suggestion if one is available.
       //
-      // Never allow default browser focus traversal while editing.
+      // Never allow default browser focus traversal while editing (except while IME composition
+      // is active, where we intentionally avoid special handling and let the browser/IME decide).
       if (!e.shiftKey) {
         const accepted = this.model.acceptAiSuggestion();
         if (accepted) {
