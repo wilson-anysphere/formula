@@ -14854,6 +14854,15 @@ export class SpreadsheetApp {
 
     // Avoid allocating per-cell `{row,col}` objects in the legacy renderer.
     const coordScratch = { row: 0, col: 0 };
+    const richTextRectScratch = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
+    const richTextOptionsScratch = {
+      padding: 4,
+      align: "start" as const,
+      verticalAlign: "middle" as const,
+      fontFamily: cellFontFamily,
+      fontSizePx,
+      color: defaultTextColor,
+    };
 
     const renderCellRegion = (options: {
       clipX: number;
@@ -14940,24 +14949,10 @@ export class SpreadsheetApp {
 
             if (!rich || rich.text === "") continue;
 
-          renderRichText(
-            ctx,
-            rich,
-            {
-              x: startX + visualCol * this.cellWidth,
-              y: startY + visualRow * this.cellHeight,
-              width: this.cellWidth,
-              height: this.cellHeight
-            },
-            {
-              padding: 4,
-              align: "start",
-              verticalAlign: "middle",
-              fontFamily: cellFontFamily,
-              fontSizePx,
-              color
-            }
-          );
+          richTextRectScratch.x = startX + visualCol * this.cellWidth;
+          richTextRectScratch.y = startY + visualRow * this.cellHeight;
+          richTextOptionsScratch.color = color;
+          renderRichText(ctx, rich, richTextRectScratch, richTextOptionsScratch);
         }
       }
 
