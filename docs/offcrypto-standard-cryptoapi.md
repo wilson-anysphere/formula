@@ -464,7 +464,8 @@ Parameters:
 * Cipher: AES-256 (`CALG_AES_256`, `0x00006610`)
 * KeySize: 256 bits → 32 bytes
 * spinCount: 50,000
-* `block = 0` (Standard uses a fixed `LE32(0)` block key)
+* `block = 0` (used to derive the file key and validate the verifier; RC4 uses other block indices
+  for per-block package keys)
 
 Inputs:
 
