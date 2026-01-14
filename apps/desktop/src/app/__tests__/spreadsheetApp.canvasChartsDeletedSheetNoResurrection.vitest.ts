@@ -121,7 +121,8 @@ describe("SpreadsheetApp canvas charts deleted-sheet safety", () => {
   });
 
   it("does not recreate a deleted sheet when charts refresh using a stale sheetNameResolver mapping", () => {
-    // Canvas charts are opt-in.
+    // Canvas charts are enabled by default, but set the env var explicitly so this test remains
+    // robust even if other suites temporarily override the default.
     process.env.CANVAS_CHARTS = "1";
 
     const staleIdToName = new Map<string, string>([
@@ -170,4 +171,3 @@ describe("SpreadsheetApp canvas charts deleted-sheet safety", () => {
     }
   });
 });
-
