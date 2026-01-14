@@ -3332,23 +3332,15 @@ export class FormulaBarView {
     if (!range) {
       hoverChanged = this.#lastEmittedHoverRange !== null;
     } else {
-      const next = {
-        startRow: range.start.row,
-        startCol: range.start.col,
-        endRow: range.end.row,
-        endCol: range.end.col,
-      };
       const prev = this.#lastEmittedHoverRange;
-      if (
-        !prev ||
-        prev.startRow !== next.startRow ||
-        prev.startCol !== next.startCol ||
-        prev.endRow !== next.endRow ||
-        prev.endCol !== next.endCol
-      ) {
+      const startRow = range.start.row;
+      const startCol = range.start.col;
+      const endRow = range.end.row;
+      const endCol = range.end.col;
+      if (!prev || prev.startRow !== startRow || prev.startCol !== startCol || prev.endRow !== endRow || prev.endCol !== endCol) {
         hoverChanged = true;
       }
-      if (hoverChanged) this.#lastEmittedHoverRange = next;
+      if (hoverChanged) this.#lastEmittedHoverRange = { startRow, startCol, endRow, endCol };
     }
     if (!range && hoverChanged) this.#lastEmittedHoverRange = null;
     if (this.#lastEmittedHoverText !== normalizedText) hoverChanged = true;
