@@ -312,12 +312,7 @@ fn errors_on_truncated_non_final_ciphertext_segment() {
     encrypted.truncate(8 + SEGMENT_LEN - 1);
 
     let cursor = Cursor::new(encrypted);
-    let mut reader =
-        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
-
-    let mut out = Vec::new();
-    let err = reader
-        .read_to_end(&mut out)
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
         .expect_err("expected truncated ciphertext segment to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
@@ -332,12 +327,7 @@ fn errors_on_final_segment_ciphertext_not_block_aligned() {
     encrypted.extend_from_slice(&[0u8; 17]); // not a multiple of 16
 
     let cursor = Cursor::new(encrypted);
-    let mut reader =
-        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
-
-    let mut buf = [0u8; 8];
-    let err = reader
-        .read(&mut buf)
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
         .expect_err("expected non-block-aligned ciphertext to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
@@ -353,12 +343,7 @@ fn errors_when_final_segment_ciphertext_is_block_aligned_but_too_short() {
     encrypted.extend_from_slice(&[0u8; 32]);
 
     let cursor = Cursor::new(encrypted);
-    let mut reader =
-        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
-
-    let mut out = Vec::new();
-    let err = reader
-        .read_to_end(&mut out)
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
         .expect_err("expected too-short final ciphertext segment to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
@@ -374,14 +359,13 @@ fn errors_on_u64_max_orig_size_without_panicking() {
     // No ciphertext bytes: should be treated as truncated/corrupt, not as "0 segments".
 
     let cursor = Cursor::new(encrypted);
-    let mut reader =
-        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
-
-    let mut buf = [0u8; 1];
-    let err = reader
-        .read(&mut buf)
-        .expect_err("expected truncated ciphertext to error");
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
+        .expect_err("expected u64::MAX orig_size to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
+    assert!(
+        err.to_string().contains("orig_size"),
+        "unexpected error message: {err}"
+    );
 }
 
 #[test]

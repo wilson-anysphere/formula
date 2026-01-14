@@ -27,6 +27,7 @@ pub struct StandardAesEncryptedPackageReader<R> {
     key: Vec<u8>,
     salt: Vec<u8>,
     orig_size: u64,
+    ciphertext_len: u64,
     pos: u64,
 
     cached_segment_index: Option<u64>,
@@ -49,12 +50,53 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
             .map_err(|e| truncated("EncryptedPackage size prefix", e))?;
         let orig_size = u64::from_le_bytes(size_buf);
 
+        let ciphertext_start = stream_start.checked_add(SIZE_PREFIX_LEN).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "EncryptedPackage stream start offset overflow",
+            )
+        })?;
+        let end = inner.seek(SeekFrom::End(0))?;
+        if end < ciphertext_start {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "EncryptedPackage stream is truncated (EOF before ciphertext start)",
+            ));
+        }
+        let ciphertext_len = end - ciphertext_start;
+
+        // Restore position to the ciphertext start so subsequent reads work as expected.
+        inner.seek(SeekFrom::Start(ciphertext_start))?;
+
+        // Ciphertext must be block-aligned for AES-CBC without padding removal.
+        if ciphertext_len % (AES_BLOCK_LEN as u64) != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "EncryptedPackage ciphertext length is not a multiple of 16",
+            ));
+        }
+
+        // Guardrail: the `orig_size` prefix is attacker-controlled; reject inputs where the declared
+        // plaintext length is implausible for the available ciphertext bytes.
+        //
+        // The ciphertext length must be at least `ceil(orig_size / 16) * 16` bytes for AES-CBC.
+        let expected_min_ciphertext_len = expected_min_ciphertext_len(orig_size)?;
+        if ciphertext_len < expected_min_ciphertext_len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "EncryptedPackage orig_size {orig_size} is implausibly large for ciphertext length {ciphertext_len}",
+                ),
+            ));
+        }
+
         Ok(Self {
             inner,
             stream_start,
             key: key.into(),
             salt: salt.into(),
             orig_size,
+            ciphertext_len,
             pos: 0,
             cached_segment_index: None,
             cached_plaintext: Vec::new(),
@@ -122,27 +164,32 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         let cipher_off = self.ciphertext_offset(segment_index)?;
         let is_final = segment_index + 1 == seg_count;
 
-        let cipher_len: usize = if !is_final {
-            SEGMENT_PLAINTEXT_LEN as usize
+        let cipher_len_u64: u64 = if !is_final {
+            SEGMENT_PLAINTEXT_LEN
         } else {
-            let end = self.inner.seek(SeekFrom::End(0))?;
-            if end < cipher_off {
-                return Err(std::io::Error::new(
+            let seg_off = segment_index
+                .checked_mul(SEGMENT_PLAINTEXT_LEN)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset overflow"))?;
+            self.ciphertext_len.checked_sub(seg_off).ok_or_else(|| {
+                std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "EncryptedPackage stream is truncated (end before final segment start)",
-                ));
-            }
-            let len = (end - cipher_off) as usize;
-            if len % AES_BLOCK_LEN != 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "final EncryptedPackage ciphertext segment length is not a multiple of 16",
-                ));
-            }
-            len
+                    "EncryptedPackage stream is truncated (EOF before final segment start)",
+                )
+            })?
         };
+        if cipher_len_u64 % (AES_BLOCK_LEN as u64) != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "final EncryptedPackage ciphertext segment length is not a multiple of 16",
+            ));
+        }
+        let cipher_len: usize = usize::try_from(cipher_len_u64).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "EncryptedPackage ciphertext segment does not fit into platform usize",
+            )
+        })?;
 
-        // Seek back to the ciphertext start (we may have moved to EOF to compute `cipher_len`).
         self.inner.seek(SeekFrom::Start(cipher_off))?;
 
         let mut buf = vec![0u8; cipher_len];
@@ -257,6 +304,29 @@ fn decrypt_aes_cbc_in_place(key: &[u8], iv: &[u8; 16], buf: &mut [u8]) -> std::i
             }
         };
         std::io::Error::new(kind, msg)
+    })
+}
+
+fn expected_min_ciphertext_len(orig_size: u64) -> std::io::Result<u64> {
+    if orig_size == 0 {
+        return Ok(0);
+    }
+
+    let block = AES_BLOCK_LEN as u64;
+    let blocks = orig_size
+        .checked_add(block - 1)
+        .map(|v| v / block)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "EncryptedPackage orig_size is too large",
+            )
+        })?;
+    blocks.checked_mul(block).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "EncryptedPackage orig_size is too large",
+        )
     })
 }
 
