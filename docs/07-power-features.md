@@ -25,8 +25,16 @@ See also:
 - [`docs/21-dax-engine.md`](./21-dax-engine.md) — Data Model/DAX pivot execution details
 
 ### Architecture
-
+ 
 ```typescript
+// Note: the canonical persisted schema (formula-model) uses an untagged Rust enum
+// `PivotFieldRef` for `sourceField`. Cache-backed fields serialize as a plain string
+// for backward compatibility; Data Model pivots serialize as structured objects.
+type PivotFieldRef =
+  | string                               // cache field (worksheet header text)
+  | { table: string; column: string }    // Data Model column (Table[Column])
+  | { measure: string };                 // Data Model measure name (without brackets)
+
 interface PivotTable {
   id: string;
   name: string;
@@ -53,7 +61,7 @@ interface PivotTable {
 }
 
 interface PivotField {
-  sourceField: string;
+  sourceField: PivotFieldRef;
   name: string;
   sortOrder: "ascending" | "descending" | "manual";
   manualSort?: string[];
@@ -62,12 +70,12 @@ interface PivotField {
 }
 
 interface ValueField {
-  sourceField: string;
+  sourceField: PivotFieldRef;
   name: string;
   aggregation: AggregationType;
   numberFormat?: string;
   showAs?: ShowAsType;
-  baseField?: string;
+  baseField?: PivotFieldRef;
   baseItem?: string;
 }
 
@@ -208,7 +216,13 @@ class PivotTableEngine {
     let keys: string[][] = [[]];
     
     for (const field of fields) {
-      const values = Array.from(cache.uniqueValues.get(field.sourceField) || []);
+      const fieldKey =
+        typeof field.sourceField === "string"
+          ? field.sourceField
+          : "measure" in field.sourceField
+            ? `[${field.sourceField.measure}]`
+            : `${field.sourceField.table}[${field.sourceField.column}]`;
+      const values = Array.from(cache.uniqueValues.get(fieldKey) || []);
       const sorted = this.sortValues(values, field);
       
       const newKeys: string[][] = [];
