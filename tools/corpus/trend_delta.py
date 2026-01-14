@@ -193,6 +193,10 @@ def trend_delta_markdown(
                 f"- Round-trip fail-on: `{_fmt_fail_on(cur_fail_on)}` (was `{_fmt_fail_on(prev_fail_on)}`)"
             )
 
+    if cur.get("total") is not None:
+        lines.append(
+            f"- Total workbooks: **{cur.get('total', 0)}** ({_delta_int(prev.get('total'), cur.get('total'))})"
+        )
     lines.append(
         f"- Open rate: **{_pct(cur.get('open_rate'))}** ({_delta_pct(prev.get('open_rate'), cur.get('open_rate'))})"
     )
