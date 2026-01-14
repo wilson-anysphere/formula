@@ -221,9 +221,6 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
 
     // Key material for 40-bit and 56-bit keys is a raw truncation of `MD5(H || LE32(block))`.
-    //
-    // Note: some implementations zero-pad 40-bit keys to 16 bytes when initializing RC4 (which
-    // changes the RC4 KSA and keystream). For MD5 we use the raw 5-byte key material (no padding).
     let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
     let key1_40 = standard_rc4_derive_block_key_md5(h, 1, 5);
     assert_eq!(key0_40, hex_decode("69badcae24"));
@@ -265,10 +262,11 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let key_material = hb[..5].to_vec();
     assert_eq!(key_material, hex_decode("6ad7dedf2d"));
 
-    // The 40-bit RC4 key is the first 5 bytes of `Hb0`.
+    // Standard RC4 uses the raw 5-byte key material (`keyLen = keySize/8`).
     //
-    // Zero-padding this to 16 bytes is a common legacy behavior that changes the RC4 KSA and
-    // produces a different keystream/ciphertext.
+    // Some legacy RC4-40 implementations represent a "40-bit" key as a 16-byte key with the high
+    // 88 bits set to zero. That padding is **incorrect for MS-OFFCRYPTO Standard RC4** and changes
+    // the RC4 keystream because RC4's KSA depends on both the key bytes *and* the key length.
     let mut padded_key = key_material.clone();
     padded_key.resize(16, 0);
     assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
@@ -290,7 +288,7 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     );
     assert_ne!(ciphertext_padded, ciphertext_unpadded);
 
-    // Ensure the production decrypt reader uses the unpadded 5-byte key.
+    // Ensure the production decrypt reader uses the spec-correct 5-byte key (no padding).
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     stream.extend_from_slice(&ciphertext_unpadded);
@@ -303,6 +301,20 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let mut decrypted = Vec::new();
     reader.read_to_end(&mut decrypted).unwrap();
     assert_eq!(decrypted, plaintext);
+
+    // Regression guard: decrypting the padded-ciphertext form must not produce plaintext.
+    let mut stream_padded = Vec::new();
+    stream_padded.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    stream_padded.extend_from_slice(&ciphertext_padded);
+    let mut cursor_padded = Cursor::new(stream_padded);
+    cursor_padded.seek(SeekFrom::Start(8)).unwrap();
+
+    let mut reader_padded =
+        Rc4CryptoApiDecryptReader::new(cursor_padded, plaintext.len() as u64, h.to_vec(), key_len)
+            .unwrap();
+    let mut decrypted_padded = Vec::new();
+    reader_padded.read_to_end(&mut decrypted_padded).unwrap();
+    assert_ne!(decrypted_padded, plaintext);
 }
 
 #[test]

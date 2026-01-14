@@ -583,7 +583,8 @@ impl StandardKeyDeriver {
         // and that a key size of 0 must be interpreted as 40-bit RC4.
         //
         // We normalize this here so callers don't have to special-case it when deriving per-block
-        // keys.
+        // keys. For RC4-40, the derived key is 5 bytes (`keyLen = keyBits/8`) and must be used
+        // directly (do **not** zero-pad it to 16 bytes; RC4's keystream depends on the key length).
         let key_bits = match derivation {
             StandardKeyDerivation::Rc4 if key_bits == 0 => 40,
             _ => key_bits,
@@ -903,8 +904,9 @@ mod tests {
     fn standard_cryptoapi_rc4_sha1_40bit_padding_changes_ciphertext_vector() {
         // Deterministic 40-bit RC4 vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
         //
-        // Standard/CryptoAPI RC4 uses a 5-byte key (`keyLen = keySize/8`). Zero-padding that key to
-        // 16 bytes changes RC4 KSA and yields a different ciphertext.
+        // MS-OFFCRYPTO Standard RC4 uses the raw 5-byte key material (`keyLen = keySize/8`), but
+        // zero-padding those 5 bytes to 16 changes RC4 KSA and yields a different keystream (a
+        // common interop pitfall when reusing legacy RC4-40 implementations).
         let password = "password";
         let salt: Vec<u8> = (0u8..=0x0F).collect();
 
@@ -920,7 +922,7 @@ mod tests {
 
         let plaintext = b"Hello, RC4 CryptoAPI!";
 
-        // Spec-correct 5-byte key.
+        // Raw 5-byte key (`keyLen = keySize/8`).
         let mut ciphertext_raw = plaintext.to_vec();
         rc4_xor_in_place(&key0, &mut ciphertext_raw).expect("rc4 encrypt raw");
         assert_eq!(
@@ -928,7 +930,7 @@ mod tests {
             hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
         );
 
-        // Zero-padded 16-byte key (incorrect for MS-OFFCRYPTO Standard RC4; regression guard).
+        // Demonstrate that (incorrect) zero-padding the 5-byte key changes ciphertext.
         let mut padded_key = [0u8; 16];
         padded_key[..5].copy_from_slice(&key0);
         let mut ciphertext_padded = plaintext.to_vec();
