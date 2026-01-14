@@ -11,7 +11,7 @@ fn parses_series_data_label_settings() {
               <c:barChart>
                 <c:ser>
                   <c:dLbls>
-                    <c:showVal val="1"/>
+                    <c:showVal/>
                     <c:showCatName val="0"/>
                     <c:showSerName val="1"/>
                     <c:dLblPos val="outEnd"/>

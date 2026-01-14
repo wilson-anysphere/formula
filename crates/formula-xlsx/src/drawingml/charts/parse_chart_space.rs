@@ -467,9 +467,9 @@ fn parse_data_labels(
     data_labels_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> DataLabelsModel {
-    let show_val = child_attr(data_labels_node, "showVal", "val").map(parse_ooxml_bool);
-    let show_cat_name = child_attr(data_labels_node, "showCatName", "val").map(parse_ooxml_bool);
-    let show_ser_name = child_attr(data_labels_node, "showSerName", "val").map(parse_ooxml_bool);
+    let show_val = child_bool_attr(data_labels_node, "showVal");
+    let show_cat_name = child_bool_attr(data_labels_node, "showCatName");
+    let show_ser_name = child_bool_attr(data_labels_node, "showSerName");
     let position = child_attr(data_labels_node, "dLblPos", "val").map(str::to_string);
 
     let num_fmt = data_labels_node
@@ -1473,6 +1473,14 @@ fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str
     node.children()
         .find(|n| n.is_element() && n.tag_name().name() == child)
         .and_then(|n| n.attribute(attr))
+}
+
+fn child_bool_attr(node: Node<'_, '_>, child: &str) -> Option<bool> {
+    let child_node = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child)?;
+
+    Some(child_node.attribute("val").map_or(true, parse_ooxml_bool))
 }
 
 fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
