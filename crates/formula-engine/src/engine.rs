@@ -6062,8 +6062,10 @@ fn rewrite_all_formulas_structural(
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, name) in workbook.sheet_names.iter().enumerate() {
-        sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
+    for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
+        if let Some(name) = workbook.sheet_name(sheet_id) {
+            sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
+        }
     }
 
     let mut rewrites = Vec::new();
@@ -6105,8 +6107,10 @@ fn rewrite_all_formulas_range_map(
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, name) in workbook.sheet_names.iter().enumerate() {
-        sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
+    for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
+        if let Some(name) = workbook.sheet_name(sheet_id) {
+            sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
+        }
     }
 
     let mut rewrites = Vec::new();
@@ -11387,9 +11391,14 @@ fn rewrite_defined_name_structural(
                 |name| {
                     engine
                         .workbook
-                        .sheet_names
+                        .sheet_ids_in_order()
                         .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .position(|&sheet_id| {
+                            engine
+                                .workbook
+                                .sheet_name(sheet_id)
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                        })
                 },
             );
             (NameDefinition::Reference(new_formula), changed)
@@ -11403,9 +11412,14 @@ fn rewrite_defined_name_structural(
                 |name| {
                     engine
                         .workbook
-                        .sheet_names
+                        .sheet_ids_in_order()
                         .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .position(|&sheet_id| {
+                            engine
+                                .workbook
+                                .sheet_name(sheet_id)
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                        })
                 },
             );
             (NameDefinition::Formula(new_formula), changed)
@@ -11451,9 +11465,14 @@ fn rewrite_defined_name_range_map(
                 |name| {
                     engine
                         .workbook
-                        .sheet_names
+                        .sheet_ids_in_order()
                         .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .position(|&sheet_id| {
+                            engine
+                                .workbook
+                                .sheet_name(sheet_id)
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                        })
                 },
             );
             (NameDefinition::Reference(new_formula), changed)
@@ -11467,9 +11486,14 @@ fn rewrite_defined_name_range_map(
                 |name| {
                     engine
                         .workbook
-                        .sheet_names
+                        .sheet_ids_in_order()
                         .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .position(|&sheet_id| {
+                            engine
+                                .workbook
+                                .sheet_name(sheet_id)
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                        })
                 },
             );
             (NameDefinition::Formula(new_formula), changed)
