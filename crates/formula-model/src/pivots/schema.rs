@@ -650,6 +650,10 @@ mod tests {
             parse_dax_column_ref("T[Col]]Name]"),
             Some(("T".to_string(), "Col]Name".to_string()))
         );
+        assert_eq!(
+            parse_dax_column_ref("T[A]]B]"),
+            Some(("T".to_string(), "A]B".to_string()))
+        );
         assert_eq!(parse_dax_column_ref("''[Column]"), None);
         assert_eq!(parse_dax_column_ref("'O'Reilly'[Name]"), None);
         assert_eq!(parse_dax_column_ref("'Table'X[Column]"), None);
