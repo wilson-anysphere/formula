@@ -390,8 +390,8 @@ fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckS
 ```
 
 ```typescript
-// TypeScript side
-import { getTauriInvokeOrThrow } from "../apps/desktop/src/tauri/api";
+// TypeScript side (desktop renderer, e.g. `apps/desktop/src/*`)
+import { getTauriInvokeOrThrow } from "./tauri/api";
 
 const invoke = getTauriInvokeOrThrow();
 
