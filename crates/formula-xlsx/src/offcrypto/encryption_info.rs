@@ -53,6 +53,20 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
     let doc = roxmltree::Document::parse(xml)?;
 
     let root = doc.root_element();
+
+    // Detect unsupported cipher chaining modes early.
+    //
+    // Some producers declare AES with CFB chaining in the Agile descriptor. Formula only supports
+    // `ChainingModeCBC`, so fail fast with an actionable error instead of attempting decryption.
+    if let Some(key_data) = root
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "keyData")
+    {
+        if let Some(chaining) = key_data.attribute("cipherChaining") {
+            validate_cipher_chaining(chaining)?;
+        }
+    }
+
     let key_encryptors = root
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "keyEncryptors")
@@ -63,15 +77,18 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
     let mut available_uris: Vec<String> = Vec::new();
     let mut password_uri_count = 0usize;
     let mut selected_password_uri: Option<String> = None;
+    let mut selected_password_encryptor: Option<roxmltree::Node<'_, '_>> = None;
 
     for enc in key_encryptors
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "keyEncryptor")
     {
-        let uri = enc.attribute("uri").ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
-            element: "keyEncryptor".to_string(),
-            attr: "uri".to_string(),
-        })?;
+        let uri = enc
+            .attribute("uri")
+            .ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+                element: "keyEncryptor".to_string(),
+                attr: "uri".to_string(),
+            })?;
 
         // Keep a deterministic list of URIs for error reporting. Prefer unique values but preserve
         // first-seen ordering.
@@ -83,6 +100,7 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
             password_uri_count += 1;
             if selected_password_uri.is_none() {
                 selected_password_uri = Some(uri.to_string());
+                selected_password_encryptor = Some(enc);
             }
         }
     }
@@ -100,7 +118,10 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
             msg.push('.');
         }
 
-        if available_uris.iter().any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE) {
+        if available_uris
+            .iter()
+            .any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE)
+        {
             msg.push_str(" This file appears to be certificate-encrypted (public/private key) rather than password-encrypted. Re-save the workbook in Excel using “Encrypt with Password”.");
         } else {
             msg.push_str(" Re-save the workbook in Excel using “Encrypt with Password” (not certificate-based protection).");
@@ -111,6 +132,19 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
             message: msg,
         });
     };
+
+    if let Some(enc) = selected_password_encryptor {
+        // Validate `cipherChaining` on the selected password `<p:encryptedKey>` when present.
+        // (Match by local name so the namespace prefix doesn't matter.)
+        if let Some(encrypted_key) = enc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "encryptedKey")
+        {
+            if let Some(chaining) = encrypted_key.attribute("cipherChaining") {
+                validate_cipher_chaining(chaining)?;
+            }
+        }
+    }
 
     let mut warnings = Vec::new();
     if password_uri_count > 1 {
@@ -123,6 +157,17 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
         password_key_encryptor: PasswordKeyEncryptor { uri },
         warnings,
     })
+}
+
+fn validate_cipher_chaining(chaining: &str) -> Result<()> {
+    let chaining = chaining.trim();
+    if chaining.eq_ignore_ascii_case("ChainingModeCBC") {
+        Ok(())
+    } else {
+        Err(OffCryptoError::UnsupportedCipherChaining {
+            chaining: chaining.to_string(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -179,7 +224,8 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            msg.contains(KEY_ENCRYPTOR_URI_CERTIFICATE) || msg.to_ascii_lowercase().contains("certificate"),
+            msg.contains(KEY_ENCRYPTOR_URI_CERTIFICATE)
+                || msg.to_ascii_lowercase().contains("certificate"),
             "expected error message to mention certificate encryption; got: {msg}"
         );
     }
@@ -205,6 +251,54 @@ mod tests {
         assert_eq!(
             info.warnings,
             vec![EncryptionInfoWarning::MultiplePasswordKeyEncryptors { count: 2 }]
+        );
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_key_data() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData cipherChaining="ChainingModeCFB" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey cipherChaining="ChainingModeCBC" />
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let err = parse_agile_encryption_info_xml(xml.as_bytes()).expect_err("expected error");
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_encrypted_key() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData cipherChaining="ChainingModeCBC" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey cipherChaining="ChainingModeCFB" />
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let err = parse_agile_encryption_info_xml(xml.as_bytes()).expect_err("expected error");
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("only") && msg.contains("ChainingModeCBC"),
+            "expected message to mention only CBC is supported, got: {msg}"
         );
     }
 }
