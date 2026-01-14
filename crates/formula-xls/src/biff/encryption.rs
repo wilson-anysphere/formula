@@ -779,9 +779,143 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 return Ok(());
             }
             BiffEncryption::Biff8Rc4CryptoApi { .. } => {
-                return Err(DecryptError::UnsupportedEncryption(
-                    "BIFF8 RC4 CryptoAPI encryption helper not implemented".to_string(),
-                ));
+                // RC4 CryptoAPI FILEPASS layout:
+                // - wEncryptionType (2) == 0x0001
+                // - wEncryptionSubType (2) == 0x0002
+                // - dwEncryptionInfoLen (4)
+                // - EncryptionInfo bytes
+                //
+                // For the self-consistency tests we generate deterministic EncryptionInfo
+                // structures (salt/verifier), then encrypt record payload bytes after FILEPASS
+                // using the CryptoAPI per-block RC4 keystream.
+                //
+                // Note: This is test-only; production `.xls` decryption is implemented in
+                // `crates/formula-xls/src/decrypt.rs`.
+                const CALG_RC4: u32 = 0x0000_6801;
+                const SPIN_COUNT: u32 = 50_000;
+
+                // Minimal EncryptionInfo payload sizes:
+                // - Header: 32 bytes (no CSP name)
+                // - Verifier: saltSize(4)+salt(16)+encVerifier(16)+hashSize(4)+encHash(20)=60
+                // - EncryptionInfo: version(4)+flags(4)+headerSize(4)+header(32)+verifier(60)=104
+                const ENC_HEADER_SIZE: usize = 32;
+                const ENC_INFO_LEN: usize = 12 + ENC_HEADER_SIZE + 60;
+                const FILEPASS_PAYLOAD_LEN: usize = 8 + ENC_INFO_LEN;
+
+                if record.data.len() < FILEPASS_PAYLOAD_LEN {
+                    return Err(DecryptError::InvalidFilePass(format!(
+                        "BIFF8 RC4 CryptoAPI FILEPASS payload too short: expected at least {FILEPASS_PAYLOAD_LEN} bytes, got {}",
+                        record.data.len()
+                    )));
+                }
+
+                // Always use 128-bit RC4 for test streams.
+                let key_len: usize = 16;
+                let key_size_bits: u32 = (key_len as u32) * 8;
+
+                // Deterministic salt/verifier so tests are reproducible.
+                let salt: [u8; 16] = core::array::from_fn(|i| 0x10u8.wrapping_add(i as u8));
+                let verifier_plain: [u8; 16] =
+                    core::array::from_fn(|i| 0xF0u8.wrapping_sub(i as u8));
+
+                use sha1::{Digest as _, Sha1};
+                let digest = Sha1::digest(verifier_plain);
+                let mut verifier_hash_plain = [0u8; 20];
+                verifier_hash_plain.copy_from_slice(&digest);
+
+                // Encrypt verifier + hash using the block-0 key.
+                let key0 = cryptoapi::derive_biff8_cryptoapi_key(
+                    cryptoapi::CALG_SHA1,
+                    password,
+                    &salt,
+                    SPIN_COUNT,
+                    0,
+                    key_len,
+                );
+                let mut rc4 = Rc4::new(&key0);
+                let mut verifier_buf = [0u8; 36];
+                verifier_buf[..16].copy_from_slice(&verifier_plain);
+                verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+                rc4.apply_keystream(&mut verifier_buf);
+
+                let mut encrypted_verifier = [0u8; 16];
+                encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
+                let mut encrypted_verifier_hash = [0u8; 20];
+                encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
+
+                // EncryptionHeader (32 bytes) [MS-OFFCRYPTO].
+                let mut enc_header = Vec::<u8>::new();
+                enc_header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+                enc_header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+                enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+                enc_header.extend_from_slice(&cryptoapi::CALG_SHA1.to_le_bytes()); // AlgIDHash
+                enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // KeySize bits
+                enc_header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+                enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+                enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+                // EncryptionVerifier.
+                let mut enc_verifier = Vec::<u8>::new();
+                enc_verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+                enc_verifier.extend_from_slice(&salt);
+                enc_verifier.extend_from_slice(&encrypted_verifier);
+                enc_verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
+                enc_verifier.extend_from_slice(&encrypted_verifier_hash);
+
+                // EncryptionInfo:
+                //   u16 MajorVersion, u16 MinorVersion, u32 Flags, u32 HeaderSize, EncryptionHeader, EncryptionVerifier.
+                let mut enc_info = Vec::<u8>::new();
+                enc_info.extend_from_slice(&4u16.to_le_bytes()); // Major
+                enc_info.extend_from_slice(&2u16.to_le_bytes()); // Minor
+                enc_info.extend_from_slice(&0u32.to_le_bytes()); // Flags
+                enc_info.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // HeaderSize
+                enc_info.extend_from_slice(&enc_header);
+                enc_info.extend_from_slice(&enc_verifier);
+
+                // FILEPASS payload.
+                let mut filepass_payload = Vec::<u8>::new();
+                filepass_payload.extend_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+                filepass_payload.extend_from_slice(&BIFF8_RC4_SUBTYPE_CRYPTOAPI.to_le_bytes());
+                filepass_payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+                filepass_payload.extend_from_slice(&enc_info);
+
+                debug_assert_eq!(filepass_payload.len(), FILEPASS_PAYLOAD_LEN);
+                workbook_stream[payload_start..payload_start + filepass_payload.len()]
+                    .copy_from_slice(&filepass_payload);
+                // Zero any remaining bytes in the placeholder so expected streams are stable.
+                for b in workbook_stream[payload_start + filepass_payload.len()..payload_end].iter_mut() {
+                    *b = 0;
+                }
+
+                // Encrypt record payload bytes after FILEPASS using an absolute-position mapping.
+                let (ranges, total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;
+                let blocks = total.div_ceil(RC4_BLOCK_SIZE).max(1);
+                let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::with_capacity(blocks);
+                for b in 0..blocks {
+                    let key = cryptoapi::derive_biff8_cryptoapi_key(
+                        cryptoapi::CALG_SHA1,
+                        password,
+                        &salt,
+                        SPIN_COUNT,
+                        b as u32,
+                        key_len,
+                    );
+                    let mut rc4 = Rc4::new(&key);
+                    let mut ks = [0u8; RC4_BLOCK_SIZE];
+                    rc4.apply_keystream(&mut ks);
+                    keystreams.push(ks);
+                }
+
+                for (range, start_pos) in ranges {
+                    for (i, b) in workbook_stream[range.clone()].iter_mut().enumerate() {
+                        let abs = start_pos + i;
+                        let block = abs / RC4_BLOCK_SIZE;
+                        let off = abs % RC4_BLOCK_SIZE;
+                        *b ^= keystreams[block][off];
+                    }
+                }
+
+                return Ok(());
             }
         }
     }
@@ -1285,5 +1419,44 @@ mod tests {
 
         decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
         assert_eq!(encrypted, plain);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encrypt_decrypt_roundtrip_crosses_1024_boundary_mid_record() {
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 RC4 CryptoAPI FILEPASS placeholder. The test helper overwrites the full payload
+        // deterministically, but it needs the correct type/subtype so `parse_filepass_record`
+        // selects CryptoAPI.
+        let mut filepass_placeholder = vec![0u8; 112];
+        filepass_placeholder[0..2].copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_placeholder[2..4].copy_from_slice(&BIFF8_RC4_SUBTYPE_CRYPTOAPI.to_le_bytes());
+
+        // Chosen so record2 crosses the 1024-byte block boundary: 1000 + 80.
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x50));
+        let r2 = record(0x00FD, &dummy_payload(80, 0x60));
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            r1,
+            r2,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, password).expect("encrypt");
+
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range.clone()]);
+        let filepass_offset = range.start - 4;
+        plain[filepass_offset..filepass_offset + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
+
+        let decrypted =
+            crate::decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted, password)
+                .expect("decrypt");
+        assert_eq!(decrypted, plain);
     }
 }

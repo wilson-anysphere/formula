@@ -244,12 +244,10 @@ fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionIn
 
 fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
     // CryptoAPI password hashing [MS-OFFCRYPTO]:
-    //   H0 = SHA1(UTF16LE(password))
-    //   H1 = SHA1(salt + H0)
-    //   for i in 0..49999: H1 = SHA1(i_le32 + H1)
+    //   H0 = SHA1(salt + UTF16LE(password))
+    //   for i in 0..49999: H0 = SHA1(i_le32 + H0)
     let pw_bytes = utf16le_bytes(password);
-    let h0 = sha1_bytes(&[&pw_bytes]);
-    let mut hash = sha1_bytes(&[salt, &h0]);
+    let mut hash = sha1_bytes(&[salt, &pw_bytes]);
 
     for i in 0..PASSWORD_HASH_ITERATIONS {
         let iter = i.to_le_bytes();

@@ -177,8 +177,7 @@ fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
     const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 
     let pw_bytes = utf16le_bytes(password);
-    let h0 = sha1_bytes(&[&pw_bytes]);
-    let mut hash = sha1_bytes(&[salt, &h0]);
+    let mut hash = sha1_bytes(&[salt, &pw_bytes]);
 
     for i in 0..PASSWORD_HASH_ITERATIONS {
         let iter = i.to_le_bytes();
@@ -191,6 +190,12 @@ fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
 fn derive_cryptoapi_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
+    if key_len == 5 {
+        // CryptoAPI 40-bit RC4 keys are expressed as a 128-bit key where the high 88 bits are zero.
+        let mut key = digest[..5].to_vec();
+        key.resize(16, 0);
+        return key;
+    }
     digest[..key_len].to_vec()
 }
 
