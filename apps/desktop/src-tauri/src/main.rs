@@ -2702,6 +2702,9 @@ fn main() {
                         return;
                     }
 
+                    // Mark the oauth redirect queue as ready only after verifying the window origin
+                    // is trusted (otherwise cold-start redirects could be emitted before JS
+                    // listeners are installed).
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
                     let pending = state.lock().unwrap().mark_ready_and_drain();
 
