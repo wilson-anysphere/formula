@@ -3522,6 +3522,7 @@ const PTG_UNION: u8 = 0x10;
 const PTG_RANGE: u8 = 0x11;
 const PTG_UPLUS: u8 = 0x12;
 const PTG_UMINUS: u8 = 0x13;
+const PTG_PERCENT: u8 = 0x14;
 const PTG_MISSARG: u8 = 0x16;
 const PTG_STR: u8 = 0x17;
 const PTG_ERR: u8 = 0x1C;
@@ -3574,6 +3575,7 @@ enum Expr {
         args: Vec<Expr>,
     },
     SpillRange(Box<Expr>),
+    Percent(Box<Expr>),
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -3698,6 +3700,10 @@ fn emit_expr(
         Expr::SpillRange(inner) => {
             emit_expr(inner, ctx, rgce, rgcb)?;
             rgce.push(PTG_SPILL);
+        }
+        Expr::Percent(inner) => {
+            emit_expr(inner, ctx, rgce, rgcb)?;
+            rgce.push(PTG_PERCENT);
         }
         Expr::Unary { op, expr } => {
             match op {
@@ -4288,9 +4294,18 @@ impl<'a> FormulaParser<'a> {
 
     fn parse_postfix(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
         let mut expr = self.parse_primary(stop_at_comma)?;
-        while self.peek_char() == Some('#') {
-            self.next_char();
-            expr = Expr::SpillRange(Box::new(expr));
+        loop {
+            match self.peek_char() {
+                Some('#') => {
+                    self.next_char();
+                    expr = Expr::SpillRange(Box::new(expr));
+                }
+                Some('%') => {
+                    self.next_char();
+                    expr = Expr::Percent(Box::new(expr));
+                }
+                _ => break,
+            }
         }
         Ok(expr)
     }
