@@ -177,7 +177,7 @@ test("font tokens stay consistent across themes (no accidental overrides)", () =
   }
 });
 
-test("core design tokens (--space-*, --radius*, --motion-*, --font-*) are only defined in tokens.css", () => {
+test("core design tokens are only defined in tokens.css", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const files = walkCssFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
@@ -206,6 +206,15 @@ test("core design tokens (--space-*, --radius*, --motion-*, --font-*) are only d
         !prop.startsWith("--space-") &&
         !prop.startsWith("--radius") &&
         !prop.startsWith("--motion-") &&
+        !prop.startsWith("--bg-") &&
+        !prop.startsWith("--text-") &&
+        !prop.startsWith("--border") &&
+        !prop.startsWith("--accent") &&
+        !prop.startsWith("--selection-") &&
+        !prop.startsWith("--error") &&
+        !prop.startsWith("--warning") &&
+        !prop.startsWith("--success") &&
+        prop !== "--link" &&
         prop !== "--font-sans" &&
         prop !== "--font-mono"
       ) {
