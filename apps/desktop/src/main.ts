@@ -96,8 +96,10 @@ import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import {
   getTauriDialogOrThrow,
   getTauriEventApiOrThrow,
+  getTauriInvokeOrNull,
   getTauriWindowHandleOrThrow,
   hasTauri,
+  hasTauriInvoke,
   hasTauriWindowApi,
   hasTauriWindowHandleApi,
 } from "./tauri/api";
@@ -256,7 +258,7 @@ window.addEventListener("unload", () => {
  * production Tauri builds so this doesn't ship silently.
  */
 function warnIfMissingCrossOriginIsolationInTauriProd(): void {
-  const isTauri = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  const isTauri = hasTauriInvoke();
   if (!isTauri) return;
   if (!import.meta.env.PROD) return;
 
@@ -720,7 +722,7 @@ let autoSaveNeedsSaveAfterEditing = false;
 let autoSaveForceNextSave = false;
 
 function isTauriInvokeAvailable(): boolean {
-  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  return hasTauriInvoke();
 }
 
 function clearAutoSaveTimer(): void {
@@ -1933,7 +1935,7 @@ function basename(path: string): string {
 }
 
 function computeTitlebarDocumentName(): string {
-  const isTauri = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  const isTauri = hasTauriInvoke();
   if (!isTauri) return "Untitled";
   if (!activeWorkbook?.path) return "Untitled";
   return basename(activeWorkbook.path);
@@ -2512,8 +2514,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       labelById["home.font.fontSize"] = String(formatState.fontSize);
     }
 
-    const printExportAvailable =
-      typeof queuedInvoke === "function" || typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+    const printExportAvailable = typeof queuedInvoke === "function" || hasTauriInvoke();
 
     const zoomDisabled = !app.supportsZoom();
     const outlineDisabled = app.getGridMode() === "shared";
@@ -3813,7 +3814,7 @@ function installSheetStoreSubscription(): void {
     if (syncingSheetUi && prevSnapshot) {
       const session = app.getCollabSession?.() ?? null;
       if (!session) {
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        const baseInvoke = getTauriInvokeOrNull();
         // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
         const invoke =
           queuedInvoke ??
@@ -5240,7 +5241,7 @@ if (
   // The desktop UI is used both inside the Tauri shell and as a pure-web fallback (e2e, local dev).
   // Only expose real workbook lifecycle operations to extensions when the Tauri bridge is present;
   // otherwise let BrowserExtensionHost fall back to its in-memory stub workbook implementation.
-  const hasTauriWorkbookBridge = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  const hasTauriWorkbookBridge = hasTauriInvoke();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const extensionSpreadsheetApi: any = {
@@ -6717,9 +6718,9 @@ if (
     getWorkbookId: () => activePanelWorkbookId,
     getCollabSession: () => app.getCollabSession(),
     invoke:
-      typeof (globalThis as any).__TAURI__?.core?.invoke === "function"
+      hasTauriInvoke()
         ? (cmd, args) => {
-            const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+            const baseInvoke = getTauriInvokeOrNull();
             const invokeFn = queuedInvoke ?? baseInvoke;
             if (!invokeFn) {
               return Promise.reject(new Error("Tauri invoke API not available"));
@@ -8167,7 +8168,7 @@ registerDesktopCommands({
       void setAutoSaveEnabledFromUi(nextEnabled);
     },
     print: () => {
-      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      const invokeAvailable = hasTauriInvoke();
       if (!invokeAvailable) {
         showDesktopOnlyToast("Print is available in the desktop app.");
         return;
@@ -8178,7 +8179,7 @@ registerDesktopCommands({
       });
     },
     printPreview: () => {
-      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      const invokeAvailable = hasTauriInvoke();
       if (!invokeAvailable) {
         showDesktopOnlyToast("Print Preview is available in the desktop app.");
         return;
@@ -8221,7 +8222,7 @@ registerDesktopCommands({
     },
     quit: () => {
       if (!handleCloseRequestForRibbon) {
-        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+        const invokeAvailable = hasTauriInvoke();
         if (!invokeAvailable) {
           showDesktopOnlyToast("Quitting is available in the desktop app.");
           return;
@@ -8244,8 +8245,7 @@ registerDesktopCommands({
 });
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
-  const invoke =
-    queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
+  const invoke = (queuedInvoke ?? getTauriInvokeOrNull()) as TauriInvoke | null;
   if (!invoke) {
     showDesktopOnlyToast("Print/Export is available in the desktop app.");
     return null;
@@ -9694,7 +9694,7 @@ async function computeWorkbookSignature(info: WorkbookInfo): Promise<string> {
     return randomSessionId("workbook");
   }
 
-  const invoke = queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined);
+  const invoke = (queuedInvoke ?? getTauriInvokeOrNull()) as TauriInvoke | null;
   if (typeof invoke !== "function") return basePath;
 
   try {
@@ -10528,7 +10528,7 @@ async function handleNewWorkbook(
 
 try {
   tauriBackend = new TauriWorkbookBackend();
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  const invoke = getTauriInvokeOrNull() as TauriInvoke | null;
   if (invoke) {
     queuedInvoke = (cmd, args) => queueBackendOp(() => invoke(cmd, args));
     // Expose the queued invoke so other subsystems (e.g. Power Query table reads)
