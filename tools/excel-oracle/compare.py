@@ -219,6 +219,28 @@ def _redact_paths_in_obj(obj: Any, *, privacy_mode: str) -> Any:
     return obj
 
 
+def _redact_suspicious_strings_in_obj(obj: Any, *, privacy_mode: str) -> Any:
+    """Recursively redact string values that look like paths/URIs/domains.
+
+    This is primarily intended for redacting *source metadata* emitted by external tools/runners
+    (for example, an engine adapter might include an absolute binary path under a key like
+    `engineCommand` rather than `enginePath`).
+
+    It is intentionally not applied to formulas, since hashing an entire formula string would harm
+    debuggability; formulas are handled separately by `_redact_formula`.
+    """
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return obj
+    if isinstance(obj, dict):
+        return {k: _redact_suspicious_strings_in_obj(v, privacy_mode=privacy_mode) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact_suspicious_strings_in_obj(v, privacy_mode=privacy_mode) for v in obj]
+    if isinstance(obj, str) and obj:
+        return _redact_text(obj, privacy_mode=privacy_mode) or obj
+    return obj
+
+
 def _redact_error_details_in_obj(obj: Any, *, privacy_mode: str) -> Any:
     """Recursively redact free-form error `detail` strings in privacy mode.
 
@@ -1081,8 +1103,14 @@ def main() -> int:
     report = {
         "schemaVersion": 1,
         "summary": summary,
-        "expectedSource": _redact_paths_in_obj(expected.get("source"), privacy_mode=args.privacy_mode),
-        "actualSource": _redact_paths_in_obj(actual_source, privacy_mode=args.privacy_mode),
+        "expectedSource": _redact_suspicious_strings_in_obj(
+            _redact_paths_in_obj(expected.get("source"), privacy_mode=args.privacy_mode),
+            privacy_mode=args.privacy_mode,
+        ),
+        "actualSource": _redact_suspicious_strings_in_obj(
+            _redact_paths_in_obj(actual_source, privacy_mode=args.privacy_mode),
+            privacy_mode=args.privacy_mode,
+        ),
         "mismatches": mismatches,
     }
     report = _redact_error_details_in_obj(report, privacy_mode=args.privacy_mode)
