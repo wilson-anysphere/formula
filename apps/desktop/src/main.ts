@@ -10830,12 +10830,13 @@ try {
 
   void listen("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
-    const first = Array.isArray(paths) ? paths[0] : null;
-    if (typeof first !== "string" || first.trim() === "") return;
+    const firstWorkbookPath = Array.isArray(paths)
+      ? paths.find((p) => typeof p === "string" && p.trim() !== "" && isOpenWorkbookPath(p))
+      : null;
+    if (!firstWorkbookPath) return;
     // Ignore non-spreadsheet drops (e.g. images) so drag/drop picture insertion doesn't trigger
     // a spurious "open workbook" flow.
-    if (!isOpenWorkbookPath(first)) return;
-    queueOpenWorkbook(first);
+    queueOpenWorkbook(firstWorkbookPath);
   });
 
   void listen("tray-open", () => {
