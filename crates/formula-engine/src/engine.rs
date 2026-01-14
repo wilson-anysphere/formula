@@ -7866,9 +7866,11 @@ impl PivotRefreshContext for Engine {
     fn read_cell_number_format(&self, sheet: &str, addr: &str) -> Option<String> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
-        let style_id = self.effective_style_id_at(CellKey { sheet: sheet_id, addr });
-        crate::pivot::source::resolve_number_format_from_style_id(&self.workbook.styles, style_id)
-            .map(|s| s.to_string())
+        self.number_format_pattern_for_rounding(CellKey {
+            sheet: sheet_id,
+            addr,
+        })
+        .map(|s| s.to_string())
     }
 
     fn date_system(&self) -> ExcelDateSystem {
