@@ -1,4 +1,4 @@
-//! Generate a Standard/CryptoAPI RC4 encrypted OOXML `.xlsx` fixture.
+//! Generate a Standard/CryptoAPI RC4 encrypted OOXML fixture (e.g. `.xlsx`/`.xlsm`/`.xlsb`).
 //!
 //! This example is **not** part of the normal test suite; it exists to document how the
 //! `fixtures/encrypted/ooxml/standard-rc4.xlsx` blob was generated.
@@ -193,15 +193,24 @@ fn main() {
         .next()
         .unwrap_or_else(|| std::ffi::OsString::from("generate_standard_rc4_ooxml_fixture"));
     let Some(in_path) = args.next().map(PathBuf::from) else {
-        eprintln!("usage: {} <plaintext.xlsx> <out-encrypted.xlsx>", exe.to_string_lossy());
+        eprintln!(
+            "usage: {} <plaintext_ooxml_zip> <out_encrypted_ooxml>",
+            exe.to_string_lossy()
+        );
         std::process::exit(2);
     };
     let Some(out_path) = args.next().map(PathBuf::from) else {
-        eprintln!("usage: {} <plaintext.xlsx> <out-encrypted.xlsx>", exe.to_string_lossy());
+        eprintln!(
+            "usage: {} <plaintext_ooxml_zip> <out_encrypted_ooxml>",
+            exe.to_string_lossy()
+        );
         std::process::exit(2);
     };
     if args.next().is_some() {
-        eprintln!("usage: {} <plaintext.xlsx> <out-encrypted.xlsx>", exe.to_string_lossy());
+        eprintln!(
+            "usage: {} <plaintext_ooxml_zip> <out_encrypted_ooxml>",
+            exe.to_string_lossy()
+        );
         std::process::exit(2);
     }
 
