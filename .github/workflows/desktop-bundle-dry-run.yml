@@ -154,6 +154,10 @@ jobs:
             fakeroot \
             rpm
 
+          # AppImage-based tooling (including `appimagetool`) supports "extract and run" mode.
+          # Prefer it in CI to reduce reliance on a working FUSE setup.
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "${GITHUB_ENV}"
+
           # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
           # Ubuntu 24.04 renamed the package to `libfuse2t64`; try both, but don't fail
           # the dry run if neither is available (some runners may already provide it).
