@@ -8957,6 +8957,7 @@ const ribbonCommandHandlersCtx = {
   openCustomSort: (commandId: string) => {
     handleCustomSortCommand(commandId, {
       isEditing: isSpreadsheetEditing,
+      isReadOnly: () => app.isReadOnly?.() === true,
       getDocument: () => app.getDocument(),
       getSheetId: () => app.getCurrentSheetId(),
       getSelectionRanges: () => app.getSelectionRanges(),

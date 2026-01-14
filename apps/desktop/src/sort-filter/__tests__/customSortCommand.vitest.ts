@@ -123,4 +123,38 @@ describe("custom sort command wiring", () => {
     expect(applySpy).toHaveBeenCalledTimes(1);
     expect((applySpy.mock.calls[0]?.[0] as any)?.spec?.hasHeader).toBe(false);
   });
+
+  it("blocks custom sort in read-only mode (shows toast + does not open dialog)", async () => {
+    const focusGrid = vi.fn();
+
+    let handled = false;
+    await act(async () => {
+      handled = handleCustomSortCommand("data.sortFilter.sort.customSort", {
+        isEditing: () => false,
+        isReadOnly: () => true,
+        // These should never be consulted when read-only.
+        getDocument: () => {
+          throw new Error("getDocument should not be called");
+        },
+        getSheetId: () => {
+          throw new Error("getSheetId should not be called");
+        },
+        getSelectionRanges: () => {
+          throw new Error("getSelectionRanges should not be called");
+        },
+        getCellValue: () => {
+          throw new Error("getCellValue should not be called");
+        },
+        focusGrid,
+      });
+    });
+
+    expect(handled).toBe(true);
+    expect(focusGrid).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("dialog.custom-sort-dialog")).toBeNull();
+    const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
+    expect(toast?.textContent).toMatch(/Read-only/i);
+    // Clear the toast timeout so the test environment can tear down cleanly.
+    toast?.click();
+  });
 });

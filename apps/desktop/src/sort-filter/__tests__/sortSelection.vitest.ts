@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
-import { applySortSpecToSelection, sortRangeRowsInDocument } from "../sortSelection.js";
+import { applySortSpecToSelection, sortRangeRowsInDocument, sortSelection } from "../sortSelection.js";
 
 describe("sortRangeRowsInDocument", () => {
   it("sorts rows in a selection and moves style/formula state with the row", () => {
@@ -207,5 +207,23 @@ describe("applySortSpecToSelection", () => {
     expect(doc.getCell("Sheet1", { row: 3, col: 0 })).toMatchObject({ value: "B", styleId: 40 });
     expect(doc.getCell("Sheet1", { row: 3, col: 1 })).toMatchObject({ value: 0, styleId: 41 });
     expect(doc.getCell("Sheet1", { row: 3, col: 2 })).toMatchObject({ value: "third", styleId: 42 });
+  });
+});
+
+describe("sortSelection (UI wrapper)", () => {
+  it("returns early in read-only mode (does not consult selection state)", () => {
+    const app = {
+      isReadOnly: () => true,
+      // These should never be consulted when read-only.
+      getSelectionRanges: () => {
+        throw new Error("getSelectionRanges should not be called");
+      },
+      getActiveCell: () => {
+        throw new Error("getActiveCell should not be called");
+      },
+      focus: () => {},
+    } as any;
+
+    expect(() => sortSelection(app, { order: "ascending" })).not.toThrow();
   });
 });

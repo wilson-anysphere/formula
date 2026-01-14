@@ -146,6 +146,29 @@ export function sortRangeRowsInDocument(
  * shows toasts for unsupported scenarios.
  */
 export function sortSelection(app: SpreadsheetApp, options: { order: SortOrder }): void {
+  // Sorting mutates cell values/styles. Even though `DocumentController.canEditCell` will prevent
+  // edits in collab read-only roles, guard early here so command palette / programmatic execution
+  // produces an explicit (and cheaper) UX outcome.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const appAny = app as any;
+    if (typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true) {
+      try {
+        showToast("Read-only: you don't have permission to sort.", "warning");
+      } catch {
+        // ignore (toast root missing in tests/headless)
+      }
+      try {
+        app.focus();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
   const ranges = app.getSelectionRanges();
   const activeCell = app.getActiveCell();
 
@@ -281,4 +304,3 @@ export function applySortSpecToSelection(params: {
 
   return true;
 }
-

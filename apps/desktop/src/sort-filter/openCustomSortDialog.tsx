@@ -13,6 +13,13 @@ import type { SortSpec } from "./types";
 
 export type CustomSortDialogHost = {
   isEditing: () => boolean;
+  /**
+   * Optional read-only indicator (used in collab viewer/commenter sessions).
+   *
+   * Sorting mutates cell contents, so it must remain blocked in read-only roles even though
+   * other view-local operations (like AutoFilter row hiding) may still be allowed.
+   */
+  isReadOnly?: () => boolean;
   getDocument: () => DocumentController;
   getSheetId: () => string;
   getSelectionRanges: () => Range[];
@@ -142,6 +149,20 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
   // Avoid throwing when another modal dialog is already open.
   const openModal = document.querySelector("dialog[open]");
   if (openModal) return;
+
+  if (host.isReadOnly?.() === true) {
+    try {
+      showToast("Read-only: you don't have permission to sort.", "warning");
+    } catch {
+      // ignore (toast root missing in tests/headless)
+    }
+    try {
+      host.focusGrid();
+    } catch {
+      // ignore
+    }
+    return;
+  }
 
   const selectionRanges = host.getSelectionRanges();
   if (selectionRanges.length !== 1) {

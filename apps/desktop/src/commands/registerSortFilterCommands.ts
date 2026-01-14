@@ -68,6 +68,15 @@ export function registerSortFilterCommands(params: {
             if (isEditingActive()) return;
             openCustomSortDialog({
               isEditing: isEditingActive,
+              isReadOnly: () => {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const appAny = app as any;
+                  return typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true;
+                } catch {
+                  return false;
+                }
+              },
               getDocument: () => app.getDocument(),
               getSheetId: () => app.getCurrentSheetId(),
               getSelectionRanges: () => app.getSelectionRanges(),
