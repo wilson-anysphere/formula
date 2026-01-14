@@ -11460,9 +11460,11 @@ struct EngineBytecodeGrid<'a> {
     /// [`bytecode::grid::Grid::resolve_sheet_name`], which currently returns a `usize`. To let
     /// runtime-parsed external sheet keys flow through the bytecode runtime, we intern them as
     /// synthetic ids and treat them as external during reads/bounds checks.
+    #[allow(dead_code)]
     external_sheets: &'a Mutex<ExternalSheetResolver>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct ExternalSheetResolver {
     base_id: usize,
@@ -11470,6 +11472,7 @@ struct ExternalSheetResolver {
     keys_by_id: Vec<Arc<str>>,
 }
 
+#[allow(dead_code)]
 impl ExternalSheetResolver {
     fn new(base_id: usize) -> Self {
         Self {
