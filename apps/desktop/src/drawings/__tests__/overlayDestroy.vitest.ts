@@ -101,6 +101,41 @@ describe("DrawingOverlay destroy()", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("closes in-flight preload ImageBitmaps when destroyed", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const createImageBitmapMock = vi.fn(() => inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const imageEntry: ImageEntry = { id: "img_preload", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+    const entries = new Map<string, ImageEntry>([[imageEntry.id, imageEntry]]);
+    const images: ImageStore = {
+      get: (id: string) => entries.get(id),
+      set: (entry: ImageEntry) => entries.set(entry.id, entry),
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    // Start a preload decode but destroy the overlay before it resolves. This ensures the bitmap
+    // isn't leaked even though the cache entry is cleared while the decode promise is in-flight.
+    const preload = overlay.preloadImage(imageEntry).catch(() => {});
+    overlay.destroy();
+
+    resolveDecode(bitmap);
+    await preload;
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("prunes cached shape text layouts when objects are removed", async () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);

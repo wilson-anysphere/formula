@@ -294,6 +294,8 @@ export class DrawingOverlay {
   private selectedId: number | null = null;
   private renderSeq = 0;
   private renderAbort: AbortController | null = null;
+  private preloadAbort: AbortController | null = typeof AbortController !== "undefined" ? new AbortController() : null;
+  private preloadCount = 0;
   private cssVarStyle: CssVarStyle | null | undefined = undefined;
   private colorTokens: OverlayColorTokens | null = null;
   private orderedObjects: DrawingObject[] = [];
@@ -847,7 +849,19 @@ export class DrawingOverlay {
    * can reuse an already-decoding promise.
    */
   preloadImage(entry: ImageEntry): Promise<ImageBitmap> {
-    return this.bitmapCache.preload(entry);
+    // Preloads are optional / best-effort and can be invalidated by:
+    // - overlay destruction (switching workbooks, hot reload, tests)
+    // - cache clears/invalidation (applyState/image updates)
+    //
+    // Use an AbortSignal so that if the overlay is torn down before the decode resolves, any
+    // resulting ImageBitmap is deterministically closed instead of being returned to a dropped
+    // Promise chain (which would leak the decoded bitmap in memory).
+    const signal = this.preloadAbort?.signal;
+    this.preloadCount += 1;
+    const p = this.bitmapCache.get(entry, signal ? { signal } : undefined);
+    return p.finally(() => {
+      this.preloadCount = Math.max(0, this.preloadCount - 1);
+    });
   }
 
   /**
@@ -857,6 +871,15 @@ export class DrawingOverlay {
    * underlying bytes for an existing image id change (undo/redo, overwrite, etc).
    */
   invalidateImage(imageId: string): void {
+    // If the bitmap bytes change while we are mid-render or mid-preload, the old decode result can
+    // arrive after the cache entry has been invalidated. Abort any in-flight consumers first so the
+    // stale ImageBitmap is closed when the decode eventually resolves.
+    this.renderAbort?.abort();
+    this.renderAbort = null;
+    if (this.preloadCount > 0) {
+      this.preloadAbort?.abort();
+      this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+    }
     this.bitmapCache.invalidate(String(imageId ?? ""));
   }
 
@@ -866,6 +889,13 @@ export class DrawingOverlay {
    * Useful after loading a new workbook snapshot where all image ids/bytes may change.
    */
   clearImageCache(): void {
+    // When callers clear the cache (e.g. applying a new document snapshot), ensure any in-flight
+    // decodes from older renders/preloads don't leak their ImageBitmaps after the cache entry is
+    // dropped.
+    this.renderAbort?.abort();
+    this.renderAbort = null;
+    this.preloadAbort?.abort();
+    this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
     this.bitmapCache.clear();
   }
 
@@ -873,6 +903,8 @@ export class DrawingOverlay {
     // Cancel any in-flight render and release cached bitmap resources.
     this.renderAbort?.abort();
     this.renderAbort = null;
+    this.preloadAbort?.abort();
+    this.preloadAbort = null;
     this.renderSeq += 1;
     this.chartRenderer?.destroy?.();
     this.themeObserver?.disconnect();
