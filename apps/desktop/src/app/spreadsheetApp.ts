@@ -19543,6 +19543,180 @@ export class SpreadsheetApp {
       const trimmed = String(refText ?? "").trim();
       if (!trimmed.includes("[") || trimmed.includes("!")) return null;
 
+      // Handle row-relative structured references (`#This Row`, `@Column`, implicit `[@Column]`).
+      // These require knowing the formula cell's row/column, so we resolve them here rather than
+      // relying on the shared table resolver (which intentionally treats them as unsupported).
+      const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
+      const normalizeSelector = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+      const findColumnIndex = (columns: unknown, columnName: string): number | null => {
+        if (!Array.isArray(columns)) return null;
+        const target = String(columnName ?? "").trim().toUpperCase();
+        if (!target) return null;
+        for (let i = 0; i < columns.length; i += 1) {
+          const colName = String(columns[i] ?? "").trim();
+          if (!colName) continue;
+          if (colName.toUpperCase() === target) return i;
+        }
+        return null;
+      };
+
+      const resolveThisRowStructuredRef = (tableName: string, columnName: string): string | null => {
+        const name = String(tableName ?? "").trim();
+        if (!name) return null;
+        const colName = String(columnName ?? "").trim();
+        if (!colName) return null;
+        const table: any = this.searchWorkbook.getTable(name);
+        if (!table) return null;
+
+        const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+        const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+        const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+        const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+        if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+        if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+        const baseStartRow = Math.min(startRow, endRow);
+        const baseEndRow = Math.max(startRow, endRow);
+        const baseStartCol = Math.min(startCol, endCol);
+        const baseEndCol = Math.max(startCol, endCol);
+
+        const colIdx = findColumnIndex(table.columns, colName);
+        if (colIdx == null) return null;
+        const targetCol = baseStartCol + colIdx;
+        if (targetCol < baseStartCol || targetCol > baseEndCol) return null;
+
+        const tableSheet =
+          typeof table.sheetName === "string" && table.sheetName.trim()
+            ? table.sheetName.trim()
+            : typeof table.sheet === "string" && table.sheet.trim()
+              ? table.sheet.trim()
+              : sheetId;
+        const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+        if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== sheetId.toLowerCase()) return null;
+
+        // Conservative: only resolve this-row references when the formula cell is within the table.
+        const row = cell.row;
+        const col = cell.col;
+        const dataStartRow = baseStartRow + 1;
+        if (row < dataStartRow || row > baseEndRow) return null;
+        if (col < baseStartCol || col > baseEndCol) return null;
+
+        return cellToA1({ row, col: targetCol });
+      };
+
+      const findContainingTableName = (): string | null => {
+        for (const entry of this.searchWorkbook.tables.values()) {
+          const table: any = entry as any;
+          const name = typeof table?.name === "string" ? table.name.trim() : "";
+          if (!name) continue;
+
+          const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+          const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+          const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+          const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+          if (startRow == null || startCol == null || endRow == null || endCol == null) continue;
+          if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) continue;
+
+          const baseStartRow = Math.min(startRow, endRow);
+          const baseEndRow = Math.max(startRow, endRow);
+          const baseStartCol = Math.min(startCol, endCol);
+          const baseEndCol = Math.max(startCol, endCol);
+
+          const tableSheet =
+            typeof table.sheetName === "string" && table.sheetName.trim()
+              ? table.sheetName.trim()
+              : typeof table.sheet === "string" && table.sheet.trim()
+                ? table.sheet.trim()
+                : sheetId;
+          const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+          if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== sheetId.toLowerCase()) continue;
+
+          const row = cell.row;
+          const col = cell.col;
+          const dataStartRow = baseStartRow + 1;
+          if (row < dataStartRow || row > baseEndRow) continue;
+          if (col < baseStartCol || col > baseEndCol) continue;
+
+          return name;
+        }
+        return null;
+      };
+
+      const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
+      const qualifiedThisRowRe = new RegExp(
+        `^([A-Za-z_][A-Za-z0-9_.]*)\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`,
+        "i"
+      );
+      const qualifiedImplicitThisRowRe = new RegExp(`^\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`, "i");
+      const atRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*${escapedItem}\\s*\\]$`, "i");
+      const atNestedRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+      const implicitAtRe = new RegExp(`^\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
+      const implicitAtNestedRe = new RegExp(`^\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+
+      const qualified = qualifiedThisRowRe.exec(trimmed);
+      if (qualified) {
+        const selector = normalizeSelector(unescapeStructuredRefItem(qualified[2]!.trim()));
+        if (selector === "#this row") {
+          const columnName = unescapeStructuredRefItem(qualified[3]!.trim());
+          const resolved = resolveThisRowStructuredRef(qualified[1]!, columnName);
+          if (resolved) return resolved;
+          return null;
+        }
+      }
+
+      const nested = atNestedRe.exec(trimmed);
+      if (nested) {
+        const columnName = unescapeStructuredRefItem(nested[2]!.trim());
+        const resolved = resolveThisRowStructuredRef(nested[1]!, columnName);
+        if (resolved) return resolved;
+        return null;
+      }
+
+      const at = atRe.exec(trimmed);
+      if (at) {
+        const item = unescapeStructuredRefItem(at[2]!.trim());
+        if (item.startsWith("@")) {
+          const columnName = item.startsWith("@[") && item.endsWith("]") && item.length > 3 ? item.slice(2, -1).trim() : item.slice(1).trim();
+          const resolved = resolveThisRowStructuredRef(at[1]!, columnName);
+          if (resolved) return resolved;
+          return null;
+        }
+      }
+
+      const implicitQualified = qualifiedImplicitThisRowRe.exec(trimmed);
+      if (implicitQualified) {
+        const selector = normalizeSelector(unescapeStructuredRefItem(implicitQualified[1]!.trim()));
+        if (selector === "#this row") {
+          const columnName = unescapeStructuredRefItem(implicitQualified[2]!.trim());
+          const tableName = findContainingTableName();
+          if (!tableName) return null;
+          const resolved = resolveThisRowStructuredRef(tableName, columnName);
+          if (resolved) return resolved;
+          return null;
+        }
+      }
+
+      const implicitNested = implicitAtNestedRe.exec(trimmed);
+      if (implicitNested) {
+        const columnName = unescapeStructuredRefItem(implicitNested[1]!.trim());
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        const resolved = resolveThisRowStructuredRef(tableName, columnName);
+        if (resolved) return resolved;
+        return null;
+      }
+
+      const implicitAt = implicitAtRe.exec(trimmed);
+      if (implicitAt) {
+        const columnName = unescapeStructuredRefItem(implicitAt[1]!.trim());
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        const resolved = resolveThisRowStructuredRef(tableName, columnName);
+        if (resolved) return resolved;
+        return null;
+      }
+
       const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: this.searchWorkbook.tables as any });
       const first = references[0];
       if (!first) return null;

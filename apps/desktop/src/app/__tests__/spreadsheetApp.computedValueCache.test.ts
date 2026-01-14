@@ -187,4 +187,58 @@ describe("SpreadsheetApp computed-value cache", () => {
     app.destroy();
     root.remove();
   });
+
+  it("evaluates #This Row / @ structured references in fallback computed values", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument() as any;
+    const sheetId = app.getCurrentSheetId();
+
+    // Force the app into multi-sheet mode so it uses the in-process evaluator for computed values.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 1);
+
+    // Table range includes header row at A1:C1 and data rows at A2:C4.
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, "Amount");
+    doc.setCellValue(sheetId, { row: 0, col: 1 }, "Total Amount");
+    doc.setCellValue(sheetId, { row: 0, col: 2 }, "Calc");
+
+    doc.setCellValue(sheetId, { row: 1, col: 0 }, 10);
+    doc.setCellValue(sheetId, { row: 1, col: 1 }, 100);
+    doc.setCellFormula(sheetId, { row: 1, col: 2 }, "=[@Amount] + [@[Total Amount]]");
+
+    doc.setCellValue(sheetId, { row: 2, col: 0 }, 20);
+    doc.setCellValue(sheetId, { row: 2, col: 1 }, 200);
+    doc.setCellFormula(sheetId, { row: 2, col: 2 }, "=TableThisRow[@Amount] + TableThisRow[@[Total Amount]]");
+
+    doc.setCellValue(sheetId, { row: 3, col: 0 }, 30);
+    doc.setCellValue(sheetId, { row: 3, col: 1 }, 300);
+    doc.setCellFormula(
+      sheetId,
+      { row: 3, col: 2 },
+      "=TableThisRow[[#This Row],[Amount]] + TableThisRow[[#This Row],[Total Amount]]",
+    );
+
+    app.getSearchWorkbook().addTable({
+      name: "TableThisRow",
+      sheetName: sheetId,
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 2,
+      columns: ["Amount", "Total Amount", "Calc"],
+    });
+
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 1, col: 2 })).toBe(110);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 2, col: 2 })).toBe(220);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 3, col: 2 })).toBe(330);
+
+    app.destroy();
+    root.remove();
+  });
 });
