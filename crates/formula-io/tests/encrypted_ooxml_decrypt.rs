@@ -1,4 +1,4 @@
-//! End-to-end decryption tests for Office-encrypted OOXML workbooks (Agile encryption).
+//! End-to-end decryption tests for Office-encrypted OOXML workbooks (Agile + Standard encryption).
 //!
 //! These are gated behind the `encrypted-workbooks` feature because decryption is optional.
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
@@ -11,7 +11,8 @@ use rand::{rngs::StdRng, SeedableRng as _};
 
 use formula_io::{
     detect_workbook_format, open_workbook_model, open_workbook_model_with_password,
-    open_workbook_with_password, Error, Workbook, WorkbookFormat,
+    open_workbook_with_options, open_workbook_with_password, Error, OpenOptions, Workbook,
+    WorkbookFormat,
 };
 use formula_model::{CellRef, CellValue};
 
@@ -246,10 +247,11 @@ fn assert_detects_xlsm(decrypted: &[u8]) {
 }
 
 #[test]
-fn decrypts_agile_fixture_with_correct_password() {
+fn decrypts_agile_and_standard_fixtures_with_correct_password() {
     let plaintext_path = fixture_path("plaintext.xlsx");
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
+    let standard_path = fixture_path("standard.xlsx");
 
     let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
     assert_expected_contents(&plaintext);
@@ -259,6 +261,43 @@ fn decrypts_agile_fixture_with_correct_password() {
 
     let agile_empty = open_model_with_password(&agile_empty_password_path, "");
     assert_expected_contents(&agile_empty);
+
+    let standard = open_model_with_password(&standard_path, "password");
+    assert_expected_contents(&standard);
+}
+
+#[test]
+fn open_workbook_with_options_decrypts_agile_and_standard_fixtures() {
+    for (fixture, password) in [
+        ("agile.xlsx", "password"),
+        ("agile-empty-password.xlsx", ""),
+        ("agile-unicode.xlsx", "pässwörd"),
+        ("standard.xlsx", "password"),
+    ] {
+        let path = fixture_path(fixture);
+        let wb = open_workbook_with_options(
+            &path,
+            OpenOptions {
+                password: Some(password.to_string()),
+            },
+        )
+        .unwrap_or_else(|err| panic!("open_workbook_with_options({fixture}) failed: {err:?}"));
+
+        match wb {
+            Workbook::Xlsx(package) => {
+                let bytes = package
+                    .write_to_bytes()
+                    .expect("serialize decrypted workbook package to bytes");
+                let model = formula_io::xlsx::read_workbook_from_reader(Cursor::new(bytes))
+                    .expect("parse decrypted workbook bytes");
+                assert_expected_contents(&model);
+            }
+            Workbook::Model(workbook) => assert_expected_contents(&workbook),
+            other => panic!(
+                "expected Workbook::Xlsx or Workbook::Model for {fixture}, got {other:?}"
+            ),
+        }
+    }
 }
 
 #[test]
