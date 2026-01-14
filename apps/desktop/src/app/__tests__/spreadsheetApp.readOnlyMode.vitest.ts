@@ -410,6 +410,72 @@ describe("SpreadsheetApp read-only collab UX", () => {
     root.remove();
   });
 
+  it("can resolve the ciphertext key id when an enc payload is stored as a nested Y.Map", async () => {
+    const root = createRoot();
+    const readOnlyIndicator = document.createElement("div");
+    readOnlyIndicator.hidden = true;
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+      readOnlyIndicator,
+    };
+
+    let capturedOptions: any = null;
+    mocks.createCollabSession.mockImplementation((opts: any) => {
+      capturedOptions = opts;
+      const session = createMockCollabSession();
+      session.doc.transact(() => {
+        session.metadata.set("encryptedRanges", [
+          {
+            id: "er-1",
+            sheetId: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 0,
+            endCol: 0,
+            keyId: "policy-key",
+          },
+        ]);
+
+        const cell = new Y.Map();
+        const enc = new Y.Map();
+        enc.set("v", 2);
+        enc.set("alg", "AES-256-GCM");
+        enc.set("keyId", "payload-key");
+        enc.set("ivBase64", "a");
+        enc.set("tagBase64", "b");
+        enc.set("ciphertextBase64", "c");
+        cell.set("enc", enc);
+        session.cells.set("Sheet1:0:0", cell);
+      });
+      return session;
+    });
+
+    const app = new SpreadsheetApp(root, status, {
+      collab: {
+        wsUrl: "ws://example.invalid",
+        docId: "doc-1",
+        persistenceEnabled: false,
+        user: { id: "u1", name: "User 1", color: "#ff0000" },
+      },
+    });
+
+    expect(capturedOptions).not.toBeNull();
+    expect(typeof capturedOptions?.encryption?.keyForCell).toBe("function");
+
+    const store = app.getCollabEncryptionKeyStore();
+    expect(store).not.toBeNull();
+    await store!.set("doc-1", "payload-key", Buffer.alloc(32, 1).toString("base64"));
+
+    const resolved = capturedOptions.encryption.keyForCell({ sheetId: "Sheet1", row: 0, col: 0 });
+    expect(resolved).toMatchObject({ keyId: "payload-key" });
+    expect(resolved?.keyBytes).toBeInstanceOf(Uint8Array);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("does not fall back to the policy keyId when an encrypted cell payload key is unavailable", async () => {
     const root = createRoot();
     const readOnlyIndicator = document.createElement("div");

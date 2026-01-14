@@ -2126,18 +2126,28 @@ export class SpreadsheetApp {
                   for (const key of keys) {
                     const cellData = cells.get(key);
                     if (!cellData) continue;
-                    const encRaw =
-                      typeof (cellData as any)?.get === "function" ? (cellData as any).get("enc") : (cellData as any)?.enc;
-                    if (encRaw === undefined) continue;
-                    hasEncPayload = true;
-                    // Best-effort: treat any object with a string keyId as an encrypted payload
-                    // marker, even if the full schema is unsupported by this client.
-                    const keyId =
-                      typeof encRaw === "object" && encRaw && typeof (encRaw as any).keyId === "string"
-                        ? String((encRaw as any).keyId ?? "").trim()
-                        : isEncryptedCellPayload(encRaw)
-                          ? String((encRaw as any).keyId ?? "").trim()
-                          : "";
+                     const encRaw =
+                       typeof (cellData as any)?.get === "function" ? (cellData as any).get("enc") : (cellData as any)?.enc;
+                     if (encRaw === undefined) continue;
+                     hasEncPayload = true;
+                     // Best-effort: treat any object with a string keyId as an encrypted payload
+                     // marker, even if the full schema is unsupported by this client.
+                    const keyId = (() => {
+                      if (!encRaw || typeof encRaw !== "object") return "";
+                      const direct = (encRaw as any).keyId;
+                      if (typeof direct === "string") return direct.trim();
+                      const getter = (encRaw as any).get;
+                      if (typeof getter === "function") {
+                        try {
+                          const raw = getter.call(encRaw, "keyId");
+                          const trimmed = raw == null ? "" : String(raw).trim();
+                          if (trimmed && !/^\[object .*]$/.test(trimmed)) return trimmed;
+                        } catch {
+                          // ignore
+                        }
+                      }
+                      return isEncryptedCellPayload(encRaw) ? String((encRaw as any).keyId ?? "").trim() : "";
+                    })();
                     if (keyId) {
                       payloadKeyId = keyId;
                       break;
