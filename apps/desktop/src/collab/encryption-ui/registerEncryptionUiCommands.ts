@@ -356,6 +356,72 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
   );
 
   commandRegistry.registerBuiltinCommand(
+    "collab.listEncryptedRanges",
+    "List encrypted ranges…",
+    async () => {
+      const session = app.getCollabSession();
+      if (!session) {
+        showToast("This command requires collaboration mode.", "warning");
+        return;
+      }
+
+      const manager = getEncryptionManager(app);
+      if (!manager) {
+        showToast("Encryption is not available for this workbook.", "error");
+        return;
+      }
+
+      const ranges = manager.list();
+      if (ranges.length === 0) {
+        showToast("No encrypted ranges in this workbook.", "info");
+        return;
+      }
+
+      const selected = await showQuickPick(
+        ranges.map((r) => {
+          const a1 = rangeToA1({ startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol });
+          const displaySheetName = app.getSheetDisplayNameById(r.sheetId);
+          const label = `${displaySheetName}!${a1}`;
+          const description = `Key ID: ${r.keyId}`;
+          return { label, description, value: r };
+        }),
+        { placeHolder: "Select an encrypted range" },
+      );
+      if (!selected) return;
+
+      const selectRange = (app as any).selectRange;
+      if (typeof selectRange !== "function") {
+        showToast("Selection API is not available for this workbook.", "error");
+        return;
+      }
+
+      try {
+        selectRange.call(
+          app,
+          {
+            sheetId: selected.sheetId,
+            range: {
+              startRow: selected.startRow,
+              startCol: selected.startCol,
+              endRow: selected.endRow,
+              endCol: selected.endCol,
+            },
+          },
+          { scrollIntoView: true, focus: true },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to select encrypted range: ${message}`, "error");
+      }
+    },
+    {
+      category: COMMAND_CATEGORY,
+      description: "Show all encrypted ranges in the workbook and jump to one.",
+      keywords: ["encrypt", "encryption", "list", "protected range", "collaboration", "collaboration:"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "collab.exportEncryptionKey",
     "Export encryption key…",
     async () => {
