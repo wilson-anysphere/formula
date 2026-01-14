@@ -4341,37 +4341,6 @@ impl WasmWorkbook {
                     continue;
                 }
 
-                // Import number formats so cached numeric values can be rounded correctly when the
-                // workbook is in "precision as displayed" mode.
-                //
-                // Excel precedence (best-effort):
-                // - cell style (`c/@s`) if present (non-zero id in our model)
-                // - row default style (`row/@s`)
-                // - column default style (`col/@style`)
-                let number_format = if cell.style_id != 0 {
-                    model.styles
-                        .get(cell.style_id)
-                        .and_then(|s| s.number_format.clone())
-                } else {
-                    let row_style_id = sheet
-                        .row_properties
-                        .get(&cell_ref.row)
-                        .and_then(|props| props.style_id);
-                    let col_style_id = sheet
-                        .col_properties
-                        .get(&cell_ref.col)
-                        .and_then(|props| props.style_id);
-                    row_style_id
-                        .or(col_style_id)
-                        .and_then(|style_id| model.styles.get(style_id))
-                        .and_then(|s| s.number_format.clone())
-                };
-                if let Some(pattern) = number_format.filter(|s| !s.trim().is_empty()) {
-                    wb.engine
-                        .set_cell_number_format(&sheet_name, &address, Some(pattern))
-                        .map_err(|err| js_err(err.to_string()))?;
-                }
-
                 // Seed cached values first (including cached formula results).
                 wb.engine
                     .set_cell_value(&sheet_name, &address, cell_value_to_engine(&cell.value))
@@ -6360,6 +6329,46 @@ mod tests {
             !settings.full_calc_on_load,
             "fixture does not set fullCalcOnLoad, default should be false"
         );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_xlsx_bytes_forces_manual_calc_mode_even_when_workbook_is_automatic() {
+        use std::io::Cursor;
+
+        let mut workbook = formula_model::Workbook::new();
+        workbook.calc_settings.calculation_mode = CalculationMode::Automatic;
+        workbook.calc_settings.calculate_before_save = false;
+        workbook.calc_settings.iterative.enabled = true;
+        workbook.calc_settings.iterative.max_iterations = 7;
+        workbook.calc_settings.iterative.max_change = 0.123;
+        workbook.calc_settings.full_precision = false;
+        workbook.calc_settings.full_calc_on_load = true;
+
+        let sheet_id = workbook.add_sheet("Sheet1").unwrap();
+        workbook
+            .sheet_mut(sheet_id)
+            .unwrap()
+            .set_value_a1("A1", CellValue::Number(1.0))
+            .unwrap();
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+
+        let wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+        let settings = wb.inner.engine.calc_settings();
+
+        // The WASM worker protocol expects manual recalc regardless of what the XLSX requested.
+        assert_eq!(settings.calculation_mode, CalculationMode::Manual);
+
+        // Other workbook calc settings should still round-trip.
+        assert!(!settings.calculate_before_save);
+        assert!(settings.iterative.enabled);
+        assert_eq!(settings.iterative.max_iterations, 7);
+        assert!((settings.iterative.max_change - 0.123).abs() < 1e-12);
+        assert!(!settings.full_precision);
+        assert!(settings.full_calc_on_load);
     }
 
     #[test]
