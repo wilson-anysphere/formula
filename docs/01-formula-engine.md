@@ -233,6 +233,8 @@ Expansion rules:
   * No formula quoting (e.g. return `Sheet 1`, not `'Sheet 1'`).
   * Each sheet should appear **exactly once** (Excel sheet names are compared case-insensitively
     across Unicode, using NFKC + case folding).
+  * The order should reflect the workbook’s tab order as Excel would use for 3D references
+    (generally **including hidden sheets**, i.e. do not filter by visibility).
 * Endpoint matching (`Sheet1` / `Sheet3`) uses Excel’s Unicode-aware, NFKC + case-insensitive
   comparison semantics (see `formula_model::sheet_name_eq_case_insensitive`).
 * The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys

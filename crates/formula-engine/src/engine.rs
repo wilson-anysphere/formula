@@ -9851,7 +9851,9 @@ pub trait ExternalValueProvider: Send + Sync {
     ///
     /// Implementations should return sheet names in workbook order (without the `[Book.xlsx]`
     /// prefix). Sheet names should be unquoted display names (e.g. return `Sheet 1`, not
-    /// `'Sheet 1'`) and each sheet should appear exactly once.
+    /// `'Sheet 1'`) and each sheet should appear exactly once. The order should reflect the
+    /// workbook's tab order as Excel would use for 3D references (generally including hidden
+    /// sheets).
     ///
     /// Endpoint matching (`Sheet1` / `Sheet3`) uses Excel’s Unicode-aware, NFKC + case-insensitive
     /// comparison semantics (see [`formula_model::sheet_name_eq_case_insensitive`]).
