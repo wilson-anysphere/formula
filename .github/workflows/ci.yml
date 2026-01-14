@@ -60,6 +60,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run manifest unit tests (fast, dependency-free)
         run: node --test scripts/__tests__/release-manifest.test.mjs
+      - name: Desktop URL scheme + file association preflight (tauri.conf.json/Info.plist)
+        run: node scripts/check-desktop-url-scheme.mjs
       - name: Run desktop bundle validator unit tests (fast, dependency-free)
         run: |
           node --test \
