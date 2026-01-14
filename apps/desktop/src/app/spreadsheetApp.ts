@@ -2884,6 +2884,11 @@ export class SpreadsheetApp {
             a.to.offset.yEmu === bb.to.offset.yEmu
           );
         };
+        // Cache the currently-selected chart drawing id/index so pointer-move updates can avoid
+        // scanning and allocating maps for the full chart list on every drag/resize tick.
+        let selectedCanvasChartDrawingId: number | null = null;
+        let selectedCanvasChartIndex: number | null = null;
+        let lastCanvasChartAnchor: DrawingObject["anchor"] | null = null;
 
         this.chartDrawingInteraction = new DrawingInteractionController(
           this.root,
@@ -2909,27 +2914,42 @@ export class SpreadsheetApp {
               );
             },
             setObjects: (next) => {
-              const current = this.listCanvasChartDrawingObjectsForSheet(this.sheetId);
-              const prevById = new Map<number, DrawingObject>();
-              for (const obj of current) prevById.set(obj.id, obj);
+              const targetId = selectedCanvasChartDrawingId;
+              if (targetId == null) return;
 
-              for (const obj of next) {
-                const prev = prevById.get(obj.id);
-                if (!prev) continue;
-                if (anchorsEqual(prev.anchor, obj.anchor)) continue;
-                const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
-                if (typeof chartId !== "string" || chartId.trim() === "") continue;
-                this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
+              let idx = selectedCanvasChartIndex;
+              const hasCachedIndex =
+                typeof idx === "number" && idx >= 0 && idx < next.length && next[idx]?.id === targetId;
+              if (!hasCachedIndex) {
+                idx = -1;
+                for (let i = 0; i < next.length; i += 1) {
+                  if (next[i]!.id === targetId) {
+                    idx = i;
+                    break;
+                  }
+                }
+                selectedCanvasChartIndex = idx >= 0 ? idx : null;
               }
+              if (idx == null || idx < 0) return;
+              const obj = next[idx];
+              if (!obj) return;
+              if (lastCanvasChartAnchor && anchorsEqual(lastCanvasChartAnchor, obj.anchor)) return;
+              const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
+              if (typeof chartId !== "string" || chartId.trim() === "") return;
+              lastCanvasChartAnchor = obj.anchor;
+              this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
             },
             beginBatch: () => {
               this.chartDrawingGestureActive = true;
+              lastCanvasChartAnchor = null;
             },
             endBatch: () => {
               this.chartDrawingGestureActive = false;
+              lastCanvasChartAnchor = null;
             },
             cancelBatch: () => {
               this.chartDrawingGestureActive = false;
+              lastCanvasChartAnchor = null;
             },
             onPointerDownHit: () => {
               if (this.editor.isOpen()) {
@@ -2937,14 +2957,41 @@ export class SpreadsheetApp {
               }
             },
              onSelectionChange: (selectedId) => {
-               const selected =
-                 selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId).find((o) => o.id === selectedId) : null;
-               const nextChartId =
-                 selected?.kind.type === "chart" && typeof selected.kind.chartId === "string" ? selected.kind.chartId : null;
-               this.setSelectedChartId(nextChartId);
-             },
-             requestFocus: () => this.focus(),
-           },
+               selectedCanvasChartDrawingId = selectedId;
+               selectedCanvasChartIndex = null;
+               lastCanvasChartAnchor = null;
+
+              let nextChartId: string | null = null;
+              if (selectedId != null) {
+                const charts = this.chartStore.listCharts();
+                let idx = 0;
+                for (const chart of charts) {
+                  if (chart.sheetId !== this.sheetId) continue;
+                  if (chartStoreIdToDrawingId(chart.id) === selectedId) {
+                    nextChartId = chart.id;
+                    selectedCanvasChartIndex = idx;
+                    break;
+                  }
+                  idx += 1;
+                }
+              }
+
+              // Drawings and charts are mutually exclusive selections. Selecting a chart
+              // should clear any drawing selection so selection handles don't double-render.
+              if (nextChartId != null && this.selectedDrawingId != null) {
+                this.selectedDrawingId = null;
+                this.selectedDrawingIndex = null;
+                this.drawingInteractionController?.setSelectedId(null);
+                this.dispatchDrawingSelectionChanged();
+                // In legacy grid mode, drawing selection chrome is rendered on the selection canvas.
+                // Ensure it clears immediately when switching the active selection to a chart.
+                this.renderSelection();
+              }
+
+              this.setSelectedChartId(nextChartId);
+            },
+            requestFocus: () => this.focus(),
+          },
           { capture: true },
         );
       }
