@@ -126,6 +126,7 @@ export class DesktopSharedGrid {
   private readonly hoverViewportPointScratch = { x: 0, y: 0 };
   private readonly pickCellScratch = { row: 0, col: 0 };
   private readonly fillHandlePointerCellScratch = { row: 0, col: 0 };
+  private readonly selectionDragRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
   private lastDragPickedRow: number | null = null;
   private lastDragPickedCol: number | null = null;
   private lastFillHandlePointerRow: number | null = null;
@@ -1257,16 +1258,24 @@ export class DesktopSharedGrid {
     this.lastDragPickedRow = picked.row;
     this.lastDragPickedCol = picked.col;
 
-    const range: CellRange = {
-      startRow: Math.min(anchor.row, picked.row),
-      endRow: Math.max(anchor.row, picked.row) + 1,
-      startCol: Math.min(anchor.col, picked.col),
-      endCol: Math.max(anchor.col, picked.col) + 1
-    };
+    const startRow = Math.min(anchor.row, picked.row);
+    const endRow = Math.max(anchor.row, picked.row) + 1;
+    const startCol = Math.min(anchor.col, picked.col);
+    const endCol = Math.max(anchor.col, picked.col) + 1;
 
     if (this.interactionMode === "rangeSelection") {
       const prev = this.transientRange;
-      if (rangesEqual(prev, range)) return;
+      if (
+        prev &&
+        prev.startRow === startRow &&
+        prev.endRow === endRow &&
+        prev.startCol === startCol &&
+        prev.endCol === endCol
+      ) {
+        return;
+      }
+
+      const range: CellRange = { startRow, endRow, startCol, endCol };
       this.transientRange = range;
       renderer.setRangeSelection(range);
       this.announceSelection(renderer.getSelection(), range);
@@ -1275,7 +1284,21 @@ export class DesktopSharedGrid {
     }
 
     const prevRange = renderer.getSelectionRange();
-    if (rangesEqual(prevRange, range)) return;
+    if (
+      prevRange &&
+      prevRange.startRow === startRow &&
+      prevRange.endRow === endRow &&
+      prevRange.startCol === startCol &&
+      prevRange.endCol === endCol
+    ) {
+      return;
+    }
+
+    const range = this.selectionDragRangeScratch;
+    range.startRow = startRow;
+    range.endRow = endRow;
+    range.startCol = startCol;
+    range.endCol = endCol;
 
     const ranges = renderer.getSelectionRanges();
     const activeIndex = renderer.getActiveSelectionIndex();
@@ -1286,7 +1309,7 @@ export class DesktopSharedGrid {
     const nextSelection = renderer.getSelection();
     const nextRange = renderer.getSelectionRange();
     this.announceSelection(nextSelection, nextRange);
-    this.callbacks.onSelectionRangeChange?.(nextRange ?? range);
+    this.callbacks.onSelectionRangeChange?.(nextRange);
   }
 
   private applyFillHandleDrag(picked: { row: number; col: number }): void {

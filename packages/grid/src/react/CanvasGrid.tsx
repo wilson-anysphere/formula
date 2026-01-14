@@ -1045,6 +1045,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const hoverViewportPointScratch = { x: 0, y: 0 };
     const pickCellScratch = { row: 0, col: 0 };
     const fillHandlePointerCellScratch = { row: 0, col: 0 };
+    const selectionDragRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
 
     // Cache the last picked cell during pointer-driven selection / fill-handle drags so we can
     // skip redundant work (and allocations) when high-frequency pointermove events stay within
@@ -1215,21 +1216,20 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       lastDragPickedRow = picked.row;
       lastDragPickedCol = picked.col;
 
-      const range: CellRange = {
-        startRow: Math.min(anchor.row, picked.row),
-        endRow: Math.max(anchor.row, picked.row) + 1,
-        startCol: Math.min(anchor.col, picked.col),
-        endCol: Math.max(anchor.col, picked.col) + 1
-      };
+      const startRow = Math.min(anchor.row, picked.row);
+      const endRow = Math.max(anchor.row, picked.row) + 1;
+      const startCol = Math.min(anchor.col, picked.col);
+      const endCol = Math.max(anchor.col, picked.col) + 1;
 
       if (interactionModeRef.current === "rangeSelection") {
+        const range: CellRange = { startRow, endRow, startCol, endCol };
         const prevRange = transientRangeRef.current;
         if (
           prevRange &&
-          prevRange.startRow === range.startRow &&
-          prevRange.endRow === range.endRow &&
-          prevRange.startCol === range.startCol &&
-          prevRange.endCol === range.endCol
+          prevRange.startRow === startRow &&
+          prevRange.endRow === endRow &&
+          prevRange.startCol === startCol &&
+          prevRange.endCol === endCol
         ) {
           return;
         }
@@ -1241,13 +1241,19 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         return;
       }
 
+      const range = selectionDragRangeScratch;
+      range.startRow = startRow;
+      range.endRow = endRow;
+      range.startCol = startCol;
+      range.endCol = endCol;
+
       const prevRange = renderer.getSelectionRange();
       if (
         prevRange &&
-        prevRange.startRow === range.startRow &&
-        prevRange.endRow === range.endRow &&
-        prevRange.startCol === range.startCol &&
-        prevRange.endCol === range.endCol
+        prevRange.startRow === startRow &&
+        prevRange.endRow === endRow &&
+        prevRange.startCol === startCol &&
+        prevRange.endCol === endCol
       ) {
         return;
       }
@@ -1261,7 +1267,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const nextSelection = renderer.getSelection();
       const nextRange = renderer.getSelectionRange();
       announceSelection(nextSelection, nextRange);
-      onSelectionRangeChangeRef.current?.(nextRange ?? range);
+      onSelectionRangeChangeRef.current?.(nextRange);
     };
 
     const scheduleAutoScroll = () => {
