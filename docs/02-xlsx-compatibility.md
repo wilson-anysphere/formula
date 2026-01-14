@@ -237,7 +237,7 @@ Real-world XLSX producers sometimes emit relationship targets that diverge from 
 XLSX is a ZIP archive following Open Packaging Conventions (ECMA-376).
 
 **Exception:** Excel “Encrypt with Password” / “Password to open” files are **not ZIP** archives even
-when they use a `.xlsx`/`.xlsm` extension. Excel wraps the encrypted workbook in an **OLE/CFB**
+when they use a `.xlsx`/`.xlsm`/`.xlsb` extension. Excel wraps the encrypted workbook in an **OLE/CFB**
 container with `EncryptionInfo` + `EncryptedPackage` streams. See:
 
 - [`docs/encrypted-workbooks.md`](./encrypted-workbooks.md) (overview + entrypoints)
