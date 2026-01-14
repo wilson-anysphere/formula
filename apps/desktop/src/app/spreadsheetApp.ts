@@ -2672,7 +2672,29 @@ export class SpreadsheetApp {
           this.drawingOverlay.invalidateImage(imageId);
           // Sheet background images share the same underlying image store; invalidate any cached
           // decoded bitmap so it doesn't keep memory alive after bytes are evicted.
+          //
+          // If the image being invalidated is currently being decoded for (or displayed as) the
+          // active sheet background, abort the in-flight decode + clear the pattern so we don't
+          // keep drawing a bitmap derived from stale/evicted bytes.
+          const isActiveBackground = imageId === this.activeSheetBackgroundImageId;
+          if (isActiveBackground) {
+            this.activeSheetBackgroundAbort?.abort();
+            this.activeSheetBackgroundAbort = null;
+            this.activeSheetBackgroundBitmap = null;
+            // Force a reload even if the sheet background id itself is unchanged.
+            this.activeSheetBackgroundImageId = null;
+            if (this.sharedGrid) {
+              this.sharedGrid.renderer.setBackgroundPatternImage(null);
+            } else {
+              this.refresh();
+            }
+          }
+
           this.workbookImageBitmaps.invalidate(imageId);
+
+          if (isActiveBackground) {
+            this.syncActiveSheetBackgroundImage();
+          }
         },
       },
       persistence: {
