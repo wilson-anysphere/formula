@@ -349,6 +349,7 @@ export class DrawingOverlay {
   private lastRenderArgs: { objects: DrawingObject[]; viewport: Viewport; options?: { drawObjects?: boolean } } | null = null;
   private readonly pendingImageHydrations = new Map<string, Promise<ImageEntry | undefined>>();
   private readonly imageHydrationNegativeCache = new Map<string, number>();
+  private imageHydrationEpoch = 0;
   private hydrationRerenderScheduled = false;
 
   constructor(
@@ -516,8 +517,15 @@ export class DrawingOverlay {
 
     if (this.pendingImageHydrations.has(id)) return;
 
+    const epoch = this.imageHydrationEpoch;
     const promise = Promise.resolve()
-      .then(() => this.images.getAsync!(id))
+      .then(() => {
+        // Avoid starting async store work if the overlay has been torn down or the
+        // caller cleared image caches while we were waiting for this microtask turn.
+        if (this.destroyed) return undefined;
+        if (epoch !== this.imageHydrationEpoch) return undefined;
+        return this.images.getAsync!(id);
+      })
       .catch(() => undefined);
 
     this.pendingImageHydrations.set(id, promise);
@@ -528,6 +536,10 @@ export class DrawingOverlay {
       // while an async hydration is still in-flight. Avoid mutating shared image stores after
       // teardown so the decoded bytes can be released promptly.
       if (this.destroyed) return;
+      // If callers cleared image caches (e.g. applyState swapping workbook snapshots) while a
+      // hydration request was already in-flight, ignore the stale result so we don't repopulate
+      // caches with bytes from the previous epoch.
+      if (epoch !== this.imageHydrationEpoch) return;
       if (!entry) {
         this.imageHydrationNegativeCache.set(id, Date.now() + 250);
         return;
@@ -1147,6 +1159,9 @@ export class DrawingOverlay {
    */
   clearImageCache(): void {
     if (this.destroyed) return;
+    // Bump the epoch so any async hydrations that were already queued (or in-flight)
+    // do not repopulate the caches after we've cleared them.
+    this.imageHydrationEpoch += 1;
     // When callers clear the cache (e.g. applying a new document snapshot), ensure any in-flight
     // decodes from older renders/preloads don't leak their ImageBitmaps after the cache entry is
     // dropped.

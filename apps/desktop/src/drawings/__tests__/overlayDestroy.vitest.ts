@@ -307,6 +307,50 @@ describe("DrawingOverlay destroy()", () => {
     expect(set).not.toHaveBeenCalled();
   });
 
+  it("does not start image hydration lookups after destroy() when queued via microtask", async () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const getAsync = vi.fn(async () => ({ id: "img_queued", bytes: new Uint8Array([1]), mimeType: "image/png" }));
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+      getAsync,
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    overlay.render([createImageObject("img_queued")], viewport);
+    overlay.destroy();
+
+    // Flush the hydration microtask turn.
+    await Promise.resolve();
+
+    expect(getAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not start stale image hydration lookups after clearImageCache()", async () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const getAsync = vi.fn(async () => ({ id: "img_clear_epoch", bytes: new Uint8Array([1]), mimeType: "image/png" }));
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+      getAsync,
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    overlay.render([createImageObject("img_clear_epoch")], viewport);
+    overlay.clearImageCache();
+
+    // Flush the hydration microtask turn.
+    await Promise.resolve();
+
+    expect(getAsync).not.toHaveBeenCalled();
+  });
+
   it("prunes cached shape text layouts when objects are removed", () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
