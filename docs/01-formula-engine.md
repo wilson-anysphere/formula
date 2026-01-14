@@ -308,19 +308,21 @@ Expanded lookups via `get(sheet, addr)` (conceptually):
   get("[C:\path\Book.xlsx]Sheet3", A1)
 ```
 
-Note: the canonical key format uses `[...]` as the workbook delimiter. The engine currently splits
-`"[workbook]sheet"` keys at the **first** `]`, so workbook identifiers that contain `]` are
-ambiguous. This can matter for uncommon paths containing bracket characters (e.g. a directory named
-`C:\[foo]\`), especially for external 3D spans that require extracting the workbook id to call
-`sheet_order(...)`.
+Note: the canonical key format uses `[...]` as the workbook delimiter. The engine splits
+`"[workbook]sheet"` keys at the **last** `]`, so workbook identifiers may include bracket
+characters (e.g. a directory named `C:\[foo]\`). Sheet names are expected to follow Excel
+restrictions (notably: no `]`), so this split is unambiguous.
 
 #### Current limitations / behavior notes
 
-* **Bytecode backend:** formulas that contain external workbook references currently do **not** compile
-  to bytecode (they fall back to the AST evaluator).
-  * Note: this is about **external workbook references** like `[Book.xlsx]Sheet1!A1`. The bytecode
-    backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a multi-area
-    reference) when all referenced sheets exist.
+* **Bytecode backend:**
+  * The bytecode backend supports external workbook references that lower to a single external sheet
+    key (e.g. `[Book.xlsx]Sheet1!A1`, plus path-qualified variants).
+  * External workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are not currently compiled to
+    bytecode (they fall back to the AST evaluator), since span expansion requires
+    `ExternalValueProvider::sheet_order`.
+  * The bytecode backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a
+    multi-area reference) when all referenced sheets exist.
 * **External structured references:** structured refs cannot be workbook/sheet-qualified today
   (e.g. `[Book.xlsx]Sheet1!Table1[Col]` evaluates to `#REF!`).
 * **External workbook defined names:** name references cannot be qualified to an external workbook
