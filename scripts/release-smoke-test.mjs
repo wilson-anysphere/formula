@@ -818,6 +818,17 @@ async function main() {
             }
           }
 
+          // validate-linux-deb.sh can optionally run an installability check inside an Ubuntu container.
+          // If Docker isn't available locally, still run the static checks.
+          if (base === "validate-linux-deb.sh" && skipReason === undefined) {
+            if (!commandExists("dpkg-deb")) {
+              skipReason =
+                "Skipping validate-linux-deb.sh because required command `dpkg-deb` is not available on PATH. Install dpkg (and optionally docker) to validate local DEB bundles.";
+            } else if (!hasDocker()) {
+              extraArgs.push("--no-container");
+            }
+          }
+
           steps.push(makeValidatorStep(validator, key, { extraArgs, skipReason }));
         }
       }

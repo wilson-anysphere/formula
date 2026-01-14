@@ -155,3 +155,160 @@ test("release-smoke-test: --local-bundles skips validators when bundle dirs exis
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-container when docker is unavailable", () => {
+  if (process.platform !== "linux") return;
+
+  const tag = currentDesktopTag();
+  const tauriConfPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
+  const expectedVersion = String(tauriConf?.version ?? "").trim();
+  const expectedDebName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+  assert.ok(expectedVersion, "Expected tauri.conf.json to contain a non-empty version");
+
+  // Like the empty-artifacts test above, avoid relying on / mutating any real bundle outputs
+  // that may exist on developer machines.
+  const hasExistingBundleDirs = [
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target"),
+  ].some((root) => {
+    try {
+      return (
+        fs.existsSync(path.join(root, "release", "bundle")) ||
+        fs.readdirSync(root, { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .some((d) => fs.existsSync(path.join(root, d.name, "release", "bundle")))
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  if (hasExistingBundleDirs) {
+    return;
+  }
+
+  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-deb-nodocker-${process.pid}`);
+  const bundleDir = path.join(tmpRoot, "release", "bundle", "deb");
+  const binDir = path.join(tmpRoot, "bin");
+  fs.mkdirSync(bundleDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const debPath = path.join(bundleDir, "Formula.deb");
+  fs.writeFileSync(debPath, "not-a-real-deb", { encoding: "utf8" });
+
+  const mimeList = [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-excel.sheet.macroEnabled.12",
+    "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+    "application/vnd.ms-excel.template.macroEnabled.12",
+    "application/vnd.ms-excel.addin.macroEnabled.12",
+    "text/csv",
+    "application/vnd.apache.parquet",
+    "x-scheme-handler/formula",
+  ].join(";");
+
+  const dpkgDebStub = `#!/usr/bin/env bash
+set -euo pipefail
+
+expected_version="${expectedVersion}"
+expected_pkg="${expectedDebName}"
+
+cmd="\${1:-}"
+case "$cmd" in
+  --version)
+    echo "dpkg-deb (stub)"
+    exit 0
+    ;;
+  -f)
+    field="\${3:-}"
+    case "$field" in
+      Version) echo "$expected_version" ;;
+      Package) echo "$expected_pkg" ;;
+      Depends) echo "shared-mime-info, libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2, libssl3" ;;
+      *) echo "" ;;
+    esac
+    exit 0
+    ;;
+  -c|--contents)
+    cat <<EOF
+-rwxr-xr-x root/root 0 2024-01-01 00:00 ./usr/bin/$expected_pkg
+-rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/applications/formula.desktop
+-rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/doc/$expected_pkg/LICENSE
+-rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/doc/$expected_pkg/NOTICE
+-rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/mime/packages/app.formula.desktop.xml
+EOF
+    exit 0
+    ;;
+  -x)
+    dest="\${3:-}"
+    mkdir -p "$dest/usr/bin" "$dest/usr/share/applications" "$dest/usr/share/doc/$expected_pkg" "$dest/usr/share/mime/packages"
+    cat > "$dest/usr/bin/$expected_pkg" <<'BIN'
+#!/usr/bin/env bash
+echo "formula stub"
+BIN
+    chmod +x "$dest/usr/bin/$expected_pkg"
+    cat > "$dest/usr/share/applications/formula.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Formula
+Exec=$expected_pkg %U
+MimeType=${mimeList};
+EOF
+    echo "LICENSE stub" > "$dest/usr/share/doc/$expected_pkg/LICENSE"
+    echo "NOTICE stub" > "$dest/usr/share/doc/$expected_pkg/NOTICE"
+    cat > "$dest/usr/share/mime/packages/app.formula.desktop.xml" <<'XML'
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.apache.parquet">
+    <glob pattern="*.parquet" />
+  </mime-type>
+</mime-info>
+XML
+    exit 0
+    ;;
+  *)
+    echo "dpkg-deb stub: unsupported args: $*" >&2
+    exit 2
+    ;;
+esac
+`;
+  const dpkgDebPath = path.join(binDir, "dpkg-deb");
+  fs.writeFileSync(dpkgDebPath, dpkgDebStub, { encoding: "utf8" });
+  fs.chmodSync(dpkgDebPath, 0o755);
+
+  // Stub docker so `docker info` fails, which should force release-smoke-test to pass
+  // --no-container to validate-linux-deb.sh.
+  const dockerPath = path.join(binDir, "docker");
+  fs.writeFileSync(dockerPath, "#!/usr/bin/env bash\nexit 1\n", { encoding: "utf8" });
+  fs.chmodSync(dockerPath, 0o755);
+
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [smokeTestPath, "--tag", tag, "--repo", "owner/repo", "--local-bundles", "--", "--help"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: tmpRoot,
+          PATH: `${binDir}:${process.env.PATH}`,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(
+      child.status,
+      0,
+      `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.match(child.stdout, /Release smoke test PASSED/i);
+    assert.match(child.stdout, /=== Validate local bundles \(linux\): validate-linux-deb\.sh ===/i);
+    assert.match(child.stdout, /validate-linux-deb\.sh: OK/i);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
