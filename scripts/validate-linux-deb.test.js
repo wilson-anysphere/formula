@@ -114,16 +114,19 @@ BIN
 
     mime_value="\${FAKE_DESKTOP_MIME_VALUE:-${defaultDesktopMimeValue}}"
     exec_line="\${FAKE_DESKTOP_EXEC_LINE:-Exec=$fake_binary %U}"
-    cat > "$dest/usr/share/applications/formula.desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=Formula
-\${exec_line}
-MimeType=\${mime_value}
-DESKTOP
+    with_mimetype="\${FAKE_DESKTOP_WITH_MIMETYPE:-1}"
+    {
+      echo "[Desktop Entry]"
+      echo "Type=Application"
+      echo "Name=Formula"
+      echo "\${exec_line}"
+      if [[ "\${with_mimetype}" == "1" ]]; then
+        echo "MimeType=\${mime_value}"
+      fi
+    } > "$dest/usr/share/applications/formula.desktop"
 
-     echo "LICENSE stub" > "$dest/usr/share/doc/$fake_package/LICENSE"
-     echo "NOTICE stub" > "$dest/usr/share/doc/$fake_package/NOTICE"
+    echo "LICENSE stub" > "$dest/usr/share/doc/$fake_package/LICENSE"
+    echo "NOTICE stub" > "$dest/usr/share/doc/$fake_package/NOTICE"
     if [[ -n "\${FAKE_MIME_XML_CONTENT:-}" ]]; then
       printf '%s\n' "$FAKE_MIME_XML_CONTENT" > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml"
     else
@@ -202,6 +205,7 @@ function runValidator({
   fakeBinary,
   desktopMimeValue,
   desktopExecLine,
+  desktopWithMimeType,
   mimeXmlContent,
   debNameOverride,
 } = {}) {
@@ -220,6 +224,7 @@ function runValidator({
         FAKE_DPKG_DEB_BINARY: fakeBinary ?? expectedMainBinary,
         FAKE_DPKG_DEB_DEPENDS_FILE: dependsFile,
         FAKE_DPKG_DEB_CONTENTS_FILE: contentsFile,
+        ...(desktopWithMimeType === false ? { FAKE_DESKTOP_WITH_MIMETYPE: "0" } : {}),
         ...(mimeXmlContent ? { FAKE_MIME_XML_CONTENT: mimeXmlContent } : {}),
         ...(desktopMimeValue ? { FAKE_DESKTOP_MIME_VALUE: desktopMimeValue } : {}),
         ...(desktopExecLine ? { FAKE_DESKTOP_EXEC_LINE: desktopExecLine } : {}),
@@ -545,4 +550,48 @@ test("validate-linux-deb fails when extracted .desktop Exec= lacks a file placeh
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /placeholder/i);
+});
+
+test("validate-linux-deb fails when extracted .desktop is missing MimeType=", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopWithMimeType: false,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /MimeType=/i);
+});
+
+test("validate-linux-deb fails when extracted .desktop lacks xlsx integration", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    // Only advertise csv + parquet (no xlsx MIME types).
+    desktopMimeValue: "text/csv;application/vnd.apache.parquet;x-scheme-handler/formula;",
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  // python verifier complains about missing spreadsheetml.sheet; bash fallback complains about xlsx support.
+  assert.match(proc.stderr, /(xlsx|spreadsheetml\.sheet)/i);
 });
