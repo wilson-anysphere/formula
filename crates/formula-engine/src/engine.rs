@@ -1964,8 +1964,8 @@ impl Engine {
             }
         }
 
-        // Prefer an explicit cell style. Treat style_id 0 (default style) as "inherit" so row/column
-        // default styles can still apply.
+        // Prefer an explicit cell style. Treat style_id 0 (default style) as "inherit" so
+        // row/column/sheet default styles can still apply.
         let cell_style_id = self
             .workbook
             .get_cell(key)
@@ -1983,6 +1983,7 @@ impl Engine {
             .row_properties
             .get(&key.addr.row)
             .and_then(|props| props.style_id)
+            .filter(|id| *id != 0)
         {
             return style_id;
         }
@@ -1991,7 +1992,12 @@ impl Engine {
             .col_properties
             .get(&key.addr.col)
             .and_then(|props| props.style_id)
+            .filter(|id| *id != 0)
         {
+            return style_id;
+        }
+
+        if let Some(style_id) = sheet_state.default_style_id.filter(|id| *id != 0) {
             return style_id;
         }
 
@@ -2002,8 +2008,9 @@ impl Engine {
     ///
     /// Resolution order:
     /// 1. Explicit [`Cell::number_format`] override (if set).
-    /// 2. Effective style id derived from Excel precedence rules (cell -> row -> column) and
-    ///    spill-origin formatting semantics.
+    /// 2. Spill-origin formatting semantics (spilled outputs observe the origin cell's formatting).
+    /// 3. Effective number format resolved from layered style ids:
+    ///    sheet < col < row < cell (per-property).
     fn number_format_pattern_for_rounding(&self, key: CellKey) -> Option<&str> {
         // Explicit per-cell override always wins.
         if let Some(fmt) = self
@@ -2021,11 +2028,44 @@ impl Engine {
             }
         }
 
-        let style_id = self.effective_style_id_at(key);
-        self.workbook
-            .styles
-            .get(style_id)
-            .and_then(|style| style.number_format.as_deref())
+        let Some(sheet_state) = self.workbook.sheets.get(key.sheet) else {
+            return None;
+        };
+
+        let cell_style_id = self
+            .workbook
+            .get_cell(key)
+            .map(|cell| cell.style_id)
+            .unwrap_or(0);
+        let row_style_id = sheet_state
+            .row_properties
+            .get(&key.addr.row)
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let col_style_id = sheet_state
+            .col_properties
+            .get(&key.addr.col)
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let sheet_style_id = sheet_state.default_style_id.unwrap_or(0);
+
+        // Style precedence matches DocumentController layering:
+        // sheet < col < row < cell
+        //
+        // When a style does not specify a number format (`number_format=None`), it is treated as
+        // "inherit" so lower-precedence layers can contribute the number format.
+        for style_id in [cell_style_id, row_style_id, col_style_id, sheet_style_id] {
+            if let Some(fmt) = self
+                .workbook
+                .styles
+                .get(style_id)
+                .and_then(|style| style.number_format.as_deref())
+            {
+                return Some(fmt);
+            }
+        }
+
+        None
     }
 
     fn round_number_as_displayed(&self, number: f64, format_pattern: Option<&str>) -> f64 {

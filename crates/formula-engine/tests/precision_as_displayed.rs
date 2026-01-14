@@ -1,6 +1,6 @@
 use formula_engine::calc_settings::CalcSettings;
 use formula_engine::{Engine, Value};
-use formula_model::Style;
+use formula_model::{Font, Style};
 
 #[test]
 fn precision_as_displayed_rounds_numeric_literals_fixed_decimals() {
@@ -108,6 +108,54 @@ fn precision_as_displayed_rounds_numeric_literals_using_row_col_style_fallback()
     // For other rows, fall back to column styles.
     engine.set_cell_value("Sheet1", "A2", 1.239).unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.2));
+}
+
+#[test]
+fn precision_as_displayed_rounds_numeric_literals_using_sheet_default_style_fallback() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    engine.set_sheet_default_style_id("Sheet1", Some(style_id));
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+}
+
+#[test]
+fn precision_as_displayed_number_format_inherits_through_cell_style_layer() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    // Simulate a cell having some explicit formatting (e.g. font) while the row provides the number
+    // format. The number format should still apply for "precision as displayed" rounding.
+    let cell_style_id = engine.intern_style(Style {
+        font: Some(Font {
+            bold: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let row_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    engine
+        .set_cell_style_id("Sheet1", "A1", cell_style_id)
+        .expect("set style");
+    engine.set_row_style_id("Sheet1", 0, Some(row_style_id));
+
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
 }
 
 #[test]
