@@ -459,6 +459,172 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles_for_metadat
 }
 
 #[test]
+fn cell_format_reports_excel_cell_format_codes_from_number_formats() {
+    use formula_engine::Engine;
+    use formula_format::builtin_format_code;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    // Text format: literal code and builtin placeholder.
+    let text_style = engine.intern_style(Style {
+        number_format: Some("@".to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", text_style)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+
+    let text_placeholder_style = engine.intern_style(Style {
+        number_format: Some("__builtin_numFmtId:49".to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A2", text_placeholder_style)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"format\",A2)")
+        .unwrap();
+
+    // Fractions: built-ins 12/13 are a non-standard numeric family and Excel reports `N`.
+    let frac_style = engine.intern_style(Style {
+        number_format: Some(builtin_format_code(12).unwrap().to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A3", frac_style)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"format\",A3)")
+        .unwrap();
+
+    let frac_placeholder_style = engine.intern_style(Style {
+        number_format: Some("__builtin_numFmtId:12".to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A4", frac_placeholder_style)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"format\",A4)")
+        .unwrap();
+
+    // Accounting: 41/43 are accounting-without-currency (grouped number formats) => "N0"/"N2";
+    // 42/44 include currency => "C0"/"C2".
+    for (idx, (num_fmt_id, _expected)) in [(41u16, "N0"), (42, "C0"), (43, "N2"), (44, "C2")]
+        .into_iter()
+        .enumerate()
+    {
+        let row = 5 + idx as u32;
+        let a = format!("A{row}");
+        let b = format!("B{row}");
+        let style = engine.intern_style(Style {
+            number_format: Some(builtin_format_code(num_fmt_id).unwrap().to_string()),
+            ..Default::default()
+        });
+        engine.set_cell_style_id("Sheet1", &a, style).unwrap();
+        engine
+            .set_cell_formula("Sheet1", &b, &format!("=CELL(\"format\",{a})"))
+            .unwrap();
+        let placeholder_row = row + 4;
+        let a_ph = format!("A{placeholder_row}");
+        let b_ph = format!("B{placeholder_row}");
+        let style_ph = engine.intern_style(Style {
+            number_format: Some(format!("__builtin_numFmtId:{num_fmt_id}")),
+            ..Default::default()
+        });
+        engine.set_cell_style_id("Sheet1", &a_ph, style_ph).unwrap();
+        engine
+            .set_cell_formula("Sheet1", &b_ph, &format!("=CELL(\"format\",{a_ph})"))
+            .unwrap();
+    }
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("@".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("@".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
+        Value::Text("N".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B4"),
+        Value::Text("N".to_string())
+    );
+
+    for (idx, (_num_fmt_id, expected)) in [(41u16, "N0"), (42, "C0"), (43, "N2"), (44, "C2")]
+        .into_iter()
+        .enumerate()
+    {
+        let row = 5 + idx as u32;
+        let b = format!("B{row}");
+        assert_eq!(
+            engine.get_cell_value("Sheet1", &b),
+            Value::Text(expected.to_string())
+        );
+        let b_ph = format!("B{}", row + 4);
+        assert_eq!(
+            engine.get_cell_value("Sheet1", &b_ph),
+            Value::Text(expected.to_string())
+        );
+    }
+}
+
+#[test]
+fn cell_color_and_parentheses_reflect_number_format_sections() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    // One-section formats do not set the CELL("color") / CELL("parentheses") flags.
+    let one_section = engine.intern_style(Style {
+        number_format: Some("[Red]0".to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", one_section)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"parentheses\",A1)")
+        .unwrap();
+
+    // Two-section formats with explicit negative section.
+    let two_section = engine.intern_style(Style {
+        number_format: Some("0;[Red](0)".to_string()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A2", two_section)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"color\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"parentheses\",A2)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B4"), 1.0);
+}
+
+#[test]
 fn cell_address_quotes_sheet_names_when_needed() {
     use formula_engine::Engine;
 
