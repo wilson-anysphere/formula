@@ -687,6 +687,126 @@ fn pivot_includes_blank_group_for_unmatched_relationship_keys() {
 }
 
 #[test]
+fn pivot_columnar_includes_blank_group_for_unmatched_relationship_keys() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let customers_schema = vec![
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Region".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+    customers.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("West")),
+    ]);
+
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    sales.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    // Unmatched foreign key.
+    sales.append_row(&[
+        formula_columnar::Value::Number(102.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("Customers", customers.finalize()))
+        .unwrap();
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Customers".into(),
+            from_table: "Sales".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Total Sales", "SUM(Sales[Amount])")
+        .unwrap();
+
+    let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+    let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+    let result = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("East"), 10.0.into()],
+            vec![Value::from("West"), 5.0.into()],
+            vec![Value::Blank, 7.0.into()],
+        ]
+    );
+
+    // Excluding BLANK removes the virtual blank group and the unmatched fact rows that contribute
+    // to it.
+    let non_blank_filter = DaxEngine::new()
+        .apply_calculate_filters(&model, &FilterContext::empty(), &["Customers[Region] <> BLANK()"])
+        .unwrap();
+    let result = pivot(&model, "Sales", &group_by, &measures, &non_blank_filter).unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("East"), 10.0.into()],
+            vec![Value::from("West"), 5.0.into()],
+        ]
+    );
+}
+
+#[test]
 fn pivot_star_schema_columnar_matches_in_memory() {
     let vec_model = build_star_schema_model();
     let col_model = build_star_schema_columnar_model();
