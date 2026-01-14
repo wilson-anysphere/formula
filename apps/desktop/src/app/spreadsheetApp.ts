@@ -1220,6 +1220,7 @@ export class SpreadsheetApp {
   // rich values). These act as external references for WorkbookImageManager so image bytes are
   // not garbage-collected while still referenced by at least one cell.
   private workbookCellImageIds = new Set<string>();
+  private workbookCellImageIdsScanned = false;
 
   private wasmEngine: EngineClient | null = null;
   /**
@@ -8609,10 +8610,11 @@ export class SpreadsheetApp {
     // in cell values, not the drawing layer. These ids are tracked by `workbookCellImageIds` for the
     // workbook-level image manager; reuse that cache here so IndexedDB GC doesn't delete bytes still
     // referenced by a cell value.
-    if (this.workbookCellImageIds.size === 0) {
-      // Best-effort: when the cache is empty, attempt to repopulate it from stored cells so we don't
-      // accidentally delete image bytes needed by in-cell images.
-      this.recomputeWorkbookCellImageIdsFromStoredCells();
+    if (!this.workbookCellImageIdsScanned) {
+      // Best-effort: when the cache has not been computed yet (e.g. unusual test harnesses),
+      // attempt to populate it from stored cells so we don't accidentally delete image bytes
+      // still needed by in-cell images.
+      this.recomputeWorkbookCellImageIdsFromStoredCells(sheetIds.length > 0 ? sheetIds : undefined);
     }
     for (const id of this.workbookCellImageIds) {
       const normalized = typeof id === "string" ? id.trim() : "";
@@ -17142,6 +17144,7 @@ export class SpreadsheetApp {
     }
 
     this.workbookCellImageIds = next;
+    this.workbookCellImageIdsScanned = true;
     return changed;
   }
 
