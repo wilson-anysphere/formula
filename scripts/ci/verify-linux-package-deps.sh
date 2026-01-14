@@ -88,6 +88,9 @@ if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
 fi
 : "${EXPECTED_PACKAGE_NAME:=formula-desktop}"
 
+echo "verify-linux-package-deps: expected desktop version: ${EXPECTED_DESKTOP_VERSION}"
+echo "verify-linux-package-deps: expected package/binary name: ${EXPECTED_PACKAGE_NAME}"
+
 target_dirs=()
 
 # Respect `CARGO_TARGET_DIR` if set (common in CI caching setups). Cargo interprets relative paths
