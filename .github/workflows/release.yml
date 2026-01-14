@@ -3119,7 +3119,9 @@ jobs:
 
   upload-sbom:
     name: Upload SBOM to the draft release
-    needs: [sbom, preflight]
+    # Wait for the build matrix so the draft release definitely exists before attempting to upload.
+    # (The release is created by the first successful `tauri-apps/tauri-action` run.)
+    needs: [sbom, preflight, build]
     if: needs.preflight.outputs.upload == 'true'
     runs-on: ubuntu-24.04
     permissions:
