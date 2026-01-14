@@ -75,6 +75,25 @@ fn roundtrip_standard_rc4_40bit_encryption() {
 }
 
 #[test]
+fn roundtrip_standard_rc4_56bit_encryption() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole_with_key_bits(plaintext, password, Rc4HashAlgorithm::Sha1, 56);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
 fn standard_rc4_ignores_trailing_encrypted_package_bytes() {
     let password = "password";
     let plaintext = include_bytes!(concat!(
@@ -398,12 +417,14 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
         let expected = match key_bits {
             40 => hex_decode("6ad7dedf2d"),
+            56 => hex_decode("6ad7dedf2da351"),
             128 => hex_decode("6ad7dedf2da3514b1d85eabee069d47d"),
             _ => panic!("no SHA1 test vector for keyBits={key_bits}"),
         };
         assert_eq!(key0, expected, "SHA1 block0 key vector mismatch");
         let expected1 = match key_bits {
             40 => hex_decode("2ed4e8825c"),
+            56 => hex_decode("2ed4e8825cd48a"),
             128 => hex_decode("2ed4e8825cd48aa4a47994cda7415b4a"),
             _ => panic!("no SHA1 test vector for keyBits={key_bits}"),
         };
@@ -414,6 +435,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
         let expected = match key_bits {
             40 => hex_decode("69badcae24"),
+            56 => hex_decode("69badcae244868"),
             128 => hex_decode("69badcae244868e209d4e053ccd2a3bc"),
             _ => panic!("no MD5 test vector for keyBits={key_bits}"),
         };
@@ -424,6 +446,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         );
         let expected1 = match key_bits {
             40 => hex_decode("6f4d502ab3"),
+            56 => hex_decode("6f4d502ab37700"),
             128 => hex_decode("6f4d502ab37700ffdab5704160455b47"),
             _ => panic!("no MD5 test vector for keyBits={key_bits}"),
         };
