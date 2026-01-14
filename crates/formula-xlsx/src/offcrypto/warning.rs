@@ -44,6 +44,14 @@ pub enum OffCryptoWarning {
         salt_value_len: usize,
     },
 
+    /// The document could only be decrypted by using a non-standard IV derivation for the password
+    /// key encryptor.
+    ///
+    /// MS-OFFCRYPTO specifies that the AES-CBC IV for the password key encryptor is the
+    /// `p:encryptedKey@saltValue` truncated to `blockSize`, but some producers appear to derive the
+    /// IV using the `KEY_VALUE_BLOCK` constant.
+    NonStandardPasswordKeyIvDerivation,
+
     /// An XML element was present that Formula does not recognize.
     UnrecognizedXmlElement { element: String },
 

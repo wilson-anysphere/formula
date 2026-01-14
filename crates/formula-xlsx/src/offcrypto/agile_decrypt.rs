@@ -404,9 +404,13 @@ fn decrypt_agile_encrypted_package_impl(
     encrypted_package: &[u8],
     password: &str,
     decrypt_opts: &DecryptOptions,
-    warnings: Option<&mut Vec<OffCryptoWarning>>,
+    mut warnings: Option<&mut Vec<OffCryptoWarning>>,
 ) -> Result<Vec<u8>> {
-    let info = parse_agile_encryption_info(encryption_info, decrypt_opts, warnings)?;
+    let info = parse_agile_encryption_info(
+        encryption_info,
+        decrypt_opts,
+        warnings.as_mut().map(|w| &mut **w),
+    )?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
