@@ -82,12 +82,23 @@ fn write_filter_column<W: std::io::Write>(
     fc.push_attribute(("colId", col.col_id.to_string().as_str()));
     writer.write_event(Event::Start(fc))?;
 
-    if write_dynamic_filter(writer, col, tags)? {
+    // Compute the effective criteria once (including falling back to the legacy `values` list).
+    //
+    // Important: if the column has *no* expressible criteria/values, do not emit a placeholder
+    // `<filters/>` or `<customFilters/>` element. Some filter types we don't model yet (e.g. `<top10/>`,
+    // `<colorFilter/>`, `<iconFilter/>`) are stored in `raw_xml`. Emitting an empty `<filters/>` alongside
+    // those would create invalid `<filterColumn>` contents (the schema uses a choice for these
+    // criterion types).
+    let criteria = effective_criteria(col);
+
+    if write_dynamic_filter(writer, col, &criteria, tags)? {
         // Written.
-    } else if can_write_as_filters(col) {
-        write_filters(writer, col, tags)?;
+    } else if criteria.is_empty() {
+        // No modeled criteria; rely solely on `raw_xml`.
+    } else if can_write_as_filters(col.join, &criteria) {
+        write_filters(writer, &criteria, tags)?;
     } else {
-        write_custom_filters(writer, col, tags)?;
+        write_custom_filters(writer, col.join, &criteria, tags)?;
     }
 
     for raw in &col.raw_xml {
@@ -104,9 +115,9 @@ fn write_filter_column<W: std::io::Write>(
 fn write_dynamic_filter<W: std::io::Write>(
     writer: &mut Writer<W>,
     col: &formula_model::autofilter::FilterColumn,
+    criteria: &[FilterCriterion],
     tags: &AutoFilterTags,
 ) -> Result<bool, quick_xml::Error> {
-    let criteria = effective_criteria(col);
     if col.join != FilterJoin::Any || criteria.len() != 1 {
         return Ok(false);
     }
@@ -161,28 +172,27 @@ fn write_dynamic_filter_element<W: std::io::Write>(
     Ok(())
 }
 
-fn can_write_as_filters(col: &formula_model::autofilter::FilterColumn) -> bool {
-    if col.join != FilterJoin::Any {
+fn can_write_as_filters(join: FilterJoin, criteria: &[FilterCriterion]) -> bool {
+    if join != FilterJoin::Any {
         return false;
     }
-    effective_criteria(col)
+    criteria
         .iter()
         .all(|c| matches!(c, FilterCriterion::Equals(_) | FilterCriterion::Blanks))
 }
 
 fn write_filters<W: std::io::Write>(
     writer: &mut Writer<W>,
-    col: &formula_model::autofilter::FilterColumn,
+    criteria: &[FilterCriterion],
     tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
-    let criteria = effective_criteria(col);
     let mut filters = BytesStart::new(tags.filters.as_str());
     if criteria.iter().any(|c| matches!(c, FilterCriterion::Blanks)) {
         filters.push_attribute(("blank", "1"));
     }
     writer.write_event(Event::Start(filters))?;
 
-    for criterion in &criteria {
+    for criterion in criteria {
         if let FilterCriterion::Equals(value) = criterion {
             let mut f = BytesStart::new(tags.filter.as_str());
             f.push_attribute(("val", value_to_string(value).as_str()));
@@ -196,14 +206,14 @@ fn write_filters<W: std::io::Write>(
 
 fn write_custom_filters<W: std::io::Write>(
     writer: &mut Writer<W>,
-    col: &formula_model::autofilter::FilterColumn,
+    join: FilterJoin,
+    criteria: &[FilterCriterion],
     tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
-    let criteria = effective_criteria(col);
     let mut entries: Vec<(String, Option<String>)> = Vec::new();
-    let mut requires_and = col.join == FilterJoin::All;
+    let mut requires_and = join == FilterJoin::All;
 
-    for criterion in &criteria {
+    for criterion in criteria {
         match criterion {
             FilterCriterion::Number(NumberComparison::Between { min, max }) => {
                 requires_and = true;
@@ -438,6 +448,39 @@ mod tests {
 
         let xml = write_autofilter(&filter).unwrap();
         assert!(xml.contains("sortState"));
+        let parsed = crate::autofilter::parse_autofilter(&xml).unwrap();
+        assert_eq!(parsed, filter);
+    }
+
+    #[test]
+    fn write_raw_xml_only_filter_column_does_not_emit_placeholder_filters() {
+        let filter = SheetAutoFilter {
+            range: Range::new(CellRef::new(0, 0), CellRef::new(10, 0)),
+            filter_columns: vec![FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: Vec::new(),
+                values: Vec::new(),
+                raw_xml: vec![r#"<top10 val="5" percent="1"/>"#.into()],
+            }],
+            sort_state: None,
+            raw_xml: Vec::new(),
+        };
+
+        let xml = write_autofilter(&filter).unwrap();
+        assert!(
+            xml.contains(r#"<filterColumn colId="0"><top10"#),
+            "expected raw_xml top10 to be the primary filter element, got: {xml}"
+        );
+        assert!(
+            !xml.contains("<filters"),
+            "writer must not emit an empty <filters/> alongside raw_xml criteria, got: {xml}"
+        );
+        assert!(
+            !xml.contains("<customFilters"),
+            "writer must not emit an empty <customFilters/> alongside raw_xml criteria, got: {xml}"
+        );
+
         let parsed = crate::autofilter::parse_autofilter(&xml).unwrap();
         assert_eq!(parsed, filter);
     }

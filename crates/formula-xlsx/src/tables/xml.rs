@@ -303,6 +303,10 @@ mod tests {
             written.contains("<dynamicFilter") && written.contains(r#"type="today""#),
             "missing dynamicFilter today: {written}"
         );
+        assert!(
+            written.contains(r#"<filterColumn colId="2"><top10"#),
+            "expected raw_xml top10 to be the primary filter element for colId=2, got: {written}"
+        );
         assert!(written.contains("<top10"), "missing top10 raw_xml: {written}");
         assert!(written.contains("<extLst"), "missing extLst raw_xml: {written}");
 
