@@ -19,10 +19,18 @@ pub enum PivotRegistryError {
 
 pub(crate) fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
     if let Some(measure) = parse_dax_measure_ref(name) {
-        return Cow::Owned(format!("[{measure}]"));
+        return Cow::Owned(
+            PivotFieldRef::DataModelMeasure(measure)
+                .canonical_name()
+                .into_owned(),
+        );
     }
     if let Some((table, column)) = parse_dax_column_ref(name) {
-        return Cow::Owned(format!("{table}[{column}]"));
+        return Cow::Owned(
+            PivotFieldRef::DataModelColumn { table, column }
+                .canonical_name()
+                .into_owned(),
+        );
     }
     Cow::Borrowed(name)
 }
@@ -353,6 +361,34 @@ impl PivotRegistry {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_pivot_cache_field_name;
+
+    #[test]
+    fn normalize_pivot_cache_field_name_escapes_dax_brackets() {
+        // Bracket escapes inside identifiers should be canonicalized to DAX `]]` form.
+        assert_eq!(
+            normalize_pivot_cache_field_name("[Total]USD]").as_ref(),
+            "[Total]]USD]"
+        );
+        assert_eq!(
+            normalize_pivot_cache_field_name("Orders[Amount]USD]").as_ref(),
+            "Orders[Amount]]USD]"
+        );
+
+        // Valid DAX-escaped refs should round-trip unchanged.
+        assert_eq!(
+            normalize_pivot_cache_field_name("[Total]]USD]").as_ref(),
+            "[Total]]USD]"
+        );
+        assert_eq!(
+            normalize_pivot_cache_field_name("Orders[Amount]]USD]").as_ref(),
+            "Orders[Amount]]USD]"
+        );
     }
 }
 fn rewrite_pivot_destination_for_structural_edit(
