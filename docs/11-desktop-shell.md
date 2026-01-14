@@ -853,9 +853,9 @@ Note on quitting from the tray:
 
 The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and instead uses the injected runtime object.
 
-Code should **not** access `globalThis.__TAURI__` directly for common UI-facing APIs (dialogs/window/events); those are centralized in `apps/desktop/src/tauri/api.ts` so we can harden and test feature-detection/fallback behavior in one place.
+Code should **not** access `globalThis.__TAURI__` directly for common UI-facing APIs (dialogs/window/events) or for `core.invoke` access; those are centralized in `apps/desktop/src/tauri/api.ts` (TypeScript) and `apps/desktop/src/tauri/invoke.js` (JavaScript) so we can harden and test feature-detection/fallback behavior in one place.
 
-- `globalThis.__TAURI__.core.invoke` for `#[tauri::command]` calls
+- `getTauriInvokeOr{Null,Throw}()` for `#[tauri::command]` calls
 - `getTauriEventApiOr{Null,Throw}()` for events (`listen` / `emit`)
 - `getTauriWindowHandleOr{Null,Throw}()` for window handle access (hide/show/focus/close)
 - `getTauriDialogOr{Null,Throw}()` for file open/save prompts

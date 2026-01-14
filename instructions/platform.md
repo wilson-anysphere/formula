@@ -391,9 +391,9 @@ fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckS
 
 ```typescript
 // TypeScript side
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-if (!invoke) throw new Error("Tauri invoke API not available");
+import { getTauriInvokeOrThrow } from "../apps/desktop/src/tauri/api";
+
+const invoke = getTauriInvokeOrThrow();
 
 await invoke("check_for_updates", { source: "manual" });
 ```
