@@ -287,6 +287,12 @@ canonicalization would appear as:
 'C:\\path\\[Book.xlsx]Sheet1'!A1  =>  sheet key "[C:\\path\\Book.xlsx]Sheet1"
 ```
 
+Note: the canonical key format uses `[...]` as the workbook delimiter. The engine currently splits
+`"[workbook]sheet"` keys at the **first** `]`, so workbook identifiers that contain `]` are
+ambiguous. This can matter for uncommon paths containing bracket characters (e.g. a directory named
+`C:\[foo]\`), especially for external 3D spans that require extracting the workbook id to call
+`sheet_order(...)`.
+
 #### Current limitations / behavior notes
 
 * **Bytecode backend:** formulas that contain external workbook references currently do **not** compile

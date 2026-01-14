@@ -9435,6 +9435,10 @@ pub trait ExternalValueProvider: Send + Sync {
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
     /// `"C:\\path\\Book.xlsx"`).
     ///
+    /// Note: the engine parses the workbook identifier by splitting the `"[workbook]..."` key at
+    /// the first `]`. As a result, workbook ids containing `]` characters are ambiguous and are
+    /// not currently supported for external 3D span expansion.
+    ///
     /// The engine currently treats workbook identifiers as opaque strings and does not perform any
     /// additional normalization (case folding, path separator normalization, etc). Providers should
     /// normalize/match this identifier as needed.
