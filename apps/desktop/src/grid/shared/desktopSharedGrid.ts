@@ -14,11 +14,13 @@ import {
   applySrOnlyStyle,
   alignScrollToDevicePixels,
   CanvasGridRenderer,
+  computeFillPreview,
   computeScrollbarThumb,
   DEFAULT_GRID_FONT_FAMILY,
   DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
   describeActiveCellLabel,
   describeCellForA11y,
+  hitTestSelectionHandle,
   resolveGridThemeFromCssVars,
   wheelDeltaToPixels,
 } from "@formula/grid";
@@ -1193,87 +1195,22 @@ export class DesktopSharedGrid {
     this.callbacks.onSelectionRangeChange?.(nextRange ?? range);
   }
 
-  private computeFillDeltaRange(source: CellRange, union: CellRange): CellRange | null {
-    const sameCols = source.startCol === union.startCol && source.endCol === union.endCol;
-    const sameRows = source.startRow === union.startRow && source.endRow === union.endRow;
-
-    if (sameCols) {
-      if (union.endRow > source.endRow) {
-        return { startRow: source.endRow, endRow: union.endRow, startCol: source.startCol, endCol: source.endCol };
-      }
-      if (union.startRow < source.startRow) {
-        return { startRow: union.startRow, endRow: source.startRow, startCol: source.startCol, endCol: source.endCol };
-      }
-    }
-
-    if (sameRows) {
-      if (union.endCol > source.endCol) {
-        return { startRow: source.startRow, endRow: source.endRow, startCol: source.endCol, endCol: union.endCol };
-      }
-      if (union.startCol < source.startCol) {
-        return { startRow: source.startRow, endRow: source.endRow, startCol: union.startCol, endCol: source.startCol };
-      }
-    }
-
-    return null;
-  }
-
-  private computeFillTarget(source: CellRange, picked: { row: number; col: number }, direction: "up" | "down" | "left" | "right"): CellRange {
-    const { rowCount, colCount } = this.renderer.scroll.getCounts();
-    const dataStartRow = this.headerRows >= rowCount ? 0 : this.headerRows;
-    const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
-
-    const clampRow = (row: number) => Math.max(dataStartRow, Math.min(row, rowCount));
-    const clampCol = (col: number) => Math.max(dataStartCol, Math.min(col, colCount));
-
-    if (direction === "down") {
-      const endRow = clampRow(Math.max(source.endRow, picked.row + 1));
-      return { startRow: source.startRow, endRow, startCol: source.startCol, endCol: source.endCol };
-    }
-
-    if (direction === "up") {
-      const startRow = clampRow(Math.min(source.startRow, picked.row));
-      return { startRow, endRow: source.endRow, startCol: source.startCol, endCol: source.endCol };
-    }
-
-    if (direction === "right") {
-      const endCol = clampCol(Math.max(source.endCol, picked.col + 1));
-      return { startRow: source.startRow, endRow: source.endRow, startCol: source.startCol, endCol };
-    }
-
-    const startCol = clampCol(Math.min(source.startCol, picked.col));
-    return { startRow: source.startRow, endRow: source.endRow, startCol, endCol: source.endCol };
-  }
-
   private applyFillHandleDrag(picked: { row: number; col: number }): void {
     const state = this.fillHandleState;
     if (!state) return;
+    const { rowCount, colCount } = this.renderer.scroll.getCounts();
+    if (rowCount === 0 || colCount === 0) return;
+    const dataStartRow = this.headerRows >= rowCount ? 0 : this.headerRows;
+    const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
 
-    const srcTop = state.source.startRow;
-    const srcBottom = state.source.endRow - 1;
-    const srcLeft = state.source.startCol;
-    const srcRight = state.source.endCol - 1;
-
-    const rowExtension = picked.row < srcTop ? picked.row - srcTop : picked.row > srcBottom ? picked.row - srcBottom : 0;
-    const colExtension = picked.col < srcLeft ? picked.col - srcLeft : picked.col > srcRight ? picked.col - srcRight : 0;
-
-    const unionRange = (() => {
-      if (rowExtension === 0 && colExtension === 0) return state.source;
-
-      const axis =
-        rowExtension !== 0 && colExtension !== 0
-          ? Math.abs(rowExtension) >= Math.abs(colExtension)
-            ? "vertical"
-            : "horizontal"
-          : rowExtension !== 0
-            ? "vertical"
-            : "horizontal";
-
-      const direction =
-        axis === "vertical" ? (rowExtension > 0 ? "down" : "up") : colExtension > 0 ? "right" : "left";
-
-      return this.computeFillTarget(state.source, picked, direction);
-    })();
+    // Clamp pointerCell into the data region so fill handle drags can't extend selection into headers.
+    const pointerCell = {
+      row: clamp(picked.row, dataStartRow, rowCount - 1),
+      col: clamp(picked.col, dataStartCol, colCount - 1)
+    };
+    const preview = computeFillPreview(state.source, pointerCell);
+    const unionRange = preview?.unionRange ?? state.source;
+    const previewTarget = preview?.targetRange ?? null;
 
     const endCell = {
       row: clamp(picked.row, unionRange.startRow, unionRange.endRow - 1),
@@ -1284,7 +1221,6 @@ export class DesktopSharedGrid {
       return;
     }
 
-    const previewTarget = this.computeFillDeltaRange(state.source, unionRange);
     this.fillHandleState = { ...state, target: unionRange, previewTarget, endCell };
     this.renderer.setFillPreviewRange(unionRange);
   }
@@ -1481,14 +1417,7 @@ export class DesktopSharedGrid {
       }
 
       if (this.interactionMode === "default" && this.callbacks.onFillCommit) {
-        const handleRect = renderer.getFillHandleRect();
-        if (
-          handleRect &&
-          point.x >= handleRect.x &&
-          point.x <= handleRect.x + handleRect.width &&
-          point.y >= handleRect.y &&
-          point.y <= handleRect.y + handleRect.height
-        ) {
+        if (hitTestSelectionHandle(renderer, point.x, point.y)) {
           const source = renderer.getSelectionRange();
           if (source) {
             this.selectionPointerId = event.pointerId;
@@ -1791,7 +1720,7 @@ export class DesktopSharedGrid {
 
         const shouldCommit = event.type === "pointerup";
         if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
-          const targetRange = this.computeFillDeltaRange(state.source, state.target);
+          const targetRange = state.previewTarget;
           if (targetRange) {
             const commitResult = this.callbacks.onFillCommit?.({
               sourceRange: state.source,
@@ -1851,14 +1780,7 @@ export class DesktopSharedGrid {
       }
 
       if (this.interactionMode === "default" && this.callbacks.onFillCommit) {
-        const handleRect = this.renderer.getFillHandleRect();
-        if (
-          handleRect &&
-          point.x >= handleRect.x &&
-          point.x <= handleRect.x + handleRect.width &&
-          point.y >= handleRect.y &&
-          point.y <= handleRect.y + handleRect.height
-        ) {
+        if (hitTestSelectionHandle(this.renderer, point.x, point.y)) {
           selectionCanvas.style.cursor = "crosshair";
           return;
         }

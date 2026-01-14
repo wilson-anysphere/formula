@@ -2,6 +2,7 @@ import type { CellBorderSpec, CellData, CellProvider, CellProviderUpdate, CellRa
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker.ts";
 import { setupHiDpiCanvas } from "./HiDpiCanvas.ts";
 import { LruCache } from "../utils/LruCache.ts";
+import { DEFAULT_FILL_HANDLE_SIZE_PX } from "../interaction/fillHandle.ts";
 import { clampZoom as clampGridZoom } from "../utils/zoomMath.ts";
 import type { GridPresence } from "../presence/types.ts";
 import type { GridTheme } from "../theme/GridTheme.ts";
@@ -6192,7 +6193,7 @@ export class CanvasGridRenderer {
   }
 
   private fillHandleRectInViewport(range: CellRange, viewport: GridViewportState): Rect | null {
-    const handleSize = 8 * this.zoom;
+    const handleSize = DEFAULT_FILL_HANDLE_SIZE_PX * this.zoom;
     const handleRow = range.endRow - 1;
     const handleCol = range.endCol - 1;
     const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });

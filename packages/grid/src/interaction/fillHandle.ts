@@ -1,5 +1,5 @@
-import type { CellRange } from "../model/CellProvider";
-import type { CanvasGridRenderer } from "../rendering/CanvasGridRenderer";
+import type { CellRange } from "../model/CellProvider.ts";
+import type { CanvasGridRenderer } from "../rendering/CanvasGridRenderer.ts";
 
 export type FillMode = "copy" | "series" | "formulas";
 

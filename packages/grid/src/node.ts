@@ -47,6 +47,9 @@ export { alignScrollToDevicePixels } from "./virtualization/alignScrollToDeviceP
 export { wheelDeltaToPixels } from "./react/wheelDeltaToPixels.ts";
 export type { WheelDeltaToPixelsOptions } from "./react/wheelDeltaToPixels.ts";
 
+export type { FillDragAxis, FillDragCommit, FillDragPreview, FillMode, RectLike } from "./interaction/fillHandle.ts";
+export { computeFillPreview, hitTestSelectionHandle } from "./interaction/fillHandle.ts";
+
 export {
   SR_ONLY_STYLE,
   applySrOnlyStyle,

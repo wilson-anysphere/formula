@@ -9,7 +9,7 @@ import {
 import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
-import type { FillMode } from "../interaction/fillHandle";
+import { computeFillPreview, hitTestSelectionHandle, type FillMode } from "../interaction/fillHandle";
 import { clampZoom } from "../utils/zoomMath";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
@@ -1144,105 +1144,29 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       return rangesEqual(a, b);
     };
 
-    const hitTestRect = (point: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) =>
-      point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
-
-    const computeFillDeltaRange = (source: CellRange, union: CellRange): CellRange | null => {
-      if (rangesEqual(source, union)) return null;
-
-      const sameCols = source.startCol === union.startCol && source.endCol === union.endCol;
-      const sameRows = source.startRow === union.startRow && source.endRow === union.endRow;
-
-      if (sameCols) {
-        if (union.endRow > source.endRow) {
-          return { startRow: source.endRow, endRow: union.endRow, startCol: source.startCol, endCol: source.endCol };
-        }
-        if (union.startRow < source.startRow) {
-          return { startRow: union.startRow, endRow: source.startRow, startCol: source.startCol, endCol: source.endCol };
-        }
-      }
-
-      if (sameRows) {
-        if (union.endCol > source.endCol) {
-          return { startRow: source.startRow, endRow: source.endRow, startCol: source.endCol, endCol: union.endCol };
-        }
-        if (union.startCol < source.startCol) {
-          return { startRow: source.startRow, endRow: source.endRow, startCol: union.startCol, endCol: source.startCol };
-        }
-      }
-
-      return null;
-    };
-
-    const computeFillTarget = (
-      source: CellRange,
-      picked: { row: number; col: number },
-      direction: "up" | "down" | "left" | "right"
-    ) => {
-      const { rowCount, colCount } = rendererRef.current?.scroll.getCounts() ?? { rowCount: 0, colCount: 0 };
-      const headerRows = headerRowsRef.current;
-      const headerCols = headerColsRef.current;
-      const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
-      const dataStartCol = headerCols >= colCount ? 0 : headerCols;
-
-      const clampRow = (row: number) => Math.max(dataStartRow, Math.min(row, rowCount));
-      const clampCol = (col: number) => Math.max(dataStartCol, Math.min(col, colCount));
-
-      if (direction === "down") {
-        const endRow = clampRow(Math.max(source.endRow, picked.row + 1));
-        return { startRow: source.startRow, endRow, startCol: source.startCol, endCol: source.endCol };
-      }
-
-      if (direction === "up") {
-        const startRow = clampRow(Math.min(source.startRow, picked.row));
-        return { startRow, endRow: source.endRow, startCol: source.startCol, endCol: source.endCol };
-      }
-
-      if (direction === "right") {
-        const endCol = clampCol(Math.max(source.endCol, picked.col + 1));
-        return { startRow: source.startRow, endRow: source.endRow, startCol: source.startCol, endCol };
-      }
-
-      const startCol = clampCol(Math.min(source.startCol, picked.col));
-      return { startRow: source.startRow, endRow: source.endRow, startCol, endCol: source.endCol };
-    };
-
     const applyFillHandleDrag = (picked: { row: number; col: number }) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
       const state = fillHandleStateRef.current;
       if (!state) return;
 
-      const srcTop = state.source.startRow;
-      const srcBottom = state.source.endRow - 1;
-      const srcLeft = state.source.startCol;
-      const srcRight = state.source.endCol - 1;
+      const { rowCount, colCount } = renderer.scroll.getCounts();
+      if (rowCount === 0 || colCount === 0) return;
+      const headerRows = headerRowsRef.current;
+      const headerCols = headerColsRef.current;
+      const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+      const dataStartCol = headerCols >= colCount ? 0 : headerCols;
 
-      const rowExtension = picked.row < srcTop ? picked.row - srcTop : picked.row > srcBottom ? picked.row - srcBottom : 0;
-      const colExtension = picked.col < srcLeft ? picked.col - srcLeft : picked.col > srcRight ? picked.col - srcRight : 0;
-
-      const target = (() => {
-        if (rowExtension === 0 && colExtension === 0) {
-          return state.source;
-        }
-
-        const axis =
-          rowExtension !== 0 && colExtension !== 0
-            ? Math.abs(rowExtension) >= Math.abs(colExtension)
-              ? "vertical"
-              : "horizontal"
-            : rowExtension !== 0
-              ? "vertical"
-              : "horizontal";
-
-        const direction =
-          axis === "vertical" ? (rowExtension > 0 ? "down" : "up") : colExtension > 0 ? "right" : "left";
-
-        return computeFillTarget(state.source, picked, direction);
-      })();
+      // Clamp pointerCell into the data region so fill handle drags can't extend selection into headers.
+      const pointerCell = {
+        row: clamp(picked.row, dataStartRow, rowCount - 1),
+        col: clamp(picked.col, dataStartCol, colCount - 1)
+      };
+      const preview = computeFillPreview(state.source, pointerCell);
+      const target = preview?.unionRange ?? state.source;
+      const previewTarget = preview?.targetRange ?? null;
       if (rangesEqual(target, state.target)) return;
 
-      const previewTarget = computeFillDeltaRange(state.source, target);
       fillHandleStateRef.current = { ...state, target, previewTarget };
       renderer.setFillPreviewRange(target);
       onFillHandleChangeRef.current?.({ source: state.source, target });
@@ -1570,8 +1494,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       if (interactionModeRef.current === "default") {
         const source = renderer.getSelectionRange();
-        const handleRect = renderer.getFillHandleRect();
-        if (source && handleRect && hitTestRect(point, handleRect)) {
+        if (source && hitTestSelectionHandle(renderer, point.x, point.y)) {
           selectionPointerIdRef.current = event.pointerId;
           dragModeRef.current = "fillHandle";
           const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
@@ -2157,7 +2080,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
           const { source, target } = state;
-          const targetRange = computeFillDeltaRange(source, target);
+          const targetRange = state.previewTarget;
 
           if (targetRange) {
             const commitResult = onFillCommitRef.current
@@ -2267,8 +2190,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
 
       if (interactionModeRef.current === "default") {
-        const handleRect = renderer.getFillHandleRect();
-        if (handleRect && hitTestRect(point, handleRect)) {
+        if (hitTestSelectionHandle(renderer, point.x, point.y)) {
           selectionCanvas.style.cursor = "crosshair";
           return;
         }

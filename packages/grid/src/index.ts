@@ -20,7 +20,8 @@ export { CanvasGrid } from "./react/CanvasGrid";
 export { wheelDeltaToPixels } from "./react/wheelDeltaToPixels";
 export type { WheelDeltaToPixelsOptions } from "./react/wheelDeltaToPixels";
 
-export type { FillMode } from "./interaction/fillHandle";
+export type { FillDragAxis, FillDragCommit, FillDragPreview, FillMode, RectLike } from "./interaction/fillHandle";
+export { computeFillPreview, hitTestSelectionHandle } from "./interaction/fillHandle";
 
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
 
