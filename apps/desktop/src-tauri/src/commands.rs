@@ -5394,15 +5394,25 @@ impl<'de> Deserialize<'de> for LimitedMacroPermissions {
             {
                 use crate::resource_limits::MAX_MACRO_PERMISSION_ENTRIES;
 
-                let mut out = Vec::new();
-                while let Some(permission) = seq.next_element::<MacroPermission>()? {
-                    if out.len() >= MAX_MACRO_PERMISSION_ENTRIES {
-                        return Err(de::Error::custom(format!(
-                            "macro permissions list is too large (max {MAX_MACRO_PERMISSION_ENTRIES} entries)"
-                        )));
+                let mut out = match seq.size_hint() {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_MACRO_PERMISSION_ENTRIES)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_MACRO_PERMISSION_ENTRIES {
+                    match seq.next_element::<MacroPermission>()? {
+                        Some(permission) => out.push(permission),
+                        None => return Ok(LimitedMacroPermissions(out)),
                     }
-                    out.push(permission);
                 }
+
+                // Detect any additional entries without allocating them.
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "macro permissions list is too large (max {MAX_MACRO_PERMISSION_ENTRIES} entries)"
+                    )));
+                }
+
                 Ok(LimitedMacroPermissions(out))
             }
         }
@@ -5589,15 +5599,25 @@ impl<'de> Deserialize<'de> for LimitedPythonNetworkAllowlist {
             {
                 use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES;
 
-                let mut out = Vec::new();
-                while let Some(entry) = seq.next_element::<LimitedPythonNetworkAllowlistEntry>()? {
-                    if out.len() >= MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES {
-                        return Err(de::Error::custom(format!(
-                            "python network allowlist is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES} entries)"
-                        )));
+                let mut out = match seq.size_hint() {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES {
+                    match seq.next_element::<LimitedPythonNetworkAllowlistEntry>()? {
+                        Some(entry) => out.push(entry),
+                        None => return Ok(LimitedPythonNetworkAllowlist(out)),
                     }
-                    out.push(entry);
                 }
+
+                // Detect any additional entries without allocating them.
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "python network allowlist is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES} entries)"
+                    )));
+                }
+
                 Ok(LimitedPythonNetworkAllowlist(out))
             }
         }
