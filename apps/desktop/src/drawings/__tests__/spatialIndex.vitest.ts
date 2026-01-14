@@ -116,6 +116,53 @@ describe("DrawingSpatialIndex", () => {
     expect(index.getRect(0)).toEqual({ x: 6000, y: 0, width: 10, height: 10 });
   });
 
+  it("perf guard: incremental update reuses rect objects for identity transforms", () => {
+    const index = new DrawingSpatialIndex({ tileSizePx: 512 });
+    const objects: DrawingObject[] = [absObject({ id: 1, zOrder: 0, x: 0, y: 0, w: 10, h: 10 })];
+    index.rebuild(objects, geom, 1);
+
+    const rect1 = index.getRect(1);
+    expect(rect1).not.toBeNull();
+
+    const moved = absObject({ id: 1, zOrder: 0, x: 600, y: 0, w: 10, h: 10 });
+    index.rebuild([moved], geom, 1);
+
+    const rect2 = index.getRect(1);
+    expect(rect2).toBe(rect1);
+    expect(rect2).toEqual({ x: 600, y: 0, width: 10, height: 10 });
+    expect(index.getAabb(1)).toBe(rect1);
+  });
+
+  it("perf guard: incremental update reuses AABB objects for non-identity transforms", () => {
+    const index = new DrawingSpatialIndex({ tileSizePx: 512 });
+    const rotated: DrawingObject = {
+      ...absObject({ id: 1, zOrder: 0, x: 0, y: 0, w: 10, h: 10 }),
+      transform: { rotationDeg: 45, flipH: false, flipV: false },
+    };
+    index.rebuild([rotated], geom, 1);
+
+    const rect1 = index.getRect(1);
+    const aabb1 = index.getAabb(1);
+    expect(rect1).not.toBeNull();
+    expect(aabb1).not.toBeNull();
+    expect(aabb1).not.toBe(rect1);
+
+    const moved: DrawingObject = {
+      ...rotated,
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(600), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+      },
+    };
+    index.rebuild([moved], geom, 1);
+
+    const rect2 = index.getRect(1);
+    const aabb2 = index.getAabb(1);
+    expect(rect2).toBe(rect1);
+    expect(aabb2).toBe(aabb1);
+  });
+
   it("perf guard: query does not sort and returns a small subset", () => {
     const objects: DrawingObject[] = [];
     for (let i = 0; i < 10_000; i += 1) {

@@ -7,17 +7,17 @@ export const DEFAULT_DRAWING_SPATIAL_INDEX_TILE_SIZE_PX = 512;
 
 const A1_CELL = { row: 0, col: 0 };
 
-function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom = 1): Rect {
+function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom = 1, out?: Rect): Rect {
   const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const target: Rect = out ?? { x: 0, y: 0, width: 0, height: 0 };
   switch (anchor.type) {
     case "oneCell": {
       const origin = geom.cellOriginPx(anchor.from.cell);
-      return {
-        x: origin.x + emuToPx(anchor.from.offset.xEmu) * scale,
-        y: origin.y + emuToPx(anchor.from.offset.yEmu) * scale,
-        width: emuToPx(anchor.size.cx) * scale,
-        height: emuToPx(anchor.size.cy) * scale,
-      };
+      target.x = origin.x + emuToPx(anchor.from.offset.xEmu) * scale;
+      target.y = origin.y + emuToPx(anchor.from.offset.yEmu) * scale;
+      target.width = emuToPx(anchor.size.cx) * scale;
+      target.height = emuToPx(anchor.size.cy) * scale;
+      return target;
     }
     case "twoCell": {
       const fromOrigin = geom.cellOriginPx(anchor.from.cell);
@@ -32,12 +32,11 @@ function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom = 1): Rect {
       const x2 = toOrigin.x + emuToPx(anchor.to.offset.xEmu) * scale;
       const y2 = toOrigin.y + emuToPx(anchor.to.offset.yEmu) * scale;
 
-      return {
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        width: Math.abs(x2 - x1),
-        height: Math.abs(y2 - y1),
-      };
+      target.x = Math.min(x1, x2);
+      target.y = Math.min(y1, y2);
+      target.width = Math.abs(x2 - x1);
+      target.height = Math.abs(y2 - y1);
+      return target;
     }
     case "absolute":
       // In DrawingML, absolute anchors are worksheet-space coordinates whose
@@ -47,12 +46,11 @@ function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom = 1): Rect {
       // Use the A1 origin from the provided grid geometry so absolute anchors
       // align with oneCell/twoCell anchors in shared-grid mode.
       const origin = geom.cellOriginPx(A1_CELL);
-      return {
-        x: origin.x + emuToPx(anchor.pos.xEmu) * scale,
-        y: origin.y + emuToPx(anchor.pos.yEmu) * scale,
-        width: emuToPx(anchor.size.cx) * scale,
-        height: emuToPx(anchor.size.cy) * scale,
-      };
+      target.x = origin.x + emuToPx(anchor.pos.xEmu) * scale;
+      target.y = origin.y + emuToPx(anchor.pos.yEmu) * scale;
+      target.width = emuToPx(anchor.size.cx) * scale;
+      target.height = emuToPx(anchor.size.cy) * scale;
+      return target;
   }
 }
 
@@ -88,7 +86,7 @@ function getTransformTrig(transform: DrawingTransform): CachedTrig {
   return next;
 }
 
-function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
+function rectToAabb(rect: Rect, transform: DrawingTransform, out?: Rect): Rect {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const hw = rect.width / 2;
@@ -103,28 +101,60 @@ function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
-  const visitCorner = (dx: number, dy: number) => {
-    let x = dx;
-    let y = dy;
-    if (transform.flipH) x = -x;
-    if (transform.flipV) y = -y;
-    // Forward transform: scale(flip) then rotate(theta).
-    const tx = x * cos - y * sin;
-    const ty = x * sin + y * cos;
-    const wx = cx + tx;
-    const wy = cy + ty;
-    if (wx < minX) minX = wx;
-    if (wx > maxX) maxX = wx;
-    if (wy < minY) minY = wy;
-    if (wy > maxY) maxY = wy;
-  };
+  // Corner 1: (-hw, -hh)
+  let x = -hw;
+  let y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  let wx = cx + (x * cos - y * sin);
+  let wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
-  visitCorner(-hw, -hh);
-  visitCorner(hw, -hh);
-  visitCorner(hw, hh);
-  visitCorner(-hw, hh);
+  // Corner 2: (hw, -hh)
+  x = hw;
+  y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  // Corner 3: (hw, hh)
+  x = hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  // Corner 4: (-hw, hh)
+  x = -hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  const target: Rect = out ?? { x: 0, y: 0, width: 0, height: 0 };
+  target.x = minX;
+  target.y = minY;
+  target.width = maxX - minX;
+  target.height = maxY - minY;
+  return target;
 }
 
 function pointInTransformedRect(x: number, y: number, rect: Rect, transform: DrawingTransform): boolean {
@@ -154,6 +184,14 @@ export interface DrawingSpatialIndexHitTestResult {
    */
   bounds: Rect;
 }
+
+type BucketRange = {
+  minTileX: number;
+  maxTileX: number;
+  minTileY: number;
+  maxTileY: number;
+  isGlobal: boolean;
+};
 
 /**
  * Uniform-grid spatial index for `DrawingObject`s.
@@ -186,6 +224,20 @@ export class DrawingSpatialIndex {
   private seenGeneration = 1;
   private readonly hitTestCandidatesScratch: DrawingObject[] = [];
   private readonly changedScratch: DrawingObject[] = [];
+  private readonly bucketRangeScratchOld: BucketRange = {
+    minTileX: 0,
+    maxTileX: 0,
+    minTileY: 0,
+    maxTileY: 0,
+    isGlobal: false,
+  };
+  private readonly bucketRangeScratchNew: BucketRange = {
+    minTileX: 0,
+    maxTileX: 0,
+    minTileY: 0,
+    maxTileY: 0,
+    isGlobal: false,
+  };
 
   constructor(opts?: { tileSizePx?: number; maxBucketsPerObject?: number }) {
     const tileSizePx = opts?.tileSizePx ?? DEFAULT_DRAWING_SPATIAL_INDEX_TILE_SIZE_PX;
@@ -244,13 +296,7 @@ export class DrawingSpatialIndex {
     this.dirty = true;
   }
 
-  private computeBucketRange(aabb: Rect): {
-    minTileX: number;
-    maxTileX: number;
-    minTileY: number;
-    maxTileY: number;
-    isGlobal: boolean;
-  } {
+  private computeBucketRange(aabb: Rect, out: BucketRange): BucketRange {
     const tileSize = this.tileSize;
     const x1 = aabb.x;
     const y1 = aabb.y;
@@ -267,7 +313,12 @@ export class DrawingSpatialIndex {
     const bucketCount = bucketsWide * bucketsHigh;
     const isGlobal = !Number.isFinite(bucketCount) || bucketCount > this.maxBucketsPerObject;
 
-    return { minTileX, maxTileX, minTileY, maxTileY, isGlobal };
+    out.minTileX = minTileX;
+    out.maxTileX = maxTileX;
+    out.minTileY = minTileY;
+    out.maxTileY = maxTileY;
+    out.isGlobal = isGlobal;
+    return out;
   }
 
   private removeOrderedId(list: number[], id: number): void {
@@ -339,27 +390,45 @@ export class DrawingSpatialIndex {
     const oldAabb = this.aabbById.get(id);
     if (!oldRect || !oldAabb) return false;
 
-    const newRect = anchorToRectPx(obj.anchor, geom, zoom);
-    const newAabb = hasNonIdentityTransform(obj.transform) ? rectToAabb(newRect, obj.transform!) : newRect;
+    // Compute old range before mutating the existing rect/AABB objects so we can
+    // remove the id from its previous buckets without allocating throwaway
+    // range/rect objects on the per-frame update path.
+    const oldRange = this.computeBucketRange(oldAabb, this.bucketRangeScratchOld);
 
-    // Update caches first so insertion/removal helpers can resolve ordering.
-    this.rectById.set(id, newRect);
-    this.aabbById.set(id, newAabb);
+    // Reuse the existing rect object to avoid per-update allocations.
+    anchorToRectPx(obj.anchor, geom, zoom, oldRect);
+
+    const hasTransform = hasNonIdentityTransform(obj.transform);
+    let newAabb: Rect;
+    if (!hasTransform) {
+      // For identity transforms, keep rect and AABB aliased as the same object
+      // (matches rebuild behaviour and reduces retained memory).
+      if (oldAabb !== oldRect) this.aabbById.set(id, oldRect);
+      newAabb = oldRect;
+    } else if (oldAabb === oldRect) {
+      // Transform changed from identity -> non-identity; allocate once so we can
+      // keep the rect and AABB separate.
+      const next: Rect = { x: 0, y: 0, width: 0, height: 0 };
+      rectToAabb(oldRect, obj.transform!, next);
+      this.aabbById.set(id, next);
+      newAabb = next;
+    } else {
+      // Reuse existing AABB object for non-identity transforms.
+      rectToAabb(oldRect, obj.transform!, oldAabb);
+      newAabb = oldAabb;
+    }
+
     this.objectById.set(id, obj);
 
-    const oldRange = this.computeBucketRange(oldAabb);
-    const newRange = this.computeBucketRange(newAabb);
+    const newRange = this.computeBucketRange(newAabb, this.bucketRangeScratchNew);
 
-    const rangeEqual = (() => {
-      if (oldRange.isGlobal && newRange.isGlobal) return true;
-      return (
-        oldRange.isGlobal === newRange.isGlobal &&
+    const rangeEqual =
+      (oldRange.isGlobal && newRange.isGlobal) ||
+      (oldRange.isGlobal === newRange.isGlobal &&
         oldRange.minTileX === newRange.minTileX &&
         oldRange.maxTileX === newRange.maxTileX &&
         oldRange.minTileY === newRange.minTileY &&
-        oldRange.maxTileY === newRange.maxTileY
-      );
-    })();
+        oldRange.maxTileY === newRange.maxTileY);
 
     if (rangeEqual) return true;
 
