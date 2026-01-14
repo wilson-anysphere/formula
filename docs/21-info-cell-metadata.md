@@ -93,6 +93,8 @@ Hosts should supply a best-effort snapshot of:
 
 Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 
+For local references, if the `reference` argument resolves outside the sheet’s configured dimensions (see `setSheetDimensions` / `Engine::set_sheet_dimensions`), the engine returns `#REF!` (Excel-like).
+
 | Key | Return type | Data required | Engine status |
 |---|---|---|---|
 | `address` | text | sheet name registry | implemented |
