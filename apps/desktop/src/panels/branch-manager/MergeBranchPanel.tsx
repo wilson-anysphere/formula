@@ -851,9 +851,36 @@ export function MergeBranchPanel({
                               }}
                             >
                               <option value="custom">{t("branchMerge.manualCell.encrypted.customUnencrypted")}</option>
-                              {cellHasEnc(c.base) ? <option value="base">{t("branchMerge.manualCell.encrypted.useBase")}</option> : null}
-                              {cellHasEnc(c.ours) ? <option value="ours">{t("branchMerge.manualCell.encrypted.useOurs")}</option> : null}
-                              {cellHasEnc(c.theirs) ? <option value="theirs">{t("branchMerge.manualCell.encrypted.useTheirs")}</option> : null}
+                              {cellHasEnc(c.base) ? (
+                                <option value="base">
+                                  {(() => {
+                                    const keyId = encKeyId(c.base?.enc);
+                                    return keyId
+                                      ? tWithVars("branchMerge.manualCell.encrypted.useBaseWithKeyId", { keyId })
+                                      : t("branchMerge.manualCell.encrypted.useBase");
+                                  })()}
+                                </option>
+                              ) : null}
+                              {cellHasEnc(c.ours) ? (
+                                <option value="ours">
+                                  {(() => {
+                                    const keyId = encKeyId(c.ours?.enc);
+                                    return keyId
+                                      ? tWithVars("branchMerge.manualCell.encrypted.useOursWithKeyId", { keyId })
+                                      : t("branchMerge.manualCell.encrypted.useOurs");
+                                  })()}
+                                </option>
+                              ) : null}
+                              {cellHasEnc(c.theirs) ? (
+                                <option value="theirs">
+                                  {(() => {
+                                    const keyId = encKeyId(c.theirs?.enc);
+                                    return keyId
+                                      ? tWithVars("branchMerge.manualCell.encrypted.useTheirsWithKeyId", { keyId })
+                                      : t("branchMerge.manualCell.encrypted.useTheirs");
+                                  })()}
+                                </option>
+                              ) : null}
                             </select>
                           </div>
                         ) : null}
