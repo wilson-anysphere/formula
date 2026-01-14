@@ -4509,6 +4509,7 @@ export class SpreadsheetApp {
     // multi-megabyte clipboard payloads / comment indexes if it stays referenced.
     this.clipboardCopyContext = null;
     this.clipboardProviderPromise = null;
+    this.dlpContext = null;
     this.selectionSummaryCache = null;
     this.selectionStatsFormatter = null;
     this.commentMetaByCoord.clear();

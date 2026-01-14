@@ -253,6 +253,7 @@ describe("SpreadsheetApp drawings teardown", () => {
     expect(((app as any).editStateListeners as Set<unknown>).size).toBe(0);
     expect(((app as any).drawingsListeners as Set<unknown>).size).toBe(0);
     expect(((app as any).drawingSelectionListeners as Set<unknown>).size).toBe(0);
+    expect((app as any).dlpContext).toBeNull();
     expect(outlineLayer!.childElementCount).toBe(0);
     expect(commentsThreads!.childElementCount).toBe(0);
     expect(commentTooltip!.childElementCount).toBe(0);
