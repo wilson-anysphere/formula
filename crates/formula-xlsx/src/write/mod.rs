@@ -7052,6 +7052,22 @@ fn effective_value_kind(
 ) -> CellValueKind {
     if let Some(meta) = meta {
         if let Some(kind) = meta.value_kind.clone() {
+            // Cells with phonetic guide metadata are tricky: the phonetic runs may be stored either
+            // inline (`<c t="inlineStr"><is><rPh>…`) or inside the referenced shared-string table
+            // entry (`sharedStrings.xml <si><rPh>…`).
+            //
+            // If the original file used a shared string, prefer preserving that representation so
+            // we keep the original shared string index (and avoid collapsing duplicate visible text
+            // entries that differ only in phonetic metadata).
+            if cell.phonetic.is_some() && matches!(&cell.value, CellValue::String(_)) {
+                if matches!(&kind, CellValueKind::SharedString { .. })
+                    && value_kind_compatible(&kind, &cell.value)
+                {
+                    return kind;
+                }
+                return CellValueKind::InlineString;
+            }
+
             // Cells with less-common or unknown `t=` attributes require the original `<v>` payload
             // to round-trip safely. If we don't have it, fall back to the inferred kind so we emit
             // a valid SpreadsheetML representation.
