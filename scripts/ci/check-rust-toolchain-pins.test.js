@@ -89,6 +89,68 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("passes when a non-run block scalar mentions cargo (restore-keys)", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/cache@v4
+        with:
+          restore-keys: |2
+            cargo-\${{ runner.os }}-
+      - run: echo ok
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
+test("fails when cargo is invoked inside a folded run block scalar without installing the toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run cargo in a folded scalar
+        run: >-
+          cargo test --locked
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("fails when cargo is invoked inside an indented run block scalar without installing the toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run cargo in an indented scalar
+        run: |2
+          cargo test --locked
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
 test("passes when a github-script block mentions cargo in a string", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `
