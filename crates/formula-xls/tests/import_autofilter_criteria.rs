@@ -86,6 +86,45 @@ fn import_autofilter_criteria_join_all() {
         "unexpected filter columns; warnings={:?}",
         result.warnings
     );
+    assert!(af.sort_state.is_none());
+
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn import_autofilter_criteria_continued_string() {
+    let bytes = xls_fixture_builder::build_autofilter_criteria_continued_string_fixture_xls();
+    let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
+    tmp.write_all(&bytes).expect("write xls bytes");
+    let result = formula_xls::import_xls_path(tmp.path()).expect("import xls");
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilterCriteriaContinue")
+        .expect("FilterCriteriaContinue missing");
+    let af = sheet.auto_filter.as_ref().expect("auto_filter missing");
+
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
+    assert_eq!(
+        af.filter_columns,
+        vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".to_string()))],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        "unexpected filter columns; warnings={:?}",
+        result.warnings
+    );
+    assert!(af.sort_state.is_none());
 
     assert!(
         !result
