@@ -168,13 +168,13 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
         path = base.join(path);
     }
 
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase());
-
-    if let Some(ext) = ext {
-        if SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        // Treat OS-delivered paths as untrusted: avoid allocating a full lowercase copy of a
+        // potentially large extension string just to compare against our small allowlist.
+        if SUPPORTED_EXTENSIONS
+            .iter()
+            .any(|supported| ext.eq_ignore_ascii_case(supported))
+        {
             return Some(path);
         }
     }
