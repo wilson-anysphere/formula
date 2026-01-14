@@ -6,7 +6,9 @@ use crate::editing::rewrite::{
     StructuralEdit,
 };
 use crate::pivot::PivotTable;
+use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref};
 use formula_model::{CellRef, Range};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -15,6 +17,16 @@ use thiserror::Error;
 pub enum PivotRegistryError {
     #[error("pivot field {0:?} is missing from the pivot cache")]
     MissingField(String),
+}
+
+fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
+    if let Some(measure) = parse_dax_measure_ref(name) {
+        return Cow::Owned(format!("[{measure}]"));
+    }
+    if let Some((table, column)) = parse_dax_column_ref(name) {
+        return Cow::Owned(format!("{table}[{column}]"));
+    }
+    Cow::Borrowed(name)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,8 +88,10 @@ impl PivotRegistryEntry {
         let mut cache_field_indices: HashMap<String, usize> = HashMap::new();
         let mut cache_field_names: HashMap<String, String> = HashMap::new();
         for f in &pivot.cache.fields {
-            cache_field_indices.insert(crate::value::casefold(&f.name), f.index);
-            cache_field_names.insert(crate::value::casefold(&f.name), f.name.clone());
+            let normalized = normalize_pivot_cache_field_name(&f.name);
+            let key = crate::value::casefold(normalized.as_ref());
+            cache_field_indices.insert(key.clone(), f.index);
+            cache_field_names.insert(key, f.name.clone());
         }
 
         let mut field_positions: HashMap<String, PivotFieldPosition> = HashMap::new();
