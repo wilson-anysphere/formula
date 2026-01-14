@@ -33,6 +33,23 @@ test("theme command strings are localizable", () => {
   assert.equal(t("command.view.theme.light"), "السمة: فاتح");
 });
 
+test("ribbon label strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("ribbon.label.mixed"), "Mixed");
+  assert.equal(t("ribbon.label.custom"), "Custom");
+  assert.equal(t("ribbon.label.comma"), "Comma");
+
+  setLocale("de-DE");
+  assert.equal(t("ribbon.label.mixed"), "Gemischt");
+  assert.equal(t("ribbon.label.custom"), "Benutzerdefiniert");
+  assert.equal(t("ribbon.label.comma"), "Komma");
+
+  setLocale("ar");
+  assert.equal(t("ribbon.label.mixed"), "مختلط");
+  assert.equal(t("ribbon.label.custom"), "مخصص");
+  assert.equal(t("ribbon.label.comma"), "فاصلة");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");

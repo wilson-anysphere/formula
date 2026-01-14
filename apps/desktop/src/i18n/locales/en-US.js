@@ -459,6 +459,11 @@ export const enUS = {
 
   // Status bar
   "statusBar.sheetPosition": "Sheet {position} of {total}",
+
+  // Ribbon
+  "ribbon.label.mixed": "Mixed",
+  "ribbon.label.custom": "Custom",
+  "ribbon.label.comma": "Comma",
   "commandPalette.searching": "Searching…",
   "commandPalette.shortcutSearch.hint": "Shortcut search",
   "commandPalette.extensions.loading": "Loading extensions…",

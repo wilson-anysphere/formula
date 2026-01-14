@@ -2267,7 +2267,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     const numberFormatLabel = (() => {
       const format = formatState.numberFormat;
-      if (format === "mixed") return "Mixed";
+      if (format === "mixed") return t("ribbon.label.mixed");
 
       const normalized = typeof format === "string" ? format.trim() : "";
       if (!normalized || normalized.toLowerCase() === "general") return t("command.format.numberFormat.general");
@@ -2280,13 +2280,13 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       if (compact === NUMBER_FORMATS.date.toLowerCase()) return t("command.format.numberFormat.shortDate");
       if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return t("command.format.numberFormat.time");
       if (compact.includes("%")) return t("command.format.numberFormat.percent");
-      if (/^#,##0(\.[0]+)?$/.test(compact)) return "Comma";
+      if (/^#,##0(\.[0]+)?$/.test(compact)) return t("ribbon.label.comma");
       if (/^0(\.[0]+)?$/.test(compact)) return t("command.format.numberFormat.number");
       if (compact.includes("e")) return t("command.format.numberFormat.scientific");
       if (compact.includes("/")) return t("command.format.numberFormat.fraction");
       if (compact === "@") return t("command.format.numberFormat.text");
 
-      return "Custom";
+      return t("ribbon.label.custom");
     })();
 
     const themeLabel = (() => {
@@ -2315,13 +2315,13 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     // Keep defaults ("Font"/"Size") when we don't have an explicit value, but show "Mixed"
     // when the selection contains multiple values.
     if (formatState.fontName === "mixed") {
-      labelById["home.font.fontName"] = "Mixed";
+      labelById["home.font.fontName"] = t("ribbon.label.mixed");
     } else if (typeof formatState.fontName === "string") {
       labelById["home.font.fontName"] = formatState.fontName;
     }
 
     if (formatState.fontSize === "mixed") {
-      labelById["home.font.fontSize"] = "Mixed";
+      labelById["home.font.fontSize"] = t("ribbon.label.mixed");
     } else if (typeof formatState.fontSize === "number") {
       labelById["home.font.fontSize"] = String(formatState.fontSize);
     }
