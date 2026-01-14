@@ -336,7 +336,7 @@ class CellRenderer {
 
 ### Shared-grid axis sizing (including Hide/Unhide)
 
-In **shared-grid mode**, row heights and column widths are driven by *sheet view metadata* (`rowHeights` / `colWidths`) and applied to the renderer as **axis size overrides** (batched, not per-index setters). **Hide / Unhide** uses the same axis size override mechanism:
+In **shared-grid mode**, row heights and column widths are applied to the renderer as **axis size overrides** (batched, not per-index setters). The inputs include persisted *sheet view metadata* (`rowHeights` / `colWidths`) as well as view-layer overrides like **Hide / Unhide**:
 
 - Hidden state is tracked as a view-local **user-hidden flag** (desktop: `OutlineEntry.hidden.user`) and translated into a tiny row/column size override during sync.
 - **Hide**: apply a tiny-size override for the affected axis indices (a couple of pixels — `CanvasGridRenderer` requires sizes `> 0`)
