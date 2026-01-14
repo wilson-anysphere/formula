@@ -78,6 +78,9 @@ class CompatScorecardTests(unittest.TestCase):
                 )
 
             md = out_md.read_text(encoding="utf-8")
+            self.assertIn("includeTags: add, sub", md)
+            self.assertIn("excludeTags: <none>", md)
+            self.assertIn("maxCases: all", md)
             self.assertIn("| L1 | Read (corpus open) | PASS | 100.00% | 10 / 10 |", md)
             # 1 mismatch out of 1000 => 99.9% pass rate.
             self.assertIn("| L2 | Calculate (Excel oracle) | PASS | 99.90% | 999 / 1000 |", md)
