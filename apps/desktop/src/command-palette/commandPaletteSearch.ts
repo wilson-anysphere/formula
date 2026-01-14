@@ -116,6 +116,11 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<Exclude<FormulaLocaleId, "en-US">,
   "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
   "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+  // Minimal locales (no translated function names yet, but they are valid engine locale ids).
+  "ja-JP": { canonicalToLocalized: new Map() },
+  "zh-CN": { canonicalToLocalized: new Map() },
+  "zh-TW": { canonicalToLocalized: new Map() },
+  "ko-KR": { canonicalToLocalized: new Map() },
 };
 
 const FUNCTIONS_BY_LOCALE_CACHE = new Map<string, PreparedFunctionForSearch[]>();

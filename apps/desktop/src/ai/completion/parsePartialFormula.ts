@@ -96,6 +96,11 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<FormulaLocaleId, FunctionTranslati
   "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
   "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+  // Minimal locales (no translated function names yet, but they are valid engine locale ids).
+  "ja-JP": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
+  "zh-CN": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
+  "zh-TW": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
+  "ko-KR": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
   "en-US": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
 };
 

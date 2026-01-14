@@ -8,6 +8,9 @@ describe("formulaLocale", () => {
     expect(normalizeLocaleId("  de-DE  ")).toBe("de-DE");
     expect(normalizeLocaleId("de_DE.UTF-8")).toBe("de-DE");
     expect(normalizeLocaleId("de_DE@euro")).toBe("de-DE");
+    expect(normalizeLocaleId("C")).toBe("en-US");
+    expect(normalizeLocaleId("C.UTF-8")).toBe("en-US");
+    expect(normalizeLocaleId("POSIX")).toBe("en-US");
     expect(normalizeLocaleId("fr-FR-u-nu-latn")).toBe("fr-FR");
     expect(normalizeLocaleId("de-CH-1996")).toBe("de-CH");
     expect(normalizeLocaleId("en")).toBe("en");
@@ -39,10 +42,27 @@ describe("formulaLocale", () => {
 
     // The engine treats `en-GB` as an alias for the canonical formula locale.
     expect(normalizeFormulaLocaleId("en-GB")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en-AU")).toBe("en-US");
 
     // Ignore BCP-47 variants/extensions.
     expect(normalizeFormulaLocaleId("fr-FR-u-nu-latn")).toBe("fr-FR");
     expect(normalizeFormulaLocaleId("de-CH-1996")).toBe("de-DE");
+
+    // Minimal locale registrations (no translations, but still valid engine locale ids).
+    expect(normalizeFormulaLocaleId("ja")).toBe("ja-JP");
+    expect(normalizeFormulaLocaleId("ja-JP")).toBe("ja-JP");
+    expect(normalizeFormulaLocaleId("ko")).toBe("ko-KR");
+    expect(normalizeFormulaLocaleId("ko-KR")).toBe("ko-KR");
+    expect(normalizeFormulaLocaleId("zh")).toBe("zh-CN");
+    expect(normalizeFormulaLocaleId("zh-Hans")).toBe("zh-CN");
+    expect(normalizeFormulaLocaleId("zh-Hant")).toBe("zh-TW");
+    expect(normalizeFormulaLocaleId("zh-Hant-u-nu-latn")).toBe("zh-TW");
+    expect(normalizeFormulaLocaleId("zh-HK")).toBe("zh-TW");
+    expect(normalizeFormulaLocaleId("zh-TW")).toBe("zh-TW");
+
+    // POSIX "C locale" aliases.
+    expect(normalizeFormulaLocaleId("C")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("POSIX")).toBe("en-US");
 
     // Unknown locales stay unknown.
     expect(normalizeFormulaLocaleId("pt-BR")).toBeNull();
@@ -50,4 +70,3 @@ describe("formulaLocale", () => {
     expect(normalizeFormulaLocaleId("")).toBeNull();
   });
 });
-

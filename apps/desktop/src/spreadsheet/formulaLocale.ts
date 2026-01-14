@@ -1,4 +1,13 @@
-export type FormulaLocaleId = "en-US" | "de-DE" | "fr-FR" | "es-ES";
+// Keep in sync with `crates/formula-engine/src/locale/registry.rs` (`ALL_LOCALES`).
+export type FormulaLocaleId =
+  | "en-US"
+  | "ja-JP"
+  | "zh-CN"
+  | "ko-KR"
+  | "zh-TW"
+  | "de-DE"
+  | "fr-FR"
+  | "es-ES";
 
 /**
  * Best-effort locale-id normalization compatible with the formula engine's locale registry.
@@ -39,6 +48,9 @@ export function normalizeLocaleId(localeId: string | null | undefined): string |
   if (parts.length === 0) return null;
 
   const language = parts[0]!.toLowerCase();
+  // POSIX "C locale" aliases show up in some environments; treat them as English so callers
+  // can safely pass the result to `Intl.*` APIs.
+  if (language === "c" || language === "posix") return "en-US";
 
   // Find the first region-like subtag before any BCP-47 extension singleton (e.g. `u`, `x`).
   let region: string | null = null;
@@ -58,28 +70,98 @@ export function normalizeLocaleId(localeId: string | null | undefined): string |
   return region ? `${language}-${region}` : language;
 }
 
+type LocaleKeyParts = {
+  lang: string;
+  script: string | null;
+  region: string | null;
+};
+
+function normalizeLocaleKey(id: string | null | undefined): string | null {
+  const trimmed = String(id ?? "").trim();
+  if (!trimmed) return null;
+
+  // Strip POSIX encoding/modifier suffixes (".UTF-8", "@euro").
+  let key = trimmed;
+  for (const sep of [".", "@"]) {
+    const idx = key.indexOf(sep);
+    if (idx >= 0) key = key.slice(0, idx);
+  }
+
+  key = key.replaceAll("_", "-").trim();
+  return key ? key : null;
+}
+
+function parseLocaleKey(key: string): LocaleKeyParts | null {
+  // Parse BCP-47 tags and variants such as `de-CH-1996` or `zh-Hant-u-nu-latn`. We only care
+  // about the language + optional script/region, ignoring variants/extensions.
+  const parts = key.split("-").filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const lang = parts[0]!.toLowerCase();
+
+  let script: string | null = null;
+  let region: string | null = null;
+
+  let next = parts[1] ?? null;
+  // Optional script subtag (4 alpha characters) comes before the region.
+  if (next && /^[A-Za-z]{4}$/.test(next)) {
+    script = next.toLowerCase();
+    next = parts[2] ?? null;
+  }
+
+  if (next) {
+    if (/^[A-Za-z]{2}$/.test(next)) region = next.toLowerCase();
+    else if (/^\d{3}$/.test(next)) region = next;
+  }
+
+  return { lang, script, region };
+}
+
 /**
  * Normalize an arbitrary locale ID to one of the formula locales the engine supports.
  *
  * Returns `null` when the locale is unknown/unsupported.
  */
 export function normalizeFormulaLocaleId(localeId: string | null | undefined): FormulaLocaleId | null {
-  const normalized = normalizeLocaleId(localeId);
-  if (!normalized) return null;
+  const key = normalizeLocaleKey(localeId);
+  if (!key) return null;
+  const parts = parseLocaleKey(key);
+  if (!parts) return null;
 
-  const lang = normalized.split("-")[0] ?? "";
-  switch (lang.toLowerCase()) {
+  // Map language/region variants onto the small set of engine-supported locales.
+  // For example, `fr-CA` still resolves to `fr-FR`, and `de-AT` resolves to `de-DE`.
+  switch (parts.lang) {
+    // Many POSIX environments report locale as `C` / `POSIX` for the default "C locale".
+    // Treat these as English (United States) so callers don't need to special-case.
+    case "en":
+    case "c":
+    case "posix":
+      // The engine treats `en-GB` (and other English locales) as an alias for the canonical
+      // formula locale (English names + `,` separators).
+      return "en-US";
+    case "ja":
+      return "ja-JP";
+    case "zh": {
+      // Prefer explicit region codes when present.
+      //
+      // Otherwise, use the BCP-47 script subtag:
+      // - `zh-Hant` is Traditional Chinese, commonly associated with `zh-TW`.
+      // - `zh-Hans` is Simplified Chinese, commonly associated with `zh-CN`.
+      const region = parts.region;
+      if (region) {
+        return region === "tw" || region === "hk" || region === "mo" ? "zh-TW" : "zh-CN";
+      }
+      return parts.script === "hant" ? "zh-TW" : "zh-CN";
+    }
+    case "ko":
+      return "ko-KR";
     case "de":
       return "de-DE";
     case "fr":
       return "fr-FR";
     case "es":
       return "es-ES";
-    case "en":
-      // The engine treats `en-GB` as an alias for the canonical formula locale (English names + `,` separators).
-      return "en-US";
     default:
       return null;
   }
 }
-

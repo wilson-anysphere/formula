@@ -1199,6 +1199,11 @@ const FUNCTION_TRANSLATIONS_TSV_BY_LOCALE: Record<Exclude<FormulaLocaleId, "en-U
   "de-DE": DE_DE_FUNCTION_TSV,
   "fr-FR": FR_FR_FUNCTION_TSV,
   "es-ES": ES_ES_FUNCTION_TSV,
+  // Minimal locales (no translated function names yet).
+  "ja-JP": "",
+  "zh-CN": "",
+  "zh-TW": "",
+  "ko-KR": "",
 };
 
 const FUNCTION_TRANSLATIONS_CACHE = new Map<Exclude<FormulaLocaleId, "en-US">, FunctionTranslationTables>();
