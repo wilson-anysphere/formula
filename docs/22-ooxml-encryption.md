@@ -323,6 +323,12 @@ To maximize real-world compatibility:
   `agile_secret_key` helpers). When verifier fields are missing, it falls back to the common
   `IV = saltValue[..blockSize]` behavior.
 
+In the derived-IV scheme, the IV is **per-blob** because the `blockKey` differs for:
+
+- `encryptedVerifierHashInput`
+- `encryptedVerifierHashValue`
+- `encryptedKeyValue`
+
 ## Decrypting `EncryptedPackage`
 
 The `EncryptedPackage` stream layout (on disk / as stored) is:
