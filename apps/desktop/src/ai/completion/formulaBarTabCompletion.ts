@@ -14,6 +14,7 @@ import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
+import { normalizeFormulaLocaleId } from "../../spreadsheet/formulaLocale.js";
 import {
   createLocaleAwareFunctionRegistry,
   createLocaleAwarePartialFormulaParser,
@@ -124,16 +125,16 @@ export class FormulaBarTabCompletionController {
       getSheetNames: externalSchemaProvider?.getSheetNames ?? defaultSchemaProvider.getSheetNames,
       getNamedRanges: externalSchemaProvider?.getNamedRanges ?? defaultSchemaProvider.getNamedRanges,
       getTables: externalSchemaProvider?.getTables ?? defaultSchemaProvider.getTables,
-      getCacheKey: () => {
-        const base = defaultSchemaProvider.getCacheKey?.() ?? "";
-        const extra = externalSchemaProvider?.getCacheKey?.() ?? "";
-        // The partial parser is locale-aware (argument separators, etc). Include locale in the cache key so
-        // tab completion recomputes suggestions if the UI locale changes at runtime.
-        const locale = this.#formulaBar.currentLocaleId();
-        const combined = extra ? `${base}|${extra}` : base;
-        return locale ? `${combined}|locale:${locale}` : combined;
-      },
-    };
+       getCacheKey: () => {
+         const base = defaultSchemaProvider.getCacheKey?.() ?? "";
+         const extra = externalSchemaProvider?.getCacheKey?.() ?? "";
+         // The partial parser is locale-aware (argument separators, etc). Include locale in the cache key so
+         // tab completion recomputes suggestions if the UI locale changes at runtime.
+         const locale = normalizeFormulaLocaleId(this.#formulaBar.currentLocaleId()) ?? "en-US";
+         const combined = extra ? `${base}|${extra}` : base;
+         return locale ? `${combined}|locale:${locale}` : combined;
+       },
+     };
     this.#schemaProvider = schemaProvider;
 
     const completionClient =
