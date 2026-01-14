@@ -11,6 +11,7 @@ import {
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupArgv,
   resolveDesktopStartupMode,
+  resolveDesktopStartupRunEnv,
   resolveDesktopStartupTargets,
   resolvePerfHome,
   type DesktopStartupBenchKind,
@@ -84,9 +85,7 @@ function parseArgs(argv: string[]): {
   const args = [...argv];
   let mode: DesktopStartupMode = resolveDesktopStartupMode();
 
-  const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
-  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
-  const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
+  const envDefaults = resolveDesktopStartupRunEnv();
 
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
   const defaultKind: DesktopStartupBenchKind = resolveDesktopStartupBenchKind();
@@ -98,9 +97,9 @@ function parseArgs(argv: string[]): {
 
   const out = {
     mode,
-    runs: Math.max(1, envRuns),
-    timeoutMs: Math.max(1, envTimeoutMs),
-    binPath: envBin as string | null,
+    runs: envDefaults.runs,
+    timeoutMs: envDefaults.timeoutMs,
+    binPath: envDefaults.binPath,
     windowTargetMs: 0,
     firstRenderTargetMs: 0,
     webviewLoadedTargetMs: 0,

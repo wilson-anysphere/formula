@@ -32,6 +32,17 @@ export type DesktopStartupTargets = {
   ttiTargetMs: number;
 };
 
+export type DesktopStartupRunEnv = {
+  runs: number;
+  timeoutMs: number;
+  /**
+   * Resolved desktop binary path from `FORMULA_DESKTOP_BIN`, or null when unset.
+   *
+   * Callers typically fall back to `defaultDesktopBinPath()` when this is null.
+   */
+  binPath: string | null;
+};
+
 export function resolveDesktopStartupArgv(benchKind: DesktopStartupBenchKind): string[] {
   return benchKind === 'shell' ? ['--startup-bench'] : [];
 }
@@ -149,6 +160,22 @@ function firstPositiveNumber(env: NodeJS.ProcessEnv, ...names: string[]): number
     if (val !== null) return val;
   }
   return null;
+}
+
+/**
+ * Resolve common env vars shared by desktop startup benchmark entrypoints.
+ *
+ * Centralizing this avoids drift between:
+ * - `desktop-startup-runner.ts` (standalone CLI runner)
+ * - `desktopStartupBench.ts` (integrated benchmark harness)
+ */
+export function resolveDesktopStartupRunEnv(options: { env?: NodeJS.ProcessEnv } = {}): DesktopStartupRunEnv {
+  const env = options.env ?? process.env;
+  const runs = parsePositiveNumber(env.FORMULA_DESKTOP_STARTUP_RUNS) ?? 20;
+  const timeoutMs = parsePositiveNumber(env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS) ?? 15_000;
+  const rawBin = env.FORMULA_DESKTOP_BIN;
+  const binPath = rawBin && rawBin.trim() !== '' ? resolve(repoRoot, rawBin) : null;
+  return { runs, timeoutMs, binPath };
 }
 
 /**

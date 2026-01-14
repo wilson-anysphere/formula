@@ -10,6 +10,7 @@ import {
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
+  resolveDesktopStartupRunEnv,
   resolveDesktopStartupTargets,
   sleep,
 } from './desktopStartupUtil.ts';
@@ -205,6 +206,28 @@ describe('desktopStartupUtil resolveDesktopStartupArgv', () => {
 
   it('returns no args for full', () => {
     expect(resolveDesktopStartupArgv('full')).toEqual([]);
+  });
+});
+
+describe('desktopStartupUtil resolveDesktopStartupRunEnv', () => {
+  it('uses defaults when env is empty', () => {
+    expect(resolveDesktopStartupRunEnv({ env: {} })).toEqual({ runs: 20, timeoutMs: 15_000, binPath: null });
+  });
+
+  it('parses overrides and resolves FORMULA_DESKTOP_BIN relative to the repo root', () => {
+    expect(
+      resolveDesktopStartupRunEnv({
+        env: {
+          FORMULA_DESKTOP_STARTUP_RUNS: '5',
+          FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '123',
+          FORMULA_DESKTOP_BIN: 'target/release/formula-desktop',
+        },
+      }),
+    ).toEqual({
+      runs: 5,
+      timeoutMs: 123,
+      binPath: resolve(repoRoot, 'target/release/formula-desktop'),
+    });
   });
 });
 

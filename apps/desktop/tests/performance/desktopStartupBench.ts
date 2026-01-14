@@ -47,7 +47,6 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
@@ -55,6 +54,7 @@ import {
   findPidForExecutableLinux,
   getProcessRssMbLinux,
   formatPerfPath,
+  resolveDesktopStartupRunEnv,
   sleep,
   buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
@@ -152,14 +152,8 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   // The lightweight shell benchmark is opt-in via `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell`.
   const benchKind = resolveDesktopStartupBenchKind({ defaultKind: 'full' });
 
-  const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
-  const timeoutMs = Math.max(
-    1,
-    Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? '15000') || 15000,
-  );
-  const binPath = process.env.FORMULA_DESKTOP_BIN
-    ? resolve(process.env.FORMULA_DESKTOP_BIN)
-    : defaultDesktopBinPath();
+  const { runs, timeoutMs, binPath: binFromEnv } = resolveDesktopStartupRunEnv();
+  const binPath = binFromEnv ?? defaultDesktopBinPath();
 
   if (!binPath || !existsSync(binPath)) {
     const buildHint =
