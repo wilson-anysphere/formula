@@ -101,4 +101,15 @@ describe("extensions/ui showInputBox", () => {
       vi.restoreAllMocks();
     }
   });
+
+  it("resolves to null when another modal dialog is already open", async () => {
+    const blocking = document.createElement("dialog");
+    blocking.setAttribute("open", "");
+    document.body.appendChild(blocking);
+
+    await expect(showInputBox({ prompt: "Name" })).resolves.toBeNull();
+
+    // Ensure we did not create an additional input-box dialog.
+    expect(document.querySelectorAll('dialog[data-testid="input-box"]').length).toBe(0);
+  });
 });
