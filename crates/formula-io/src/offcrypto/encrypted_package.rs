@@ -159,7 +159,8 @@ pub fn decrypt_standard_encrypted_package_stream(
     // If ciphertext length is known (buffer-based decrypt), reject clearly implausible `orig_size`
     // values. Allow up to one extra segment of slop to account for producer differences (e.g.
     // padding to a 4096-byte boundary, OLE sector slack, etc).
-    let plausible_max = (ciphertext.len() as u64).saturating_add(ENCRYPTED_PACKAGE_SEGMENT_LEN as u64);
+    let plausible_max =
+        (ciphertext.len() as u64).saturating_add(ENCRYPTED_PACKAGE_SEGMENT_LEN as u64);
     if orig_size > plausible_max {
         return Err(EncryptedPackageError::ImplausibleOrigSize {
             orig_size,
@@ -723,8 +724,11 @@ mod tests {
 
             let mut ciphertext = plaintext.to_vec();
             for (block_index, chunk) in ciphertext.chunks_mut(BLOCK_LEN).enumerate() {
-                let key =
-                    test_cryptoapi_block_key_sha1(&self.password_hash, block_index as u32, self.key_len);
+                let key = test_cryptoapi_block_key_sha1(
+                    &self.password_hash,
+                    block_index as u32,
+                    self.key_len,
+                );
                 let mut rc4 = TestRc4::new(&key);
                 rc4.apply_keystream(chunk);
             }
@@ -759,8 +763,8 @@ mod tests {
         let key_len = 16;
 
         let encryptor = TestCryptoapiRc4Encryptor::new(password, &salt, key_len);
-        let decryptor =
-            CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len).expect("decryptor");
+        let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len)
+            .expect("decryptor");
 
         for len in [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000] {
             let plaintext = make_plaintext_pattern(len);
@@ -802,9 +806,17 @@ mod tests {
 
         // Tiny `EncryptedPackage`: just the size prefix, no ciphertext.
         let encrypted = u64::MAX.to_le_bytes().to_vec();
-        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
-        assert!(res.is_ok(), "decryptor should not panic on u64::MAX orig_size");
-        assert!(res.unwrap().is_err(), "expected error on u64::MAX orig_size");
+        let res = std::panic::catch_unwind(|| {
+            decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt)
+        });
+        assert!(
+            res.is_ok(),
+            "decryptor should not panic on u64::MAX orig_size"
+        );
+        assert!(
+            res.unwrap().is_err(),
+            "expected error on u64::MAX orig_size"
+        );
     }
 
     #[test]
@@ -819,9 +831,16 @@ mod tests {
 
         let orig_size = (usize::MAX as u64) + 1;
         let encrypted = orig_size.to_le_bytes().to_vec();
-        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
-        assert!(res.is_ok(), "decryptor should not panic on orig_size > usize::MAX");
-        let err = res.unwrap().expect_err("expected error on orig_size > usize::MAX");
+        let res = std::panic::catch_unwind(|| {
+            decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt)
+        });
+        assert!(
+            res.is_ok(),
+            "decryptor should not panic on orig_size > usize::MAX"
+        );
+        let err = res
+            .unwrap()
+            .expect_err("expected error on orig_size > usize::MAX");
         assert_eq!(
             err,
             EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size }
@@ -837,7 +856,9 @@ mod tests {
         let orig_size = u64::MAX - 4094;
         let encrypted = orig_size.to_le_bytes().to_vec();
 
-        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
+        let res = std::panic::catch_unwind(|| {
+            decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt)
+        });
         assert!(
             res.is_ok(),
             "decryptor should not panic when computing segment counts/offsets"
@@ -873,12 +894,21 @@ mod tests {
         // >4096 bytes so we exercise segmentIndex 0 and 1.
         let plaintext = make_plaintext(5000);
 
-        for salt in [ (0u8..8).collect::<Vec<u8>>(), (0u8..32).collect::<Vec<u8>>() ] {
-            let encrypted =
-                encrypt_encrypted_package_stream_standard_cryptoapi_reference(&key, &salt, &plaintext);
+        for salt in [
+            (0u8..8).collect::<Vec<u8>>(),
+            (0u8..32).collect::<Vec<u8>>(),
+        ] {
+            let encrypted = encrypt_encrypted_package_stream_standard_cryptoapi_reference(
+                &key, &salt, &plaintext,
+            );
             let decrypted =
                 decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt).unwrap();
-            assert_eq!(decrypted, plaintext, "round-trip failed for salt len={}", salt.len());
+            assert_eq!(
+                decrypted,
+                plaintext,
+                "round-trip failed for salt len={}",
+                salt.len()
+            );
         }
     }
 }
