@@ -403,9 +403,9 @@ describe("EngineWorker RPC", () => {
       channelFactory: createMockChannel
     });
 
-    await engine.setRowStyleId(5, 123, "Sheet1");
-    await engine.setColStyleId(2, 0, "Sheet1");
-    await engine.setSheetDefaultStyleId(42, "Sheet1");
+    await engine.setRowStyleId("Sheet1", 5, 123);
+    await engine.setColStyleId("Sheet1", 2, 0);
+    await engine.setSheetDefaultStyleId("Sheet1", 42);
 
     const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
     const methods = requests.map((r) => r.method);
