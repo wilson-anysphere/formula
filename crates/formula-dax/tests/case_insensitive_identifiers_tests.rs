@@ -1,5 +1,6 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, FilterContext, Relationship, Table, Value,
+    Cardinality, CrossFilterDirection, DataModel, DaxError, FilterContext, Relationship, Table,
+    Value,
 };
 
 fn build_model() -> DataModel {
@@ -100,4 +101,15 @@ fn identifiers_are_case_insensitive_for_measures_columns_filters_and_relationshi
         .evaluate_measure("customers with large orders", &FilterContext::empty())
         .unwrap();
     assert_eq!(customers_with_large_orders, Value::from(1_i64));
+}
+
+#[test]
+fn add_table_rejects_duplicate_column_names_case_insensitively() {
+    let mut model = DataModel::new();
+    let table = Table::new("T", vec!["Col", "col"]);
+    let err = model.add_table(table).unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::DuplicateColumn { table, column } if table == "T" && column == "col"
+    ));
 }

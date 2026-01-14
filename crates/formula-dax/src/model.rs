@@ -848,6 +848,20 @@ impl DataModel {
         if self.tables.contains_key(&key) {
             return Err(DaxError::DuplicateTable { table: name });
         }
+
+        // Tabular/DAX identifiers are case-insensitive. Ensure we don't allow two physical columns
+        // that normalize to the same identifier, which would make subsequent column resolution
+        // ambiguous.
+        let mut seen_cols: HashSet<String> = HashSet::new();
+        for column in table.columns() {
+            let col_key = normalize_ident(column);
+            if !seen_cols.insert(col_key) {
+                return Err(DaxError::DuplicateColumn {
+                    table: name.clone(),
+                    column: column.clone(),
+                });
+            }
+        }
         self.tables.insert(key, table);
         Ok(())
     }

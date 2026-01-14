@@ -104,7 +104,7 @@ fn insert_row_maps_values_around_calculated_columns() {
 fn insert_row_rolls_back_on_calculated_column_error() {
     let mut model = DataModel::new();
 
-    let mut t = Table::new("T", vec!["a", "A"]);
+    let mut t = Table::new("T", vec!["a0", "A"]);
     t.push_row(vec![1.into(), Value::Blank]).unwrap();
     model.add_table(t).unwrap();
 
