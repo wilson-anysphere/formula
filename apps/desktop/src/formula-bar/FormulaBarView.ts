@@ -2158,34 +2158,28 @@ export class FormulaBarView {
         span: { kind: string; start: number; end: number; className?: string },
         text: string
       ): string => {
-        const classAttr = (base: string | null): string => {
-          const extra = span.className;
-          if (base) {
-            if (extra) return ` class="${base} ${extra}"`;
-            return ` class="${base}"`;
-          }
-          if (extra) return ` class="${extra}"`;
-          return "";
-        };
+        const extraClass = span.className;
 
         if (!isFormulaEditing) {
-          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+          const classAttr = extraClass ? ` class="${extraClass}"` : "";
+          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
         }
 
         if (span.kind === "error") {
-          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+          const classAttr = extraClass ? ` class="${extraClass}"` : "";
+          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
         }
 
         const containing = findContainingRef(span.start, span.end);
         if (!containing) {
-          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+          const classAttr = extraClass ? ` class="${extraClass}"` : "";
+          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
         }
 
         const isActive = activeReferenceIndex === containing.index;
         const baseClass = isActive ? "formula-bar-reference formula-bar-reference--active" : "formula-bar-reference";
-        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr(baseClass)} style="color: ${containing.color};">${escapeHtml(
-          text
-        )}</span>`;
+        const classAttr = extraClass ? ` class="${baseClass} ${extraClass}"` : ` class="${baseClass}"`;
+        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${escapeHtml(text)}</span>`;
       };
 
       for (const span of highlightedSpans) {
