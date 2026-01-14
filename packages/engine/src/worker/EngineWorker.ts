@@ -355,7 +355,13 @@ export class EngineWorker {
     await this.flush();
     let payload = bytes;
     if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+      // `Uint8Array#slice()` copies into a new backing buffer, but `Buffer#slice()` (Node) returns a
+      // view into the same underlying pool. Normalize to a compact standalone `Uint8Array` so we
+      // transfer only the relevant bytes.
       payload = payload.slice();
+      if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+        payload = new Uint8Array(payload);
+      }
     }
     await this.invoke("loadFromXlsxBytes", { bytes: payload }, options, [payload.buffer]);
   }
@@ -373,7 +379,11 @@ export class EngineWorker {
     }
     let payload = bytes;
     if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+      // See `loadWorkbookFromXlsxBytes` for why we normalize to a standalone buffer.
       payload = payload.slice();
+      if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+        payload = new Uint8Array(payload);
+      }
     }
     await this.invoke("loadFromEncryptedXlsxBytes", { bytes: payload, password }, options, [payload.buffer]);
   }
