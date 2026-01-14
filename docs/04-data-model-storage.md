@@ -301,11 +301,12 @@ Row-context navigation follows the relationship orientation (`fromTable` → `to
 - `RELATEDTABLE(otherTable)` returns the set of matching rows, and can naturally return multiple
   rows for many-to-many relationships.
 
-Pivot/group-by note: the current pivot/group-by implementation does not expand a base row into
-multiple related rows when traversing a many-to-many relationship (it effectively relies on
-`RELATED`-like semantics for group keys). Grouping by columns across a many-to-many relationship is
-therefore currently unsupported/ambiguous; prefer an explicit bridge table or pre-aggregated
-mapping when pivoting.
+Pivot/group-by note: grouping/pivoting by columns across a many-to-many relationship **expands** a
+base row into multiple related rows. When a key matches multiple rows on the `toTable` side, the
+engine treats the group key as a set of possible values and produces groups for all combinations
+(Cartesian product across group-by columns). This can duplicate measure contributions (a single fact
+row can contribute to multiple groups), so summing group totals can “double count” compared to an
+ungrouped total.
 
 ### Referential Integrity
 

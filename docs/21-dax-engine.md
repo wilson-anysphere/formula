@@ -197,9 +197,12 @@ Many-to-many semantics:
   `TREATAS(VALUES(source[key]), target[key])`).
 - `RELATED` is ambiguous when there is more than one match on the `to_table` side (error).
 - `RELATEDTABLE` returns the set of matching rows (can be >1 for many-to-many).
-- Pivot/group-by: when a group-by column is on a related table, the pivot engine navigates relationships
-  similarly to `RELATED`. If a hop matches multiple rows, grouping is ambiguous and pivot returns an
-  evaluation error.
+- Pivot/group-by note: grouping by columns across a many-to-many relationship **expands** a base row
+  into multiple related rows. When a key matches multiple rows on the `to_table` side, the engine
+  treats the group key as a set of possible values and produces groups for all combinations
+  (Cartesian product across group-by columns). This can duplicate measure contributions (a single
+  fact row can contribute to multiple groups), so summing group totals can “double count” compared to
+  an ungrouped total. This differs from scalar navigation (`RELATED`), which errors on ambiguity.
 
 ### Cross-filter direction
 
@@ -524,7 +527,8 @@ pub fn pivot(
     - Relationship path resolution consults `FilterContext` overrides:
       - `USERELATIONSHIP` activation (and the “override pairs” semantics described above)
       - `CROSSFILTER(..., NONE)` disabling relationships
-    - If a relationship hop is ambiguous (key matches multiple rows), pivot returns an evaluation error.
+    - If the path contains a `ManyToMany` hop, pivot expands a base row into multiple related key
+      values (and combinations), which can duplicate measure contributions.
 - `measures`: list of named expressions to evaluate per group.
   - A `PivotMeasure` is *not* required to correspond to a named model measure; `expression` is parsed as DAX.
 - `filter`: the initial filter context applied to the pivot query.
@@ -664,10 +668,10 @@ Supported expression forms:
   - on the RHS of the `IN` operator (`expr IN { ... }`), and
   - as the first argument to `CONTAINSROW({ ... }, value)`.
 
-Unsupported (not parsed):
+Unsupported / not yet implemented in the parser:
 
 - Exponent notation for numbers (`1e3`)
-- Multi-column table constructors (row tuples)
+- Multi-column table constructors (row tuples) like `{(1,2), (3,4)}`
 
 ---
 
@@ -824,15 +828,17 @@ This is not an exhaustive list, but the most common contributor-facing constrain
 
 - **Relationships**
   - `OneToMany`, `OneToOne`, and `ManyToMany` are supported.
-  - DAX APIs that need a unique “one-side” lookup (`RELATED`, pivot grouping by related columns, etc.)
-    will error when a relationship key matches multiple rows.
   - Only single-column relationships are supported.
+  - `RELATED` errors when a relationship key matches multiple rows on the `to_table` side (ambiguous scalar lookup).
+  - Grouping/pivoting by columns across a `ManyToMany` relationship uses expansion semantics: a base
+    row can contribute to multiple related group keys (and combinations), which can duplicate measure
+    contributions.
 - **DAX language coverage**
-   - Variables (`VAR`/`RETURN`) are supported.
-   - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
-     and are currently only supported on the RHS of the `IN` operator and as the first argument to
-     `CONTAINSROW`.
-   - Most scalar/table functions are unimplemented (anything not listed above).
+  - Variables (`VAR`/`RETURN`) are supported.
+  - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
+    and are currently only supported on the RHS of the `IN` operator and as the first argument to
+    `CONTAINSROW`.
+  - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
 - **Calculated columns**
