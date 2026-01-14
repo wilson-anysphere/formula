@@ -244,6 +244,11 @@ export default defineConfig({
       // desktop-scoped Vitest include list.
       "src/command-palette/__tests__/commandPalette.test.ts",
       "src/command-palette/__tests__/shortcutSearch.test.ts",
+      // Some grid/shared and layout tests use the `.test.ts` suffix but are part of the
+      // desktop package's unit suite. Include them directly so they don't need wrapper
+      // `*.vitest.ts` entrypoints.
+      "src/grid/shared/__tests__/**/*.test.ts",
+      "src/layout/__tests__/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
