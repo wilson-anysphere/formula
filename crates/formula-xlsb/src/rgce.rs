@@ -4155,7 +4155,7 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse_mul_div(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
-        let mut expr = self.parse_power(stop_at_comma)?;
+        let mut expr = self.parse_unary(stop_at_comma)?;
         loop {
             self.skip_ws();
             let op = match self.peek_char() {
@@ -4175,14 +4175,15 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse_power(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
-        let expr = self.parse_unary(stop_at_comma)?;
+        // In Excel, exponentiation binds tighter than unary +/- (e.g. `-2^2` == `-(2^2)`).
+        let expr = self.parse_ref_union(stop_at_comma)?;
         self.skip_ws();
         if self.peek_char() != Some('^') {
             return Ok(expr);
         }
         // Excel exponentiation is right-associative.
         self.next_char();
-        let rhs = self.parse_power(stop_at_comma)?;
+        let rhs = self.parse_unary(stop_at_comma)?;
         Ok(Expr::Binary {
             op: BinaryOp::Pow,
             left: Box::new(expr),
@@ -4214,7 +4215,7 @@ impl<'a> FormulaParser<'a> {
                     expr: Box::new(self.parse_unary(stop_at_comma)?),
                 })
             }
-            _ => self.parse_ref_union(stop_at_comma),
+            _ => self.parse_power(stop_at_comma),
         }
     }
 

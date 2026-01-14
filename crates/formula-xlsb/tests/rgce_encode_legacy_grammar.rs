@@ -75,6 +75,14 @@ fn legacy_encoder_roundtrips_pow_right_associative() {
 }
 
 #[test]
+fn legacy_encoder_roundtrips_unary_minus_with_pow_precedence() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=-2^2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("-2^2"), normalize(&decoded));
+}
+
+#[test]
 fn legacy_encoder_roundtrips_union_inside_function_args() {
     let ctx = WorkbookContext::default();
     let encoded =
