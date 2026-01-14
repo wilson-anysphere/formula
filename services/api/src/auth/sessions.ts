@@ -102,7 +102,9 @@ export async function lookupSessionByToken(pool: Pool, token: string): Promise<S
   };
 
   // Best-effort "touch" for session activity.
-  void pool.query("UPDATE sessions SET last_used_at = now() WHERE id = $1", [row.session_id]);
+  void pool.query("UPDATE sessions SET last_used_at = now() WHERE id = $1", [row.session_id]).catch(() => {
+    // Best-effort; ignore failures updating the timestamp.
+  });
 
   return {
     session: {

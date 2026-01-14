@@ -288,7 +288,9 @@ export function registerAuditRoutes(app: FastifyInstance): void {
         backpressured = false;
         if (drainQueued) {
           drainQueued = false;
-          void drain();
+          void drain().catch(() => {
+            // Best-effort: avoid unhandled rejections from fire-and-forget drain.
+          });
         }
       });
 
@@ -368,24 +370,32 @@ export function registerAuditRoutes(app: FastifyInstance): void {
           drainInFlight = false;
           if (drainQueued && !closed && !backpressured) {
             drainQueued = false;
-            void drain();
+            void drain().catch(() => {
+              // Best-effort: avoid unhandled rejections from fire-and-forget drain.
+            });
           }
         }
       };
 
       unsubscribe = app.auditStreamHub.subscribe(orgId, () => {
-        void drain();
+        void drain().catch(() => {
+          // Best-effort: avoid unhandled rejections from fire-and-forget drain.
+        });
       });
 
       keepaliveTimer = setInterval(() => {
         if (closed) return;
         stream.write(":keep-alive\n\n");
-        void drain();
+        void drain().catch(() => {
+          // Best-effort: avoid unhandled rejections from fire-and-forget drain.
+        });
       }, 15_000);
       keepaliveTimer.unref?.();
 
       // Kick off an initial drain so resume cursors replay immediately.
-      void drain();
+      void drain().catch(() => {
+        // Best-effort: avoid unhandled rejections from fire-and-forget drain.
+      });
 
       return reply.send(stream);
     }

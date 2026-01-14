@@ -106,6 +106,24 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
   let db: IDBDatabase | null = null;
   let writeQueue = Promise.resolve();
 
+  const enqueueWrite = (update: Uint8Array) => {
+    // IndexedDB writes are best-effort. Avoid unhandled rejections for callers that don't await
+    // `whenLoaded()` (or when writes fail after initial load).
+    writeQueue = writeQueue
+      .catch(() => {
+        // keep queue alive
+      })
+      .then(async () => {
+        if (destroyed) return;
+        if (!db) return;
+        try {
+          await appendUpdate(db, update);
+        } catch {
+          // Best-effort: ignore persistence write failures (private browsing, blocked IDB, etc).
+        }
+      });
+  };
+
   const updateHandler = (update: Uint8Array, origin: unknown) => {
     if (destroyed) return;
     if (origin === persistenceOrigin) return;
@@ -114,11 +132,7 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
       return;
     }
 
-    writeQueue = writeQueue.then(async () => {
-      if (destroyed) return;
-      if (!db) return;
-      await appendUpdate(db, update);
-    });
+    enqueueWrite(update);
   };
 
   doc.on("update", updateHandler);
@@ -154,11 +168,7 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
 
       if (bufferedUpdates.length > 0) {
         for (const update of bufferedUpdates.splice(0, bufferedUpdates.length)) {
-          writeQueue = writeQueue.then(async () => {
-            if (destroyed) return;
-            if (!db) return;
-            await appendUpdate(db, update);
-          });
+          enqueueWrite(update);
         }
       }
 

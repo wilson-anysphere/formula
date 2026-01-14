@@ -509,7 +509,10 @@ export function createSyncServer(
     }
 
     retentionSweepTimer = setInterval(() => {
-      void triggerRetentionSweep();
+      void triggerRetentionSweep().catch(() => {
+        // Best-effort: triggerRetentionSweep already logs failures; avoid unhandled rejections from
+        // this timer callback.
+      });
     }, config.retention.sweepIntervalMs);
     retentionSweepTimer.unref();
   };
@@ -719,7 +722,15 @@ export function createSyncServer(
               }
  
               void enqueue(retentionDocName, async () => {
-                await hashedLdb.storeUpdate(docName, update);
+                try {
+                  await hashedLdb.storeUpdate(docName, update);
+                } catch (err) {
+                  // Best-effort: keep serving the in-memory doc even if persistence fails.
+                  disabledDocs.add(docName);
+                  logger.error({ docName, err }, "persistence_write_failed");
+                }
+              }).catch(() => {
+                // Best-effort: avoid unhandled rejections from fire-and-forget persistence writes.
               });
               void retentionManager?.markSeen(retentionDocName)?.catch(() => {});
             });
@@ -1028,7 +1039,15 @@ export function createSyncServer(
                   return;
                 }
                 void enqueue(retentionDocName, async () => {
-                  await hashedLdb.storeUpdate(docName, update);
+                  try {
+                    await hashedLdb.storeUpdate(docName, update);
+                  } catch (err) {
+                    // Best-effort: keep serving the in-memory doc even if persistence fails.
+                    disabledDocs.add(docName);
+                    logger.error({ docName, err }, "persistence_write_failed");
+                  }
+                }).catch(() => {
+                  // Best-effort: avoid unhandled rejections from fire-and-forget persistence writes.
                 });
                 void retentionManager?.markSeen(retentionDocName)?.catch(() => {});
               });

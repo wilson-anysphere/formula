@@ -147,5 +147,7 @@ main().catch((err) => {
   // eslint-disable-next-line no-console
   console.error(err);
   process.exitCode = 1;
-  void otel.shutdown();
+  void otel.shutdown().catch(() => {
+    // Best-effort: avoid unhandled rejections during shutdown.
+  });
 });

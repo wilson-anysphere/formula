@@ -77,7 +77,10 @@ export class AuditStreamHub {
 
       client.on("notification", (msg: Notification) => {
         if (msg.channel !== AUDIT_PG_CHANNEL) return;
-        void this.handlePgNotification(msg.payload ?? null);
+        void this.handlePgNotification(msg.payload ?? null).catch((err) => {
+          // Best-effort: avoid unhandled rejections from EventEmitter callbacks.
+          this.logger.warn({ err }, "audit stream pg notification handler failed");
+        });
       });
 
       client.on("error", (err) => {
