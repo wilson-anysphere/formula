@@ -142,6 +142,97 @@ fn build_chain_model(rows: usize, bidirectional: bool) -> DataModel {
     model
 }
 
+fn build_many_to_many_duplicate_to_table_model(rows: usize) -> DataModel {
+    // Many-to-many relationship where the `to_table` is columnar and has heavy key duplication.
+    //
+    // This is the scenario that previously caused major memory overhead when the relationship
+    // stored per-key `Vec<usize>` row lists for the `to_table` side.
+    let duplicates_per_key = std::env::var("FORMULA_DAX_REL_BENCH_M2M_DUP_PER_KEY")
+        .ok()
+        .and_then(|v| v.replace('_', "").parse::<usize>().ok())
+        .filter(|&v| v >= 2 && v <= 10_000)
+        .unwrap_or(100);
+
+    // Keep the dimension size bounded independently of the fact size so the benchmark remains
+    // runnable on typical developer machines.
+    let dim_rows = rows.min(1_000_000);
+    let unique_keys = (dim_rows / duplicates_per_key).max(1);
+
+    let options = TableOptions {
+        page_size_rows: 65_536,
+        cache: PageCacheConfig { max_entries: 8 },
+    };
+
+    let mut model = DataModel::new();
+
+    // Products (to_table): duplicate keys, plus a low-cardinality attribute to filter on.
+    let products_schema = vec![
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Group".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut products_builder = ColumnarTableBuilder::new(products_schema, options);
+    for key in 0..unique_keys {
+        let group = (key % 100) as f64;
+        for _ in 0..duplicates_per_key {
+            products_builder.append_row(&[
+                formula_columnar::Value::Number(key as f64),
+                formula_columnar::Value::Number(group),
+            ]);
+        }
+    }
+    model
+        .add_table(Table::from_columnar("Products", products_builder.finalize()))
+        .unwrap();
+
+    // Sales (from_table): fact table keyed by ProductId.
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales_builder = ColumnarTableBuilder::new(sales_schema, options);
+    for i in 0..rows {
+        let product_id = (i.wrapping_mul(13)) % unique_keys;
+        sales_builder.append_row(&[
+            formula_columnar::Value::Number(product_id as f64),
+            formula_columnar::Value::Number(1.0),
+        ]);
+    }
+    model
+        .add_table(Table::from_columnar("Sales", sales_builder.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total Sales", "SUM(Sales[Amount])").unwrap();
+    model.add_measure("Sales Rows", "COUNTROWS(Sales)").unwrap();
+
+    model
+}
+
 fn bench_relationship_propagation(c: &mut Criterion) {
     let rows = bench_rows();
 
@@ -258,5 +349,43 @@ fn bench_relationship_propagation(c: &mut Criterion) {
     rows_group.finish();
 }
 
-criterion_group!(benches, bench_relationship_propagation);
+fn bench_relationship_propagation_many_to_many(c: &mut Criterion) {
+    let rows = bench_rows();
+    let model = build_many_to_many_duplicate_to_table_model(rows);
+
+    // Filter on a low-cardinality dimension attribute. This selects a subset of product keys, but
+    // includes *all* duplicate dimension rows for those keys.
+    let filter = FilterContext::empty().with_column_equals("Products", "Group", 5.into());
+
+    // Sanity check: measure should not be blank under filter.
+    let value = model.evaluate_measure("Total Sales", &filter).unwrap();
+    assert!(matches!(value, Value::Number(_)), "unexpected value {value:?}");
+
+    let mut group = c.benchmark_group("relationship_propagation_m2m_to_table_duplicates");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(10));
+    group.throughput(Throughput::Elements(rows as u64));
+
+    group.bench_with_input(BenchmarkId::new("sum", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model.evaluate_measure("Total Sales", &filter).unwrap();
+            black_box(value);
+        })
+    });
+
+    group.bench_with_input(BenchmarkId::new("countrows", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model.evaluate_measure("Sales Rows", &filter).unwrap();
+            black_box(value);
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_relationship_propagation,
+    bench_relationship_propagation_many_to_many
+);
 criterion_main!(benches);
