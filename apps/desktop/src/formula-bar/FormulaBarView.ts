@@ -1778,11 +1778,11 @@ export class FormulaBarView {
     );
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus(), { signal: this.#domAbort.signal });
-    textarea.addEventListener("input", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("input", () => this.#onInput(), { signal: this.#domAbort.signal });
     textarea.addEventListener("mousedown", (e) => this.#onTextareaMouseDown(e), { signal: this.#domAbort.signal });
     textarea.addEventListener("click", () => this.#onTextareaClick(), { signal: this.#domAbort.signal });
-    textarea.addEventListener("keyup", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
-    textarea.addEventListener("select", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("keyup", () => this.#onSelectionChange(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("select", () => this.#onSelectionChange(), { signal: this.#domAbort.signal });
     textarea.addEventListener("scroll", () => this.#syncScroll(), { signal: this.#domAbort.signal });
     textarea.addEventListener("keydown", (e) => this.#onKeyDown(e), { signal: this.#domAbort.signal });
     textarea.addEventListener(
@@ -2180,7 +2180,7 @@ export class FormulaBarView {
     // that doesn't fully blur in all environments). Ensure we still transition into edit mode, mirroring
     // the textarea focus listener.
     this.#beginEditFromFocus();
-    this.#onInputOrSelection();
+    this.#onSelectionChange();
   }
 
   setActiveCell(info: { address: string; input: string; value: unknown; nameBox?: string }): void {
@@ -2280,24 +2280,36 @@ export class FormulaBarView {
     this.#scheduleEngineTooling();
   }
 
-  #onInputOrSelection(): void {
+  #onInput(): void {
     if (!this.model.isEditing) return;
 
     const value = this.textarea.value;
     const start = this.textarea.selectionStart ?? value.length;
     const end = this.textarea.selectionEnd ?? value.length;
 
-    // "keyup" and "select" events can fire without changing the textarea value/selection.
-    // Skip redundant model updates/renders in that case.
-    if (this.model.draft === value && this.model.cursorStart === start && this.model.cursorEnd === end) {
-      return;
-    }
-
     this.model.updateDraft(value, start, end);
     // If the user just started typing a formula, begin loading signature metadata in the background.
     if (isFormulaText(value) && !isFunctionSignatureCatalogReady()) {
       void preloadFunctionSignatureCatalog();
     }
+    this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
+    this.#requestRender({ preserveTextareaValue: true });
+    this.#emitOverlays();
+    this.#scheduleEngineTooling();
+  }
+
+  #onSelectionChange(): void {
+    if (!this.model.isEditing) return;
+
+    // Selection/cursor updates are common and usually do not change the underlying text.
+    // Avoid reading `textarea.value` (and comparing potentially-large strings) in this hot path.
+    const draftLen = this.model.draft.length;
+    const start = this.textarea.selectionStart ?? draftLen;
+    const end = this.textarea.selectionEnd ?? draftLen;
+
+    if (this.model.cursorStart === start && this.model.cursorEnd === end) return;
+
+    this.model.updateDraft(this.model.draft, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
     this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
@@ -2635,10 +2647,10 @@ export class FormulaBarView {
       const nextCursor = cursorStart + insertion.length;
       this.textarea.setSelectionRange(nextCursor, nextCursor);
 
-      // Reuse the standard input/selection path to keep the model + highlight in sync.
-      this.#onInputOrSelection();
-      return;
-    }
+       // Reuse the standard input path to keep the model + highlight in sync.
+       this.#onInput();
+       return;
+     }
 
     if (e.key === "Enter" && !e.altKey) {
       e.preventDefault();
