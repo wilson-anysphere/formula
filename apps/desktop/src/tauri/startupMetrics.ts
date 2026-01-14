@@ -37,6 +37,7 @@ const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
 const TTI_REPORTED_KEY = "__FORMULA_STARTUP_TTI_REPORTED__";
 const HOST_INVOKE_RETRY_DEADLINE_MS = 10_000;
+const FIRST_RENDER_REPORTING_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTING__";
 
 function getStore(): StartupTimings {
   const g = globalThis as any;
@@ -195,43 +196,52 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
 
   const g = globalThis as any;
   if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
-
-  // Give the renderer a frame (or two) to paint the initial grid before reporting.
-  await nextFrame();
-  await nextFrame();
-
-  let invoke = getTauriInvoke();
-  if (!invoke) {
-    // In most environments `__TAURI__` is available immediately, but some host builds can delay
-    // injection until shortly after module evaluation begins. When the early bootstrap runs we
-    // set `__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__` as a low-risk signal that we're in a Tauri
-    // environment and should retry for a short bounded period.
-    const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
-    if (!shouldRetry) return { ...store };
-
-    const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
-    let delayMs = 1;
-    while (!invoke && Date.now() < deadlineMs) {
-      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-      delayMs = Math.min(50, delayMs * 2);
-      invoke = getTauriInvoke();
-    }
-
-    if (!invoke) return { ...store };
-  }
-
-  // Mark as reported only once we're sure the host IPC surface exists; some Tauri builds may
-  // inject `__TAURI__` slightly after the first JS tick.
-  if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
-  g[FIRST_RENDER_REPORTED_KEY] = true;
+  if (g[FIRST_RENDER_REPORTING_KEY]) return { ...store };
+  g[FIRST_RENDER_REPORTING_KEY] = true;
 
   try {
-    await invoke("report_startup_first_render");
-  } catch {
-    // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
-  }
+    // Give the renderer a frame (or two) to paint the initial grid before reporting.
+    await nextFrame();
+    await nextFrame();
 
-  return { ...store };
+    let invoke = getTauriInvoke();
+    if (!invoke) {
+      // In most environments `__TAURI__` is available immediately, but some host builds can delay
+      // injection until shortly after module evaluation begins. When the early bootstrap runs we
+      // set `__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__` as a low-risk signal that we're in a Tauri
+      // environment and should retry for a short bounded period.
+      const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
+      if (!shouldRetry) return { ...store };
+
+      const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
+      let delayMs = 1;
+      while (!invoke && Date.now() < deadlineMs) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(50, delayMs * 2);
+        invoke = getTauriInvoke();
+      }
+
+      if (!invoke) return { ...store };
+    }
+
+    if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
+
+    try {
+      await invoke("report_startup_first_render");
+      g[FIRST_RENDER_REPORTED_KEY] = true;
+    } catch {
+      // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
+    }
+
+    return { ...store };
+  } finally {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (g as any)[FIRST_RENDER_REPORTING_KEY];
+    } catch {
+      g[FIRST_RENDER_REPORTING_KEY] = false;
+    }
+  }
 }
 
 /**
@@ -301,11 +311,23 @@ export async function markStartupTimeToInteractive(options?: {
 
   if (g[TTI_REPORTED_KEY]) return { ...store };
 
+  const ensureFirstRenderReported = async (invoke: TauriInvoke): Promise<void> => {
+    if (g[FIRST_RENDER_REPORTED_KEY]) return;
+    try {
+      await invoke("report_startup_first_render");
+      g[FIRST_RENDER_REPORTED_KEY] = true;
+    } catch {
+      // Best-effort: ignore failures; if we can't report first render, still attempt TTI so the
+      // desktop process can emit a `[startup] ...` line.
+    }
+  };
+
   const invoke = getTauriInvoke();
   if (invoke) {
     if (g[TTI_REPORTED_KEY]) return { ...store };
     g[TTI_REPORTED_KEY] = true;
     try {
+      await ensureFirstRenderReported(invoke);
       await invoke("report_startup_tti");
     } catch {
       // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
@@ -327,6 +349,7 @@ export async function markStartupTimeToInteractive(options?: {
         if (g[TTI_REPORTED_KEY]) return { ...store };
         g[TTI_REPORTED_KEY] = true;
         try {
+          await ensureFirstRenderReported(retriedInvoke);
           await retriedInvoke("report_startup_tti");
         } catch {
           // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.

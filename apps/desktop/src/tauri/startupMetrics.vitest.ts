@@ -13,6 +13,7 @@ describe("startupMetrics", () => {
   const originalTimings = (globalThis as any).__FORMULA_STARTUP_TIMINGS__;
   const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
   const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
+  const originalFirstRenderReporting = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__;
   const originalTtiReported = (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__;
   const originalBootstrapped = (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__;
   const originalWebviewReported = (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__;
@@ -28,6 +29,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
@@ -48,6 +50,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = originalTimings;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__ = originalFirstRenderReporting;
     (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = originalTtiReported;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = originalBootstrapped;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = originalWebviewReported;
@@ -56,6 +59,8 @@ describe("startupMetrics", () => {
 
   it("records a TTI mark and invokes the Rust host when running under Tauri", async () => {
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+    // In the real app we report first-render earlier in startup; keep this test focused on TTI.
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
 
     await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
 
@@ -70,6 +75,24 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("reports first render before TTI when first-render was not previously reported", async () => {
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    // Ensure the first-render report has not happened yet.
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
+
+    await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+
+    expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+    expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+
+    const firstRenderIdx = invoke.mock.calls.findIndex((args) => args[0] === "report_startup_first_render");
+    const ttiIdx = invoke.mock.calls.findIndex((args) => args[0] === "report_startup_tti");
+    expect(firstRenderIdx).toBeGreaterThanOrEqual(0);
+    expect(ttiIdx).toBeGreaterThanOrEqual(0);
+    expect(firstRenderIdx).toBeLessThan(ttiIdx);
+  });
+
   it("retries TTI reporting when bootstrapped and __TAURI__ is injected late", async () => {
     vi.useFakeTimers();
     const originalRaf = (globalThis as any).requestAnimationFrame;
@@ -77,6 +100,7 @@ describe("startupMetrics", () => {
       const invoke = vi.fn().mockResolvedValue(null);
       const listen = vi.fn().mockResolvedValue(() => {});
       (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = true;
+      (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
 
       // Make `nextFrame()` fast so we hit the retry path quickly.
       (globalThis as any).requestAnimationFrame = undefined;
@@ -111,6 +135,7 @@ describe("startupMetrics", () => {
       const invoke = vi.fn().mockResolvedValue(null);
       const listen = vi.fn().mockResolvedValue(() => {});
       (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = true;
+      (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
 
       // Make `nextFrame()` fast so the first call only waits on the invoke retry window.
       (globalThis as any).requestAnimationFrame = undefined;
@@ -123,7 +148,7 @@ describe("startupMetrics", () => {
       }
 
       const first = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
-      // Let the bounded invoke retry window (2s) elapse.
+      // Let the bounded invoke retry window elapse.
       await vi.advanceTimersByTimeAsync(10_500);
       await first;
       expect(invoke).not.toHaveBeenCalled();
@@ -145,6 +170,7 @@ describe("startupMetrics", () => {
       const invoke = vi.fn().mockResolvedValue(null);
       const listen = vi.fn().mockResolvedValue(() => {});
       (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
 
       // Broken rAF implementation (never invokes callback).
       (globalThis as any).requestAnimationFrame = vi.fn();
@@ -167,6 +193,7 @@ describe("startupMetrics", () => {
       const invoke = vi.fn().mockResolvedValue(null);
       const listen = vi.fn().mockResolvedValue(() => {});
       (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
 
       // Make `nextFrame()` fast so the test only waits on the idle timeout.
       (globalThis as any).requestAnimationFrame = undefined;
