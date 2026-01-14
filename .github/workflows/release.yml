@@ -1052,7 +1052,7 @@ jobs:
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
 
-      - name: Validate macOS bundle (DMG, Info.plist, signing)
+      - name: Validate macOS bundle (DMG, Info.plist, codesign/notarization)
         # Always run on macOS so unsigned fork/dry-run builds still validate bundle structure.
         # Codesign + notarization checks are conditional on env vars (APPLE_* secrets) and are
         # skipped automatically when signing is not configured.
@@ -1182,10 +1182,6 @@ jobs:
           # Optional: set as GitHub Actions variables to enable gating.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
-
-      - name: Validate macOS bundle (DMG + codesign/notarization)
-        if: runner.os == 'macOS'
-        run: bash scripts/validate-macos-bundle.sh
 
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
