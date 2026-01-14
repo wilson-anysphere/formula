@@ -82,12 +82,17 @@ fn chart_type_from_kind(kind: &ChartKind) -> ChartType {
 }
 
 fn legacy_text_string(text: &TextModel) -> Option<String> {
-    if let Some(formula) = &text.formula {
-        Some(formula.clone())
-    } else if text.rich_text.text.is_empty() {
-        None
-    } else {
+    // Legacy `extract_charts()` historically surfaced displayed strings for text
+    // (title/series names) rather than the underlying formula reference.
+    //
+    // Prefer the cached/display text and only fall back to the formula when the
+    // rich text is empty.
+    if !text.rich_text.text.is_empty() {
         Some(text.rich_text.text.clone())
+    } else if let Some(formula) = &text.formula {
+        Some(formula.clone())
+    } else {
+        None
     }
 }
 
