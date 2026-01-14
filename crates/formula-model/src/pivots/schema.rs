@@ -226,8 +226,7 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX table identifiers can be written without quotes when they are simple identifier tokens.
-    // Quote anything containing whitespace/punctuation or reserved keywords like VAR/RETURN/IN.
+    // DAX table identifiers can be written without quotes when they are identifier-like tokens.
     //
     // Use Unicode-aware character classes so names like `Straße` can remain unquoted.
     // Keep this conservative—quoting is always accepted by DAX.
