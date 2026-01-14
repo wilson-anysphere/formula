@@ -188,6 +188,31 @@ describeWasm("EngineWorker getWorkbookInfo (wasm)", () => {
     expect(veryHidden.tabColor).toBeUndefined();
   });
 
+  it("round-trips sheet visibility + tabColor through toJson/fromJson", async () => {
+    const wasm = await loadFormulaWasm();
+    const fixturePath = fileURLToPath(
+      new URL("../../../../crates/formula-xlsx/tests/fixtures/sheet-metadata.xlsx", import.meta.url)
+    );
+    const bytes = new Uint8Array(readFileSync(fixturePath));
+
+    const workbook = wasm.WasmWorkbook.fromXlsxBytes(bytes);
+    const json = workbook.toJson();
+    const parsed = JSON.parse(json) as any;
+
+    expect(parsed?.sheets?.Visible?.tabColor).toEqual({ rgb: "FFFF0000" });
+    expect(parsed?.sheets?.Visible?.visibility).toBeUndefined();
+    expect(parsed?.sheets?.Hidden?.visibility).toBe("hidden");
+    expect(parsed?.sheets?.VeryHidden?.visibility).toBe("veryHidden");
+
+    const roundtripped = wasm.WasmWorkbook.fromJson(json);
+    const info = roundtripped.getWorkbookInfo() as WorkbookInfoDto;
+
+    const byId = new Map(info.sheets.map((sheet) => [sheet.id, sheet]));
+    expect(byId.get("Visible")?.tabColor).toEqual({ rgb: "FFFF0000" });
+    expect(byId.get("Hidden")?.visibility).toBe("hidden");
+    expect(byId.get("VeryHidden")?.visibility).toBe("veryHidden");
+  });
+
   it("returns sheet list, dimensions, and best-effort used ranges (including rich inputs)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

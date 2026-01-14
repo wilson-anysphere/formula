@@ -4137,6 +4137,10 @@ impl WasmWorkbook {
             row_count: Option<u32>,
             #[serde(default, rename = "colCount")]
             col_count: Option<u32>,
+            #[serde(default)]
+            visibility: Option<String>,
+            #[serde(default, rename = "tabColor")]
+            tab_color: Option<TabColor>,
             cells: BTreeMap<String, JsonValue>,
         }
 
@@ -4185,6 +4189,40 @@ impl WasmWorkbook {
         }
 
         for (sheet_name, sheet) in parsed.sheets {
+            let display_name = wb.ensure_sheet(&sheet_name);
+
+            if let Some(raw) = sheet.visibility.as_deref() {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() || trimmed == "visible" {
+                    wb.sheet_visibility.remove(&display_name);
+                } else {
+                    let vis = match trimmed {
+                        "hidden" => SheetVisibility::Hidden,
+                        "veryHidden" | "very_hidden" => SheetVisibility::VeryHidden,
+                        other => {
+                            return Err(js_err(format!(
+                                "invalid sheet visibility (expected visible|hidden|veryHidden): {other}"
+                            )))
+                        }
+                    };
+                    wb.sheet_visibility.insert(display_name.clone(), vis);
+                }
+            }
+
+            if let Some(color) = sheet.tab_color.as_ref() {
+                let is_empty = color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none();
+                if is_empty {
+                    wb.sheet_tab_colors.remove(&display_name);
+                } else {
+                    wb.sheet_tab_colors
+                        .insert(display_name.clone(), color.clone());
+                }
+            }
+
             // Apply sheet dimensions (when provided) before importing cells so large addresses
             // can be set without pre-populating the full grid.
             if sheet.row_count.is_some() || sheet.col_count.is_some() {
@@ -4740,6 +4778,10 @@ impl WasmWorkbook {
             row_count: Option<u32>,
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "colCount")]
             col_count: Option<u32>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            visibility: Option<&'static str>,
+            #[serde(default, skip_serializing_if = "Option::is_none", rename = "tabColor")]
+            tab_color: Option<TabColor>,
             cells: BTreeMap<String, JsonValue>,
         }
 
@@ -4761,11 +4803,20 @@ impl WasmWorkbook {
                 .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
             let row_count = (rows != EXCEL_MAX_ROWS).then_some(rows);
             let col_count = (cols != EXCEL_MAX_COLS).then_some(cols);
+
+            let visibility = self.inner.sheet_visibility.get(sheet_name).and_then(|v| match v {
+                SheetVisibility::Hidden => Some("hidden"),
+                SheetVisibility::VeryHidden => Some("veryHidden"),
+                SheetVisibility::Visible => None,
+            });
+            let tab_color = self.inner.sheet_tab_colors.get(sheet_name).cloned();
             sheets.insert(
                 sheet_name.clone(),
                 SheetJson {
                     row_count,
                     col_count,
+                    visibility,
+                    tab_color,
                     cells: out_cells,
                 },
             );
