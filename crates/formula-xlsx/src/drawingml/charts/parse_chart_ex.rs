@@ -212,7 +212,7 @@ fn parse_legend(
 
 fn detect_chart_kind(
     doc: &Document<'_>,
-    _root_ns: &str,
+    root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
