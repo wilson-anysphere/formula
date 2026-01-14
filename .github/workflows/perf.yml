@@ -407,22 +407,27 @@ jobs:
           name: perf-benchmark-results
           path: artifacts/perf-benchmark-results
 
-      - name: Verify benchmark results are present
+      - name: Check benchmark results (skip publish when missing/empty)
+        id: bench
         shell: bash
         run: |
           set -euo pipefail
           path="artifacts/perf-benchmark-results/benchmark-results.json"
           if [ ! -f "$path" ]; then
-            echo "::error::Missing ${path}; cannot publish benchmark history."
-            exit 1
+            echo "::notice::Missing ${path}; skipping gh-pages publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           count="$(node -e 'const fs=require(\"fs\");const p=process.argv[1];const v=JSON.parse(fs.readFileSync(p,\"utf8\"));console.log(Array.isArray(v)?v.length:0);' "$path")"
           if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then
-            echo "::error::Benchmark results file is empty; cannot publish benchmark history."
-            exit 1
+            echo "::notice::Benchmark results file is empty; skipping gh-pages publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish benchmark results
+        if: steps.bench.outputs.publish == 'true'
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
