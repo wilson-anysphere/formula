@@ -301,6 +301,66 @@ fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
 }
 
 #[test]
+fn import_autofilter_criteria_negative_text_operators_are_preserved_as_opaque_custom() {
+    let bytes = xls_fixture_builder::build_autofilter_criteria_text_ops_negative_fixture_xls();
+    let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilterCriteriaTextOpsNeg")
+        .expect("FilterCriteriaTextOpsNeg missing");
+    let af = sheet.auto_filter.as_ref().expect("auto_filter missing");
+
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
+    assert_eq!(
+        af.filter_columns,
+        vec![
+            FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "doesNotContain".to_string(),
+                    value: Some("Al".to_string()),
+                })],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 1,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "doesNotBeginWith".to_string(),
+                    value: Some("B".to_string()),
+                })],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 2,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "doesNotEndWith".to_string(),
+                    value: Some("z".to_string()),
+                })],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+        ],
+        "unexpected filter columns; warnings={:?}",
+        result.warnings
+    );
+
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn import_autofilter_criteria_bool_values() {
     let bytes = xls_fixture_builder::build_autofilter_criteria_bool_fixture_xls();
     let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
