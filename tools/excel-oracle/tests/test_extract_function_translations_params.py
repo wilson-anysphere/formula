@@ -34,6 +34,13 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
         self.assertIn("functionCatalog.json", text)
         self.assertIn('"shared"', text)
 
+        # Source label should be stable across Excel updates so we don't churn diffs when only the
+        # Office build number changes.
+        self.assertIn(
+            'source = "Microsoft Excel ($LocaleId) function name translations via Range.Formula/FormulaLocal round-trip',
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
