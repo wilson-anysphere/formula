@@ -8,8 +8,12 @@ describe("parseSpreadsheetNumber", () => {
     expect(parseSpreadsheetNumber("123")).toBe(123);
     expect(parseSpreadsheetNumber("1,200")).toBe(1200);
     expect(parseSpreadsheetNumber("$5")).toBe(5);
+    expect(parseSpreadsheetNumber("$-5")).toBe(-5);
     expect(parseSpreadsheetNumber("(1,200)")).toBe(-1200);
+    expect(parseSpreadsheetNumber("(-5)")).toBe(-5);
+    expect(parseSpreadsheetNumber("($-5)")).toBe(-5);
     expect(parseSpreadsheetNumber("10%")).toBeCloseTo(0.1);
+    expect(parseSpreadsheetNumber("(-10%)")).toBeCloseTo(-0.1);
     expect(parseSpreadsheetNumber(".5")).toBeCloseTo(0.5);
     expect(parseSpreadsheetNumber("1e3")).toBe(1000);
   });
@@ -22,4 +26,3 @@ describe("parseSpreadsheetNumber", () => {
     expect(parseSpreadsheetNumber("Infinity")).toBeNull();
   });
 });
-

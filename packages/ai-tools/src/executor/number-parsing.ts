@@ -30,10 +30,10 @@ export function parseSpreadsheetNumber(value: unknown): number | null {
   if (Number.isFinite(direct)) return direct;
 
   let sign = 1;
+  const hasParens = text.startsWith("(") && text.endsWith(")");
 
   // Accounting-style negatives: "(123)".
-  if (text.startsWith("(") && text.endsWith(")")) {
-    sign *= -1;
+  if (hasParens) {
     text = text.slice(1, -1).trim();
     if (text === "") return null;
   }
@@ -75,6 +75,10 @@ export function parseSpreadsheetNumber(value: unknown): number | null {
 
   let result = numeric * sign;
   if (isPercent) result /= 100;
+  // Parentheses typically indicate a negative number in spreadsheets.
+  // Only apply the negation when the parsed value is positive to avoid
+  // double-negating tokens like "(-5)" or "($-5)".
+  if (hasParens && result > 0) result = -result;
 
   return Number.isFinite(result) ? result : null;
 }
