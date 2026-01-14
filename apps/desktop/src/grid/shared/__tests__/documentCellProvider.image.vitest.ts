@@ -117,5 +117,33 @@ describe("DocumentCellProvider image values", () => {
     expect(cell?.image?.imageId).toBe("image5.png");
     expect(cell?.value).toBe("Computed");
   });
-});
 
+  it("prefers cached in-cell image values for formula cells when present", () => {
+    const doc = new DocumentController();
+    // `setCellFormula` forces value=null, so use `setCell` to simulate an imported snapshot that
+    // includes a cached rich-value image payload alongside the original formula text.
+    doc.setCell("Sheet1", 0, 0, {
+      value: { type: "image", value: { imageId: "image6.png", altText: "Cached" } },
+      formula: "=IMAGE(\"https://example.com\")",
+      styleId: 0,
+    } as any);
+
+    const getComputedValue = vi.fn(() => ({ type: "image", value: { imageId: "computed.png", altText: "Computed" } }));
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue,
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(getComputedValue).not.toHaveBeenCalled();
+    expect(cell?.image?.imageId).toBe("image6.png");
+    expect(cell?.value).toBe("Cached");
+  });
+});

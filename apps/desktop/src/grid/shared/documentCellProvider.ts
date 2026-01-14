@@ -962,9 +962,15 @@ export class DocumentCellProvider implements CellProvider {
       if (this.options.showFormulas()) {
         value = state.formula;
       } else {
-        const computed = this.options.getComputedValue(coord);
-        if (!applyImageValue(computed)) {
-          applyScalarValue(computed);
+        // Most formula cells should display the calc engine's computed value. However, imported XLSX
+        // snapshots can include a cached rich-value image payload for IMAGE() / "Place in Cell"
+        // pictures. Prefer rendering that cached in-cell image when present, falling back to the
+        // computed value for all other formulas.
+        if (!applyImageValue(state.value)) {
+          const computed = this.options.getComputedValue(coord);
+          if (!applyImageValue(computed)) {
+            applyScalarValue(computed);
+          }
         }
       }
     } else if (state.value != null) {
