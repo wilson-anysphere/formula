@@ -483,7 +483,18 @@ export class FormulaBarFunctionAutocompleteController {
 
       const name = document.createElement("div");
       name.className = "formula-bar-function-autocomplete-name";
-      name.textContent = item.name;
+      const ctx = this.#context;
+      const typedName = ctx ? ctx.typedPrefix.slice(ctx.qualifier.length) : "";
+      const matchLen = Math.max(0, Math.min(item.name.length, typedName.length));
+      if (matchLen > 0) {
+        const match = document.createElement("span");
+        match.className = "formula-bar-function-autocomplete-match";
+        match.textContent = item.name.slice(0, matchLen);
+        name.appendChild(match);
+        name.appendChild(document.createTextNode(item.name.slice(matchLen)));
+      } else {
+        name.textContent = item.name;
+      }
 
       const sig = document.createElement("div");
       sig.className = "formula-bar-function-autocomplete-signature";

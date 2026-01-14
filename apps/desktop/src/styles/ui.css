@@ -514,6 +514,10 @@ a:visited {
   font-size: 12px;
 }
 
+.formula-bar-function-autocomplete-match {
+  font-weight: 800;
+}
+
 .formula-bar-function-autocomplete-signature {
   font-size: 11px;
   color: var(--text-secondary);
