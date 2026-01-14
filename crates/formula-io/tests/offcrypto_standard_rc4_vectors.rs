@@ -68,13 +68,26 @@ fn standard_rc4_spun_password_hash(password: &str, salt: &[u8], spin_count: u32)
 /// Standard CryptoAPI per-block key derivation helper.
 ///
 /// Algorithm:
-/// `rc4_key = SHA1(H || LE32(block_index))[0..key_len]`
+/// `h_block = SHA1(H || LE32(block_index))`
+///
+/// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the
+/// high 88 bits zero. Concretely, when `key_len == 5` (`keySize == 40`), the RC4 key bytes passed
+/// into the RC4 KSA are:
+///
+/// `rc4_key = h_block[0..5] || 0x00 * 11` (16 bytes total)
 fn standard_rc4_derive_block_key(h: [u8; 20], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(h);
     hasher.update(block_index.to_le_bytes());
     let digest = hasher.finalize();
-    digest[..key_len].to_vec()
+    if key_len == 5 {
+        let mut key = Vec::with_capacity(16);
+        key.extend_from_slice(&digest[..5]);
+        key.resize(16, 0);
+        key
+    } else {
+        digest[..key_len].to_vec()
+    }
 }
 
 /// Standard CryptoAPI "spun password hash" helper for MD5.
@@ -101,7 +114,14 @@ fn standard_rc4_derive_block_key_md5(h: [u8; 16], block_index: u32, key_len: usi
     hasher.update(h);
     hasher.update(block_index.to_le_bytes());
     let digest = hasher.finalize();
-    digest[..key_len].to_vec()
+    if key_len == 5 {
+        let mut key = Vec::with_capacity(16);
+        key.extend_from_slice(&digest[..5]);
+        key.resize(16, 0);
+        key
+    } else {
+        digest[..key_len].to_vec()
+    }
 }
 
 /// Minimal RC4 implementation (KSA + PRGA).
@@ -175,6 +195,12 @@ fn standard_cryptoapi_rc4_derivation_vector() {
         hex_decode("e7c9974140e69857dbdec656c7ccb4f9283d723236")
     );
     assert_eq!(rc4_apply(&key0, &ciphertext), plaintext);
+
+    // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
+    let key0_40 = standard_rc4_derive_block_key(h, 0, 5);
+    assert_eq!(key0_40, hex_decode("6ad7dedf2d0000000000000000000000"));
+    assert_eq!(key0_40.len(), 16);
+    assert!(key0_40[5..].iter().all(|b| *b == 0));
 }
 
 #[test]
@@ -196,7 +222,9 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key2, hex_decode("ac69022e396c7750872133f37e2c7afc"));
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
 
-    // Truncation for 40-bit RC4 keys.
+    // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
     let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
-    assert_eq!(key0_40, hex_decode("69badcae24"));
+    assert_eq!(key0_40, hex_decode("69badcae240000000000000000000000"));
+    assert_eq!(key0_40.len(), 16);
+    assert!(key0_40[5..].iter().all(|b| *b == 0));
 }
