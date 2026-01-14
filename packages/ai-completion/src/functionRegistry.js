@@ -2113,7 +2113,7 @@ const CURATED_FUNCTIONS = [
     name: "SERIESSUM",
     description: "Returns the sum of a power series based on the formula.",
     args: [
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "n", type: "number" },
       { name: "m", type: "number" },
       { name: "coefficients", type: "range" },
@@ -2155,7 +2155,7 @@ const CURATED_FUNCTIONS = [
     name: "FORECAST.LINEAR",
     description: "Returns a value along a linear trend.",
     args: [
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "known_ys", type: "range" },
       { name: "known_xs", type: "range" },
     ],
@@ -2164,7 +2164,7 @@ const CURATED_FUNCTIONS = [
     name: "FORECAST",
     description: "Returns a value along a linear trend (legacy).",
     args: [
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "known_ys", type: "range" },
       { name: "known_xs", type: "range" },
     ],

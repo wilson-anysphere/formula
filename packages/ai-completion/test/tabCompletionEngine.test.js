@@ -4338,6 +4338,42 @@ test("BESSELI x suggests a left-cell reference (value-like)", async () => {
   );
 });
 
+test("FORECAST.LINEAR x suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.LINEAR(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.LINEAR(A1"),
+    `Expected FORECAST.LINEAR to suggest a left-cell reference for x, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("SERIESSUM x suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SERIESSUM(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SERIESSUM(A1"),
+    `Expected SERIESSUM to suggest a left-cell reference for x, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
   const engine = new TabCompletionEngine();
 

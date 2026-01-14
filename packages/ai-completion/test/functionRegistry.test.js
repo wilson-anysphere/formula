@@ -219,8 +219,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     false,
     "Expected FORECAST.LINEAR x not to be a range"
   );
+  assert.equal(registry.getArgType("FORECAST.LINEAR", 0), "value", "Expected FORECAST.LINEAR x to be value-like");
   assert.ok(registry.isRangeArg("FORECAST.LINEAR", 1), "Expected FORECAST.LINEAR known_ys to be a range");
   assert.ok(registry.isRangeArg("FORECAST.LINEAR", 2), "Expected FORECAST.LINEAR known_xs to be a range");
+  assert.equal(registry.getArgType("FORECAST", 0), "value", "Expected FORECAST x to be value-like");
 
   // HSTACK/VSTACK(array1, [array2], ...)
   assert.ok(registry.isRangeArg("HSTACK", 0), "Expected HSTACK array1 to be a range");
@@ -376,6 +378,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("PROB", 3), "value", "Expected PROB upper_limit to be value-like");
   assert.ok(registry.getFunction("PROB")?.args?.[3]?.optional, "Expected PROB upper_limit to be optional");
   assert.ok(registry.isRangeArg("SERIESSUM", 3), "Expected SERIESSUM coefficients to be a range");
+  assert.equal(registry.getArgType("SERIESSUM", 0), "value", "Expected SERIESSUM x to be value-like");
 
   // Common distribution functions: keep cumulative flags boolean while treating scalar inputs as value-like.
   assert.equal(registry.getArgType("NORM.DIST", 0), "value", "Expected NORM.DIST x to be value-like");
