@@ -62,6 +62,23 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 10 }]);
   });
 
+  it("drops filterRows comparisons that are missing required values", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals" } },
+          { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "contains", value: null } },
+          { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("filter", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } }]);
+  });
+
   it("drops take operations with invalid counts", async () => {
     chatMock.mockResolvedValue({
       message: {

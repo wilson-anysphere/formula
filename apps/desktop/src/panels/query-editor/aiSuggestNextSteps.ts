@@ -137,13 +137,40 @@ function coerceFilterPredicate(value: unknown, allowedColumns: Set<string>): Fil
   if (type === "comparison") {
     if (!validateColumn(value.column, allowedColumns)) return null;
     if (!isComparisonOperator(value.operator)) return null;
+    // Most comparison operators require a `value` field. Without it, the engine
+    // would interpret the missing value as `undefined`, often resulting in a
+    // predicate that matches everything (e.g. `contains ""`) or nothing
+    // (`greaterThan undefined`).
+    if (
+      value.operator !== "isNull" &&
+      value.operator !== "isNotNull" &&
+      !("value" in value)
+    ) {
+      return null;
+    }
     const predicate: ComparisonPredicate = {
       type: "comparison",
       column: value.column,
       operator: value.operator,
     };
     const maybeValue = (value as { value?: unknown }).value;
-    if ("value" in value) predicate.value = maybeValue;
+    if ("value" in value) {
+      // Treat nullish values as invalid for operators that would otherwise
+      // devolve into always-true/always-false filters.
+      if (
+        (value.operator === "greaterThan" ||
+          value.operator === "greaterThanOrEqual" ||
+          value.operator === "lessThan" ||
+          value.operator === "lessThanOrEqual" ||
+          value.operator === "contains" ||
+          value.operator === "startsWith" ||
+          value.operator === "endsWith") &&
+        maybeValue == null
+      ) {
+        return null;
+      }
+      predicate.value = maybeValue;
+    }
     const maybeCaseSensitive = (value as { caseSensitive?: unknown }).caseSensitive;
     if (typeof maybeCaseSensitive === "boolean") predicate.caseSensitive = maybeCaseSensitive;
     return predicate;
