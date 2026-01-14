@@ -136,6 +136,28 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     expect(doc.getCellFormat("Sheet1", "C3").numberFormat).toBe("#,##0");
   });
 
+  it("shows a toast and does not apply when the format code is syntactically invalid", async () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });
+
+    const showInputBox = vi.fn().mockResolvedValue('"0.00'); // unbalanced quotes
+    const showToast = vi.fn();
+    const applyFormattingToSelection = vi.fn((_, fn) => {
+      fn(doc, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
+    });
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => false,
+      showInputBox,
+      getSelectionNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
+      applyFormattingToSelection,
+      showToast,
+    });
+
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("0.00");
+  });
+
   it("treats the localized General label as a clear-format sentinel", async () => {
     const doc = new DocumentController();
     doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });

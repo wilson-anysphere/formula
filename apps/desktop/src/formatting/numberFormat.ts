@@ -254,3 +254,67 @@ export function formatValueWithNumberFormat(value: number, numberFormat: string)
 
   return formatNumeric(value, section);
 }
+
+/**
+ * Best-effort validation for Excel-style custom number format codes.
+ *
+ * Notes:
+ * - This is intentionally **not** a full Excel number format parser.
+ * - The goal is to catch obvious syntax errors (unbalanced quotes/brackets, too many sections)
+ *   so the custom format prompt can avoid storing clearly-invalid codes.
+ * - Valid Excel codes may still be rendered approximately by `formatValueWithNumberFormat` since
+ *   our canvas renderer supports only a subset of Excel formatting features.
+ */
+export function isValidExcelNumberFormatCode(format: string): boolean {
+  if (typeof format !== "string") return false;
+
+  let inQuotes = false;
+  let bracketDepth = 0;
+  let sections = 1;
+
+  for (let i = 0; i < format.length; i += 1) {
+    const ch = format[i];
+    if (ch === "\\") {
+      // Excel uses backslash to escape the next character (treat it as a literal).
+      i += 1;
+      if (i >= format.length) return false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (inQuotes) continue;
+
+    if (ch === ";") {
+      sections += 1;
+      if (sections > 4) return false;
+      continue;
+    }
+
+    // `*` repeats the next character; `_` reserves space for it. Missing the trailing
+    // character is a syntax error.
+    if (ch === "*" || ch === "_") {
+      if (i + 1 >= format.length) return false;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      bracketDepth -= 1;
+      if (bracketDepth < 0) return false;
+      continue;
+    }
+  }
+
+  if (inQuotes) return false;
+  if (bracketDepth !== 0) return false;
+  return true;
+}

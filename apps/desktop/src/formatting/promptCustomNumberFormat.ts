@@ -1,7 +1,7 @@
 import type { DocumentController } from "../document/documentController.js";
 import { t } from "../i18n/index.js";
 import type { CellRange } from "./toolbar.js";
-import { formatValueWithNumberFormat } from "./numberFormat.js";
+import { isValidExcelNumberFormatCode } from "./numberFormat.js";
 
 export type ApplyFormattingToSelection = (
   label: string,
@@ -49,15 +49,8 @@ export async function promptAndApplyCustomNumberFormat(options: {
     !trimmed || normalized === "general" || (localizedGeneral && normalized === localizedGeneral) ? null : input;
 
   if (typeof desired === "string") {
-    // Best-effort validation: if our formatter/parser rejects the format code (throws),
-    // surface a warning and do not apply.
-    let valid = true;
-    try {
-      formatValueWithNumberFormat(0, desired);
-    } catch {
-      valid = false;
-    }
-    if (!valid) {
+    // Best-effort validation: catch obvious syntax errors before applying.
+    if (!isValidExcelNumberFormatCode(desired)) {
       options.showToast?.(t("toast.customNumberFormat.invalid"), "warning");
       return;
     }
