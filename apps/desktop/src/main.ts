@@ -7210,7 +7210,11 @@ if (
     event.preventDefault();
 
     const pointerId = event.pointerId;
-    gridSplitterEl.setPointerCapture(pointerId);
+    try {
+      gridSplitterEl.setPointerCapture(pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
 
     // Preserve the pointer's initial offset within the splitter handle so dragging
     // doesn't "snap" the pointer to the edge of the splitter (keeps the grab point stable).
