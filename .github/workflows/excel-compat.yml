@@ -70,7 +70,9 @@ env:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    # Pin runner image versions for reproducibility. GitHub's `ubuntu-latest` alias moves
+    # over time, which can introduce unexpected breakages in CI guard checks.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
@@ -81,12 +83,12 @@ jobs:
   excel-oracle:
     needs: conflict-marker-guard
     # Validating the engine (against a pinned dataset) does not require Excel and can run on
-    # GitHub-hosted `windows-latest`.
+    # GitHub-hosted `windows-2022`.
     #
     # Generating a real Excel oracle dataset *does* require desktop Excel, which is typically only
     # available on a self-hosted runner. Route workflow_dispatch runs that need Excel generation to
     # a runner labeled `self-hosted` + `windows` + `excel` (see tools/excel-oracle/self-hosted-runner.md).
-    runs-on: ${{ fromJSON((github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'generate-oracle' || github.event.inputs.oracle_source == 'generate' || hashFiles('tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json') == '')) && '["self-hosted","windows","excel"]' || '["windows-latest"]') }}
+    runs-on: ${{ fromJSON((github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'generate-oracle' || github.event.inputs.oracle_source == 'generate' || hashFiles('tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json') == '')) && '["self-hosted","windows","excel"]' || '["windows-2022"]') }}
     timeout-minutes: 60
     # For push/PR we validate against a pinned dataset (no Excel required).
     # If there is no pinned dataset committed yet, skip the job to avoid failing CI.

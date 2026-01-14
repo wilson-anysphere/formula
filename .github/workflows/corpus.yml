@@ -70,7 +70,9 @@ on:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    # Pin runner image versions for reproducibility. GitHub's `ubuntu-latest` alias moves
+    # over time, which can introduce unexpected breakages in corpus automation.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
@@ -81,7 +83,7 @@ jobs:
   public-corpus:
     name: Public corpus triage
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # Manual workflow_dispatch runs can opt into heavier checks even for the public subset.
       CORPUS_RUN_RECALC: ${{ github.event.inputs.recalc }}
@@ -154,7 +156,7 @@ jobs:
   private-corpus:
     name: Private corpus triage (scheduled)
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     env:
       # Nightly schedule runs at least the Calculate (L2) check by default. This can be disabled by
