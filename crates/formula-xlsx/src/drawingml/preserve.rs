@@ -149,7 +149,20 @@ impl PreservedDrawingParts {
 ///
 /// Unlike [`XlsxPackage::from_bytes`], this does **not** inflate every ZIP entry into memory.
 pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
+    reader: R,
+) -> Result<PreservedDrawingParts, ChartExtractionError> {
+    preserve_drawing_parts_from_reader_limited(reader, DEFAULT_MAX_ZIP_PART_BYTES, DEFAULT_MAX_ZIP_TOTAL_BYTES)
+}
+
+/// Streaming variant of [`XlsxPackage::preserve_drawing_parts`] with configurable ZIP inflation
+/// limits.
+///
+/// This is primarily useful for callers that treat the input as untrusted (e.g. desktop IPC
+/// surfaces) and want tighter bounds than the crate defaults.
+pub fn preserve_drawing_parts_from_reader_limited<R: Read + Seek>(
     mut reader: R,
+    max_part_bytes: u64,
+    max_total_bytes: u64,
 ) -> Result<PreservedDrawingParts, ChartExtractionError> {
     reader
         .seek(SeekFrom::Start(0))
@@ -169,14 +182,15 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
     }
 
-    let mut budget = ZipInflateBudget::new(DEFAULT_MAX_ZIP_TOTAL_BYTES);
+    let mut budget = ZipInflateBudget::new(max_total_bytes);
 
     let content_types_xml =
-        read_zip_part_required(&mut archive, "[Content_Types].xml", &mut budget)?;
+        read_zip_part_required(&mut archive, "[Content_Types].xml", max_part_bytes, &mut budget)?;
 
-    let workbook_xml = read_zip_part_required(&mut archive, "xl/workbook.xml", &mut budget)?;
+    let workbook_xml =
+        read_zip_part_required(&mut archive, "xl/workbook.xml", max_part_bytes, &mut budget)?;
     let workbook_rels_xml =
-        read_zip_part_optional(&mut archive, "xl/_rels/workbook.xml.rels", &mut budget)?;
+        read_zip_part_optional(&mut archive, "xl/_rels/workbook.xml.rels", max_part_bytes, &mut budget)?;
 
     let chart_sheets = extract_workbook_chart_sheets_from_workbook_parts(
         &workbook_xml,
@@ -210,7 +224,12 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
 
         // Best-effort: some producers emit malformed `.rels` parts. For preservation we skip
         // relationship discovery for this sheet rather than erroring.
-        let rels = match read_zip_part_optional(&mut archive, &sheet_rels_part, &mut budget)? {
+        let rels = match read_zip_part_optional(
+            &mut archive,
+            &sheet_rels_part,
+            max_part_bytes,
+            &mut budget,
+        )? {
             Some(xml) => match parse_relationships(&xml, &sheet_rels_part) {
                 Ok(rels) => rels,
                 Err(_) => Vec::new(),
@@ -262,7 +281,7 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         }
 
         let Some(sheet_xml) =
-            read_zip_part_optional(&mut archive, &sheet.part_name, &mut budget)?
+            read_zip_part_optional(&mut archive, &sheet.part_name, max_part_bytes, &mut budget)?
         else {
             continue;
         };
@@ -518,6 +537,7 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         &mut archive,
         &part_names,
         root_parts,
+        max_part_bytes,
         &mut budget,
     )?;
 
@@ -1128,12 +1148,13 @@ impl XlsxPackage {
 fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    max_part_bytes: u64,
     budget: &mut ZipInflateBudget,
 ) -> Result<Option<Vec<u8>>, ChartExtractionError> {
     crate::zip_util::read_zip_part_optional_with_budget(
         archive,
         name,
-        DEFAULT_MAX_ZIP_PART_BYTES,
+        max_part_bytes,
         budget,
     )
     .map_err(|e| ChartExtractionError::XmlStructure(e.to_string()))
@@ -1142,9 +1163,10 @@ fn read_zip_part_optional<R: Read + Seek>(
 fn read_zip_part_required<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    max_part_bytes: u64,
     budget: &mut ZipInflateBudget,
 ) -> Result<Vec<u8>, ChartExtractionError> {
-    read_zip_part_optional(archive, name, budget)?
+    read_zip_part_optional(archive, name, max_part_bytes, budget)?
         .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 
@@ -1162,6 +1184,7 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     part_names: &HashSet<String>,
     root_parts: impl IntoIterator<Item = String>,
+    max_part_bytes: u64,
     budget: &mut ZipInflateBudget,
 ) -> Result<BTreeMap<String, Vec<u8>>, ChartExtractionError> {
     use std::collections::VecDeque;
@@ -1185,7 +1208,8 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
         if !part_names.contains(&part_name) {
             continue;
         }
-        let Some(part_bytes) = read_zip_part_optional(archive, &part_name, budget)? else {
+        let Some(part_bytes) = read_zip_part_optional(archive, &part_name, max_part_bytes, budget)?
+        else {
             continue;
         };
         out.insert(part_name.clone(), part_bytes);
@@ -1194,7 +1218,9 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
         let Some(rels_part_name) = find_part_name(part_names, &rels_part_name) else {
             continue;
         };
-        let Some(rels_bytes) = read_zip_part_optional(archive, &rels_part_name, budget)? else {
+        let Some(rels_bytes) =
+            read_zip_part_optional(archive, &rels_part_name, max_part_bytes, budget)?
+        else {
             continue;
         };
         out.insert(rels_part_name.clone(), rels_bytes.clone());
@@ -2130,6 +2156,7 @@ mod tests {
             &mut archive,
             &part_names,
             ["xl/charts/chart0.xml".to_string()],
+            u64::MAX,
             &mut budget,
         )
         .expect("traverse");
@@ -2171,6 +2198,7 @@ mod tests {
             &mut archive,
             &part_names,
             ["xl/drawings/drawing1.xml".to_string()],
+            u64::MAX,
             &mut budget,
         )
         .expect("traverse");

@@ -96,7 +96,20 @@ pub struct PreservedWorkbookSheet {
 ///
 /// Unlike [`XlsxPackage::from_bytes`], this does **not** inflate every ZIP entry into memory.
 pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
+    reader: R,
+) -> Result<PreservedPivotParts, ChartExtractionError> {
+    preserve_pivot_parts_from_reader_limited(reader, DEFAULT_MAX_ZIP_PART_BYTES, DEFAULT_MAX_ZIP_TOTAL_BYTES)
+}
+
+/// Streaming variant of [`XlsxPackage::preserve_pivot_parts`] with configurable ZIP inflation
+/// limits.
+///
+/// This is primarily useful for callers that treat the input as untrusted and want tighter bounds
+/// than the crate defaults.
+pub fn preserve_pivot_parts_from_reader_limited<R: Read + Seek>(
     mut reader: R,
+    max_part_bytes: u64,
+    max_total_bytes: u64,
 ) -> Result<PreservedPivotParts, ChartExtractionError> {
     reader
         .seek(SeekFrom::Start(0))
@@ -116,10 +129,10 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
     }
 
-    let mut budget = ZipInflateBudget::new(DEFAULT_MAX_ZIP_TOTAL_BYTES);
+    let mut budget = ZipInflateBudget::new(max_total_bytes);
 
     let content_types_xml =
-        read_zip_part_required(&mut archive, "[Content_Types].xml", &mut budget)?;
+        read_zip_part_required(&mut archive, "[Content_Types].xml", max_part_bytes, &mut budget)?;
 
     let mut parts = BTreeMap::new();
     for name in &part_names {
@@ -130,14 +143,15 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
             || name.starts_with("xl/timelines/")
             || name.starts_with("xl/timelineCaches/")
         {
-            if let Some(bytes) = read_zip_part_optional(&mut archive, name, &mut budget)? {
+            if let Some(bytes) = read_zip_part_optional(&mut archive, name, max_part_bytes, &mut budget)? {
                 parts.insert(name.clone(), bytes);
             }
         }
     }
 
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = read_zip_part_required(&mut archive, workbook_part, &mut budget)?;
+    let workbook_xml =
+        read_zip_part_required(&mut archive, workbook_part, max_part_bytes, &mut budget)?;
     let workbook_xml_str = std::str::from_utf8(&workbook_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
     let workbook_doc = Document::parse(workbook_xml_str)
@@ -200,7 +214,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
 
     let workbook_rels_part = "xl/_rels/workbook.xml.rels";
     let workbook_rels_xml =
-        read_zip_part_optional(&mut archive, workbook_rels_part, &mut budget)?;
+        read_zip_part_optional(&mut archive, workbook_rels_part, max_part_bytes, &mut budget)?;
     // Best-effort: some producers emit malformed rels. For pivot preservation we treat this as
     // "no relationships" instead of failing the whole extraction.
     let rel_map: HashMap<String, crate::relationships::Relationship> = match workbook_rels_xml
@@ -343,7 +357,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
 
         let sheet_rels_part = rels_for_part(&sheet.part_name);
         let Some(sheet_rels_xml) =
-            read_zip_part_optional(&mut archive, &sheet_rels_part, &mut budget)?
+            read_zip_part_optional(&mut archive, &sheet_rels_part, max_part_bytes, &mut budget)?
         else {
             continue;
         };
@@ -359,7 +373,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         }
 
         let Some(sheet_xml) =
-            read_zip_part_optional(&mut archive, &sheet.part_name, &mut budget)?
+            read_zip_part_optional(&mut archive, &sheet.part_name, max_part_bytes, &mut budget)?
         else {
             continue;
         };
@@ -1157,12 +1171,13 @@ fn rewrite_pivot_cache_definition_worksheet_source_sheets(
 fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    max_part_bytes: u64,
     budget: &mut ZipInflateBudget,
 ) -> Result<Option<Vec<u8>>, ChartExtractionError> {
     crate::zip_util::read_zip_part_optional_with_budget(
         archive,
         name,
-        DEFAULT_MAX_ZIP_PART_BYTES,
+        max_part_bytes,
         budget,
     )
     .map_err(|e| ChartExtractionError::XmlStructure(e.to_string()))
@@ -1171,9 +1186,10 @@ fn read_zip_part_optional<R: Read + Seek>(
 fn read_zip_part_required<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    max_part_bytes: u64,
     budget: &mut ZipInflateBudget,
 ) -> Result<Vec<u8>, ChartExtractionError> {
-    read_zip_part_optional(archive, name, budget)?
+    read_zip_part_optional(archive, name, max_part_bytes, budget)?
         .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 

@@ -9,7 +9,8 @@ mod preserve;
 pub mod style;
 
 pub use preserve::{
-    preserve_drawing_parts_from_reader, PreservedChartSheet, PreservedDrawingParts,
+    preserve_drawing_parts_from_reader, preserve_drawing_parts_from_reader_limited,
+    PreservedChartSheet, PreservedDrawingParts,
     PreservedSheetControls, PreservedSheetDrawingHF, PreservedSheetDrawings,
     PreservedSheetOleObjects, PreservedSheetPicture, SheetDrawingRelationship,
     SheetRelationshipStub, SheetRelationshipStubWithType,

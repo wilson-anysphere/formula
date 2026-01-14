@@ -21,7 +21,10 @@ pub mod ux_graph;
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 pub use cache_records::{PivotCacheRecordsReader, PivotCacheValue};
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
-pub use preserve::{preserve_pivot_parts_from_reader, PreservedPivotParts, RelationshipStub};
+pub use preserve::{
+    preserve_pivot_parts_from_reader, preserve_pivot_parts_from_reader_limited, PreservedPivotParts,
+    RelationshipStub,
+};
 pub use table_definition::{
     PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTableFieldItem,
     PivotTablePageField,

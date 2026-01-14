@@ -1,6 +1,10 @@
 use crate::atomic_write::write_file_atomic;
 use crate::power_query_validation::MAX_POWER_QUERY_XML_BYTES;
-use crate::resource_limits::{MAX_VBA_PROJECT_BIN_BYTES, MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES};
+use crate::resource_limits::{
+    MAX_PRESERVED_DRAWING_PART_BYTES, MAX_PRESERVED_DRAWING_TOTAL_BYTES,
+    MAX_PRESERVED_PIVOT_PART_BYTES, MAX_PRESERVED_PIVOT_TOTAL_BYTES, MAX_VBA_PROJECT_BIN_BYTES,
+    MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES,
+};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
@@ -831,14 +835,22 @@ where
         }
     }
     if let Ok(reader) = open_reader() {
-        if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(reader) {
+        if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader_limited(
+            reader,
+            MAX_PRESERVED_DRAWING_PART_BYTES as u64,
+            MAX_PRESERVED_DRAWING_TOTAL_BYTES as u64,
+        ) {
             if !preserved.is_empty() {
                 out.preserved_drawing_parts = Some(preserved);
             }
         }
     }
     if let Ok(reader) = open_reader() {
-        if let Ok(preserved) = formula_xlsx::pivots::preserve_pivot_parts_from_reader(reader) {
+        if let Ok(preserved) = formula_xlsx::pivots::preserve_pivot_parts_from_reader_limited(
+            reader,
+            MAX_PRESERVED_PIVOT_PART_BYTES as u64,
+            MAX_PRESERVED_PIVOT_TOTAL_BYTES as u64,
+        ) {
             if !preserved.is_empty() {
                 out.preserved_pivot_parts = Some(preserved);
             }
@@ -4542,6 +4554,79 @@ mod tests {
         assert!(
             workbook.macro_fingerprint.is_some(),
             "expected macro fingerprint to still be computed when VBA project is present"
+        );
+    }
+
+    #[test]
+    fn read_xlsx_drops_oversized_preserved_drawing_parts() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/image.xlsx"
+        );
+        let bytes = std::fs::read(fixture).expect("read xlsx fixture");
+
+        // Forge the drawing part's ZIP metadata to claim it exceeds the desktop preservation cap.
+        // This should cause preservation to fail fast (best-effort) without impacting workbook open.
+        let oversized_len = crate::resource_limits::MAX_PRESERVED_DRAWING_PART_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(bytes, "xl/drawings/drawing1.xml", oversized_len);
+
+        // Sanity check: the default (library) preservation limits are larger, so preservation should
+        // still succeed on this patched file.
+        let preserved = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(Cursor::new(
+            patched.as_slice(),
+        ))
+        .expect("preserve drawing parts with default limits");
+        assert!(
+            !preserved.is_empty(),
+            "expected drawing preservation to find parts in fixture"
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("oversized-drawing.xlsx");
+        std::fs::write(&path, &patched).expect("write patched workbook");
+
+        let workbook = read_xlsx_blocking(&path).expect("open patched workbook");
+        assert!(
+            workbook.preserved_drawing_parts.is_none(),
+            "expected oversized drawing parts to be dropped during open"
+        );
+    }
+
+    #[test]
+    fn read_xlsx_drops_oversized_preserved_pivot_parts() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/pivots/pivot-fixture.xlsx"
+        );
+        let bytes = std::fs::read(fixture).expect("read pivot xlsx fixture");
+
+        // Forge pivot cache records metadata to exceed the preservation cap.
+        let oversized_len = crate::resource_limits::MAX_PRESERVED_PIVOT_PART_BYTES as u32 + 1;
+        let patched = patch_zip_entry_uncompressed_size(
+            bytes,
+            "xl/pivotCache/pivotCacheRecords1.xml",
+            oversized_len,
+        );
+
+        // Sanity check: default limits should still allow preservation to succeed.
+        let preserved = formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(
+            patched.as_slice(),
+        ))
+        .expect("preserve pivot parts with default limits");
+        assert!(
+            !preserved.is_empty(),
+            "expected pivot preservation to find parts in fixture"
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("oversized-pivots.xlsx");
+        std::fs::write(&path, &patched).expect("write patched workbook");
+
+        let workbook = read_xlsx_blocking(&path).expect("open patched workbook");
+        assert!(
+            workbook.preserved_pivot_parts.is_none(),
+            "expected oversized pivot parts to be dropped during open"
         );
     }
 

@@ -91,6 +91,29 @@ pub const MAX_WORKBOOK_OPEN_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 /// Subsequent saves fall back to the regeneration-based code path.
 pub const MAX_ORIGIN_XLSX_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
 
+/// Maximum uncompressed size (in bytes) for any single ZIP part we will inflate while preserving
+/// DrawingML-related parts during workbook open.
+///
+/// Preserved drawing parts are used to round-trip unsupported drawing/chart structures when the
+/// user saves. This is a best-effort feature: if a workbook contains extremely large drawing parts
+/// (or forged ZIP metadata), we prefer dropping preservation rather than risking OOM.
+pub const MAX_PRESERVED_DRAWING_PART_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+
+/// Maximum total uncompressed size (in bytes) across all ZIP parts inflated while preserving
+/// DrawingML-related parts during workbook open.
+pub const MAX_PRESERVED_DRAWING_TOTAL_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
+
+/// Maximum uncompressed size (in bytes) for any single ZIP part we will inflate while preserving
+/// pivot-related parts during workbook open.
+///
+/// Like preserved drawings, pivot preservation is best-effort: when pivot parts are enormous we
+/// drop preservation rather than allocating unbounded memory.
+pub const MAX_PRESERVED_PIVOT_PART_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+
+/// Maximum total uncompressed size (in bytes) across all ZIP parts inflated while preserving
+/// pivot-related parts during workbook open.
+pub const MAX_PRESERVED_PIVOT_TOTAL_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
+
 /// Maximum uncompressed size (in bytes) for any single ZIP part when inflating an XLSX/XLSM
 /// package for *IPC-only* inspection/extraction.
 ///
