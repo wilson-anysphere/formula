@@ -1,5 +1,5 @@
 use super::{
-    decrypt_agile_encrypted_package, decrypt_aes_cbc_no_padding, derive_iv, derive_key,
+    decrypt_aes_cbc_no_padding, decrypt_agile_encrypted_package, derive_iv, derive_key,
     hash_password, HashAlgorithm, OffCryptoError, Result, AES_BLOCK_SIZE,
 };
 
@@ -55,41 +55,60 @@ fn decrypt_standard(
     let info = parse_standard_encryption_info(encryption_info_stream)?;
 
     // Derive the file key (AES key) from the password.
-    let pw_hash = hash_password(password, &info.salt, STANDARD_SPIN_COUNT, HashAlgorithm::Sha1)
-        .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: err.to_string(),
-        })?;
+    let pw_hash = hash_password(
+        password,
+        &info.salt,
+        STANDARD_SPIN_COUNT,
+        HashAlgorithm::Sha1,
+    )
+    .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
+        reason: err.to_string(),
+    })?;
 
-    let key = derive_key(&pw_hash, &0u32.to_le_bytes(), info.key_len, HashAlgorithm::Sha1)
-        .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: err.to_string(),
-        })?;
+    let key = derive_key(
+        &pw_hash,
+        &0u32.to_le_bytes(),
+        info.key_len,
+        HashAlgorithm::Sha1,
+    )
+    .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
+        reason: err.to_string(),
+    })?;
 
     // Verify password by decrypting the verifier + verifier hash.
-    let iv_ver = derive_iv(&info.salt, &0u32.to_le_bytes(), AES_BLOCK_SIZE, HashAlgorithm::Sha1)
-        .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: err.to_string(),
-        })?;
+    let iv_ver = derive_iv(
+        &info.salt,
+        &0u32.to_le_bytes(),
+        AES_BLOCK_SIZE,
+        HashAlgorithm::Sha1,
+    )
+    .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
+        reason: err.to_string(),
+    })?;
     let verifier = decrypt_aes_cbc_no_padding(&key, &iv_ver, &info.encrypted_verifier)?;
 
-    let iv_hash = derive_iv(&info.salt, &1u32.to_le_bytes(), AES_BLOCK_SIZE, HashAlgorithm::Sha1)
-        .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: err.to_string(),
-        })?;
-    let verifier_hash =
-        decrypt_aes_cbc_no_padding(&key, &iv_hash, &info.encrypted_verifier_hash)?;
+    let iv_hash = derive_iv(
+        &info.salt,
+        &1u32.to_le_bytes(),
+        AES_BLOCK_SIZE,
+        HashAlgorithm::Sha1,
+    )
+    .map_err(|err| OffCryptoError::StandardEncryptionInfoMalformed {
+        reason: err.to_string(),
+    })?;
+    let verifier_hash = decrypt_aes_cbc_no_padding(&key, &iv_hash, &info.encrypted_verifier_hash)?;
 
     let expected = HashAlgorithm::Sha1.hash(&verifier);
-    let expected = expected
-        .get(..info.verifier_hash_size)
-        .ok_or_else(|| OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: "verifierHashSize larger than SHA1 digest length".to_string(),
-        })?;
-    let got = verifier_hash.get(..info.verifier_hash_size).ok_or_else(|| {
+    let expected = expected.get(..info.verifier_hash_size).ok_or_else(|| {
         OffCryptoError::StandardEncryptionInfoMalformed {
-            reason: "decrypted verifierHash is truncated".to_string(),
+            reason: "verifierHashSize larger than SHA1 digest length".to_string(),
         }
     })?;
+    let got = verifier_hash
+        .get(..info.verifier_hash_size)
+        .ok_or_else(|| OffCryptoError::StandardEncryptionInfoMalformed {
+            reason: "decrypted verifierHash is truncated".to_string(),
+        })?;
     if expected != got {
         return Err(OffCryptoError::WrongPassword);
     }
@@ -112,10 +131,11 @@ fn parse_standard_encryption_info(bytes: &[u8]) -> Result<StandardEncryptionInfo
     // at the entrypoint, so just skip them here.
     let mut offset = 8usize;
 
-    let header_size = read_u32_le(bytes, &mut offset)
-        .ok_or_else(|| OffCryptoError::StandardEncryptionInfoMalformed {
+    let header_size = read_u32_le(bytes, &mut offset).ok_or_else(|| {
+        OffCryptoError::StandardEncryptionInfoMalformed {
             reason: "truncated EncryptionHeader.size".to_string(),
-        })? as usize;
+        }
+    })? as usize;
     if bytes.len() < offset + header_size {
         return Err(OffCryptoError::StandardEncryptionInfoMalformed {
             reason: "truncated EncryptionHeader".to_string(),
@@ -131,11 +151,8 @@ fn parse_standard_encryption_info(bytes: &[u8]) -> Result<StandardEncryptionInfo
     }
 
     // keySize (bits) is DWORD #5 (0-indexed) in the fixed fields.
-    let key_size_bits = u32::from_le_bytes(
-        header_bytes[16..20]
-            .try_into()
-            .expect("slice is 4 bytes"),
-    ) as usize;
+    let key_size_bits =
+        u32::from_le_bytes(header_bytes[16..20].try_into().expect("slice is 4 bytes")) as usize;
     let key_len = key_size_bits
         .checked_div(8)
         .filter(|n| *n > 0)
@@ -143,10 +160,11 @@ fn parse_standard_encryption_info(bytes: &[u8]) -> Result<StandardEncryptionInfo
             reason: "invalid keySize".to_string(),
         })?;
 
-    let salt_size = read_u32_le(bytes, &mut offset)
-        .ok_or_else(|| OffCryptoError::StandardEncryptionInfoMalformed {
+    let salt_size = read_u32_le(bytes, &mut offset).ok_or_else(|| {
+        OffCryptoError::StandardEncryptionInfoMalformed {
             reason: "truncated EncryptionVerifier.saltSize".to_string(),
-        })? as usize;
+        }
+    })? as usize;
     if bytes.len() < offset + salt_size {
         return Err(OffCryptoError::StandardEncryptionInfoMalformed {
             reason: "truncated EncryptionVerifier.salt".to_string(),
@@ -163,10 +181,11 @@ fn parse_standard_encryption_info(bytes: &[u8]) -> Result<StandardEncryptionInfo
     let encrypted_verifier = bytes[offset..offset + 16].to_vec();
     offset += 16;
 
-    let verifier_hash_size = read_u32_le(bytes, &mut offset)
-        .ok_or_else(|| OffCryptoError::StandardEncryptionInfoMalformed {
+    let verifier_hash_size = read_u32_le(bytes, &mut offset).ok_or_else(|| {
+        OffCryptoError::StandardEncryptionInfoMalformed {
             reason: "truncated EncryptionVerifier.verifierHashSize".to_string(),
-        })? as usize;
+        }
+    })? as usize;
 
     let encrypted_verifier_hash = bytes.get(offset..).unwrap_or_default().to_vec();
     if encrypted_verifier_hash.is_empty() {
@@ -199,11 +218,12 @@ fn decrypt_encrypted_package_stream(
     let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
     size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
     let orig_size = u64::from_le_bytes(size_bytes);
-    let orig_size_usize = usize::try_from(orig_size).map_err(|_| OffCryptoError::InvalidAttribute {
-        element: "EncryptedPackage".to_string(),
-        attr: "origSize".to_string(),
-        reason: "origSize does not fit into usize".to_string(),
-    })?;
+    let orig_size_usize =
+        usize::try_from(orig_size).map_err(|_| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "origSize".to_string(),
+            reason: "origSize does not fit into usize".to_string(),
+        })?;
 
     let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
     if ciphertext.is_empty() && orig_size == 0 {
@@ -230,19 +250,17 @@ fn decrypt_encrypted_package_stream(
             });
         }
 
-        let iv = derive_iv(salt, &segment_index.to_le_bytes(), block_size, hash_alg).map_err(|err| {
-            OffCryptoError::InvalidAttribute {
-                element: "EncryptedPackage".to_string(),
-                attr: "iv".to_string(),
-                reason: err.to_string(),
-            }
-        })?;
+        let iv =
+            derive_iv(salt, &segment_index.to_le_bytes(), block_size, hash_alg).map_err(|err| {
+                OffCryptoError::InvalidAttribute {
+                    element: "EncryptedPackage".to_string(),
+                    attr: "iv".to_string(),
+                    reason: err.to_string(),
+                }
+            })?;
 
-        let decrypted = decrypt_aes_cbc_no_padding(
-            key,
-            &iv,
-            &ciphertext[offset..offset + seg_len],
-        )?;
+        let decrypted =
+            decrypt_aes_cbc_no_padding(key, &iv, &ciphertext[offset..offset + seg_len])?;
 
         let remaining_needed = orig_size_usize - out.len();
         if decrypted.len() > remaining_needed {
