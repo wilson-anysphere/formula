@@ -130,6 +130,26 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 5 }]);
   });
 
+  it("drops addColumn suggestions that collide with earlier suggested addColumn outputs", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "addColumn", name: "Flag", formula: "1" },
+          { type: "addColumn", name: "Flag", formula: "2" },
+          { type: "take", count: 1 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("add", { query: baseQuery(), preview });
+    expect(ops).toEqual([
+      { type: "addColumn", name: "Flag", formula: "1" },
+      { type: "take", count: 1 },
+    ]);
+  });
+
   it("drops addColumn suggestions with invalid formulas", async () => {
     chatMock.mockResolvedValue({
       message: {
@@ -200,6 +220,25 @@ describe("suggestQueryNextSteps", () => {
     );
     const ops = await suggestQueryNextSteps("rename", { query: baseQuery(), preview });
     expect(ops).toEqual([{ type: "take", count: 5 }]);
+  });
+
+  it("allows chained suggestions that depend on earlier schema changes", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "renameColumn", oldName: "Region", newName: "Region2" },
+          { type: "addColumn", name: "Flag", formula: "[Region2]" },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("rename and add", { query: baseQuery(), preview });
+    expect(ops).toEqual([
+      { type: "renameColumn", oldName: "Region", newName: "Region2" },
+      { type: "addColumn", name: "Flag", formula: "[Region2]" },
+    ]);
   });
 
   it("supports code-fenced JSON responses", async () => {

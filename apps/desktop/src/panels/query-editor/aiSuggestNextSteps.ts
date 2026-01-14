@@ -131,6 +131,49 @@ function dedupePreserveOrder(values: string[]): string[] {
   return out;
 }
 
+function outputNameForAggregation(agg: Aggregation): string {
+  const fromAs = typeof agg.as === "string" && agg.as.trim() ? agg.as.trim() : null;
+  if (fromAs) return fromAs;
+  return `${agg.op} of ${agg.column}`;
+}
+
+function applySchemaTransform(op: QueryOperation, schema: Set<string>): Set<string> {
+  // Keep this intentionally conservative: only update schema for operations that
+  // obviously change column names. This is primarily used to validate multi-step
+  // AI suggestions (e.g. preventing duplicate addColumn names).
+  switch (op.type) {
+    case "removeColumns": {
+      const next = new Set(schema);
+      for (const col of op.columns) next.delete(col);
+      return next;
+    }
+    case "selectColumns": {
+      return new Set(op.columns);
+    }
+    case "renameColumn": {
+      const next = new Set(schema);
+      if (op.newName !== op.oldName) {
+        next.delete(op.oldName);
+        next.add(op.newName);
+      }
+      return next;
+    }
+    case "addColumn": {
+      const next = new Set(schema);
+      next.add(op.name);
+      return next;
+    }
+    case "groupBy": {
+      const next = new Set<string>();
+      for (const col of op.groupColumns) next.add(col);
+      for (const agg of op.aggregations) next.add(outputNameForAggregation(agg));
+      return next;
+    }
+    default:
+      return schema;
+  }
+}
+
 function coerceFilterPredicate(value: unknown, allowedColumns: Set<string>): FilterPredicate | null {
   if (!isPlainObject(value)) return null;
   const type = value.type;
@@ -393,10 +436,19 @@ function coerceOperations(value: unknown, allowedColumns: Set<string>): QueryOpe
       : isPlainObject(value) && typeof (value as { type?: unknown }).type === "string"
         ? [value]
       : [];
-  return operations
-    .map((op) => coerceQueryOperation(op, allowedColumns))
-    .filter((op): op is QueryOperation => Boolean(op))
-    .slice(0, 3);
+
+  const out: QueryOperation[] = [];
+  let currentSchema = new Set(allowedColumns);
+
+  for (const candidate of operations) {
+    const coerced = coerceQueryOperation(candidate, currentSchema);
+    if (!coerced) continue;
+    out.push(coerced);
+    currentSchema = applySchemaTransform(coerced, currentSchema);
+    if (out.length >= 3) break;
+  }
+
+  return out;
 }
 
 function buildUserPrompt(args: { intent: string; query: Query; preview: PreviewTable }): string {
