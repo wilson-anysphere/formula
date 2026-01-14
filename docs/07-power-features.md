@@ -833,9 +833,18 @@ All What‑If tools are written against the `what_if::WhatIfModel` trait (get/se
 
 Rust:
 
-- `what_if::CellRef` — a `#[serde(transparent)]` A1-style cell reference string. `EngineWhatIfModel` accepts `A1` (uses `default_sheet`) or `Sheet1!A1` / `\'My Sheet\'!A1`.
+- `what_if::CellRef` — a `#[serde(transparent)]` A1-style cell reference string.
+  - For engine-backed usage (`EngineWhatIfModel`), accepted forms include:
+    - `"A1"` (uses the adapter’s `default_sheet`)
+    - `"Sheet1!A1"`
+    - `"'My Sheet'!A1"` (Excel-style quoting for spaces)
+    - `"'O''Brien'!A1"` (escaped `'` via doubled apostrophe)
 - `what_if::CellValue` — scalar-only values: `Number(f64)`, `Text(String)`, `Bool(bool)`, `Blank`.
 - `what_if::WhatIfError<E>` — returned for invalid parameters, non-numeric cells, or underlying model failures.
+
+Engine adapter notes (in-tree today):
+
+- `what_if::EngineWhatIfModel` defaults to **single-threaded** recalculation (`RecalcMode::SingleThreaded`) to reduce per-iteration overhead; hosts can opt into `RecalcMode::MultiThreaded` via `EngineWhatIfModel::with_recalc_mode(...)`.
 
 Proposed JS/WASM DTOs (directly compatible with the current serde shapes):
 
@@ -1088,6 +1097,7 @@ Validation + edge cases (Rust behavior):
 - Correlations:
   - `correlations.matrix` must be square, symmetric, diagonal=1, entries in `[-1, 1]`, and **positive definite** (Cholesky decomposition).
   - Correlated sampling is currently supported **only** when *all* input distributions are `{ type: "normal", ... }` → otherwise `InvalidParams("correlated sampling is currently supported only for normal distributions")`.
+  - Matrix row/column order is the same as `inputDistributions` order (`matrix[i][j]` is corr(input i, input j)).
 - Histogram edge cases:
   - If all samples are identical (`min == max`), Rust returns a single bin with `count = iterations`.
   - If samples are empty or min/max are non-finite (shouldn’t happen for valid runs), histogram bins are empty.
@@ -1236,6 +1246,9 @@ Validation + edge cases (Rust behavior):
 - `Solver::solve` validates:
   - `problem.variables.len()` must equal `model.num_vars()` → otherwise a `SolverError` with message like `"variable spec count (X) does not match model vars (Y)"`.
   - Every `Constraint.index` must be `< model.num_constraints()` → otherwise `SolverError("constraint index ... out of range ...")`.
+- Iteration limits:
+  - `SolveOptions.max_iterations` is used by **GRG** and **Evolutionary**.
+  - **Simplex** uses method-specific limits (`SimplexOptions.max_pivots`, `SimplexOptions.max_bnb_nodes`) rather than `SolveOptions.max_iterations`.
 - Integer/binary normalization:
   - `VarType::Integer`: bounds are normalized to `ceil(lower)` / `floor(upper)`. If `lower > upper` after normalization → `SolverError("integer var {idx} has empty bounds [...]")`.
   - `VarType::Binary`: bounds are forced to `[0, 1]` regardless of input.
@@ -1245,9 +1258,15 @@ Validation + edge cases (Rust behavior):
 - GRG-specific: only `Continuous` variables participate in the gradient; integer/binary vars are effectively held fixed (use Simplex or Evolutionary for mixed-integer problems).
 - Progress + cancellation:
   - `SolveOptions.progress` returns `false` to cancel; solver returns `SolveStatus::Cancelled` with the best solution found so far.
+- Side effects:
+  - The solver overwrites `variableCells` repeatedly while searching.
+  - On return, `applySolution` controls final state:
+    - `true`: the best solution is applied to the model.
+    - `false`: the original variable values are restored (the solve still recalculates during the search).
 - Engine integration (`EngineSolverModel`):
   - Decision variables must be coercible to numbers at construction time; otherwise `EngineSolverModel::new` fails with a `SolverError` like `"cell Sheet1!A1 is not numeric (...)"`.
   - Objective and constraint cells are coerced per-iteration; non-numeric values become `NaN` (methods treat non-finite values as very bad via a large penalty).
+  - Cell refs accept the same forms as What‑If (`A1` default-sheet, `Sheet!A1`, `\'My Sheet\'!A1`).
 
 ---
 
