@@ -38,15 +38,32 @@ impl<'de, const MAX: usize> Deserialize<'de> for LimitedByteVec<MAX> {
             where
                 A: de::SeqAccess<'de>,
             {
-                let capacity = seq.size_hint().unwrap_or(0).min(MAX);
-                let mut out = Vec::with_capacity(capacity);
-                while let Some(v) = seq.next_element::<u8>()? {
-                    if out.len() >= MAX {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
+                    if hint > MAX {
                         return Err(de::Error::custom(format!(
                             "Payload is too large (max {MAX} bytes)"
                         )));
                     }
-                    out.push(v);
+                }
+
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX {
+                    match seq.next_element::<u8>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedByteVec(out)),
+                    }
+                }
+
+                // Detect overflow without allocating/parsing another typed element.
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "Payload is too large (max {MAX} bytes)"
+                    )));
                 }
                 Ok(LimitedByteVec(out))
             }
@@ -199,6 +216,76 @@ mod tests {
         assert!(
             err.to_ascii_lowercase().contains("pem"),
             "unexpected error: {err}"
+        );
+    }
+
+    struct SizeHintSeqDeserializer {
+        len: usize,
+    }
+
+    struct SizeHintSeqAccess {
+        len: usize,
+    }
+
+    impl<'de> de::SeqAccess<'de> for SizeHintSeqAccess {
+        type Error = de::value::Error;
+
+        fn next_element_seed<T>(&mut self, _seed: T) -> Result<Option<T::Value>, Self::Error>
+        where
+            T: de::DeserializeSeed<'de>,
+        {
+            panic!("unexpected element deserialization (size_hint guard should have failed first)");
+        }
+
+        fn size_hint(&self) -> Option<usize> {
+            Some(self.len)
+        }
+    }
+
+    impl<'de> serde::Deserializer<'de> for SizeHintSeqDeserializer {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            self.deserialize_seq(visitor)
+        }
+
+        fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            visitor.visit_seq(SizeHintSeqAccess { len: self.len })
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
+            unit_struct newtype_struct tuple tuple_struct map struct enum identifier ignored_any
+        }
+    }
+
+    #[test]
+    fn limited_byte_vec_rejects_oversized_size_hint() {
+        type SmallBytes = LimitedByteVec<4>;
+        let err = <SmallBytes as Deserialize>::deserialize(SizeHintSeqDeserializer { len: 5 })
+            .expect_err("expected size_hint guard to reject oversized byte vec")
+            .to_string();
+        assert!(
+            err.contains("max") && err.contains("4"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_byte_vec_rejects_oversized_json_array() {
+        type SmallBytes = LimitedByteVec<4>;
+        let err = serde_json::from_str::<SmallBytes>("[0,1,2,3,4]")
+            .expect_err("expected oversized byte array to be rejected")
+            .to_string();
+        assert!(
+            err.contains("max") && err.contains("4"),
+            "unexpected error message: {err}"
         );
     }
 

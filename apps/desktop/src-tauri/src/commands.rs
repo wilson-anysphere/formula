@@ -968,7 +968,8 @@ impl<'de> Deserialize<'de> for LimitedSheetColWidthDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_VIEW_COL_WIDTH_DELTAS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_VIEW_COL_WIDTH_DELTAS {
                         return Err(de::Error::custom(format!(
                             "colWidths is too large (max {MAX_SHEET_VIEW_COL_WIDTH_DELTAS} deltas)"
@@ -976,7 +977,10 @@ impl<'de> Deserialize<'de> for LimitedSheetColWidthDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_VIEW_COL_WIDTH_DELTAS)),
+                    None => Vec::new(),
+                };
                 for _ in 0..MAX_SHEET_VIEW_COL_WIDTH_DELTAS {
                     match seq.next_element::<SheetColWidthDelta>()? {
                         Some(v) => out.push(v),
@@ -1023,7 +1027,8 @@ impl<'de> Deserialize<'de> for LimitedSheetRowHeightDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS {
                         return Err(de::Error::custom(format!(
                             "rowHeights is too large (max {MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS} deltas)"
@@ -1031,7 +1036,10 @@ impl<'de> Deserialize<'de> for LimitedSheetRowHeightDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS)),
+                    None => Vec::new(),
+                };
                 for _ in 0..MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS {
                     match seq.next_element::<SheetRowHeightDelta>()? {
                         Some(v) => out.push(v),
@@ -1721,14 +1729,31 @@ impl<'de> Deserialize<'de> for LimitedF64Vec {
             {
                 use crate::resource_limits::MAX_RANGE_DIM;
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<f64>()? {
-                    if out.len() >= MAX_RANGE_DIM {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
+                    if hint > MAX_RANGE_DIM {
                         return Err(de::Error::custom(format!(
                             "array is too large (max {MAX_RANGE_DIM} items)"
                         )));
                     }
-                    out.push(v);
+                }
+
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_RANGE_DIM)),
+                    None => Vec::new(),
+                };
+                for _ in 0..MAX_RANGE_DIM {
+                    match seq.next_element::<f64>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedF64Vec(out)),
+                    }
+                }
+
+                // Detect overflow without allocating/parsing the next element into an `f64`.
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "array is too large (max {MAX_RANGE_DIM} items)"
+                    )));
                 }
                 Ok(LimitedF64Vec(out))
             }
@@ -9868,6 +9893,18 @@ mod tests {
             bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
             unit_struct newtype_struct tuple tuple_struct map struct enum identifier ignored_any
         }
+    }
+
+    #[test]
+    fn limited_f64_vec_rejects_too_many_entries_by_size_hint() {
+        let max = crate::resource_limits::MAX_RANGE_DIM;
+        let err = <LimitedF64Vec as Deserialize>::deserialize(SizeHintSeqDeserializer { len: max + 1 })
+            .expect_err("expected size_hint guard to reject oversized f64 vec")
+            .to_string();
+        assert!(
+            err.contains("max") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
     }
 
     #[test]
