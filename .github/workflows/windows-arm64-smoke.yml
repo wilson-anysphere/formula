@@ -259,10 +259,20 @@ jobs:
       - name: Install NSIS (required for NSIS .exe bundling)
         shell: pwsh
         run: |
-          choco install nsis --no-progress -y
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            choco install nsis --no-progress -y
+          }
+
           $nsisHome = "${env:ProgramFiles(x86)}\NSIS"
           if (Test-Path $nsisHome) {
+            # Ensure the tool is visible in the current step (and persist it for later steps).
+            $env:PATH = "$nsisHome;$env:PATH"
             $nsisHome | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            throw "NSIS installation failed: makensis.exe not found on PATH."
           }
 
       - name: Install JS dependencies
