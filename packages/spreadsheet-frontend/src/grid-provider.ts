@@ -74,7 +74,10 @@ export class EngineGridProvider implements CellProvider {
   }
 
   prefetch(range: CellRange): void {
-    void this.prefetchAsync(range);
+    const promise = this.prefetchAsync(range);
+    // Prefetch is best-effort and often fire-and-forgotten by renderers. Attach a no-op rejection
+    // handler so unexpected errors never surface as unhandled rejections.
+    void promise.catch(() => {});
   }
 
   async prefetchAsync(range: CellRange): Promise<void> {
