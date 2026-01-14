@@ -1,4 +1,4 @@
-//! End-to-end decryption test for the Standard (CryptoAPI) streaming decrypt path.
+//! End-to-end decryption test for the Standard (CryptoAPI) OOXML open path.
 //!
 //! This is gated behind `encrypted-workbooks` because password-based decryption is optional.
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
@@ -43,16 +43,25 @@ fn decrypts_standard_fixture_via_streaming_reader() {
             password: Some("password".to_string()),
         },
     )
-    .expect("open standard.xlsx via streaming decrypt");
+    .expect("open standard.xlsx with password");
 
-    let Workbook::Model(decrypted) = decrypted else {
-        panic!("expected Workbook::Model for decrypted Standard workbook");
+    let Workbook::Xlsx(package) = decrypted else {
+        panic!("expected Workbook::Xlsx for decrypted Standard workbook");
     };
-    assert_expected_contents(&decrypted);
+
+    // Materialize the decrypted ZIP bytes and parse them into a model workbook so we can validate
+    // cell contents. (The streaming decrypt path itself is exercised by unit tests inside
+    // `encrypted_ooxml.rs`.)
+    let decrypted_bytes = package
+        .write_to_bytes()
+        .expect("serialize decrypted workbook package to bytes");
+    let decrypted_model = formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
+        .expect("parse decrypted bytes to model workbook");
+    assert_expected_contents(&decrypted_model);
 
     // Sanity: compare some key cell values with the known-good plaintext fixture.
     let plain_sheet = plaintext.sheet_by_name("Sheet1").expect("Sheet1 missing");
-    let dec_sheet = decrypted.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    let dec_sheet = decrypted_model.sheet_by_name("Sheet1").expect("Sheet1 missing");
     for addr in ["A1", "B1"] {
         let cref = CellRef::from_a1(addr).unwrap();
         assert_eq!(dec_sheet.value(cref), plain_sheet.value(cref), "addr={addr}");
