@@ -1820,13 +1820,6 @@ export function bindYjsToDocumentController(options) {
 
     for (const event of events) {
       const path = event?.path;
-      const touchesView = Array.isArray(path) && path.includes("view");
-      const touchesFormats =
-        Array.isArray(path) &&
-        (path.includes("rowFormats") ||
-          path.includes("colFormats") ||
-          path.includes("defaultFormat") ||
-          path.includes("formatRunsByCol"));
       const changes = event?.changes?.keys;
 
       // Array-level changes (insert/delete/move) don't expose meaningful `changes.keys`. This can
@@ -1837,7 +1830,12 @@ export function bindYjsToDocumentController(options) {
       // Note: in some Yjs versions `changes.keys` exists but is an empty Map for
       // array-level changes, so treat `size===0` as "no keys" as well.
       if (!changes || changes.size === 0) {
-        if ((touchesView || touchesFormats) && Array.isArray(path) && typeof path[0] === "number") {
+        // Array-level changes (insert/delete/move) don't expose meaningful `changes.keys`. This can
+        // happen for nested arrays under a sheet entry (e.g. `sheet.drawings` / `sheet.view.drawings`)
+        // as well as for the root `sheets` array itself.
+        //
+        // When the deep path includes the sheet index, avoid scanning the entire sheet list.
+        if (Array.isArray(path) && typeof path[0] === "number") {
           const entry = sheets.get(path[0]);
           const id = coerceString(entry?.get?.("id") ?? entry?.id);
           if (id) {
@@ -1846,7 +1844,7 @@ export function bindYjsToDocumentController(options) {
           }
         }
 
-        // Root array changes: conservatively rescan sheet ids.
+        // Root array changes (or malformed paths): conservatively rescan sheet ids.
         needsFullScan = true;
         continue;
       }
