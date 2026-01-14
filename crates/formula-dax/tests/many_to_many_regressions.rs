@@ -64,6 +64,67 @@ fn insert_row_updates_m2m_to_index() {
 }
 
 #[test]
+fn related_errors_on_duplicate_keys_with_m2m_for_columnar_dim() {
+    // Same ambiguity regression as in `insert_row_updates_m2m_to_index`, but with a columnar-backed
+    // dimension table so the relationship uses `ToIndex::KeySet` + `filter_eq` for the lookup.
+    let mut model = DataModel::new();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("Old".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("New".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key"]);
+    fact.push_row(vec![1.into(), 1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let err = model
+        .add_calculated_column("Fact", "Related Attr", "RELATED(Dim[Attr])")
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambig") || msg.contains("multiple") || msg.contains("more than one"),
+        "unexpected RELATED error with duplicate keys: {err}"
+    );
+}
+
+#[test]
 fn userelationship_override_works_with_m2m() {
     let mut model = DataModel::new();
 
