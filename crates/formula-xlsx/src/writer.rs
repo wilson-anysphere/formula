@@ -456,9 +456,11 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         sheet_index_by_id.insert(sheet.id, idx as u32);
     }
 
+    // Excel defined names are case-insensitive; normalize keys so we reliably suppress
+    // duplicate built-in print names regardless of casing in `workbook.defined_names`.
     let print_keys: HashSet<(String, u32)> = print_defined_names
         .iter()
-        .map(|(name, local_sheet_id, _)| (name.clone(), *local_sheet_id))
+        .map(|(name, local_sheet_id, _)| (name.to_ascii_uppercase(), *local_sheet_id))
         .collect();
 
     let mut out = String::new();
@@ -469,7 +471,7 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
             DefinedNameScope::Workbook => None,
         };
         if let Some(local_sheet_id) = local_sheet_id {
-            if print_keys.contains(&(defined.name.clone(), local_sheet_id)) {
+            if print_keys.contains(&(defined.name.to_ascii_uppercase(), local_sheet_id)) {
                 // Avoid emitting duplicate built-in print names; `Workbook::print_settings`
                 // is the canonical representation for these.
                 continue;

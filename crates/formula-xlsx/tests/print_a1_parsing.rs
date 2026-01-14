@@ -25,3 +25,24 @@ fn print_defined_name_parsing_rejects_overflowing_column_letters() {
         "expected parse to fail for column letters that overflow u32"
     );
 }
+
+#[test]
+fn print_titles_defined_name_parsing_accepts_row_and_col_cell_ranges() {
+    // Some producers represent print titles using explicit cell ranges rather than row/col-only
+    // references. Accept these best-effort.
+    let titles = parse_print_titles_defined_name("Sheet1", "Sheet1!$A$1:$IV$1,Sheet1!$A$1:$A$10")
+        .unwrap();
+    assert_eq!(
+        titles,
+        PrintTitles {
+            repeat_rows: Some(RowRange { start: 1, end: 1 }),
+            repeat_cols: Some(ColRange { start: 1, end: 1 }),
+        }
+    );
+
+    // But reject cell ranges that span both multiple rows and multiple columns (ambiguous).
+    assert!(
+        parse_print_titles_defined_name("Sheet1", "Sheet1!$A$1:$B$2").is_err(),
+        "expected multi-row multi-col cell range to be rejected"
+    );
+}

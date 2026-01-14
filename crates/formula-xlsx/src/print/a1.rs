@@ -128,10 +128,28 @@ pub fn parse_print_titles_defined_name(
         match area.range {
             A1Range::Row(r) => titles.repeat_rows = Some(r.normalized()),
             A1Range::Col(r) => titles.repeat_cols = Some(r.normalized()),
-            A1Range::Cell(_) => {
-                return Err(PrintError::InvalidA1(
-                    "print titles must be a row or column range".to_string(),
-                ))
+            A1Range::Cell(r) => {
+                // Some producers represent whole-row/whole-column print titles as explicit
+                // cell ranges (e.g. `$A$1:$IV$1`, `$A$1:$A$65536`) instead of row/col-only
+                // references (`$1:$1`, `$A:$A`).
+                //
+                // Best-effort: interpret single-row / single-column cell ranges as print titles.
+                let r = r.normalized();
+                if r.start_row == r.end_row && r.start_col != r.end_col {
+                    titles.repeat_rows = Some(RowRange {
+                        start: r.start_row,
+                        end: r.end_row,
+                    });
+                } else if r.start_col == r.end_col && r.start_row != r.end_row {
+                    titles.repeat_cols = Some(ColRange {
+                        start: r.start_col,
+                        end: r.end_col,
+                    });
+                } else {
+                    return Err(PrintError::InvalidA1(
+                        "print titles must be a row or column range".to_string(),
+                    ));
+                }
             }
         }
     }
