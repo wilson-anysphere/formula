@@ -77,5 +77,22 @@ describe("createLocaleAwarePartialFormulaParser (engine-supported locales)", () 
     expect(esResult.currentArg?.text).toBe("1,");
     expect(esResult.functionName).toBe("SUM");
   });
-});
 
+  it("normalizes POSIX/variant locale IDs to the supported engine locale (de_DE.UTF-8 → de-DE)", async () => {
+    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    currentLocale = "de_DE.UTF-8";
+    const input = "=SUMME(1,";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    // de-DE uses semicolons, so the trailing comma is treated as a decimal separator.
+    expect(result.argIndex).toBe(0);
+    expect(result.currentArg?.text).toBe("1,");
+    // Localized function names are canonicalized for metadata lookup.
+    expect(result.functionName).toBe("SUM");
+  });
+});

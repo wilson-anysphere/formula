@@ -4,6 +4,7 @@ import {
   type PartialFormulaContext,
 } from "@formula/ai-completion";
 import { getLocale } from "../../i18n/index.js";
+import { normalizeFormulaLocaleId, type FormulaLocaleId } from "../../spreadsheet/formulaLocale.js";
 
 // Translation tables from the Rust engine (canonical <-> localized function names).
 // Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
@@ -76,10 +77,11 @@ function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
   return { localizedToCanonical, canonicalToLocalized };
 }
 
-const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationTables> = {
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<FormulaLocaleId, FunctionTranslationTables> = {
   "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
   "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+  "en-US": { localizedToCanonical: new Map(), canonicalToLocalized: new Map() },
 };
 
 type FormulaArgSeparator = "," | ";";
@@ -92,7 +94,7 @@ function getLocaleArgSeparator(localeId: string): FormulaArgSeparator {
   // - de-DE/fr-FR/es-ES: `;` args + `,` decimals
   //
   // Treat unknown locales as canonical `,` separator.
-  switch (localeId) {
+  switch (normalizeFormulaLocaleId(localeId)) {
     case "de-DE":
     case "fr-FR":
     case "es-ES":
@@ -106,7 +108,8 @@ function canonicalizeFunctionNameForLocale(name: string, localeId: string): stri
   const raw = String(name ?? "");
   if (!raw) return raw;
 
-  const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  const effectiveLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
+  const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[effectiveLocaleId];
   if (!localeMap) return casefoldIdent(raw);
 
   // Mirror `formula_engine::locale::registry::FormulaLocale::canonical_function_name`.
@@ -184,6 +187,7 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
         return "en-US";
       }
     })();
+    const formulaLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
     const candidates: any[] = super.search(prefix, { ...options, limit: candidateLimit } as any);
 
@@ -198,7 +202,7 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
       const meta = spec as any as LocaleAliasMeta;
       const isAlias = typeof meta.__formulaLocaleId === "string" && meta.__formulaLocaleId.length > 0;
       if (isAlias) {
-        if (meta.__formulaLocaleId === localeId) {
+        if (meta.__formulaLocaleId === formulaLocaleId) {
           localized.push(spec);
           if (typeof meta.__formulaCanonicalName === "string") {
             suppressCanonical.add(casefoldIdent(meta.__formulaCanonicalName));
@@ -223,7 +227,7 @@ export function createLocaleAwareFunctionRegistry(): FunctionRegistry {
 const CANONICAL_STARTER_FUNCTIONS = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
 
 function localizeFunctionNameForLocale(canonicalName: string, localeId: string): string {
-  const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[normalizeFormulaLocaleId(localeId) ?? "en-US"];
   if (!tables) return canonicalName;
   const upper = casefoldIdent(canonicalName);
   return tables.canonicalToLocalized.get(upper) ?? canonicalName;
@@ -333,9 +337,10 @@ export function createLocaleAwareStarterFunctions(): () => string[] {
         return "en-US";
       }
     })();
-    const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+    const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
+    const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[normalizedLocaleId];
     if (!tables) return CANONICAL_STARTER_FUNCTIONS;
-    return CANONICAL_STARTER_FUNCTIONS.map((s) => localizeStarter(s, localeId));
+    return CANONICAL_STARTER_FUNCTIONS.map((s) => localizeStarter(s, normalizedLocaleId));
   };
 }
 
@@ -682,6 +687,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
         return "en-US";
       }
     })();
+    const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
     // Use the built-in JS parser for spans (currentArg.start/end, etc.) and then
     // optionally refine function/arg context via the locale-aware WASM engine.
@@ -691,7 +697,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
     } catch {
       baseline = { isFormula: true, inFunctionCall: false };
     }
-    const localeArgSeparator = getLocaleArgSeparator(localeId);
+    const localeArgSeparator = getLocaleArgSeparator(normalizedLocaleId);
     if (localeArgSeparator === ";") {
       // The fallback parser is intentionally locale-agnostic, and will treat `,` as an argument
       // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
@@ -708,7 +714,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
         baseline = { ...baseline, argIndex, currentArg };
       }
     }
-    baseline = canonicalizeInCallContext(baseline, localeId, functionRegistry);
+    baseline = canonicalizeInCallContext(baseline, normalizedLocaleId, functionRegistry);
 
     const engine = (() => {
       try {
@@ -719,14 +725,14 @@ export function createLocaleAwarePartialFormulaParser(options: {
     })();
 
     if (!engine) return baseline;
-    if (unsupportedLocaleIds.has(localeId)) return baseline;
+    if (unsupportedLocaleIds.has(normalizedLocaleId)) return baseline;
 
     const parsePromise = Promise.resolve()
-      .then(() => engine.parseFormulaPartial(input, cursor, { localeId }, { timeoutMs }))
+      .then(() => engine.parseFormulaPartial(input, cursor, { localeId: normalizedLocaleId }, { timeoutMs }))
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         if (typeof message === "string" && message.startsWith("unknown localeId:")) {
-          unsupportedLocaleIds.add(localeId);
+          unsupportedLocaleIds.add(normalizedLocaleId);
         }
         return null;
       });
@@ -741,7 +747,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
             : null;
         if (!rawName || argIndex == null || argIndex < 0) return baseline;
 
-        const canonicalFnName = canonicalizeFunctionNameForLocale(rawName, localeId);
+        const canonicalFnName = canonicalizeFunctionNameForLocale(rawName, normalizedLocaleId);
 
         return {
           ...baseline,
