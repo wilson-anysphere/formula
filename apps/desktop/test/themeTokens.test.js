@@ -161,7 +161,7 @@ test("space tokens stay consistent across themes (no accidental overrides)", () 
   }
 });
 
-test("--space-* and --radius* tokens are only defined in tokens.css", () => {
+test("core design tokens (--space-*, --radius*, --font-*) are only defined in tokens.css", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const files = walkCssFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
@@ -186,7 +186,14 @@ test("--space-* and --radius* tokens are only defined in tokens.css", () => {
     let decl;
     while ((decl = cssDeclaration.exec(stripped))) {
       const prop = decl?.groups?.prop ?? "";
-      if (!prop.startsWith("--space-") && !prop.startsWith("--radius")) continue;
+      if (
+        !prop.startsWith("--space-") &&
+        !prop.startsWith("--radius") &&
+        prop !== "--font-sans" &&
+        prop !== "--font-mono"
+      ) {
+        continue;
+      }
       const line = getLineNumber(stripped, decl.index ?? 0);
       violations.push(`${rel}:L${line}: ${prop}`);
     }
@@ -196,7 +203,7 @@ test("--space-* and --radius* tokens are only defined in tokens.css", () => {
   assert.deepEqual(
     violations,
     [],
-    `Found spacing/radius token overrides outside src/styles/tokens.css:\n${violations
+    `Found core token overrides outside src/styles/tokens.css:\n${violations
       .map((violation) => `- ${violation}`)
       .join("\n")}`,
   );
