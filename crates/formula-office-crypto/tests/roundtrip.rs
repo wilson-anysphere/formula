@@ -480,7 +480,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let size_extra = 0u32;
     let alg_id = 0x0000_6801u32; // CALG_RC4
     let alg_id_hash = rc4_hash_alg_id(hash_alg);
-    let provider_type = 0u32;
+    let provider_type = 0x0000_0001u32; // PROV_RSA_FULL
     let reserved1 = 0u32;
     let reserved2 = 0u32;
     let csp_name_utf16_nul = [0u8, 0u8];
