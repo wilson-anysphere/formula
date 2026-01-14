@@ -62,9 +62,9 @@ for ad-hoc pipeline tests without bumping the app version, prefer `upload=false`
 
 ## Toolchain versions (keep local + CI in sync)
 
-The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workflows/release.yml`
-(currently Node 22). If you run the preflight scripts or build release bundles locally, use the same
-Node version to avoid subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
+The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workflows/release.yml`.
+If you run the preflight scripts or build release bundles locally, use the same Node version to avoid
+subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
 
 The workflow also pins the Rust CLI tools it installs at runtime:
 
@@ -93,7 +93,8 @@ releasable state.
 Run them locally from the repo root:
 
 ```bash
-# Note: CI/release workflows run these scripts under Node 22 (see release.yml).
+# Note: CI/release workflows run these scripts under the pinned Node major
+# (`NODE_VERSION` in .github/workflows/release.yml).
 # Using the same major locally reduces "works locally, breaks in release" drift.
 # Ensures TAURI_CLI_VERSION is patch-pinned and kept in sync with the repo's Tauri crates
 # (Cargo.toml major/minor + Cargo.lock resolved patch), across workflows + docs.
