@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use formula_engine::functions::FunctionSpec;
+use formula_engine::locale::get_locale;
 use formula_engine::ErrorKind;
 
 fn casefold_key(s: &str) -> String {
@@ -652,6 +653,19 @@ fn assert_error_alias(entries: &BTreeMap<String, Vec<String>>, canon: &str, loca
     );
 }
 
+fn assert_error_preferred(entries: &BTreeMap<String, Vec<String>>, canon: &str, preferred: &str) {
+    let Some(list) = entries.get(canon) else {
+        panic!("expected error TSV to contain canonical key {canon:?}");
+    };
+    let Some(first) = list.first() else {
+        panic!("expected error TSV mapping for {canon:?} to have at least one localized spelling");
+    };
+    assert_eq!(
+        first, preferred,
+        "expected preferred localized spelling for {canon:?} to be {preferred:?}; got {list:?}"
+    );
+}
+
 #[test]
 fn locale_error_tsvs_preserve_known_alias_spellings() {
     // Regression guard: some locales deliberately include additional spellings ("aliases") for
@@ -668,6 +682,12 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     );
     assert_error_alias(&de_de.entries, "#N/A", "#NV");
     assert_error_alias(&de_de.entries, "#N/A", "#N/A!");
+    assert_error_preferred(&de_de.entries, "#N/A", "#NV");
+
+    let de_de_locale = get_locale("de-DE").expect("expected de-DE locale to be registered");
+    assert_eq!(de_de_locale.localized_error_literal("#N/A"), Some("#NV"));
+    assert_eq!(de_de_locale.canonical_error_literal("#NV"), Some("#N/A"));
+    assert_eq!(de_de_locale.canonical_error_literal("#N/A!"), Some("#N/A"));
 
     let fr_fr = parse_error_tsv(
         "fr-FR",
@@ -679,6 +699,15 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_alias(&fr_fr.entries, "#NULL!", "#NULL!");
     assert_error_alias(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
     assert_error_alias(&fr_fr.entries, "#SPILL!", "#DEVERSEMENT!");
+    assert_error_preferred(&fr_fr.entries, "#NULL!", "#NUL!");
+    assert_error_preferred(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
+
+    let fr_fr_locale = get_locale("fr-FR").expect("expected fr-FR locale to be registered");
+    assert_eq!(fr_fr_locale.localized_error_literal("#NULL!"), Some("#NUL!"));
+    assert_eq!(fr_fr_locale.canonical_error_literal("#NUL!"), Some("#NULL!"));
+    assert_eq!(fr_fr_locale.localized_error_literal("#SPILL!"), Some("#PROPAGATION!"));
+    assert_eq!(fr_fr_locale.canonical_error_literal("#PROPAGATION!"), Some("#SPILL!"));
+    assert_eq!(fr_fr_locale.canonical_error_literal("#DEVERSEMENT!"), Some("#SPILL!"));
 
     let es_es = parse_error_tsv(
         "es-ES",
@@ -692,4 +721,27 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_alias(&es_es.entries, "#NAME?", "#NOMBRE?");
     assert_error_alias(&es_es.entries, "#SPILL!", "#¡DESBORDAMIENTO!");
     assert_error_alias(&es_es.entries, "#SPILL!", "#DESBORDAMIENTO!");
+    assert_error_preferred(&es_es.entries, "#VALUE!", "#¡VALOR!");
+    assert_error_preferred(&es_es.entries, "#NAME?", "#¿NOMBRE?");
+    assert_error_preferred(&es_es.entries, "#SPILL!", "#¡DESBORDAMIENTO!");
+
+    let es_es_locale = get_locale("es-ES").expect("expected es-ES locale to be registered");
+    assert_eq!(es_es_locale.localized_error_literal("#VALUE!"), Some("#¡VALOR!"));
+    assert_eq!(es_es_locale.canonical_error_literal("#¡VALOR!"), Some("#VALUE!"));
+    assert_eq!(es_es_locale.canonical_error_literal("#VALOR!"), Some("#VALUE!"));
+    assert_eq!(es_es_locale.localized_error_literal("#NAME?"), Some("#¿NOMBRE?"));
+    assert_eq!(es_es_locale.canonical_error_literal("#¿NOMBRE?"), Some("#NAME?"));
+    assert_eq!(es_es_locale.canonical_error_literal("#NOMBRE?"), Some("#NAME?"));
+    assert_eq!(
+        es_es_locale.localized_error_literal("#SPILL!"),
+        Some("#¡DESBORDAMIENTO!")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#¡DESBORDAMIENTO!"),
+        Some("#SPILL!")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#DESBORDAMIENTO!"),
+        Some("#SPILL!")
+    );
 }
