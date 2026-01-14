@@ -1414,6 +1414,22 @@ export class ToolExecutor {
     const cols = range.endCol - range.startCol + 1;
     const correlationSupported = cols === 2;
     const needsStreamingCorrelation = wantsCorrelation && correlationSupported;
+    const correlationOnly = wantsCorrelation && requested.size === 1;
+
+    // Fast-path: correlation is only defined for 2-column ranges. If it's the only requested measure
+    // and the range is not 2 columns wide, avoid reading/scanning the whole range (unless we need to
+    // count redacted cells under DLP REDACT).
+    if (
+      correlationOnly &&
+      !correlationSupported &&
+      (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW)
+    ) {
+      if (dlp) this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
+      return {
+        range: this.formatRangeForUser(range),
+        statistics: { correlation: null }
+      };
+    }
 
     const cells = this.spreadsheet.readRange(range);
     const includeFormulaValues = Boolean(
