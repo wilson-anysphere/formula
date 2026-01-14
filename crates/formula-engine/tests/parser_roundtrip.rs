@@ -71,6 +71,7 @@ fn roundtrip_with_external_workbook_scoped_name_ref() {
     // Workbook-scoped external defined names are emitted as a single quoted token so they remain
     // parseable (`[Book]Name` is ambiguous with structured references for our lexer/parser).
     roundtrip("='[Book2.xlsb]MyName'", opts.clone(), ser.clone());
+    roundtrip("='C:\\[foo]\\[Book.xlsx]MyName'", opts.clone(), ser.clone());
     roundtrip("='[AddIn]MyAddinConst'", opts, ser);
 }
 

@@ -916,6 +916,23 @@ impl NameRef {
                 // Workbook-scoped external names are written in Excel as `[Book.xlsx]MyName`, but
                 // this is ambiguous with structured references for our parser/lexer. Emit the
                 // combined token as a quoted identifier (`'[Book.xlsx]MyName'`) so it round-trips.
+                //
+                // If the workbook id is path-qualified (e.g. `C:\path\Book.xlsx`), prefer the
+                // Excel-canonical form `'C:\path\[Book.xlsx]MyName'`.
+                if let Some(sep) = book.rfind(['\\', '/']) {
+                    let (prefix, base) = book.split_at(sep + 1);
+                    if !base.is_empty() {
+                        out.push('\'');
+                        fmt_sheet_name_escaped(out, prefix);
+                        out.push('[');
+                        fmt_sheet_name_escaped(out, base);
+                        out.push(']');
+                        fmt_sheet_name_escaped(out, &self.name);
+                        out.push('\'');
+                        return;
+                    }
+                }
+
                 out.push('\'');
                 out.push('[');
                 fmt_sheet_name_escaped(out, book);
@@ -1108,9 +1125,59 @@ fn fmt_ref_prefix(
     sheet: &Option<SheetRef>,
     reference_style: ReferenceStyle,
 ) {
+    fn split_path_prefix(book: &str) -> Option<(&str, &str)> {
+        // Path-qualified external workbook ids arise when parsing formulas like
+        // `'C:\path\[Book.xlsx]Sheet1'!A1`: the parser folds the path prefix (`C:\path\`) into the
+        // workbook id, producing `C:\path\Book.xlsx`.
+        //
+        // When serializing back to formula text, keep the path prefix *outside* the `[workbook]`
+        // bracket so any `[` / `]` characters in directory names (e.g. `C:\[foo]\`) do not need to
+        // be escaped as workbook-prefix `]]` sequences.
+        let sep = book.rfind(['\\', '/'])?;
+        let (prefix, base) = book.split_at(sep + 1);
+        if base.is_empty() {
+            None
+        } else {
+            Some((prefix, base))
+        }
+    }
+
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet_ref)) => {
             // External references are written as `[Book.xlsx]Sheet1!A1`.
+            //
+            // If `book` is a path-qualified workbook id (e.g. `C:\path\Book.xlsx`), prefer the
+            // Excel-canonical form where the path prefix appears *outside* the workbook brackets:
+            // `'C:\path\[Book.xlsx]Sheet1'!A1`.
+            //
+            // This is important for paths containing bracket characters in directory names (e.g.
+            // `C:\[foo]\`): embedding the full path inside `[ ... ]` would introduce an unescaped
+            // `]` inside the workbook prefix, making the serialized formula unparseable.
+            if let Some((path_prefix, base)) = split_path_prefix(book) {
+                out.push('\'');
+                fmt_sheet_name_escaped(out, path_prefix);
+                out.push('[');
+                fmt_sheet_name_escaped(out, base);
+                out.push(']');
+                match sheet_ref {
+                    SheetRef::Sheet(sheet) => {
+                        fmt_sheet_name_escaped(out, sheet);
+                    }
+                    SheetRef::SheetRange { start, end } => {
+                        if sheet_name_eq_case_insensitive(start, end) {
+                            fmt_sheet_name_escaped(out, start);
+                        } else {
+                            fmt_sheet_name_escaped(out, start);
+                            out.push(':');
+                            fmt_sheet_name_escaped(out, end);
+                        }
+                    }
+                }
+                out.push('\'');
+                out.push('!');
+                return;
+            }
+
             // Excel uses a single quoted string for the combined `[book]sheet` prefix when the
             // sheet name requires quoting (e.g. spaces / characters that aren't valid identifiers).
             match sheet_ref {
