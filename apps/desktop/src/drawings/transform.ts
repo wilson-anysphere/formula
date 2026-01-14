@@ -29,7 +29,18 @@ export function normalizeRotationDeg(rotationDeg: number): number {
 function parseBoolAttr(raw: string | undefined): boolean {
   if (!raw) return false;
   const value = raw.trim().toLowerCase();
-  if (value === "" || value === "0" || value === "false" || value === "f") return false;
+  if (
+    value === "" ||
+    value === "0" ||
+    value === "false" ||
+    value === "f" ||
+    value === "no" ||
+    value === "off"
+  ) {
+    return false;
+  }
+  // Most OOXML payloads use "1"/"0" or "true"/"false", but some generators use "on"/"off" or "yes"/"no".
+  // Treat any non-empty value not in the explicit false set as true (including "1", "true", "t", "yes", "on").
   return true;
 }
 

@@ -45,6 +45,26 @@ describe("drawings transform parsing", () => {
       flipV: true,
     });
   });
+
+  it('treats "on"/"off" and "yes"/"no" as boolean values', () => {
+    const rawXml = `
+      <xdr:sp xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <xdr:spPr>
+          <a:xfrm rot="0" flipH="off" flipV="on">
+            <a:off x="0" y="0"/>
+            <a:ext cx="100" cy="200"/>
+          </a:xfrm>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    expect(parseDrawingTransformFromRawXml(rawXml)).toEqual({
+      rotationDeg: 0,
+      flipH: false,
+      flipV: true,
+    });
+  });
 });
 
 describe("drawings hit testing with rotation", () => {
