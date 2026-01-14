@@ -115,3 +115,70 @@ test("remote sheet view updates applied via sheetViewBinder are not echoed back 
     doc.destroy();
   }
 });
+
+test("remote drawings updates applied via sheetViewBinder are not echoed back into Yjs by the full binder (prevents undo pollution)", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const binderOrigin = { type: "test:binder-origin" };
+  const undoService = createCollabUndoService({ doc, scope: [sheets], origin: binderOrigin });
+
+  const dc = new DocumentControllerStub();
+  const sheetViewBinder = bindSheetViewToCollabSession({
+    session: /** @type {any} */ ({ doc, sheets, localOrigins: new Set(), isReadOnly: () => false }),
+    documentController: /** @type {any} */ (dc),
+    origin: binderOrigin,
+  });
+  const fullBinder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController: dc,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  let localUpdates = 0;
+  const onUpdate = (_update, origin) => {
+    if (origin === binderOrigin) localUpdates += 1;
+  };
+
+  try {
+    await flushAsync(5);
+
+    undoService.undoManager.clear();
+    doc.on("update", onUpdate);
+
+    const drawings = [
+      {
+        id: "drawing-1",
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ];
+
+    doc.transact(() => {
+      const sheet = sheets.get(0);
+      assert.ok(sheet, "expected Sheet1 entry in Yjs");
+      sheet.set("view", { frozenRows: 0, frozenCols: 0, drawings });
+    }, REMOTE_ORIGIN);
+
+    await flushAsync(10);
+
+    assert.deepEqual(dc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, drawings });
+    assert.equal(localUpdates, 0, "expected no binder-origin Yjs updates from remote drawings changes");
+    assert.equal(undoService.canUndo(), false, "expected remote drawings changes to not create undoable local steps");
+  } finally {
+    doc.off("update", onUpdate);
+    sheetViewBinder.destroy();
+    fullBinder.destroy();
+    undoService.undoManager.destroy();
+    doc.destroy();
+  }
+});
