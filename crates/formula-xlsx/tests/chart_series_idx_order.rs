@@ -211,3 +211,34 @@ fn warns_on_unparsable_chart_ex_idx() {
         model.diagnostics
     );
 }
+
+#[test]
+fn warns_on_unparsable_chart_ex_order() {
+    let xml = br#"
+        <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+          <cx:chart>
+            <cx:plotArea>
+              <cx:histogramChart>
+                <cx:ser>
+                  <cx:idx val="7"/>
+                  <cx:order val="nope"/>
+                </cx:ser>
+              </cx:histogramChart>
+            </cx:plotArea>
+          </cx:chart>
+        </cx:chartSpace>
+    "#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 1);
+    // Unparsable order should trigger a warning; missing order is then defaulted to the series position.
+    assert_eq!(model.series[0].idx, Some(7));
+    assert_eq!(model.series[0].order, Some(0));
+    assert!(
+        model.diagnostics
+            .iter()
+            .any(|d| d.message.contains("ChartEx series order")),
+        "expected warning about ChartEx series order parse failure, got {:?}",
+        model.diagnostics
+    );
+}
