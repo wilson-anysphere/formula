@@ -196,7 +196,11 @@ impl PivotTableDefinition {
                 self.apply_range_map_edit(&edit);
             }
             // CopyRange does not move existing cells, so pivot definitions do not shift.
-            EditOp::CopyRange { sheet, src, dst_top_left } => {
+            EditOp::CopyRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
                 let dst = Range::new(
                     *dst_top_left,
                     CellRef::new(
@@ -342,10 +346,7 @@ impl PivotTableDefinition {
             }
             StructuralEdit::DeleteRows { row, count, .. } => {
                 let del_end = row.saturating_add(count.saturating_sub(1));
-                let deleted = Range::new(
-                    CellRef::new(*row, 0),
-                    CellRef::new(del_end, u32::MAX),
-                );
+                let deleted = Range::new(CellRef::new(*row, 0), CellRef::new(del_end, u32::MAX));
                 if output.intersects(&deleted) {
                     self.needs_refresh = true;
                 }
@@ -359,10 +360,7 @@ impl PivotTableDefinition {
             }
             StructuralEdit::DeleteCols { col, count, .. } => {
                 let del_end = col.saturating_add(count.saturating_sub(1));
-                let deleted = Range::new(
-                    CellRef::new(0, *col),
-                    CellRef::new(u32::MAX, del_end),
-                );
+                let deleted = Range::new(CellRef::new(0, *col), CellRef::new(u32::MAX, del_end));
                 if output.intersects(&deleted) {
                     self.needs_refresh = true;
                 }
@@ -395,7 +393,9 @@ impl PivotTableDefinition {
         }
 
         // Cells moved *into* the output range invalidate it (e.g. MoveRange destination overlaps output).
-        let Some(dst) = shift_grid_range_saturating(edit.moved_region, edit.delta_row, edit.delta_col) else {
+        let Some(dst) =
+            shift_grid_range_saturating(edit.moved_region, edit.delta_row, edit.delta_col)
+        else {
             return;
         };
         let dst_range = Range::new(
@@ -408,7 +408,11 @@ impl PivotTableDefinition {
     }
 }
 
-fn shift_grid_range_saturating(range: GridRange, delta_row: i32, delta_col: i32) -> Option<GridRange> {
+fn shift_grid_range_saturating(
+    range: GridRange,
+    delta_row: i32,
+    delta_col: i32,
+) -> Option<GridRange> {
     let sr = range.start_row as i64 + delta_row as i64;
     let sc = range.start_col as i64 + delta_col as i64;
     let er = range.end_row as i64 + delta_row as i64;
@@ -441,7 +445,11 @@ fn rewrite_cell_ref_for_structural_edit(
     parse_a1_cell_from_formula(&out)
 }
 
-fn rewrite_range_for_structural_edit(range: Range, sheet: &str, edit: &StructuralEdit) -> Option<Range> {
+fn rewrite_range_for_structural_edit(
+    range: Range,
+    sheet: &str,
+    edit: &StructuralEdit,
+) -> Option<Range> {
     let formula = format!("={range}");
     let (out, _) = rewrite_formula_for_structural_edit(&formula, sheet, CellAddr::new(0, 0), edit);
     parse_a1_range_from_formula(&out)
@@ -457,7 +465,11 @@ fn rewrite_cell_ref_for_range_map_edit(
     parse_a1_cell_from_formula(&out)
 }
 
-fn rewrite_range_for_range_map_edit(range: Range, sheet: &str, edit: &RangeMapEdit) -> Option<Range> {
+fn rewrite_range_for_range_map_edit(
+    range: Range,
+    sheet: &str,
+    edit: &RangeMapEdit,
+) -> Option<Range> {
     let formula = format!("={range}");
     let (out, _) = rewrite_formula_for_range_map(&formula, sheet, CellAddr::new(0, 0), edit);
     parse_a1_range_from_formula(&out)

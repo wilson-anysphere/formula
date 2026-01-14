@@ -1,8 +1,8 @@
-use formula_engine::{EditOp, Engine, Value};
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotFieldRef,
     PivotSource, PivotTableDefinition, SubtotalPosition, ValueField,
 };
+use formula_engine::{EditOp, Engine, Value};
 use formula_model::{CellRef, Range};
 use pretty_assertions::assert_eq;
 
@@ -253,4 +253,79 @@ fn move_range_updates_pivot_source_and_refresh_reads_from_moved_location() {
 
     engine.refresh_pivot_table(pivot_id).unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Number(700.0));
+}
+
+#[test]
+fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    assert!(engine.rename_sheet("Sheet1", "Data"));
+
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.sheet, "Data");
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Data".to_string(),
+            range: Some(range("A1:B5")),
+        }
+    );
+
+    // The old sheet name should not resolve anymore.
+    assert_eq!(engine.sheet_dimensions("Sheet1"), None);
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    // Output written to renamed sheet.
+    assert_eq!(
+        engine.get_cell_value("Data", "D1"),
+        Value::Text("Region".to_string())
+    );
+
+    // Refresh should *not* recreate the old sheet.
+    assert_eq!(engine.sheet_dimensions("Sheet1"), None);
+}
+
+#[test]
+fn delete_sheet_drops_pivot_definitions_that_referenced_it() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.delete_sheet("Sheet1").unwrap();
+
+    assert!(engine.pivot_table(pivot_id).is_none());
+    assert!(engine.refresh_pivot_table(pivot_id).is_err());
 }

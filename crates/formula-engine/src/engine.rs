@@ -1052,6 +1052,20 @@ impl Engine {
             .filter_map(|(id, name)| name.as_ref().map(|name| (Workbook::sheet_key(name), id)))
             .collect();
 
+        // Keep stored pivot definitions aligned with sheet renames. Pivot definitions store sheet
+        // names (not stable ids) and pivot refresh uses `set_cell_value`, which would otherwise
+        // recreate the *old* sheet name via `ensure_sheet`.
+        for pivot in self.workbook.pivots.values_mut() {
+            if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &old_name) {
+                pivot.destination.sheet = new_name.to_string();
+            }
+            if let crate::pivot::PivotSource::Range { sheet, .. } = &mut pivot.source {
+                if formula_model::sheet_name_eq_case_insensitive(sheet, &old_name) {
+                    *sheet = new_name.to_string();
+                }
+            }
+        }
+
         // Sheet names can be observed by worksheet information functions (e.g. CELL("address")).
         // Conservatively mark all compiled formula cells dirty so callers see updated results.
         self.mark_all_compiled_cells_dirty();
@@ -1461,12 +1475,19 @@ impl Engine {
 
         // Pivot definitions store sheet names as strings. If we leave stale references behind,
         // refreshing a pivot can silently resurrect the deleted sheet via `ensure_sheet`.
+        //
+        // Also drop table-backed pivots that referenced tables from the deleted sheet.
+        let deleted_table_ids: HashSet<u32> = self
+            .workbook
+            .sheets
+            .get(deleted_sheet_id)
+            .map(|sheet_state| sheet_state.tables.iter().map(|t| t.id).collect())
+            .unwrap_or_default();
         self.workbook.pivots.retain(|_, def| {
-            let destination_matches =
-                Workbook::sheet_key(&def.destination.sheet) == deleted_sheet_key;
+            let destination_matches = Workbook::sheet_key(&def.destination.sheet) == deleted_sheet_key;
             let source_matches = match &def.source {
                 PivotSource::Range { sheet, .. } => Workbook::sheet_key(sheet) == deleted_sheet_key,
-                PivotSource::Table { .. } => false,
+                PivotSource::Table { table_id } => deleted_table_ids.contains(table_id),
             };
             !(destination_matches || source_matches)
         });
@@ -1476,7 +1497,6 @@ impl Engine {
 
         // Drop any per-sheet engine metadata keyed by the deleted sheet id.
         self.info.origin_by_sheet.remove(&deleted_sheet_id);
-
         // Keep the pre-delete sheet tab order so 3D span boundary shift logic can resolve adjacent
         // sheets (Excel shifts a deleted 3D boundary one sheet inward).
         let sheet_order_names: Vec<String> = self
