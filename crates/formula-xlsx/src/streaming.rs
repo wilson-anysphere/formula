@@ -621,18 +621,20 @@ mod macro_strip_streaming {
     const RELATIONSHIPS_NS: &[u8] =
         b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-    fn canonical_part_name(name: &str) -> &str {
-        name.strip_prefix('/').unwrap_or(name)
+    fn canonical_part_name(name: &str) -> String {
+        // Normalize producer bugs so macro stripping is robust:
+        // - strip leading separators (`/` or `\`, including percent-encoded)
+        // - normalize `\` to `/`
+        // - ASCII-lowercase
+        // - percent-decode valid `%xx` sequences
+        //
+        // This matches `zip_part_names_equivalent`.
+        String::from_utf8_lossy(&crate::zip_util::zip_part_name_lookup_key(name)).into_owned()
     }
 
     fn find_part_name(part_names: &BTreeSet<String>, candidate: &str) -> Option<String> {
-        if let Some(found) = part_names.get(candidate) {
-            return Some(found.clone());
-        }
-        part_names
-            .iter()
-            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
-            .cloned()
+        let candidate = canonical_part_name(candidate);
+        part_names.get(&candidate).cloned()
     }
 
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
@@ -673,11 +675,11 @@ mod macro_strip_streaming {
 
             let name = file.name().to_string();
             let canonical_name = canonical_part_name(&name);
-            if delete_parts.contains(canonical_name) {
+            if delete_parts.contains(&canonical_name) {
                 continue;
             }
 
-            if let Some(bytes) = updated_parts.get(canonical_name) {
+            if let Some(bytes) = updated_parts.get(&canonical_name) {
                 zip.start_file(name, options)?;
                 zip.write_all(bytes)?;
             } else {
@@ -698,7 +700,7 @@ mod macro_strip_streaming {
             if file.is_dir() {
                 continue;
             }
-            out.insert(canonical_part_name(file.name()).to_string());
+            out.insert(canonical_part_name(file.name()));
         }
         Ok(out)
     }
@@ -711,21 +713,21 @@ mod macro_strip_streaming {
         let mut delete = BTreeSet::new();
 
         // VBA project payloads.
-        delete.insert("xl/vbaProject.bin".to_string());
-        delete.insert("xl/vbaData.xml".to_string());
-        delete.insert("xl/vbaProjectSignature.bin".to_string());
+        delete.insert("xl/vbaproject.bin".to_string());
+        delete.insert("xl/vbadata.xml".to_string());
+        delete.insert("xl/vbaprojectsignature.bin".to_string());
 
         // Ribbon customizations.
         for name in part_names {
-            if name.starts_with("customUI/") {
+            if name.starts_with("customui/") {
                 delete.insert(name.clone());
             }
         }
 
         // ActiveX + legacy form controls.
         for name in part_names {
-            if name.starts_with("xl/activeX/")
-                || name.starts_with("xl/ctrlProps/")
+            if name.starts_with("xl/activex/")
+                || name.starts_with("xl/ctrlprops/")
                 || name.starts_with("xl/controls/")
             {
                 delete.insert(name.clone());
@@ -903,14 +905,13 @@ mod macro_strip_streaming {
                     };
                     let target = strip_fragment(&target);
                     let resolved = resolve_target_for_source(source_part, target);
+                    let resolved = canonical_part_name(&resolved);
 
                     // Worksheet OLE objects are stored under `xl/embeddings/` and referenced from
                     // `<oleObjects>` in sheet XML (valid in `.xlsx`). For macro stripping we only
                     // delete embedding binaries referenced by VML `<o:OLEObject>` control shapes.
-                    if resolved.starts_with("xl/embeddings/") {
-                        if let Some(found) = find_part_name(part_names, &resolved) {
-                            out.insert(found);
-                        }
+                    if resolved.starts_with("xl/embeddings/") && part_names.contains(&resolved) {
+                        out.insert(resolved);
                     }
                 }
                 _ => {}
@@ -1008,11 +1009,11 @@ mod macro_strip_streaming {
         updated_parts: &mut HashMap<String, Vec<u8>>,
         target_kind: WorkbookKind,
     ) -> Result<(), StreamingPatchError> {
-        let ct_name = "[Content_Types].xml";
-        if !delete_parts.contains(ct_name) && zip_part_exists(archive, ct_name)? {
-            let existing = read_zip_part(archive, ct_name, read_cache)?;
+        let ct_name = canonical_part_name("[Content_Types].xml");
+        if !delete_parts.contains(&ct_name) && zip_part_exists(archive, &ct_name)? {
+            let existing = read_zip_part(archive, &ct_name, read_cache)?;
             if let Some(updated) = strip_content_types(&existing, delete_parts, target_kind)? {
-                updated_parts.insert(ct_name.to_string(), updated);
+                updated_parts.insert(ct_name, updated);
             }
         }
 
@@ -1420,7 +1421,8 @@ mod macro_strip_streaming {
         };
 
         let normalized = part_name.strip_prefix('/').unwrap_or(part_name.as_str());
-        if delete_parts.contains(normalized) {
+        let normalized = canonical_part_name(normalized);
+        if delete_parts.contains(&normalized) {
             return Ok(Some(None));
         }
 
@@ -1549,14 +1551,15 @@ mod macro_strip_streaming {
             return found;
         }
 
-        if !direct.starts_with("xl/") {
-            let xl_prefixed = format!("xl/{direct}");
+        let direct_canonical = canonical_part_name(&direct);
+        if !direct_canonical.starts_with("xl/") {
+            let xl_prefixed = format!("xl/{direct_canonical}");
             if let Some(found) = find_part_name(part_names, &xl_prefixed) {
                 return found;
             }
         }
 
-        direct
+        direct_canonical
     }
 
     fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
