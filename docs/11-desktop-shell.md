@@ -1192,7 +1192,7 @@ High-level contents (see the file for the exhaustive list):
   - deep links / OAuth: `oauth-redirect`
   - native menu bar events (e.g. `menu-open`, `menu-save`, `menu-check-updates`)
   - tray + shortcuts (e.g. `tray-open`, `shortcut-command-palette`)
-  - startup timing instrumentation (e.g. `startup:webview-loaded`, `startup:tti`)
+  - startup timing instrumentation (e.g. `startup:webview-loaded`, `startup:first-render`, `startup:tti`)
   - updater events (e.g. `update-check-started`, `update-available`)
 - `core:event:allow-emit` includes acknowledgements and check-mode signals:
   - `open-file-ready`, `oauth-redirect-ready`
