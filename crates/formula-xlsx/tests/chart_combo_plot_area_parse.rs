@@ -200,6 +200,23 @@ fn combo_plot_area_warns_only_for_unknown_chart_types() {
     };
     assert_eq!(combo.charts.len(), 2);
 
+    match &combo.charts[0] {
+        ComboChartEntry::Unknown { name, series } => {
+            assert_eq!(name, "madeUpChart");
+            assert_eq!(series.start, 0);
+            assert_eq!(series.end, 1);
+        }
+        other => panic!("expected unknown first plot to be surfaced, got {other:?}"),
+    }
+
+    match &combo.charts[1] {
+        ComboChartEntry::Bar { series, .. } => {
+            assert_eq!(series.start, 1);
+            assert_eq!(series.end, 2);
+        }
+        other => panic!("expected second subplot to be bar, got {other:?}"),
+    }
+
     // We should only warn about the unsupported chart type, not because multiple chart types exist.
     assert_eq!(model.diagnostics.len(), 1);
     assert!(
