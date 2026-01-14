@@ -36,7 +36,7 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "format.numberFormat.number")).toBe(true);
     expect(handleRibbonCommand(ctx, "format.numberFormat.percent")).toBe(true);
     expect(handleRibbonCommand(ctx, "format.numberFormat.longDate")).toBe(true);
-    expect(handleRibbonCommand(ctx, "format.increaseFontSize")).toBe(true);
+    expect(handleRibbonCommand(ctx, "format.fontSize.increase")).toBe(true);
   });
 
   it("toggles bold", () => {
@@ -158,11 +158,11 @@ describe("handleRibbonCommand", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);
 
-    handleRibbonCommand(ctx, "format.increaseFontSize");
+    handleRibbonCommand(ctx, "format.fontSize.increase");
     let style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
     expect(style.font?.size).toBe(12);
 
-    handleRibbonCommand(ctx, "format.decreaseFontSize");
+    handleRibbonCommand(ctx, "format.fontSize.decrease");
     style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
     expect(style.font?.size).toBe(11);
   });

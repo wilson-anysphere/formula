@@ -166,7 +166,6 @@ import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import {
   FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
   FORMAT_FONT_SIZE_PRESET_COMMAND_IDS,
-  FORMAT_FONT_SIZE_STEP_COMMAND_IDS,
 } from "./commands/registerBuiltinFormatFontCommands.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
@@ -2654,9 +2653,13 @@ let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
 
 const RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING: Record<string, true> = Object.fromEntries(
-  [...FORMAT_FONT_NAME_PRESET_COMMAND_IDS, ...FORMAT_FONT_SIZE_PRESET_COMMAND_IDS, ...FORMAT_FONT_SIZE_STEP_COMMAND_IDS].map(
-    (id) => [id, true] as const,
-  ),
+  [
+    ...FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
+    ...FORMAT_FONT_SIZE_PRESET_COMMAND_IDS,
+    // Step commands are registered by `registerBuiltinCommands` (not `registerBuiltinFormatFontCommands`).
+    "format.fontSize.increase",
+    "format.fontSize.decrease",
+  ].map((id) => [id, true] as const),
 );
 
 // --- Ribbon: auto-disable unimplemented CommandRegistry-backed controls ----------

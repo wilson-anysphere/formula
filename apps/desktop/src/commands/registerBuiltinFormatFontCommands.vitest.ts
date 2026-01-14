@@ -21,7 +21,6 @@ describe("registerBuiltinFormatFontCommands", () => {
 
     registerBuiltinFormatFontCommands({
       commandRegistry,
-      app: {} as any,
       applyFormattingToSelection: applyFormattingToSelection as any,
     });
 
@@ -44,4 +43,3 @@ describe("registerBuiltinFormatFontCommands", () => {
     );
   });
 });
-

@@ -211,7 +211,6 @@ export function registerDesktopCommands(params: {
 
   registerBuiltinFormatFontCommands({
     commandRegistry,
-    app,
     applyFormattingToSelection,
   });
 

@@ -321,21 +321,21 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const fontSizePrefix = "format.fontSize.";
-  if (commandId.startsWith(fontSizePrefix)) {
-    const size = Number(commandId.slice(fontSizePrefix.length));
-    if (!Number.isFinite(size) || size <= 0) return true;
-    ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
-    return true;
-  }
-
-  if (commandId === "format.increaseFontSize" || commandId === "format.decreaseFontSize") {
-    const direction = commandId === "format.increaseFontSize" ? "increase" : "decrease";
+  if (commandId === "format.fontSize.increase" || commandId === "format.fontSize.decrease") {
+    const direction = commandId === "format.fontSize.increase" ? "increase" : "decrease";
     const current = activeCellFontSizePt(ctx);
     const next = stepFontSize(current, direction);
     if (next !== current) {
       ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
     }
+    return true;
+  }
+
+  const fontSizePrefix = "format.fontSize.";
+  if (commandId.startsWith(fontSizePrefix)) {
+    const size = Number(commandId.slice(fontSizePrefix.length));
+    if (!Number.isFinite(size) || size <= 0) return true;
+    ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
     return true;
   }
 
