@@ -1,6 +1,7 @@
 #![cfg(windows)]
 
 use formula_io::offcrypto::cryptoapi::{crypt_derive_key, HashAlg};
+use sha1::{Digest as _, Sha1};
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::Security::Cryptography::{
     CryptAcquireContextW, CryptCreateHash, CryptDeriveKey, CryptDestroyHash, CryptDestroyKey,
@@ -279,6 +280,12 @@ fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
         (CALG_AES_128, 16usize),
     ] {
         let (hash_value, key_blob) = derive_key_and_hash(&provider, alg_id_hash, alg_id_key, data);
+        let expected_hash_value: [u8; 20] = Sha1::digest(data).into();
+        assert_eq!(
+            hash_value,
+            expected_hash_value,
+            "unexpected SHA-1 hash value from CryptoAPI (hash derivation mismatch)"
+        );
         let key_bytes = extract_session_key_bytes(&key_blob, key_len, alg_id_key);
 
         let ours = crypt_derive_key(&hash_value, key_len, hash_alg);
