@@ -26,8 +26,9 @@
 //! engine returns the referenced value coerced to text using the current
 //! locale-aware formatting rules.
 //!
-//! Once workbook locale + codepage + phonetic metadata are modeled, this module
-//! can be extended to implement real Excel semantics for DBCS workbooks.
+//! Note: Excel's DBCS semantics contain many locale-specific edge cases. This module implements
+//! the core behaviors needed by typical Japanese/Chinese/Korean workbooks, but may need to be
+//! extended as additional Excel oracle cases are added.
 
 use crate::eval::CompiledExpr;
 use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
