@@ -40,6 +40,48 @@ function normalizeFrozenCount(value: unknown): number {
   return Math.max(0, Math.trunc(num));
 }
 
+function normalizeAxisSize(value: unknown): number | null {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  if (num <= 0) return null;
+  return num;
+}
+
+function axisOverridesEntryCountFromJson(raw: unknown): number {
+  if (!raw) return 0;
+  let count = 0;
+
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const index = Array.isArray(entry) ? entry[0] : (entry as any)?.index;
+      const size = Array.isArray(entry) ? entry[1] : (entry as any)?.size;
+      const idx = Number(index);
+      if (!Number.isInteger(idx) || idx < 0) continue;
+      const normalized = normalizeAxisSize(size);
+      if (normalized == null) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  if (isRecord(raw)) {
+    for (const [key, value] of Object.entries(raw)) {
+      const idx = Number(key);
+      if (!Number.isInteger(idx) || idx < 0) continue;
+      const normalized = normalizeAxisSize(value);
+      if (normalized == null) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  return 0;
+}
+
+function axisOverridesEntryCount(value: unknown): number {
+  return axisOverridesEntryCountFromJson(yjsValueToJson(value));
+}
+
 // Defensive cap: drawing ids can be authored via remote/shared state (sheet view state). Keep
 // validation strict so workbook schema normalization doesn't deep-copy pathological ids (e.g.
 // multi-megabyte strings) when merging duplicate sheet entries.
@@ -227,40 +269,37 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               const winnerVal = winner.get(key);
               const entryVal = entry.get(key);
 
-                if (winnerVal === undefined) {
-                  if (entryVal !== undefined) {
-                    if (key === "drawings") {
-                      const sanitized = sanitizeDrawingsValue(entryVal);
-                      winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
-                    } else if (key === "view") {
-                      const viewMap = getYMap(entryVal);
-                      if (viewMap) {
-                        const cloned = cloneYjsValue(entryVal, cloneCtors);
-                        const clonedMap = getYMap(cloned);
-                        if (clonedMap) {
-                          const drawings = clonedMap.get("drawings");
-                          const sanitized = sanitizeDrawingsValue(drawings);
-                          if (sanitized) clonedMap.set("drawings", sanitized);
-                        }
-                        winner.set(key, cloned);
-                      } else {
-                        const json = yjsValueToJson(entryVal);
-                        if (isRecord(json) && Object.prototype.hasOwnProperty.call(json, "drawings")) {
-                          const sanitized = sanitizeDrawingsJson((json as any).drawings);
-                          winner.set(
-                            key,
-                            sanitized ? { ...json, drawings: sanitized } : json,
-                          );
-                        } else {
-                          winner.set(key, json);
-                        }
+              if (winnerVal === undefined) {
+                if (entryVal !== undefined) {
+                  if (key === "drawings") {
+                    const sanitized = sanitizeDrawingsValue(entryVal);
+                    winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
+                  } else if (key === "view") {
+                    const viewMap = getYMap(entryVal);
+                    if (viewMap) {
+                      const cloned = cloneYjsValue(entryVal, cloneCtors);
+                      const clonedMap = getYMap(cloned);
+                      if (clonedMap) {
+                        const drawings = clonedMap.get("drawings");
+                        const sanitized = sanitizeDrawingsValue(drawings);
+                        if (sanitized) clonedMap.set("drawings", sanitized);
                       }
+                      winner.set(key, cloned);
                     } else {
-                      winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                      const json = yjsValueToJson(entryVal);
+                      if (isRecord(json) && Object.prototype.hasOwnProperty.call(json, "drawings")) {
+                        const sanitized = sanitizeDrawingsJson((json as any).drawings);
+                        winner.set(key, sanitized ? { ...json, drawings: sanitized } : json);
+                      } else {
+                        winner.set(key, json);
+                      }
                     }
+                  } else {
+                    winner.set(key, cloneYjsValue(entryVal, cloneCtors));
                   }
-                  continue;
                 }
+                continue;
+              }
 
               // For legacy numeric view keys, prefer non-zero values over 0.
               if (key === "frozenRows" || key === "frozenCols") {
@@ -272,10 +311,8 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               }
 
               if (key === "colWidths" || key === "rowHeights") {
-                const winnerJson = yjsValueToJson(winnerVal);
-                const entryJson = yjsValueToJson(entryVal);
-                const winnerCount = isRecord(winnerJson) ? Object.keys(winnerJson).length : 0;
-                const entryCount = isRecord(entryJson) ? Object.keys(entryJson).length : 0;
+                const winnerCount = axisOverridesEntryCount(winnerVal);
+                const entryCount = axisOverridesEntryCount(entryVal);
                 if (winnerCount === 0 && entryCount > 0) {
                   winner.set(key, cloneYjsValue(entryVal, cloneCtors));
                 }
@@ -346,10 +383,8 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                   }
 
                   if (k === "colWidths" || k === "rowHeights") {
-                    const wJson = yjsValueToJson(wv);
-                    const eJson = yjsValueToJson(ev);
-                    const wCount = isRecord(wJson) ? Object.keys(wJson).length : 0;
-                    const eCount = isRecord(eJson) ? Object.keys(eJson).length : 0;
+                    const wCount = axisOverridesEntryCount(wv);
+                    const eCount = axisOverridesEntryCount(ev);
                     if (wCount === 0 && eCount > 0) {
                       winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
                     }
@@ -407,9 +442,9 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                     }
 
                     if (k === "colWidths" || k === "rowHeights") {
-                      const wObj = isRecord(wv) ? wv : {};
-                      const eObj = isRecord(ev) ? ev : {};
-                      if (Object.keys(wObj).length === 0 && Object.keys(eObj).length > 0) {
+                      const wCount = axisOverridesEntryCountFromJson(wv);
+                      const eCount = axisOverridesEntryCountFromJson(ev);
+                      if (wCount === 0 && eCount > 0) {
                         merged[k] = structuredClone(ev);
                       }
                       continue;
