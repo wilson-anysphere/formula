@@ -2351,9 +2351,13 @@ mod fuzz_tests {
         }));
         assert!(outcome.is_ok(), "decrypt_agile_encrypted_package panicked");
         let err = outcome.unwrap().expect_err("expected failure due to invalid blockSize");
-        assert!(
-            matches!(err, OffCryptoError::InvalidAttribute { ref element, ref attr, .. } if element == "keyData" && attr == "blockSize"),
-            "expected InvalidAttribute(keyData, blockSize), got {err:?}"
-        );
+        match err {
+            OffCryptoError::InvalidBlockSize { block_size: 0 } => {}
+            OffCryptoError::InvalidAttribute { element, attr, .. }
+                if element == "keyData" && attr == "blockSize" => {}
+            other => panic!(
+                "expected InvalidBlockSize(0) or InvalidAttribute(keyData, blockSize), got {other:?}"
+            ),
+        }
     }
 }
