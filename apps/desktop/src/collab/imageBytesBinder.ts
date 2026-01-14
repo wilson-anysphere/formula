@@ -25,8 +25,47 @@ const DRAWING_IMAGES_KEY = "drawingImages";
 const DEFAULT_MAX_IMAGE_BYTES = 1_000_000; // 1MB raw bytes (base64 is larger)
 const DEFAULT_MAX_IMAGES = 100;
 
+// Guardrails for PNG decompression bombs: a PNG can advertise extremely large dimensions while the
+// compressed payload remains small. Decoding such images can allocate huge bitmaps and hang/crash
+// the renderer. Keep this in sync with the guard in SpreadsheetApp paste/insert flows.
+const MAX_PNG_DIMENSION = 10_000;
+const MAX_PNG_PIXELS = 50_000_000;
+
 function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // PNG signature (8 bytes) + IHDR chunk header (8 bytes) + width/height (8 bytes).
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 24) return null;
+
+  if (
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47 ||
+    bytes[4] !== 0x0d ||
+    bytes[5] !== 0x0a ||
+    bytes[6] !== 0x1a ||
+    bytes[7] !== 0x0a
+  ) {
+    return null;
+  }
+
+  // The first chunk should be IHDR: length (4) + type (4) + data...
+  if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) {
+    return null;
+  }
+
+  try {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    if (width === 0 || height === 0) return null;
+    return { width, height };
+  } catch {
+    return null;
+  }
 }
 
 function ensureNestedYMap(parent: any, key: string): Y.Map<any> | null {
@@ -172,6 +211,10 @@ function decodeBase64(base64Raw: string, maxBytes: number): Uint8Array | null {
 function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: string; bytes: Uint8Array } | null {
   // Variant: direct bytes. (mimeType unknown; accept but use a generic fallback.)
   if (raw instanceof Uint8Array) {
+    const dims = readPngDimensions(raw);
+    if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
+      return null;
+    }
     return { mimeType: "application/octet-stream", bytes: raw };
   }
 
@@ -179,11 +222,21 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
   if (map) {
     const mimeType = typeof map.get("mimeType") === "string" ? (map.get("mimeType") as string) : "application/octet-stream";
     const bytes = map.get("bytes");
-    if (bytes instanceof Uint8Array) return { mimeType, bytes };
+    if (bytes instanceof Uint8Array) {
+      const dims = readPngDimensions(bytes);
+      if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
+        return null;
+      }
+      return { mimeType, bytes };
+    }
     const bytesBase64 = map.get("bytesBase64");
     if (typeof bytesBase64 === "string") {
       const decoded = decodeBase64(bytesBase64, maxBytes);
       if (!decoded) return null;
+      const dims = readPngDimensions(decoded);
+      if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
+        return null;
+      }
       return { mimeType, bytes: decoded };
     }
     return null;
@@ -192,11 +245,19 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
   if (isRecord(raw)) {
     const mimeType = typeof raw.mimeType === "string" ? (raw.mimeType as string) : "application/octet-stream";
     if (raw.bytes instanceof Uint8Array) {
+      const dims = readPngDimensions(raw.bytes);
+      if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
+        return null;
+      }
       return { mimeType, bytes: raw.bytes };
     }
     if (typeof raw.bytesBase64 === "string") {
       const decoded = decodeBase64(raw.bytesBase64, maxBytes);
       if (!decoded) return null;
+      const dims = readPngDimensions(decoded);
+      if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
+        return null;
+      }
       return { mimeType, bytes: decoded };
     }
   }

@@ -155,6 +155,41 @@ describe("imageBytesBinder", () => {
     binderB.destroy();
   });
 
+  it("does not hydrate PNGs with extremely large dimensions", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    // Construct a minimal PNG header with an oversized IHDR width.
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    png.set([0x49, 0x48, 0x44, 0x52], 12); // IHDR
+    // width=10001, height=1 (big-endian)
+    png.set([0x00, 0x00, 0x27, 0x11], 16);
+    png.set([0x00, 0x00, 0x00, 0x01], 20);
+
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: Buffer.from(png).toString("base64"),
+      },
+    });
+
+    const store = createMemoryImageStore();
+    let sets = 0;
+    store.set = (entry: ImageEntry) => {
+      sets += 1;
+      store.map.set(entry.id, entry);
+    };
+
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    expect(store.get("img-1")).toBeUndefined();
+    expect(sets).toBe(0);
+
+    binder.destroy();
+  });
+
   it("evicts oldest images when exceeding maxImages", () => {
     const doc = new Y.Doc();
     const metadata = doc.getMap("metadata");
