@@ -227,6 +227,73 @@ fn sheet_protection_disabled_removes_element() {
 }
 
 #[test]
+fn clearing_conditional_formatting_strips_cf_blocks_but_preserves_other_extlst_entries() {
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+  xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <conditionalFormatting sqref="A1">
+    <cfRule type="expression" priority="1"><formula>TRUE</formula></cfRule>
+  </conditionalFormatting>
+  <extLst>
+    <ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}">
+      <x14:conditionalFormattings>
+        <x14:conditionalFormatting>
+          <x14:cfRule type="dataBar" priority="1" id="{00000000-0000-0000-0000-000000000001}">
+            <x14:dataBar>
+              <x14:cfvo type="min"/>
+              <x14:cfvo type="max"/>
+              <x14:negativeFillColor rgb="FFFF0000"/>
+              <x14:axisColor rgb="FF00FF00"/>
+            </x14:dataBar>
+          </x14:cfRule>
+          <xm:sqref>A1</xm:sqref>
+        </x14:conditionalFormatting>
+      </x14:conditionalFormattings>
+    </ext>
+    <ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}">
+      <otherExt foo="bar"/>
+    </ext>
+  </extLst>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let mut doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    {
+        let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+        assert!(
+            !sheet.conditional_formatting_rules.is_empty(),
+            "expected conditional formatting to be parsed from sheet1.xml"
+        );
+        sheet.clear_conditional_formatting();
+    }
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+    let xml = zip_part_to_string(&out, "xl/worksheets/sheet1.xml");
+    assert!(
+        !xml.contains("conditionalFormatting"),
+        "expected conditional formatting blocks removed:\n{xml}"
+    );
+    assert!(
+        !xml.contains("78C0D931-6437-407d-A8EE-F0AAD7539E65")
+            && !xml.contains("78C0D931-6437-407D-A8EE-F0AAD7539E65"),
+        "expected x14 conditional formatting extLst entry removed:\n{xml}"
+    );
+    assert!(
+        xml.contains("{01234567-89AB-CDEF-0123-456789ABCDEF}"),
+        "expected unrelated extLst entry to be preserved:\n{xml}"
+    );
+    assert!(
+        xml.contains("otherExt") && xml.contains(r#"foo="bar""#),
+        "expected unrelated extLst payload to be preserved:\n{xml}"
+    );
+}
+
+#[test]
 fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
