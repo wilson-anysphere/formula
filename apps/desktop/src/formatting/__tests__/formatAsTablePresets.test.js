@@ -57,6 +57,7 @@ test("applyFormatAsTablePreset refuses overly large ranges (banding cap)", () =>
   doc.setCellValue("Sheet1", "A1", "x");
 
   const before = doc.history.length;
+  const depthBefore = doc.batchDepth;
   // rowCount = 2*max + 3 => floor((rows - 1) / 2) = max + 1 banded-row ops (exceeds the cap).
   const rowCount = FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS * 2 + 3;
   const ok = applyFormatAsTablePreset(
@@ -67,4 +68,27 @@ test("applyFormatAsTablePreset refuses overly large ranges (banding cap)", () =>
   );
   assert.equal(ok, false);
   assert.equal(doc.history.length, before);
+  assert.equal(doc.batchDepth, depthBefore);
+});
+
+test("applyFormatAsTablePreset does not start a nested batch when already batching", () => {
+  const doc = new DocumentController();
+  doc.setRangeValues("Sheet1", "A1", [
+    ["Name", "Value"],
+    ["A", 1],
+    ["B", 2],
+  ]);
+
+  const historyBefore = doc.history.length;
+  doc.beginBatch({ label: "Outer batch" });
+  assert.equal(doc.batchDepth, 1);
+
+  const ok = applyFormatAsTablePreset(doc, "Sheet1", { start: { row: 0, col: 0 }, end: { row: 2, col: 1 } }, "light");
+  assert.equal(ok, true);
+  // Helper should not create a nested batch.
+  assert.equal(doc.batchDepth, 1);
+
+  doc.endBatch();
+  assert.equal(doc.batchDepth, 0);
+  assert.equal(doc.history.length, historyBefore + 1);
 });
