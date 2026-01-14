@@ -8721,6 +8721,10 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 name = "xlsb-diff"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "ms-offcrypto-writer",
+ "rand 0.9.2",
+ "tempfile",
  "xlsx-diff",
 ]
 
