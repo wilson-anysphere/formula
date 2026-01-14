@@ -91,6 +91,16 @@ We parse `pivotCacheDefinition*.xml` into `PivotCacheDefinition`:
   - `databaseField`, `serverField`, `uniqueList`
   - `formula`, `sqlType`, `hierarchy`, `level`, `mappingCount`
 
+Note: when a PivotCache is backed by the **Data Model / Power Pivot**, Excel may encode field
+captions using DAX-like strings (and multiple equivalent spellings), for example:
+  
+- `Table[Column]` vs `'Table Name'[Column]` (quoted table identifiers)
+- `]` escaped as `]]` inside `[...]` identifiers
+- measures sometimes stored as `Total Sales` (no brackets) or `[Total Sales]`
+
+`formula-xlsx` preserves these caption strings as-is. The compute layer resolves multiple encodings
+when binding structured `PivotFieldRef` values to cache fields.
+
 Implementation: `crates/formula-xlsx/src/pivots/cache_definition.rs`.
 
 ### 3) Pivot cache record streaming parser (`m/n/s/b/e/d/x`)
