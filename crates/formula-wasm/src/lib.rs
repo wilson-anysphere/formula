@@ -4865,7 +4865,7 @@ impl WasmWorkbook {
         ensure_rust_constructors_run();
 
         if !formula_office_crypto::is_encrypted_ooxml_ole(bytes) {
-            // Not an Office-encrypted OLE container; fall back to the plaintext XLSX loader.
+            // Not an Office-encrypted OLE container; fall back to the plaintext XLSX/XLSM loader.
             return Self::from_xlsx_bytes(bytes);
         }
 
@@ -4876,7 +4876,7 @@ impl WasmWorkbook {
                     if message.contains("ZIP archive") =>
                 {
                     js_err(
-                        "decrypted payload is not an `.xlsx`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsb` is supported for now",
+                        "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` is supported for now",
                     )
                 }
                 other => js_err(other.to_string()),
@@ -4884,11 +4884,11 @@ impl WasmWorkbook {
 
         // Office-encrypted containers can wrap arbitrary payloads (e.g. XLS, DOCX). We support
         // encrypted OOXML workbooks stored as ZIP packages:
-        // - `.xlsx`: `xl/workbook.xml`
+        // - `.xlsx`/`.xlsm`: `xl/workbook.xml`
         // - `.xlsb`: `xl/workbook.bin`
         if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
             return Err(js_err(
-                "decrypted payload is not an `.xlsx`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsb` is supported for now",
+                "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` is supported for now",
             ));
         }
 
@@ -4933,7 +4933,7 @@ impl WasmWorkbook {
             return Self::from_workbook_model(model);
         }
         Err(js_err(
-            "decrypted payload is a ZIP file but does not appear to be an `.xlsx`/`.xlsb` workbook (missing `xl/workbook.xml` and `xl/workbook.bin`)",
+            "decrypted payload is a ZIP file but does not appear to be an `.xlsx`/`.xlsm`/`.xlsb` workbook (missing `xl/workbook.xml` and `xl/workbook.bin`)",
         ))
     }
 
