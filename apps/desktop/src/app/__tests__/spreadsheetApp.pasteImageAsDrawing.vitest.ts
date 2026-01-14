@@ -308,6 +308,51 @@ describe("SpreadsheetApp paste image clipboard", () => {
     root.remove();
   });
 
+  it("does not persist image bytes when pasting an image fails to insert a drawing", async () => {
+    // 1x1 transparent PNG.
+    const pngBytes = new Uint8Array(
+      // eslint-disable-next-line no-undef
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+FeAAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({ width: 64, height: 32 })),
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const docAny = app.getDocument() as any;
+    docAny.insertDrawing = vi.fn(() => {
+      throw new Error("insertDrawing failed");
+    });
+
+    const setSpy = vi.spyOn(app.getDrawingImages(), "set");
+
+    const provider = {
+      read: vi.fn(async () => ({ imagePng: pngBytes })),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    expect(setSpy).not.toHaveBeenCalled();
+    expect(app.getDrawingObjects()).toHaveLength(0);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("pastes images into the original sheet even if the user switches sheets mid-paste", async () => {
     // 1x1 transparent PNG.
     const pngBytes = new Uint8Array(
