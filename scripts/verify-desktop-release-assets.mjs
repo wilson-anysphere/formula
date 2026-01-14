@@ -1455,30 +1455,9 @@ async function main() {
         ]);
       }
 
-      /** @type {{ signatureBytes: Buffer; keyId: string | null }} */
-      let parsedSig;
-      try {
-        parsedSig = parseTauriUpdaterSignature(latestSigText, "latest.json.sig");
-      } catch (err) {
-        throw new ActionableError(`Failed to parse latest.json.sig as a Tauri updater signature.`, [
-          err instanceof Error ? err.message : String(err),
-        ]);
-      }
-
-      if (parsedSig.keyId && parsedPubkey.keyId && parsedSig.keyId !== parsedPubkey.keyId) {
-        throw new ActionableError(`Updater manifest signature key id mismatch.`, [
-          `latest.json.sig uses key id ${parsedSig.keyId}, but plugins.updater.pubkey is ${parsedPubkey.keyId}.`,
-          `This usually means TAURI_PRIVATE_KEY does not correspond to the committed plugins.updater.pubkey.`,
-        ]);
-      }
-
-      const signatureOk = verify(null, latestJsonBytes, publicKey, parsedSig.signatureBytes);
-      if (!signatureOk) {
-        throw new ActionableError(`Updater manifest signature verification failed.`, [
-          `latest.json.sig does not verify latest.json using the updater public key embedded in ${tauriConfigRelativePath}.`,
-          `This usually means the manifest/signature were generated with a different key, or assets were tampered with.`,
-        ]);
-      }
+      // Cryptographically verify latest.json.sig against latest.json under the configured updater pubkey.
+      // (We keep the parsed `publicKey` object around for optional per-platform asset verification.)
+      verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, updaterPubkeyBase64);
       validateLatestJson(manifest, expectedVersion, assetsByName, {
         allowWindowsMsi: args.allowWindowsMsi,
         allowWindowsExe: args.allowWindowsExe,
