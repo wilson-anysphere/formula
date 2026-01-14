@@ -4305,8 +4305,6 @@ export class SpreadsheetApp {
     // A pending refresh will render chart content anyway.
     if (this.renderScheduled) return;
     if (this.chartContentRefreshScheduled) return;
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
-    if (charts.length === 0) return;
 
     // In non-engine modes (or multi-sheet), formula charts can change due to edits outside their
     // direct ranges. If we see a recalc event, conservatively mark formula-containing charts as
@@ -4322,6 +4320,18 @@ export class SpreadsheetApp {
     }
 
     if (this.dirtyChartIds.size === 0) return;
+
+    const charts = this.chartStore.listCharts();
+    if (charts.length === 0) return;
+    const sheetId = this.sheetId;
+    let hasDirtyChartOnSheet = false;
+    for (const chart of charts) {
+      if (chart.sheetId !== sheetId) continue;
+      if (!this.dirtyChartIds.has(chart.id)) continue;
+      hasDirtyChartOnSheet = true;
+      break;
+    }
+    if (!hasDirtyChartOnSheet) return;
 
     if (!this.sharedGrid) {
       // Chart rect computations depend on frozen pane geometry; keep legacy caches current.
@@ -4343,16 +4353,20 @@ export class SpreadsheetApp {
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     const { frozenRows, frozenCols } = this.getFrozen();
 
-    const hasVisibleDirtyChart = charts.some((chart) => {
-      if (!this.dirtyChartIds.has(chart.id)) return false;
+    let hasVisibleDirtyChart = false;
+    for (const chart of charts) {
+      if (chart.sheetId !== sheetId) continue;
+      if (!this.dirtyChartIds.has(chart.id)) continue;
 
       const rect = this.chartAnchorToViewportRect(chart.anchor);
-      if (!rect) return false;
+      if (!rect) continue;
 
       const chartRect = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
 
-      const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
-      const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+      const fromRow =
+        chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol =
+        chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
       const inFrozenRows = fromRow < frozenRows;
       const inFrozenCols = fromCol < frozenCols;
       const pane =
@@ -4364,9 +4378,12 @@ export class SpreadsheetApp {
               ? layout.paneRects.bottomLeft
               : layout.paneRects.bottomRight;
 
-      if (pane.width <= 0 || pane.height <= 0) return false;
-      return intersects(chartRect, pane);
-    });
+      if (pane.width <= 0 || pane.height <= 0) continue;
+      if (intersects(chartRect, pane)) {
+        hasVisibleDirtyChart = true;
+        break;
+      }
+    }
 
     if (!hasVisibleDirtyChart) return;
 
@@ -4431,8 +4448,9 @@ export class SpreadsheetApp {
   private markChartsDirtyFromDeltas(deltas: unknown): void {
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const charts = this.chartStore.listCharts();
     if (charts.length === 0) return;
+    const activeSheetId = this.sheetId;
 
     type RangeRect = { chartId: string; startRow: number; endRow: number; startCol: number; endCol: number };
     const rangesBySheet = new Map<string, RangeRect[]>();
@@ -4469,7 +4487,10 @@ export class SpreadsheetApp {
       return ranges;
     };
 
+    let sawChartOnSheet = false;
     for (const chart of charts) {
+      if (chart.sheetId !== activeSheetId) continue;
+      sawChartOnSheet = true;
       const ranges = getChartRanges(chart);
       for (const range of ranges) {
         let list = rangesBySheet.get(range.sheetId);
@@ -4480,6 +4501,8 @@ export class SpreadsheetApp {
         list.push({ chartId: chart.id, startRow: range.startRow, endRow: range.endRow, startCol: range.startCol, endCol: range.endCol });
       }
     }
+
+    if (!sawChartOnSheet) return;
 
     const affected = new Set<string>();
     for (const delta of deltas) {
@@ -4504,10 +4527,12 @@ export class SpreadsheetApp {
   }
 
   private markFormulaChartsDirty(): void {
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const charts = this.chartStore.listCharts();
     if (charts.length === 0) return;
+    const sheetId = this.sheetId;
 
     for (const chart of charts) {
+      if (chart.sheetId !== sheetId) continue;
       const hasFormula = this.chartHasFormulaCells.get(chart.id);
       // If we haven't scanned the chart ranges yet, be conservative and assume formulas
       // might be present so charts don't get stuck with stale cached values.
@@ -12799,8 +12824,18 @@ export class SpreadsheetApp {
     const overlay = this.chartSelectionOverlay;
     if (!geom || !overlay) return;
 
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
-    const selected = this.selectedChartId ? charts.find((chart) => chart.id === this.selectedChartId) : null;
+    const selectedChartId = this.selectedChartId;
+    let selected: ChartRecord | null = null;
+    if (selectedChartId) {
+      const charts = this.chartStore.listCharts();
+      const sheetId = this.sheetId;
+      for (const chart of charts) {
+        if (chart.id !== selectedChartId) continue;
+        if (chart.sheetId !== sheetId) continue;
+        selected = chart;
+        break;
+      }
+    }
 
     const { frozenRows, frozenCols } = this.getFrozen();
     const layout = this.chartOverlayLayout();
@@ -12874,8 +12909,9 @@ export class SpreadsheetApp {
     const y = clientY - this.rootTop - layout.originY;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
 
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const charts = this.chartStore.listCharts();
     if (charts.length === 0) return null;
+    const sheetId = this.sheetId;
 
     const intersect = (
       a: { left: number; top: number; width: number; height: number },
@@ -12894,6 +12930,7 @@ export class SpreadsheetApp {
     const { frozenRows, frozenCols } = this.getFrozen();
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
+      if (chart.sheetId !== sheetId) continue;
       const rect = this.chartAnchorToViewportRect(chart.anchor);
       if (!rect) continue;
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
@@ -13390,7 +13427,8 @@ export class SpreadsheetApp {
       return;
     }
 
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const charts = this.chartStore.listCharts();
+    const activeSheetId = this.sheetId;
     const keep = new Set<string>();
 
     if (!this.sharedGrid) {
@@ -13612,6 +13650,7 @@ export class SpreadsheetApp {
     ctx.translate(layout.originX, layout.originY);
 
     for (const chart of charts) {
+      if (chart.sheetId !== activeSheetId) continue;
       keep.add(chart.id);
       const rect = this.chartAnchorToViewportRect(chart.anchor);
       if (!rect) continue;
