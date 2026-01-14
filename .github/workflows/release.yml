@@ -71,7 +71,8 @@ jobs:
       contents: read
     # Pinned runner images keep release workflows deterministic and avoid breakages
     # when GitHub updates the default `*-latest` hosted runner images. Update
-    # these pins deliberately after validating the newer runner images.
+    # these pins deliberately after validating the newer runner images (recommended:
+    # run this workflow via workflow_dispatch with upload=false).
     # See https://github.com/actions/runner-images for available images and deprecation notices.
     runs-on: ubuntu-24.04
     steps:
@@ -361,7 +362,8 @@ jobs:
       matrix:
         # Pinned runner images keep release workflows deterministic and avoid breakages
         # when GitHub updates the default `*-latest` hosted runner images. Update
-        # these pins deliberately after validating the newer runner images.
+        # these pins deliberately after validating the newer runner images (recommended:
+        # run this workflow via workflow_dispatch with upload=false).
         # See https://github.com/actions/runner-images for available images and deprecation notices.
         include:
           - platform: macos-14
