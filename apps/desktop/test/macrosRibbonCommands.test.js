@@ -55,8 +55,11 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
   // createRibbonActionsFromCommands bridge; macro ids should be registered as real commands,
   // not routed via bespoke ribbon fallback logic.
   // Ribbon dispatch should delegate through CommandRegistry (shared by ribbon, command palette, and keybindings).
+  // Macro command registration is centralized in `registerDesktopCommands` (which wires ids via `registerRibbonMacroCommands`).
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
-  assert.match(main, /\bregisterRibbonMacroCommands\(/);
+  assert.match(main, /\bregisterDesktopCommands\(/);
+  assert.match(main, /\bribbonMacroHandlers\s*:/);
+  assert.doesNotMatch(main, /\bregisterRibbonMacroCommands\(/);
 
   const commandIds = [
     // View → Macros.
@@ -90,6 +93,14 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
   }
 
   // Command registration should include these ids and wire them to panels/recorder behavior.
+  const desktopRegistrationPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopRegistration = fs.readFileSync(desktopRegistrationPath, "utf8");
+  assert.match(
+    desktopRegistration,
+    /\bregisterRibbonMacroCommands\(/,
+    "Expected registerDesktopCommands.ts to register ribbon macro commands when handlers are provided",
+  );
+
   const registrationPath = path.join(__dirname, "..", "src", "commands", "registerRibbonMacroCommands.ts");
   const registration = fs.readFileSync(registrationPath, "utf8");
 

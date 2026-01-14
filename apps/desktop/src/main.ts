@@ -156,7 +156,6 @@ import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
 import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
-import { registerRibbonMacroCommands } from "./commands/registerRibbonMacroCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -7392,17 +7391,16 @@ registerDesktopCommands({
     openReplace: () => showExclusiveFindReplaceDialog(replaceDialog as any),
     openGoTo: () => showExclusiveFindReplaceDialog(goToDialog as any),
   },
-  formatPainter: {
-    isArmed: () => Boolean(formatPainterState),
-    arm: () => armFormatPainter(),
-    disarm: () => disarmFormatPainter(),
-    onCancel: () => {
-      try {
-        showToast("Format Painter cancelled");
-      } catch {
-        // ignore (toast root missing in non-UI test environments)
-      }
+  ribbonMacroHandlers: {
+    openPanel: openRibbonPanel,
+    focusScriptEditorPanel,
+    focusVbaMigratePanel,
+    setPendingMacrosPanelFocus: (target) => {
+      pendingMacrosPanelFocus = target;
     },
+    startMacroRecorder: () => activeMacroRecorder?.start(),
+    stopMacroRecorder: () => activeMacroRecorder?.stop(),
+    isTauri: () => isTauriInvokeAvailable(),
   },
   pageLayoutHandlers: {
     openPageSetupDialog: () => handleRibbonPageSetup(),
@@ -7531,21 +7529,6 @@ registerDesktopCommands({
     },
   },
   openCommandPalette: () => openCommandPalette?.(),
-});
-
-registerRibbonMacroCommands({
-  commandRegistry,
-  handlers: {
-    openPanel: openRibbonPanel,
-    focusScriptEditorPanel,
-    focusVbaMigratePanel,
-    setPendingMacrosPanelFocus: (target) => {
-      pendingMacrosPanelFocus = target;
-    },
-    startMacroRecorder: () => activeMacroRecorder?.start(),
-    stopMacroRecorder: () => activeMacroRecorder?.stop(),
-    isTauri: () => isTauriInvokeAvailable(),
-  },
 });
 registerDataQueriesCommands({
   commandRegistry,

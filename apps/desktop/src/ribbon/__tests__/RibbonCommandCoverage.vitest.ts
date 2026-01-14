@@ -4,7 +4,7 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
-import { RIBBON_MACRO_COMMAND_IDS, registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
+import { RIBBON_MACRO_COMMAND_IDS } from "../../commands/registerRibbonMacroCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -182,6 +182,15 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       openFormatCells: () => {},
       showQuickPick: async () => null,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      ribbonMacroHandlers: {
+        openPanel: (_panelId: string) => {},
+        focusScriptEditorPanel: () => {},
+        focusVbaMigratePanel: () => {},
+        setPendingMacrosPanelFocus: (_target) => {},
+        startMacroRecorder: () => {},
+        stopMacroRecorder: () => {},
+        isTauri: () => false,
+      },
       pageLayoutHandlers: {
         openPageSetupDialog: () => {},
         updatePageSetup: () => {},
@@ -202,19 +211,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
-    });
-
-    registerRibbonMacroCommands({
-      commandRegistry,
-      handlers: {
-        openPanel: (_panelId: string) => {},
-        focusScriptEditorPanel: () => {},
-        focusVbaMigratePanel: () => {},
-        setPendingMacrosPanelFocus: (_target) => {},
-        startMacroRecorder: () => {},
-        stopMacroRecorder: () => {},
-        isTauri: () => false,
-      },
     });
 
     const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]

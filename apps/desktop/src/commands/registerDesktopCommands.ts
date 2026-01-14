@@ -16,6 +16,7 @@ import { registerFormatAlignmentCommands } from "./registerFormatAlignmentComman
 import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
+import { registerRibbonMacroCommands, type RibbonMacroCommandHandlers } from "./registerRibbonMacroCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
 import { registerSortFilterCommands } from "./registerSortFilterCommands.js";
 
@@ -63,6 +64,7 @@ export function registerDesktopCommands(params: {
   findReplace: FindReplaceCommandHandlers;
   workbenchFileHandlers: WorkbenchFileCommandHandlers;
   formatPainter?: FormatPainterCommandHandlers | null;
+  ribbonMacroHandlers?: RibbonMacroCommandHandlers | null;
   pageLayoutHandlers?: PageLayoutCommandHandlers | null;
   /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
@@ -89,6 +91,7 @@ export function registerDesktopCommands(params: {
     findReplace,
     workbenchFileHandlers,
     formatPainter = null,
+    ribbonMacroHandlers = null,
     pageLayoutHandlers = null,
     openCommandPalette = null,
   } = params;
@@ -169,6 +172,10 @@ export function registerDesktopCommands(params: {
 
   if (formatPainter) {
     registerFormatPainterCommand({ commandRegistry, ...formatPainter });
+  }
+
+  if (ribbonMacroHandlers) {
+    registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers });
   }
 
   registerBuiltinFormatFontCommands({
