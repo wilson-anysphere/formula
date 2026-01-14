@@ -1663,6 +1663,11 @@ export class SpreadsheetApp {
 
   private sheetViewBinder: SheetViewBinder | null = null;
 
+  // Tracks which sheet the inline-edit overlay was opened for so completion callbacks
+  // (which can run after async LLM/tool work) can avoid stealing focus if the user has
+  // navigated to a different sheet mid-run.
+  private inlineEditOriginSheetId: string | null = null;
+
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
   private statusUpdateScheduled = false;
@@ -2470,10 +2475,16 @@ export class SpreadsheetApp {
         this.renderCharts(false);
         this.renderSelection();
         this.updateStatus();
-        this.focus();
+        const sheetId = this.inlineEditOriginSheetId;
+        if (!sheetId || this.sheetId === sheetId) {
+          this.focus();
+        }
       },
       onClosed: () => {
-        this.focus();
+        const sheetId = this.inlineEditOriginSheetId;
+        if (!sheetId || this.sheetId === sheetId) {
+          this.focus();
+        }
         this.updateEditState();
       },
       llmClient: opts.inlineEdit?.llmClient,
@@ -12944,7 +12955,14 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return;
     // Inline edit should not trigger while the formula bar is actively editing.
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+    const sheetId = this.sheetId;
+    this.inlineEditOriginSheetId = sheetId;
     this.inlineEditController.open();
+    // Only keep the origin sheet id when the overlay actually opened. This keeps the focus
+    // guards accurate even if `open()` early-returns (e.g. no selection range).
+    if (!this.inlineEditController.isOpen() && this.inlineEditOriginSheetId === sheetId) {
+      this.inlineEditOriginSheetId = null;
+    }
     this.updateEditState();
   }
 
