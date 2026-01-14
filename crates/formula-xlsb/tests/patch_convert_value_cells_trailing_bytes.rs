@@ -9,6 +9,16 @@ use formula_xlsb::{
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
 
+// Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+const SHEETDATA: u32 = 0x0091;
+const SHEETDATA_END: u32 = 0x0092;
+const ROW: u32 = 0x0000;
+const BLANK: u32 = 0x0001;
+const NUM: u32 = 0x0002;
+const BOOLERR: u32 = 0x0003;
+const BOOL: u32 = 0x0004;
+const FLOAT: u32 = 0x0005;
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -34,18 +44,13 @@ fn assert_invalid_input_contains(err: Error, needle: &str) {
     }
 }
 
-fn append_trailing_bytes_to_float_cell_payload(
+fn append_trailing_bytes_to_cell_payload(
     sheet_bin: &[u8],
     target_row: u32,
     target_col: u32,
+    record_id: u32,
     extra: &[u8],
 ) -> Vec<u8> {
-    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
-    const SHEETDATA: u32 = 0x0091;
-    const SHEETDATA_END: u32 = 0x0092;
-    const ROW: u32 = 0x0000;
-    const FLOAT: u32 = 0x0005;
-
     let mut cursor = Cursor::new(sheet_bin);
     let mut out = Vec::with_capacity(sheet_bin.len() + extra.len());
     let mut in_sheet_data = false;
@@ -86,7 +91,8 @@ fn append_trailing_bytes_to_float_cell_payload(
         }
 
         let mut tweak = false;
-        if !replaced && in_sheet_data && id == FLOAT && current_row == target_row && payload.len() >= 4 {
+        if !replaced && in_sheet_data && id == record_id && current_row == target_row && payload.len() >= 4
+        {
             let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
             if col == target_col {
                 tweak = true;
@@ -106,17 +112,19 @@ fn append_trailing_bytes_to_float_cell_payload(
         }
     }
 
-    assert!(replaced, "expected to find and rewrite the FLOAT cell record");
+    assert!(
+        replaced,
+        "expected to find and rewrite the cell record 0x{record_id:04X}"
+    );
     out
 }
 
-fn float_cell_payload(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
-    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
-    const SHEETDATA: u32 = 0x0091;
-    const SHEETDATA_END: u32 = 0x0092;
-    const ROW: u32 = 0x0000;
-    const FLOAT: u32 = 0x0005;
-
+fn cell_payload_for_id(
+    sheet_bin: &[u8],
+    target_row: u32,
+    target_col: u32,
+    record_id: u32,
+) -> Option<(u32, Vec<u8>)> {
     let mut cursor = Cursor::new(sheet_bin);
     let mut in_sheet_data = false;
     let mut current_row = 0u32;
@@ -136,7 +144,7 @@ fn float_cell_payload(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Opt
                     current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
                 }
             }
-            FLOAT if in_sheet_data && current_row == target_row && payload.len() >= 4 => {
+            _ if id == record_id && in_sheet_data && current_row == target_row && payload.len() >= 4 => {
                 let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
                 if col == target_col {
                     return Some((len as u32, payload.to_vec()));
@@ -145,6 +153,20 @@ fn float_cell_payload(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Opt
             _ => {}
         }
     }
+}
+
+fn decode_rk_number(raw: u32) -> f64 {
+    let raw_i = raw as i32;
+    let mut v = if raw_i & 0x02 != 0 {
+        (raw_i >> 2) as f64
+    } else {
+        let shifted = raw & 0xFFFFFFFC;
+        f64::from_bits((shifted as u64) << 32)
+    };
+    if raw_i & 0x01 != 0 {
+        v /= 100.0;
+    }
+    v
 }
 
 #[test]
@@ -156,7 +178,7 @@ fn converting_value_cell_with_trailing_bytes_to_formula_requires_explicit_new_rg
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_cell_number(0, 0, 1.0);
     let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
-    let tweaked = append_trailing_bytes_to_float_cell_payload(&sheet_bin, 0, 0, &[0xAB]);
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, FLOAT, &[0xAB]);
 
     let rgce = encode_rgce("=1+1").expect("encode formula");
     let edits_missing_rgcb = [CellEdit {
@@ -201,7 +223,7 @@ fn patching_value_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_cell_number(0, 0, 1.0);
     let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
-    let tweaked = append_trailing_bytes_to_float_cell_payload(&sheet_bin, 0, 0, &[0xAB]);
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, FLOAT, &[0xAB]);
 
     let edits = [CellEdit {
         row: 0,
@@ -222,7 +244,8 @@ fn patching_value_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
         .expect("patch_sheet_bin_streaming");
     assert_eq!(patched_stream, patched_in_mem);
 
-    let (len, payload) = float_cell_payload(&patched_in_mem, 0, 0).expect("find patched FLOAT cell");
+    let (len, payload) = cell_payload_for_id(&patched_in_mem, 0, 0, FLOAT)
+        .expect("find patched FLOAT cell");
     assert_eq!(
         len,
         17,
@@ -234,4 +257,145 @@ fn patching_value_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
         2.0,
         "expected patched FLOAT value to be updated in place"
     );
+}
+
+#[test]
+fn patching_bool_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_bool(0, 0, true);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, BOOL, &[0xAB]);
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Bool(false),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (len, payload) =
+        cell_payload_for_id(&patched_in_mem, 0, 0, BOOL).expect("find patched BOOL cell");
+    assert_eq!(len, 10, "expected patched BOOL record to preserve trailing bytes length");
+    assert_eq!(payload.last().copied(), Some(0xAB));
+    assert_eq!(payload[8], 0, "expected patched BOOL payload");
+}
+
+#[test]
+fn patching_error_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_error(0, 0, 0x07); // #DIV/0!
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, BOOLERR, &[0xAB]);
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Error(0x2A), // #N/A
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (len, payload) =
+        cell_payload_for_id(&patched_in_mem, 0, 0, BOOLERR).expect("find patched BOOLERR cell");
+    assert_eq!(
+        len, 10,
+        "expected patched BOOLERR record to preserve trailing bytes length"
+    );
+    assert_eq!(payload.last().copied(), Some(0xAB));
+    assert_eq!(payload[8], 0x2A, "expected patched BOOLERR payload");
+}
+
+#[test]
+fn patching_blank_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_blank(0, 0);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, BLANK, &[0xAB]);
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Blank,
+        new_style: Some(1),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (len, payload) =
+        cell_payload_for_id(&patched_in_mem, 0, 0, BLANK).expect("find patched BLANK cell");
+    assert_eq!(
+        len, 9,
+        "expected patched BLANK record to preserve trailing bytes length"
+    );
+    assert_eq!(payload.last().copied(), Some(0xAB));
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        1
+    );
+}
+
+#[test]
+fn patching_rk_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number_rk(0, 0, 42.0);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, NUM, &[0xAB]);
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(43.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (len, payload) =
+        cell_payload_for_id(&patched_in_mem, 0, 0, NUM).expect("find patched RK/NUM cell");
+    assert_eq!(
+        len, 13,
+        "expected patched RK record to preserve trailing bytes length"
+    );
+    assert_eq!(payload.last().copied(), Some(0xAB));
+    let rk_raw = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    assert_eq!(decode_rk_number(rk_raw), 43.0);
 }
