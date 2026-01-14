@@ -25,7 +25,7 @@ Environment (startup):
     - cold (default): each measured run uses a fresh profile dir (true cold start)
     - warm: one warmup run primes caches, then measured runs reuse the same profile
   FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS
-    - p95 budget for `webview_loaded_ms` (native WebView page-load complete; defaults to 800ms)
+    - p95 budget for webview_loaded_ms (native WebView page-load complete; defaults to 800ms)
   FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS
     - optional shell-only override (falls back to FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)
 
@@ -286,7 +286,7 @@ function reportSize({ env }) {
   if (bundleDirs.length === 0) {
     // eslint-disable-next-line no-console
     console.log(
-      `\n[desktop-size] No Tauri bundle artifacts found (target/**/release/bundle).\n` +
+      `\n[desktop-size] No installer artifacts found (target/**/release/bundle).\n` +
         `To generate installers/bundles, run:\n` +
         `  (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)\n` +
         `Then re-run: pnpm perf:desktop-size\n`,

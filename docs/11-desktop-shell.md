@@ -163,7 +163,7 @@ Tuning knobs:
   The scheduled cross-platform workflow (`.github/workflows/desktop-perf-platform-matrix.yml`) also runs this benchmark
   daily and uploads per-OS JSON + logs, along with the startup timings.
 
-### Size report (dist + binary + bundles)
+### Size report (dist + binary + installer artifacts)
 
 To get a quick size breakdown for the desktop app, run:
 
@@ -177,7 +177,7 @@ This reports:
 - frontend asset download size (compressed JS/CSS/WASM) via `scripts/frontend_asset_size_report.mjs`
 - the built desktop binary size (`target/**/formula-desktop`)
 - the top Rust crates/symbols contributing to the desktop binary size via `scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback)
-- if present, installer/bundle artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
+- if present, installer artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
 
 Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppImage/etc):
 
