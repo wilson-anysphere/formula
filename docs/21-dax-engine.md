@@ -102,11 +102,13 @@ The columnar backend maps `formula_columnar::Value` into `formula_dax::Value`:
 The engine’s scalar type is `formula_dax::Value` (`crates/formula-dax/src/value.rs`):
 
 - `Blank`
-- `Number(f64)`
+- `Number(ordered_float::OrderedFloat<f64>)`
 - `Text(Arc<str>)`
 - `Boolean(bool)`
 
 There is no distinct datetime type at the DAX layer today; datetime-like values are represented as numbers.
+`ordered_float::OrderedFloat` is used so numeric values can participate in `HashMap` keys and stable
+ordering (needed for dictionary scans, relationship indices, and group-by).
 
 #### Type coercions (current behavior)
 
@@ -114,14 +116,14 @@ The engine implements a small subset of DAX’s coercion rules. These matter mos
 comparisons, and text concatenation:
 
 - **Numeric coercion** (used by `+ - * /` and numeric comparisons):
-  - `Number(n)` → `n`
+  - `Number(n)` → `n.0`
   - `Boolean(true/false)` → `1.0` / `0.0`
   - `Blank` → `0.0`
   - `Text(...)` → type error
 
 - **Text coercion** (used by the `&` operator):
   - `Text(s)` → `s`
-  - `Number(n)` → `n.to_string()` (Rust formatting; not DAX format strings)
+  - `Number(n)` → `n.0.to_string()` (Rust formatting; not DAX format strings)
   - `Blank` → `""` (empty string)
   - `Boolean(true/false)` → `"TRUE"` / `"FALSE"`
 
@@ -917,7 +919,7 @@ This is not an exhaustive list, but the most common contributor-facing constrain
     as well as membership tests via `IN` and `CONTAINSROW`.
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
-  - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
+  - Only `Blank`, `Number(ordered_float::OrderedFloat<f64>)`, `Boolean`, and `Text` exist at the DAX layer.
 - **Calculated columns**
   - Calculated columns are supported for both in-memory and columnar tables, but columnar calculated
     columns currently require a single logical type across all non-blank rows (number/string/boolean).

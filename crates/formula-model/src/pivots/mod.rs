@@ -3,7 +3,7 @@ use formula_format::{FormatOptions, Value as FmtValue};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 mod model;
@@ -14,14 +14,81 @@ pub mod workbook;
 pub use model::{
     DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
 };
-pub use schema::{
-    CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    SubtotalPosition,
-};
+pub use schema::{CalculatedField, CalculatedItem};
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
+/// Layout style used when rendering a pivot table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    #[default]
+    Tabular,
+}
+
+/// Controls where subtotals appear for each pivot field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    #[default]
+    None,
+}
+
+/// Enables/disables row/column grand totals in the rendered pivot output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    #[serde(default = "default_true")]
+    pub rows: bool,
+    #[serde(default = "default_true")]
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Report filter ("Filters" area) configuration for a pivot table.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed set of item values. `None` (or missing) means "(All)" / no filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical (serde-friendly) pivot configuration used by the engine + workbook model.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PivotConfig {
+    pub row_fields: Vec<PivotField>,
+    pub column_fields: Vec<PivotField>,
+    pub value_fields: Vec<ValueField>,
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_items: Vec<CalculatedItem>,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
 /// Sort order applied to pivot fields.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
