@@ -977,6 +977,34 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
   },
+  TOCOL: {
+    // ignore
+    1: [
+      { replacement: "0", displayText: "0 (keep all)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (ignore blanks)", confidence: 0.65 },
+      { replacement: "2", displayText: "2 (ignore errors)", confidence: 0.64 },
+      { replacement: "3", displayText: "3 (ignore blanks + errors)", confidence: 0.63 },
+    ],
+    // scan_by_column
+    2: [
+      { replacement: "FALSE", displayText: "FALSE (scan by row)", confidence: 0.62 },
+      { replacement: "TRUE", displayText: "TRUE (scan by column)", confidence: 0.61 },
+    ],
+  },
+  TOROW: {
+    // ignore
+    1: [
+      { replacement: "0", displayText: "0 (keep all)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (ignore blanks)", confidence: 0.65 },
+      { replacement: "2", displayText: "2 (ignore errors)", confidence: 0.64 },
+      { replacement: "3", displayText: "3 (ignore blanks + errors)", confidence: 0.63 },
+    ],
+    // scan_by_column
+    2: [
+      { replacement: "FALSE", displayText: "FALSE (scan by row)", confidence: 0.62 },
+      { replacement: "TRUE", displayText: "TRUE (scan by column)", confidence: 0.61 },
+    ],
+  },
   TEXTSPLIT: {
     // ignore_empty
     3: [

@@ -1978,6 +1978,65 @@ test("TAKE rows suggests 1 and -1", async () => {
   );
 });
 
+test("TOCOL ignore suggests 0, 1, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TOCOL(A1:B2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["0", "1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=TOCOL(A1:B2, ${v}`),
+      `Expected TOCOL to suggest ignore=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("TOCOL scan_by_column suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TOCOL(A1:B2, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=TOCOL(A1:B2, , FALSE"),
+    `Expected TOCOL to suggest scan_by_column=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=TOCOL(A1:B2, , TRUE"),
+    `Expected TOCOL to suggest scan_by_column=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TOROW ignore suggests 0, 1, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TOROW(A1:B2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["0", "1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=TOROW(A1:B2, ${v}`),
+      `Expected TOROW to suggest ignore=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("TEXTSPLIT ignore_empty suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
