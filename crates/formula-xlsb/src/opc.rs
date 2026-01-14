@@ -30,6 +30,23 @@ const DEFAULT_STYLES_PART: &str = "xl/styles.bin";
 const DEFAULT_WORKBOOK_PART: &str = "xl/workbook.bin";
 const DEFAULT_WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.bin.rels";
 
+/// Maximum uncompressed size allowed for a single ZIP entry (OPC part) when reading XLSB files.
+///
+/// XLSB is a ZIP container; the per-entry `size` value is attacker-controlled. We enforce an
+/// explicit bound to prevent immediate huge allocations / OOM when opening or saving.
+const MAX_XLSB_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
+
+/// Maximum total decoded bytes we will store in `preserved_parts` during workbook open.
+///
+/// This bounds memory usage when `preserve_unknown_parts=true` and a package contains many parts.
+const MAX_XLSB_PRESERVED_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
+/// Cap initial allocation when reading a ZIP entry; do not trust `ZipFile::size()` for prealloc.
+const ZIP_ENTRY_READ_PREALLOC_BYTES: usize = 64 * 1024; // 64 KiB
+
+const ENV_MAX_XLSB_ZIP_PART_BYTES: &str = "FORMULA_XLSB_MAX_ZIP_PART_BYTES";
+const ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES: &str = "FORMULA_XLSB_MAX_PRESERVED_TOTAL_BYTES";
+
 const OFFICE_DOCUMENT_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 const SHARED_STRINGS_REL_TYPE: &str =
@@ -41,6 +58,20 @@ const TABLE_REL_TYPE: &str =
 
 const SHARED_STRINGS_CONTENT_TYPE: &str = "application/vnd.ms-excel.sharedStrings";
 const STYLES_CONTENT_TYPE: &str = "application/vnd.ms-excel.styles";
+
+fn max_xlsb_zip_part_bytes() -> u64 {
+    std::env::var(ENV_MAX_XLSB_ZIP_PART_BYTES)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(MAX_XLSB_ZIP_PART_BYTES)
+}
+
+fn max_xlsb_preserved_total_bytes() -> u64 {
+    std::env::var(ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(MAX_XLSB_PRESERVED_TOTAL_BYTES)
+}
 
 /// Controls how much of the original package we keep around for round-trip preservation.
 #[derive(Debug, Clone)]
@@ -373,10 +404,7 @@ impl XlsbWorkbook {
         }
 
         let mut zip = self.open_zip()?;
-        let mut entry = zip.by_name(&sheet_part)?;
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes)?;
-        Ok(bytes)
+        read_zip_entry_required(&mut zip, &sheet_part)
     }
 
     /// Stream cells from a worksheet without materializing the whole sheet.
@@ -524,10 +552,7 @@ impl XlsbWorkbook {
             bytes.clone()
         } else {
             let mut zip = self.open_zip()?;
-            let mut entry = zip.by_name(&sheet_part)?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            bytes
+            read_zip_entry_required(&mut zip, &sheet_part)?
         };
 
         let patched = patch_sheet_bin(&sheet_bytes, edits)?;
@@ -571,10 +596,7 @@ impl XlsbWorkbook {
             bytes.clone()
         } else {
             let mut zip = self.open_zip()?;
-            let mut entry = zip.by_name(&sheet_part)?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            bytes
+            read_zip_entry_required(&mut zip, &sheet_part)?
         };
 
         // Load workbook.bin so we can patch it if we need to intern new NameX function entries.
@@ -582,10 +604,7 @@ impl XlsbWorkbook {
             bytes.clone()
         } else {
             let mut zip = self.open_zip()?;
-            let mut entry = zip.by_name(&self.workbook_part)?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            bytes
+            read_zip_entry_required(&mut zip, &self.workbook_part)?
         };
 
         let mut ctx = self.workbook_context.clone();
@@ -785,10 +804,7 @@ impl XlsbWorkbook {
             bytes.clone()
         } else {
             let mut zip = self.open_zip()?;
-            let mut entry = zip.by_name(&sheet_part)?;
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            bytes
+            read_zip_entry_required(&mut zip, &sheet_part)?
         };
 
         let Some(shared_strings_part) = self.shared_strings_part.as_deref() else {
@@ -1431,9 +1447,7 @@ impl XlsbWorkbook {
                         zip.as_mut().expect("zip just initialized")
                     }
                 };
-                let mut entry = zip.by_name(&sheet_part)?;
-                let mut bytes = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut bytes)?;
+                let bytes = read_zip_entry_required(zip, &sheet_part)?;
                 patch_sheet_bin(&bytes, edits)?
             };
 
@@ -1883,10 +1897,21 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
     options: OpenOptions,
 ) -> Result<ParsedWorkbook, ParseError> {
     let mut preserved_parts = HashMap::new();
+    let mut preserved_total_bytes: u64 = 0;
 
     // Preserve package-level plumbing we don't parse but will need to re-emit on round-trip.
-    preserve_part(zip, &mut preserved_parts, "[Content_Types].xml")?;
-    preserve_part(zip, &mut preserved_parts, "_rels/.rels")?;
+    preserve_part(
+        zip,
+        &mut preserved_parts,
+        &mut preserved_total_bytes,
+        "[Content_Types].xml",
+    )?;
+    preserve_part(
+        zip,
+        &mut preserved_parts,
+        &mut preserved_total_bytes,
+        "_rels/.rels",
+    )?;
 
     let workbook_part = preserved_parts
         .get("_rels/.rels")
@@ -1913,7 +1938,12 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
 
     let workbook_rels_bytes = read_zip_entry(zip, &workbook_rels_part)?
         .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
-    preserved_parts.insert(workbook_rels_part.clone(), workbook_rels_bytes.clone());
+    insert_preserved_part(
+        &mut preserved_parts,
+        &mut preserved_total_bytes,
+        workbook_rels_part.clone(),
+        workbook_rels_bytes.clone(),
+    )?;
     let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
 
     let content_types_xml = preserved_parts
@@ -1949,20 +1979,17 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
         None => Styles::default(),
     };
     if let Some(bytes) = styles_bin {
-        preserved_parts.insert(
+        insert_preserved_part(
+            &mut preserved_parts,
+            &mut preserved_total_bytes,
             styles_part
                 .clone()
                 .unwrap_or_else(|| DEFAULT_STYLES_PART.to_string()),
             bytes,
-        );
+        )?;
     }
 
-    let workbook_bin = {
-        let mut wb = zip.by_name(&workbook_part)?;
-        let mut bytes = Vec::with_capacity(wb.size() as usize);
-        wb.read_to_end(&mut bytes)?;
-        bytes
-    };
+    let workbook_bin = read_zip_entry_required(zip, &workbook_part)?;
 
     let (mut sheets, workbook_context, workbook_properties, defined_names) = parse_workbook(
         &mut Cursor::new(&workbook_bin),
@@ -1983,23 +2010,30 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
         }
     }
     if options.preserve_parsed_parts {
-        preserved_parts.insert(workbook_part.clone(), workbook_bin);
+        insert_preserved_part(
+            &mut preserved_parts,
+            &mut preserved_total_bytes,
+            workbook_part.clone(),
+            workbook_bin,
+        )?;
     }
 
     let shared_strings = match shared_strings_part.as_deref() {
-        Some(part) => match zip.by_name(part) {
-            Ok(mut sst) => {
-                let mut bytes = Vec::with_capacity(sst.size() as usize);
-                sst.read_to_end(&mut bytes)?;
+        Some(part) => match read_zip_entry(zip, part)? {
+            Some(bytes) => {
                 let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
                 let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
                 if options.preserve_parsed_parts {
-                    preserved_parts.insert(part.to_string(), bytes);
+                    insert_preserved_part(
+                        &mut preserved_parts,
+                        &mut preserved_total_bytes,
+                        part.to_string(),
+                        bytes,
+                    )?;
                 }
                 (strings, table)
             }
-            Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
-            Err(e) => return Err(e.into()),
+            None => (Vec::new(), Vec::new()),
         },
         None => (Vec::new(), Vec::new()),
     };
@@ -2042,20 +2076,26 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
             if is_known {
                 continue;
             }
-            if let Ok(mut entry) = zip.by_name(&name) {
-                let mut bytes = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut bytes)?;
-                preserved_parts.insert(name, bytes);
+            if let Some(bytes) = read_zip_entry(zip, &name)? {
+                insert_preserved_part(
+                    &mut preserved_parts,
+                    &mut preserved_total_bytes,
+                    name,
+                    bytes,
+                )?;
             }
         }
     }
 
     if options.preserve_worksheets {
         for sheet in &sheets {
-            if let Ok(mut entry) = zip.by_name(&sheet.part_path) {
-                let mut bytes = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut bytes)?;
-                preserved_parts.insert(sheet.part_path.clone(), bytes);
+            if let Some(bytes) = read_zip_entry(zip, &sheet.part_path)? {
+                insert_preserved_part(
+                    &mut preserved_parts,
+                    &mut preserved_total_bytes,
+                    sheet.part_path.clone(),
+                    bytes,
+                )?;
             }
         }
     }
@@ -2368,10 +2408,34 @@ fn read_zip_entry<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, ParseError> {
+    let max = max_xlsb_zip_part_bytes();
+
     let try_read = |zip: &mut ZipArchive<R>, entry_name: &str| -> Result<Vec<u8>, ParseError> {
-        let mut entry = zip.by_name(entry_name)?;
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes)?;
+        let entry = zip.by_name(entry_name)?;
+        let size = entry.size();
+        if size > max {
+            return Err(ParseError::PartTooLarge {
+                part: entry_name.to_string(),
+                size,
+                max,
+            });
+        }
+
+        // Don't trust the ZIP metadata for preallocation; bound it to keep allocations modest.
+        let mut bytes =
+            Vec::with_capacity((size.min(ZIP_ENTRY_READ_PREALLOC_BYTES as u64)) as usize);
+
+        // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read.
+        entry
+            .take(max.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > max {
+            return Err(ParseError::PartTooLarge {
+                part: entry_name.to_string(),
+                size: bytes.len() as u64,
+                max,
+            });
+        }
         Ok(bytes)
     };
 
@@ -2387,13 +2451,55 @@ fn read_zip_entry<R: Read + Seek>(
     }
 }
 
+fn read_zip_entry_required<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Vec<u8>, ParseError> {
+    read_zip_entry(zip, name)?
+        .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))
+}
+
+fn insert_preserved_part(
+    preserved_parts: &mut HashMap<String, Vec<u8>>,
+    preserved_total_bytes: &mut u64,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<(), ParseError> {
+    let max_total = max_xlsb_preserved_total_bytes();
+    let new_len = bytes.len() as u64;
+    let old_len = preserved_parts
+        .get(&name)
+        .map(|v| v.len() as u64)
+        .unwrap_or(0);
+
+    let next_total = preserved_total_bytes
+        .saturating_sub(old_len)
+        .saturating_add(new_len);
+    if next_total > max_total {
+        return Err(ParseError::PreservedPartsTooLarge {
+            total: next_total,
+            max: max_total,
+        });
+    }
+
+    preserved_parts.insert(name, bytes);
+    *preserved_total_bytes = next_total;
+    Ok(())
+}
+
 fn preserve_part<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     preserved: &mut HashMap<String, Vec<u8>>,
+    preserved_total_bytes: &mut u64,
     name: &str,
 ) -> Result<(), ParseError> {
     if let Some(bytes) = read_zip_entry(zip, name)? {
-        preserved.insert(name.to_string(), bytes);
+        insert_preserved_part(
+            preserved,
+            preserved_total_bytes,
+            name.to_string(),
+            bytes,
+        )?;
     }
     Ok(())
 }

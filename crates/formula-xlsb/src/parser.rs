@@ -108,6 +108,10 @@ pub enum Error {
     InvalidExcelStringLiteral(String),
     #[error("unsupported formula text: {0}")]
     UnsupportedFormulaText(String),
+    #[error("XLSB part too large: {part} size {size} bytes exceeds limit {max} bytes")]
+    PartTooLarge { part: String, size: u64, max: u64 },
+    #[error("XLSB preserved parts too large: total {total} bytes exceeds limit {max} bytes")]
+    PreservedPartsTooLarge { total: u64, max: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
