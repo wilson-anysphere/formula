@@ -138,6 +138,14 @@ pub const HMAC_KEY_BLOCK: [u8; 8] = [0x5F, 0xB2, 0xAD, 0x01, 0x0C, 0xB9, 0xE1, 0
 /// MS-OFFCRYPTO Agile: block key used for deriving the HMAC value.
 pub const HMAC_VALUE_BLOCK: [u8; 8] = [0xA0, 0x67, 0x7F, 0x02, 0xB2, 0x2C, 0x84, 0x33];
 
+fn update_password_utf16le<D: digest::Digest>(hasher: &mut D, password: &str) {
+    // UTF-16LE with no BOM and no terminator.
+    for unit in password.encode_utf16() {
+        hasher.update(unit.to_le_bytes());
+    }
+}
+
+#[cfg(test)]
 fn password_utf16le_bytes(password: &str) -> Vec<u8> {
     // UTF-16LE with no BOM and no terminator.
     let mut out = Vec::with_capacity(password.len().saturating_mul(2));
@@ -163,17 +171,19 @@ pub fn hash_password(
         return Err(CryptoError::InvalidParameter("salt must be non-empty"));
     }
 
-    let pw = password_utf16le_bytes(password);
     let digest_len = hash_alg.digest_len();
     debug_assert!(digest_len <= MAX_DIGEST_LEN);
 
     // Avoid per-iteration allocations: keep the current hash in a fixed-size buffer and overwrite it
     // after each digest round.
     let mut h_buf = [0u8; MAX_DIGEST_LEN];
-    hash_alg.hash_two_into(salt, &pw, &mut h_buf[..digest_len]);
 
     match hash_alg {
         HashAlgorithm::Sha1 => {
+            let mut d = sha1::Sha1::new();
+            d.update(salt);
+            update_password_utf16le(&mut d, password);
+            h_buf[..20].copy_from_slice(&d.finalize());
             for i in 0..spin {
                 let mut d = sha1::Sha1::new();
                 d.update(i.to_le_bytes());
@@ -182,6 +192,10 @@ pub fn hash_password(
             }
         }
         HashAlgorithm::Sha256 => {
+            let mut d = sha2::Sha256::new();
+            d.update(salt);
+            update_password_utf16le(&mut d, password);
+            h_buf[..32].copy_from_slice(&d.finalize());
             for i in 0..spin {
                 let mut d = sha2::Sha256::new();
                 d.update(i.to_le_bytes());
@@ -190,6 +204,10 @@ pub fn hash_password(
             }
         }
         HashAlgorithm::Sha384 => {
+            let mut d = sha2::Sha384::new();
+            d.update(salt);
+            update_password_utf16le(&mut d, password);
+            h_buf[..48].copy_from_slice(&d.finalize());
             for i in 0..spin {
                 let mut d = sha2::Sha384::new();
                 d.update(i.to_le_bytes());
@@ -198,6 +216,10 @@ pub fn hash_password(
             }
         }
         HashAlgorithm::Sha512 => {
+            let mut d = sha2::Sha512::new();
+            d.update(salt);
+            update_password_utf16le(&mut d, password);
+            h_buf[..64].copy_from_slice(&d.finalize());
             for i in 0..spin {
                 let mut d = sha2::Sha512::new();
                 d.update(i.to_le_bytes());
