@@ -168,6 +168,34 @@ fn decrypt_agile_tampered_size_header_fails_integrity() {
 }
 
 #[test]
+fn decrypt_agile_tampered_size_header_high_dword_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password_agile(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let mut encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Tamper only the "reserved" high DWORD of the 8-byte plaintext size prefix. Integrity
+    // verification must cover all 8 bytes of the header (Excel computes `dataIntegrity` over the
+    // full EncryptedPackage stream bytes).
+    assert!(encrypted_package.len() >= 8, "EncryptedPackage stream too short");
+    encrypted_package[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+        options,
+    )
+    .expect_err("tampered EncryptedPackage header should fail integrity");
+    assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
+}
+
+#[test]
 fn decrypt_agile_appended_ciphertext_fails_integrity() {
     let password = "correct horse battery staple";
     let plain_zip = build_tiny_zip();

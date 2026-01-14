@@ -134,6 +134,59 @@ fn decrypts_agile_encrypted_package_streaming_tampered_size_header_fails_integri
 }
 
 #[test]
+fn decrypts_agile_encrypted_package_streaming_tampered_size_header_high_dword_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plaintext = make_zip_bytes(12_345);
+
+    let mut rng = StdRng::seed_from_u64(0xD15EA5E_u64);
+    let cursor = Cursor::new(Vec::new());
+    let mut writer =
+        Ecma376AgileWriter::create(&mut rng, password, cursor).expect("create agile writer");
+    writer
+        .write_all(&plaintext)
+        .expect("write plaintext package bytes");
+    let cursor = writer.into_inner().expect("finalize agile writer");
+    let encrypted_ole_bytes = cursor.into_inner();
+
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_ole_bytes)).expect("open cfb");
+
+    let mut encryption_info_stream = open_stream(&mut ole, "EncryptionInfo");
+    let mut encryption_info = Vec::new();
+    encryption_info_stream
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package_stream = open_stream(&mut ole, "EncryptedPackage");
+    let mut encrypted_package = Vec::new();
+    encrypted_package_stream
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    assert!(encrypted_package.len() >= 8, "EncryptedPackage too short");
+
+    // Tamper only the "reserved" high DWORD of the 8-byte size header.
+    //
+    // Some compatibility parsers treat this field as reserved/non-semantic for plaintext length, but
+    // MS-OFFCRYPTO defines `dataIntegrity` as an HMAC over the full EncryptedPackage *stream bytes*,
+    // which includes these header bytes. This must therefore fail integrity verification.
+    encrypted_package[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let mut cursor = Cursor::new(encrypted_package);
+    let mut out = Vec::new();
+    let err = decrypt_agile_encrypted_package_stream(
+        &encryption_info,
+        &mut cursor,
+        password,
+        &mut out,
+    )
+    .expect_err("expected integrity failure");
+    assert!(
+        matches!(err, OffCryptoError::IntegrityMismatch),
+        "expected IntegrityMismatch, got {err:?}"
+    );
+}
+
+#[test]
 fn decrypts_agile_encrypted_package_streaming_appended_ciphertext_fails_integrity() {
     let password = "correct horse battery staple";
     let plaintext = make_zip_bytes(12_345);
