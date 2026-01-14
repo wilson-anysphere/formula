@@ -124,7 +124,7 @@ describe("startupMetrics", () => {
 
       const first = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
       // Let the bounded invoke retry window (2s) elapse.
-      await vi.advanceTimersByTimeAsync(2500);
+      await vi.advanceTimersByTimeAsync(10_500);
       await first;
       expect(invoke).not.toHaveBeenCalled();
 

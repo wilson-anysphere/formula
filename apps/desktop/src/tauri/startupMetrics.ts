@@ -36,6 +36,7 @@ const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
 const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
 const TTI_REPORTED_KEY = "__FORMULA_STARTUP_TTI_REPORTED__";
+const HOST_INVOKE_RETRY_DEADLINE_MS = 10_000;
 
 function getStore(): StartupTimings {
   const g = globalThis as any;
@@ -208,7 +209,7 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
     const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
     if (!shouldRetry) return { ...store };
 
-    const deadlineMs = Date.now() + 10_000;
+    const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
     let delayMs = 1;
     while (!invoke && Date.now() < deadlineMs) {
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
@@ -314,7 +315,7 @@ export async function markStartupTimeToInteractive(options?: {
     // Rust-side TTI mark (required for the `[startup] ...` line the perf harness parses).
     const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
     if (shouldRetry) {
-      const deadlineMs = Date.now() + 2_000;
+      const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
       let delayMs = 1;
       let retriedInvoke: TauriInvoke | null = null;
       while (!retriedInvoke && Date.now() < deadlineMs) {
