@@ -8069,6 +8069,58 @@ const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
   commandOverrides: {
+    // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
+    // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
+    // and command palette stay consistent.
+    "file.new.new": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
+    },
+    "file.new.blankWorkbook": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
+    },
+    "file.open.open": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
+    },
+    "file.save.save": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
+    },
+    "file.save.saveAs": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
+    },
+    "file.save.saveAs.copy": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
+    },
+    "file.save.saveAs.download": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
+    },
+    "file.save.autoSave": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled);
+      app.focus();
+    },
+    "file.info.manageWorkbook.versions": async () => {
+      await commandRegistry.executeCommand("view.togglePanel.versionHistory");
+    },
+    "file.info.manageWorkbook.branches": async () => {
+      await commandRegistry.executeCommand("view.togglePanel.branchManager");
+    },
+    "file.print.print": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print);
+    },
+    "file.print.printPreview": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview);
+    },
+    "file.print.pageSetup": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
+    },
+    "file.print.pageSetup.printTitles": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
+    },
+    "file.print.pageSetup.margins": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
+    },
+    "file.options.close": async () => {
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
+    },
     // Insert → PivotTable dropdown contains Excel-style submenu variants. We only implement
     // the selection-based Pivot Builder flow today, so route "From Table/Range…" to the
     // same built-in command.
@@ -8296,43 +8348,6 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     switch (commandId) {
-      case "file.new.new":
-      case "file.new.blankWorkbook": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-        return;
-      }
-
-      case "file.open.open": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
-        return;
-      }
-
-      case "file.save.save": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
-        return;
-      }
-
-      case "file.save.autoSave": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled);
-        return;
-      }
-
-      case "file.info.manageWorkbook.versions": {
-        executeBuiltinCommand("view.togglePanel.versionHistory");
-        return;
-      }
-      case "file.info.manageWorkbook.branches": {
-        executeBuiltinCommand("view.togglePanel.branchManager");
-        return;
-      }
-
-      case "file.save.saveAs":
-      case "file.save.saveAs.copy":
-      case "file.save.saveAs.download": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-        return;
-      }
-
       case "file.export.createPdf":
       case "file.export.export.pdf":
       case "file.export.changeFileType.pdf": {
@@ -8362,32 +8377,6 @@ function handleRibbonCommand(commandId: string): void {
           console.error("Failed to save workbook:", err);
           showToast(`Failed to save workbook: ${String(err)}`, "error");
         });
-        return;
-      }
-
-      case "file.print.pageSetup": {
-        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-        return;
-      }
-
-      case "file.print.print": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.print);
-        return;
-      }
-
-      case "file.print.printPreview": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.printPreview);
-        return;
-      }
-
-      case "file.print.pageSetup.printTitles":
-      case "file.print.pageSetup.margins": {
-        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-        return;
-      }
-
-      case "file.options.close": {
-        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
         return;
       }
 
