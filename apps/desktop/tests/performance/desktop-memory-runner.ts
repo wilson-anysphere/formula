@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, parse, resolve } from "node:path";
+import { dirname, isAbsolute, parse, resolve, relative } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 
 import {
@@ -29,6 +29,14 @@ const perfXdgState = resolve(perfHome, "xdg-state");
 const perfXdgData = resolve(perfHome, "xdg-data");
 const perfAppData = resolve(perfHome, "AppData", "Roaming");
 const perfLocalAppData = resolve(perfHome, "AppData", "Local");
+
+function isSubpath(parentDir: string, maybeChild: string): boolean {
+  const rel = relative(parentDir, maybeChild);
+  if (rel === "" || rel.startsWith("..")) return false;
+  // `path.relative()` can return an absolute path on Windows when drives differ.
+  if (isAbsolute(rel)) return false;
+  return true;
+}
 
 function usage(): string {
   return [
@@ -277,6 +285,18 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     const rootDir = parse(perfHome).root;
     if (perfHome === rootDir || perfHome === repoRoot) {
       throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
+    }
+    const safeRoot = resolve(repoRoot, "target");
+    const allowUnsafe =
+      process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN === "1" ||
+      String(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN ?? "")
+        .trim()
+        .toLowerCase() === "true";
+    if (!isSubpath(safeRoot, perfHome) && !allowUnsafe) {
+      throw new Error(
+        `Refusing to reset FORMULA_PERF_HOME outside ${safeRoot} (got ${perfHome}).\n` +
+          "Pick a path under target/ (recommended), or set FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1 to override (DANGEROUS).",
+      );
     }
     rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
