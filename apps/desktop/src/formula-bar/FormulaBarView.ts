@@ -1106,6 +1106,8 @@ export class FormulaBarView {
 
   #argumentPreviewProvider: ((expr: string) => unknown | Promise<unknown>) | null = null;
   #argumentPreviewKey: string | null = null;
+  #argumentPreviewDisplayKey: string | null = null;
+  #argumentPreviewDisplayExpr: string | null = null;
   #argumentPreviewValue: unknown | null = null;
   #argumentPreviewPending = false;
   #argumentPreviewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3144,6 +3146,8 @@ export class FormulaBarView {
         argPreviewKey = `${draftVersion}|${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}`;
         if (this.#argumentPreviewKey !== argPreviewKey) {
           this.#argumentPreviewKey = argPreviewKey;
+          this.#argumentPreviewDisplayKey = argPreviewKey;
+          this.#argumentPreviewDisplayExpr = formatArgumentPreviewExpression(activeArg.argText);
           this.#argumentPreviewValue = null;
           this.#argumentPreviewPending = true;
           this.#scheduleArgumentPreviewEvaluation(activeArg, argPreviewKey);
@@ -3222,7 +3226,10 @@ export class FormulaBarView {
           previewEl.dataset.argEnd = String(activeArgForPreview.span.end);
 
           const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
-          const displayArgText = formatArgumentPreviewExpression(activeArgForPreview.argText);
+          const displayArgText =
+            this.#argumentPreviewDisplayKey === argPreviewKey
+              ? (this.#argumentPreviewDisplayExpr ?? "")
+              : formatArgumentPreviewExpression(activeArgForPreview.argText);
           previewEl.textContent = `↳ ${displayArgText}  →  ${rhs}`;
           body.appendChild(previewEl);
         } else {
@@ -3297,6 +3304,8 @@ export class FormulaBarView {
   #clearArgumentPreviewState(): void {
     if (
       this.#argumentPreviewKey === null &&
+      this.#argumentPreviewDisplayKey === null &&
+      this.#argumentPreviewDisplayExpr === null &&
       this.#argumentPreviewValue === null &&
       this.#argumentPreviewTimer == null &&
       !this.#argumentPreviewPending
@@ -3305,6 +3314,8 @@ export class FormulaBarView {
       return;
     }
     this.#argumentPreviewKey = null;
+    this.#argumentPreviewDisplayKey = null;
+    this.#argumentPreviewDisplayExpr = null;
     this.#argumentPreviewValue = null;
     this.#argumentPreviewPending = false;
     this.#argumentPreviewRequestId += 1;
