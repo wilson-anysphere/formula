@@ -787,10 +787,11 @@ Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.
 - updater events → handled by the updater UI (`apps/desktop/src/tauri/updaterUi.ts`)
   - `main.ts` emits `updater-ui-ready` once the updater listeners are installed (so the Rust host can safely start a startup update check in release builds).
 
-Separately, startup metrics listeners are installed at the top of `main.ts` via:
+Separately, startup metrics listeners are installed at the top of `main.ts` via
+`apps/desktop/src/tauri/startupMetricsBootstrap.ts`, which:
 
-- `installStartupTimingsListeners()` (listens for `startup:window-visible`, `startup:webview-loaded`, `startup:tti`, `startup:metrics`)
-- `reportStartupWebviewLoaded()` (invokes the host command to emit the initial timing events)
+- calls `installStartupTimingsListeners()` (listens for `startup:window-visible`, `startup:webview-loaded`, `startup:first-render`, `startup:tti`, `startup:metrics`)
+- then calls `reportStartupWebviewLoaded()` to prompt the host to (re-)emit the cached timing events once listeners are installed
 
 Important implementation detail: invoke calls are serialized via `queueBackendOp(...)` / `pendingBackendSync` so that bulk edits (workbook sync) don’t race with open/save/close.
 
