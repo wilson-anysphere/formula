@@ -144,10 +144,14 @@ Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 
 
 **40-bit note:** MS-OFFCRYPTO specifies `keySize == 0` MUST be interpreted as 40-bit RC4. In both
 cases (“0” or “40”), `key_size_bytes == 5`.
-However, *Office/CryptoAPI has a quirk for the SHA-1 variant*: the derived 5 bytes are treated as a
-16-byte RC4 key by appending 11 zero bytes (**key length affects the RC4 KSA and keystream**).
-For the MD5 variant, the raw 5-byte key is used (no padding). These behaviors are locked down by
-unit tests in `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`.
+
+Standard/CryptoAPI RC4 uses the raw 5-byte key (`keyLen = keySize/8` bytes). Do **not** pad to 16
+bytes: RC4’s key scheduling depends on both the key bytes *and* the key length.
+
+Compatibility note: some non-conforming/legacy producers treat a “40-bit” key as a 16-byte RC4 key
+by appending 11 zero bytes. This changes the keystream. Formula’s decryptors use the spec-correct
+5-byte key; `formula-offcrypto` additionally accepts the zero-padded-16-byte variant as a
+compatibility fallback when `keySize` indicates 40-bit RC4.
 
 ## Password verification (EncryptionVerifier)
 
@@ -212,7 +216,7 @@ block 0 H_block (SHA1(H || LE32(0))) =
  key_material (5 bytes) =
    6ad7dedf2d
 
- zero-padded 16-byte key (a common legacy behavior; **incorrect for MS-OFFCRYPTO Standard RC4**) =
+ zero-padded 16-byte key (a common legacy/non-conforming behavior; **incorrect for MS-OFFCRYPTO Standard RC4**) =
    6ad7dedf2d0000000000000000000000
 
  RC4(key=raw 5-byte key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
@@ -225,6 +229,11 @@ block 0 H_block (SHA1(H || LE32(0))) =
 These ciphertexts differ, demonstrating why implementations must treat `keySize==0/40` as a **5-byte
 RC4 key** (`keyLen = keySize/8`) and must **not** zero-pad it to 16 bytes for MS-OFFCRYPTO Standard
 RC4.
+
+The spec-correct behavior is locked down by unit tests in
+`crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`. For compatibility with some
+non-conforming producers, `formula-offcrypto` also tries the zero-padded-16-byte key variant when
+`keySize` indicates 40-bit RC4.
 
 ### 56-bit RC4 key truncation example
 
