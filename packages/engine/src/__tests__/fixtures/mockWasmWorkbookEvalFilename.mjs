@@ -48,6 +48,21 @@ function matchesInfoDirectory(formula) {
   return /^INFO\s*\(\s*\"directory\"\s*\)\s*$/i.test(body);
 }
 
+function workbookDirForExcel(dir) {
+  const d = String(dir ?? "");
+  if (d === "") return "";
+  if (d.endsWith("/") || d.endsWith("\\")) return d;
+  const lastSlash = d.lastIndexOf("/");
+  const lastBackslash = d.lastIndexOf("\\");
+  let sep = "/";
+  if (lastSlash >= 0 && lastBackslash >= 0) {
+    sep = lastSlash > lastBackslash ? "/" : "\\";
+  } else if (lastBackslash >= 0) {
+    sep = "\\";
+  }
+  return d + sep;
+}
+
 export class WasmWorkbook {
   constructor() {
     this.directory = null;
@@ -128,11 +143,14 @@ export class WasmWorkbook {
             if (!this.filename) {
               computed = "";
             } else {
+              const dirRaw = typeof this.directory === "string" ? this.directory : "";
+              const dir = dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
               const refSheetName = sheetNameFromReferenceArg(refArg);
-              computed = `${this.directory ?? ""}[${this.filename}]${refSheetName ?? sheetName}`;
+              computed = dir ? `${dir}[${this.filename}]${refSheetName ?? sheetName}` : `[${this.filename}]${refSheetName ?? sheetName}`;
             }
           } else if (matchesInfoDirectory(input)) {
-            const dir = typeof this.directory === "string" && this.directory.trim() !== "" ? this.directory : "";
+            const dirRaw = typeof this.directory === "string" ? this.directory : "";
+            const dir = dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
             computed = this.filename && dir ? dir : "#N/A";
           }
         } else {

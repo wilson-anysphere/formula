@@ -166,7 +166,7 @@ describe("engine.worker workbook file metadata integration", () => {
         type: "request",
         id: 7,
         method: "setWorkbookFileMetadata",
-        params: { directory: "/tmp/", filename: "book.xlsx" },
+        params: { directory: "/tmp", filename: "book.xlsx" },
       });
 
       await sendRequest(port, { type: "request", id: 8, method: "recalculate", params: {} });
