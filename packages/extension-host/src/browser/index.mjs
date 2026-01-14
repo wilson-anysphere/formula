@@ -1243,7 +1243,9 @@ class BrowserExtensionHost {
     for (const extension of this._extensions.values()) {
       for (const cmd of extension.manifest.contributes?.commands ?? []) {
         const keywords = Array.isArray(cmd.keywords)
-          ? cmd.keywords.filter((kw) => typeof kw === "string" && kw.trim().length > 0)
+          ? cmd.keywords
+              .map((kw) => (typeof kw === "string" ? kw.trim() : ""))
+              .filter((kw) => kw.length > 0)
           : null;
         out.push({
           extensionId: extension.id,

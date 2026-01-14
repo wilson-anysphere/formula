@@ -35,7 +35,7 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
     activationEvents: [],
     permissions: [],
     contributes: {
-      commands: [{ command: "test.cmd", title: "Test Command", category: "Test" }],
+      commands: [{ command: "test.cmd", title: "Test Command", category: "Test", keywords: ["  foo  ", "", "bar"] }],
       panels: [{ id: "test.panel", title: "Test Panel" }],
       keybindings: [{ command: "test.cmd", key: "ctrl+shift+t", mac: "cmd+shift+t" }],
       menus: {
@@ -65,7 +65,7 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
       category: "Test",
       icon: null,
       description: null,
-      keywords: null
+      keywords: ["foo", "bar"]
     }
   ]);
 

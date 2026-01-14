@@ -10,7 +10,7 @@ describe("CommandRegistry", () => {
       "view.test",
       "Test Command",
       (value: number) => value + 1,
-      { category: "View", icon: "test-icon", description: "Adds one", keywords: ["add", "plus"] },
+      { category: "View", icon: "test-icon", description: "Adds one", keywords: [" add ", "plus", "   "] },
     );
 
     const listed = registry.listCommands();
@@ -49,6 +49,23 @@ describe("CommandRegistry", () => {
     // Builtins are preserved; previous extension commands are removed.
     expect(registry.listCommands().map((c) => c.commandId).sort()).toEqual(["builtin.one", "ext.two"].sort());
     expect(registry.getCommand("ext.one")).toBeUndefined();
+  });
+
+  it("trims extension command keywords before storing them", () => {
+    const registry = new CommandRegistry();
+    registry.setExtensionCommands(
+      [
+        {
+          extensionId: "ext1",
+          command: "ext.one",
+          title: "Ext One",
+          keywords: ["  foo  ", "", "bar"],
+        },
+      ],
+      async () => null,
+    );
+
+    expect(registry.getCommand("ext.one")?.keywords).toEqual(["foo", "bar"]);
   });
 
   it("handles duplicate command ids deterministically", () => {

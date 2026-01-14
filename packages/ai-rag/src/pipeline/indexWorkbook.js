@@ -71,7 +71,7 @@ export async function indexWorkbook(params) {
   const rawEmbedderName = embedder?.name;
   const embedderName =
     typeof rawEmbedderName === "string" && rawEmbedderName.trim() !== ""
-      ? rawEmbedderName
+      ? rawEmbedderName.trim()
       : "unknown-embedder";
   const sampleRows = params.sampleRows ?? 5;
   const maxColumnsForSchema = params.maxColumnsForSchema;

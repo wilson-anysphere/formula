@@ -95,7 +95,9 @@ export class CommandRegistry {
     const id = String(commandId);
     const keywords =
       Array.isArray(options?.keywords) && options?.keywords.length > 0
-        ? options.keywords.filter((kw) => typeof kw === "string" && kw.trim() !== "")
+        ? options.keywords
+            .map((kw) => (typeof kw === "string" ? kw.trim() : ""))
+            .filter((kw) => kw !== "")
         : options?.keywords ?? null;
     this.commands.set(id, {
       commandId: id,
@@ -144,7 +146,11 @@ export class CommandRegistry {
         category: cmd.category ?? null,
         icon: cmd.icon ?? null,
         description: cmd.description ?? null,
-        keywords: Array.isArray(cmd.keywords) ? cmd.keywords.filter((kw) => typeof kw === "string" && kw.trim() !== "") : null,
+        keywords: Array.isArray(cmd.keywords)
+          ? cmd.keywords
+              .map((kw) => (typeof kw === "string" ? kw.trim() : ""))
+              .filter((kw) => kw !== "")
+          : null,
         when: cmd.when ?? null,
         source: { kind: "extension", extensionId: String(cmd.extensionId) },
         run: async (...args) => executor(id, ...args),
