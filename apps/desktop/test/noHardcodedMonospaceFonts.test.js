@@ -8,17 +8,43 @@ import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
-const stylesRoot = path.join(desktopRoot, "src", "styles");
+const srcRoot = path.join(desktopRoot, "src");
 
 function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
 test("desktop styles should not hardcode monospace font stacks (use --font-mono token)", () => {
-  const cssFiles = fs
-    .readdirSync(stylesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".css") && entry.name !== "tokens.css")
-    .map((entry) => path.join(stylesRoot, entry.name))
+  /**
+   * @param {string} dirPath
+   * @returns {string[]}
+   */
+  function walkCssFiles(dirPath) {
+    /** @type {string[]} */
+    const files = [];
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...walkCssFiles(fullPath));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".css")) continue;
+      files.push(fullPath);
+    }
+    return files;
+  }
+
+  const cssFiles = walkCssFiles(srcRoot)
+    .filter((file) => {
+      const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
+      if (rel === "styles/tokens.css") return false;
+      // Demo/sandbox assets are not part of the shipped UI bundle.
+      if (rel.startsWith("grid/presence-renderer/")) return false;
+      if (rel.includes("/demo/")) return false;
+      if (rel.includes("/__tests__/")) return false;
+      return true;
+    })
     .sort((a, b) => a.localeCompare(b));
 
   // Keep in sync with `--font-mono` in `src/styles/tokens.css`; we only allow hardcoded
@@ -51,4 +77,3 @@ test("desktop styles should not hardcode monospace font stacks (use --font-mono 
       .join("\n")}`,
   );
 });
-
