@@ -55,7 +55,7 @@ jobs:
   release-manifest-tests:
     name: Desktop release manifest scripts (node:test)
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Node
@@ -93,7 +93,7 @@ jobs:
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -109,7 +109,7 @@ jobs:
   desktop-backend-tests:
     name: Desktop backend (Rust) tests
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -137,7 +137,7 @@ jobs:
   excel-oracle-compat:
     name: Excel oracle compatibility (pinned)
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -603,7 +603,7 @@ jobs:
   node-tests:
     name: Node tests
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -642,7 +642,7 @@ jobs:
   tab-completion-latency-guard:
     name: TabCompletionEngine latency guard
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -658,7 +658,7 @@ jobs:
   desktop-tauri-guardrails:
     name: Desktop (Tauri) frontend guardrail tests
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -702,7 +702,7 @@ jobs:
   sync-server-docker:
     name: Sync server Docker build
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
