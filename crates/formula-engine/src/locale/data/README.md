@@ -299,11 +299,21 @@ Run these from the repo root:
 # If the engine function catalog changed:
 node scripts/generate-function-catalog.js
 
+# If locale function sources were (re)extracted from Excel:
+node scripts/normalize-locale-function-sources.js
+node scripts/normalize-locale-function-sources.js --check
+
 # Regenerate function TSVs (writes files in-place)
 node scripts/generate-locale-function-tsv.js
 
 # Verify function TSVs are up to date (CI mode)
 node scripts/generate-locale-function-tsv.js --check
+
+# (pnpm equivalents)
+pnpm normalize:locale-function-sources
+pnpm check:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 
 # Regenerate error TSVs from committed upstream mapping sources
 node scripts/generate-locale-error-tsvs.mjs
