@@ -83,6 +83,28 @@ function getSheetMatrix(sheet) {
   return null;
 }
 
+const COORD_KEY_RE = /^\d+(?:,|:)\d+$/;
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, any>}
+ */
+function looksLikeSparseCoordKeyedObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (value instanceof Date) return false;
+  if (typeof value.get === "function") return false;
+  // Some hosts may use `Object.create(null)` for maps; `for..in` still works.
+  let seen = 0;
+  for (const key in /** @type {any} */ (value)) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    seen += 1;
+    if (COORD_KEY_RE.test(key)) return true;
+    // Keep this check cheap: bail after a small number of keys.
+    if (seen >= 20) break;
+  }
+  return false;
+}
+
 /**
  * @param {any} sheet
  * @returns {Map<string, any> | null}
@@ -93,6 +115,14 @@ function getSheetCellMap(sheet) {
   // Some hosts wrap the underlying Map (proxy, custom class) while maintaining the
   // same access pattern.
   if (cells && typeof cells.get === "function") return cells;
+  if (looksLikeSparseCoordKeyedObject(cells)) {
+    const obj = cells;
+    return {
+      get(key) {
+        return obj[key];
+      },
+    };
+  }
   return null;
 }
 
@@ -420,6 +450,9 @@ export function extractWorkbookSchema(workbook, options = {}) {
       sheet = { name, values: rawSheet };
     } else if (rawSheet && typeof rawSheet.get === "function") {
       // Allow sheet maps like `{ Sheet1: new Map(...) }` by treating the value as a sparse cell map.
+      sheet = { name, cells: rawSheet };
+    } else if (looksLikeSparseCoordKeyedObject(rawSheet)) {
+      // Allow sheet maps like `{ Sheet1: { "0,0": {...} } }` by treating the value as a sparse cell object map.
       sheet = { name, cells: rawSheet };
     } else {
       sheet = { name };

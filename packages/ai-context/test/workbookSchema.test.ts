@@ -310,6 +310,24 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
   });
 
+  it("supports sparse sheet cell object maps (row,col keys)", () => {
+    const cells: Record<string, any> = {};
+    cells["0:0"] = { v: "Name" };
+    cells["0,1"] = { v: "Value" };
+    cells["1,0"] = { v: "A" };
+    cells["1:1"] = { v: 1 };
+
+    const workbook = {
+      id: "wb-obj-map",
+      sheets: [{ name: "Sheet1", cells }],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0].headers).toEqual(["Name", "Value"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
+  });
+
   it("supports Map-like sheets (cells.get)", () => {
     const backing = new Map<string, any>();
     backing.set("0:0", { v: "Name" });
