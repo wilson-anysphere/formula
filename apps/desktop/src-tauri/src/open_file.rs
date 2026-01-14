@@ -122,9 +122,18 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
         return None;
     }
 
+    if arg.len() > MAX_OPEN_FILE_PENDING_BYTES {
+        // Treat argv as untrusted; avoid allocating and processing huge strings that will be
+        // rejected by the later open-file request normalization anyway.
+        return None;
+    }
+
     // Deep links (e.g. OAuth redirects) are delivered via argv on some platforms. Ignore them
     // here so we don't attempt to treat `formula://...` as a filesystem path.
-    if arg.to_ascii_lowercase().starts_with("formula:") {
+    if arg
+        .get(..8)
+        .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
+    {
         return None;
     }
 
@@ -133,7 +142,10 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
         return None;
     }
 
-    let mut path = if arg.to_ascii_lowercase().starts_with("file:") {
+    let mut path = if arg
+        .get(..5)
+        .map_or(false, |prefix| prefix.eq_ignore_ascii_case("file:"))
+    {
         let url = Url::parse(arg).ok()?;
         if url.scheme() != "file" {
             return None;
@@ -210,6 +222,7 @@ mod tests {
         let argv = vec![
             "formula-desktop".to_string(),
             "formula://oauth/callback?code=abc".to_string(),
+            "FORMULA://oauth/callback?code=def".to_string(),
         ];
         let paths = extract_open_file_paths_from_argv(&argv, None);
         assert!(paths.is_empty());
