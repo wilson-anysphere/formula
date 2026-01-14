@@ -4548,6 +4548,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
 
 #[cfg(test)]
 mod tests {
+    use super::parse_encrypted_package_size_prefix_bytes;
     use super::xlsb_error_code_to_model_error;
     use super::xlsb_to_model_workbook;
     use formula_model::{CellRef, CellValue, DateSystem, ErrorValue};
@@ -4614,6 +4615,58 @@ mod tests {
         zip.write_all(shared_strings_bin).unwrap();
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn parse_encrypted_package_size_prefix_prefers_low_dword_when_u64_is_implausible() {
+        // Some producers encode the 8-byte `EncryptedPackage` size prefix as:
+        //   [u32 size][u32 reserved]
+        // which yields a non-zero high DWORD but should still be interpreted as the low DWORD when
+        // the combined u64 is not plausible for the ciphertext length.
+        let len_lo: u32 = 100;
+        let len_hi: u32 = 1;
+        let mut prefix = [0u8; 8];
+        prefix[..4].copy_from_slice(&len_lo.to_le_bytes());
+        prefix[4..].copy_from_slice(&len_hi.to_le_bytes());
+
+        let parsed = parse_encrypted_package_size_prefix_bytes(prefix, Some(200));
+        assert_eq!(parsed, len_lo as u64);
+    }
+
+    #[test]
+    fn parse_encrypted_package_size_prefix_uses_full_u64_when_plausible() {
+        let len_lo: u32 = 100;
+        let len_hi: u32 = 1;
+        let mut prefix = [0u8; 8];
+        prefix[..4].copy_from_slice(&len_lo.to_le_bytes());
+        prefix[4..].copy_from_slice(&len_hi.to_le_bytes());
+
+        let parsed = parse_encrypted_package_size_prefix_bytes(prefix, Some(5_000_000_000));
+        assert_eq!(parsed, (len_lo as u64) | ((len_hi as u64) << 32));
+    }
+
+    #[test]
+    fn parse_encrypted_package_size_prefix_without_ciphertext_len_prefers_low_dword_for_compat() {
+        let len_lo: u32 = 1234;
+        let len_hi: u32 = 1;
+        let mut prefix = [0u8; 8];
+        prefix[..4].copy_from_slice(&len_lo.to_le_bytes());
+        prefix[4..].copy_from_slice(&len_hi.to_le_bytes());
+
+        let parsed = parse_encrypted_package_size_prefix_bytes(prefix, None);
+        assert_eq!(parsed, len_lo as u64);
+    }
+
+    #[test]
+    fn parse_encrypted_package_size_prefix_returns_u64_when_high_dword_is_zero() {
+        let len_lo: u32 = 42;
+        let len_hi: u32 = 0;
+        let mut prefix = [0u8; 8];
+        prefix[..4].copy_from_slice(&len_lo.to_le_bytes());
+        prefix[4..].copy_from_slice(&len_hi.to_le_bytes());
+
+        let parsed = parse_encrypted_package_size_prefix_bytes(prefix, Some(10));
+        assert_eq!(parsed, len_lo as u64);
     }
 
     #[test]
