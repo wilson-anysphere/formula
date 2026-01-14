@@ -57,6 +57,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
    - Decrypts to `plaintext-large.xlsx` with password `password`
 - `standard-large.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
+   - `EncryptionInfo` header flags **0x00000024** (`fCryptoAPI` + `fAES`)
    - Decrypts to `plaintext-large.xlsx` with password `password`
 
 ### Why the `*-large.xlsx` fixtures exist
