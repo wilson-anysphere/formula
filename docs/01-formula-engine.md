@@ -225,6 +225,19 @@ Expanded lookups via `get(sheet, addr)` (conceptually):
   get("[Book.xlsx]Sheet3", A1)
 ```
 
+Quoted sheet names work the same way (the provider still receives unquoted names in the key):
+
+```txt
+Formula: =SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1)
+
+sheet_order("Book.xlsx") -> ["Sheet 1", "Sheet 2", "Sheet 3", ...]
+
+Expanded lookups via `get(sheet, addr)` (conceptually):
+  get("[Book.xlsx]Sheet 1", A1)
+  get("[Book.xlsx]Sheet 2", A1)
+  get("[Book.xlsx]Sheet 3", A1)
+```
+
 #### Path-qualified external workbook canonicalization
 
 Excel allows quoting a full path + workbook + sheet, e.g.:

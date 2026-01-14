@@ -8534,6 +8534,8 @@ pub trait ExternalValueProvider: Send + Sync {
     ///
     /// This is required to expand external-workbook 3D spans like
     /// `"[Book.xlsx]Sheet1:Sheet3!A1"`.
+    /// For example, `=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1)` requires `sheet_order("Book.xlsx")`
+    /// to expand the span.
     ///
     /// Implementations should return sheet names in workbook order (without the `[Book.xlsx]`
     /// prefix). Sheet names should be unquoted display names (e.g. return `Sheet 1`, not
