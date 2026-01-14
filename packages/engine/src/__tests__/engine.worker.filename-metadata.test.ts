@@ -275,6 +275,46 @@ describe("engine.worker workbook file metadata integration", () => {
     }
   });
 
+  it('infers a trailing path separator for Windows-style directories', async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=CELL("filename")', sheet: "Sheet1" },
+            { address: "A2", value: '=INFO("directory")', sheet: "Sheet1" },
+          ],
+        },
+      });
+
+      // Use a Windows-style directory without a trailing separator; the engine should infer `\\`.
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setWorkbookFileMetadata",
+        params: { directory: "C:\\tmp", filename: "book.xlsx" },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "recalculate", params: {} });
+
+      let resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("C:\\tmp\\[book.xlsx]Sheet1");
+
+      resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("C:\\tmp\\");
+    } finally {
+      dispose();
+    }
+  });
+
   it('updates CELL("filename") results after setWorkbookFileMetadata', async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
