@@ -29,20 +29,20 @@ export function createRibbonActionsFromCommands(params: {
    * a toast (best-effort) and log a warning.
    */
   onUnknownCommand?: (commandId: string) => void | Promise<void>;
-  /**
-   * Fallback handler for unregistered toggle commands.
-   *
-   * Toggle buttons should invoke `onToggle(id, pressed)` only.
-   *
-   * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
-   * immediately after `onToggle`, when this handler returns anything other than
-   * `false` the follow-up `onCommand` callback will be suppressed to avoid
-   * double-executing toggle actions.
-   *
-   * To opt into the normal unknown-command fallback behavior for unknown toggles
-   * (i.e. call `onUnknownCommand`, or show the default toast when omitted), return
-   * `false` synchronously.
-   */
+   /**
+    * Fallback handler for unregistered toggle commands.
+    *
+    * Toggle buttons should invoke `onToggle(id, pressed)` only.
+    *
+     * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
+     * immediately after `onToggle`, the bridge will suppress the follow-up
+     * `onCommand` callback to avoid double-executing toggle actions / showing
+     * duplicate fallback toasts.
+     *
+     * To opt into the normal unknown-command fallback behavior for unknown toggles
+     * (i.e. call `onUnknownCommand`, or show the default toast when omitted), return
+     * `false` synchronously.
+     */
   onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
   const {
