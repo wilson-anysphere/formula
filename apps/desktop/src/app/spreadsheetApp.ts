@@ -15198,6 +15198,38 @@ export class SpreadsheetApp {
     return false;
   }
 
+  private handleSelectedChartKeyDown(e: KeyboardEvent): boolean {
+    if (this.selectedChartId == null) return false;
+    // Never hijack keys while editing text (cell editor, formula bar, inline edit).
+    if (this.isEditing()) return false;
+
+    const key = e.key;
+    if (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      const step = e.shiftKey ? 10 : 1;
+      const { dxPx, dyPx } = (() => {
+        switch (key) {
+          case "ArrowLeft":
+            return { dxPx: -step, dyPx: 0 };
+          case "ArrowRight":
+            return { dxPx: step, dyPx: 0 };
+          case "ArrowUp":
+            return { dxPx: 0, dyPx: -step };
+          case "ArrowDown":
+            return { dxPx: 0, dyPx: step };
+        }
+      })();
+      // `shiftAnchor` expects deltas in screen pixels and converts to sheet units internally
+      // based on the provided `zoom` value.
+      this.nudgeSelectedChart(dxPx, dyPx);
+      this.focus();
+      return true;
+    }
+
+    return false;
+  }
+
   private nudgeSelectedDrawing(dxPx: number, dyPx: number): void {
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
@@ -15285,6 +15317,57 @@ export class SpreadsheetApp {
     if (!after) return;
     // Reuse the same commit path as pointer interactions so we preserve raw string ids and patched DrawingML.
     this.commitDrawingInteraction({ kind: "move", id: selectedId, before: selected, after, objects: nextObjects });
+  }
+
+  private nudgeSelectedChart(dxPx: number, dyPx: number): void {
+    const chartId = this.selectedChartId;
+    if (!chartId) return;
+    if (!Number.isFinite(dxPx) || !Number.isFinite(dyPx) || (dxPx === 0 && dyPx === 0)) return;
+
+    const chart = this.getChartRecordById(chartId);
+    if (!chart) return;
+
+    const viewport = this.getDrawingInteractionViewport();
+    const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+
+    const currentAnchor = chartRecordToDrawingObject(chart).anchor;
+    const nextAnchor = shiftAnchor(currentAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+    const anchorsEqual = (a: DrawingObject["anchor"], b: DrawingObject["anchor"]): boolean => {
+      if (a.type !== b.type) return false;
+      switch (a.type) {
+        case "absolute": {
+          const bb = b as any;
+          return a.pos.xEmu === bb.pos.xEmu && a.pos.yEmu === bb.pos.yEmu && a.size.cx === bb.size.cx && a.size.cy === bb.size.cy;
+        }
+        case "oneCell": {
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.size.cx === bb.size.cx &&
+            a.size.cy === bb.size.cy
+          );
+        }
+        case "twoCell": {
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.to.cell.row === bb.to.cell.row &&
+            a.to.cell.col === bb.to.cell.col &&
+            a.to.offset.xEmu === bb.to.offset.xEmu &&
+            a.to.offset.yEmu === bb.to.offset.yEmu
+          );
+        }
+      }
+    };
+    if (anchorsEqual(nextAnchor, currentAnchor)) return;
+
+    this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(nextAnchor));
   }
 
   private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
@@ -18383,6 +18466,9 @@ export class SpreadsheetApp {
     // This includes overriding `Ctrl/Cmd+D` (Fill Down) and `Ctrl/Cmd+[` / `Ctrl/Cmd+]` (Auditing)
     // so drawing manipulation remains usable in shared-grid mode.
     if (this.handleDrawingKeyDown(e)) {
+      return;
+    }
+    if (this.handleSelectedChartKeyDown(e)) {
       return;
     }
 
