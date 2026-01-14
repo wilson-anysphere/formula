@@ -57,7 +57,10 @@ fn validate_excel_zip(decrypted: &[u8]) -> Result<(), XlsxError> {
 fn decrypt_encrypted_ole_bytes(bytes: &[u8], password: &str) -> Result<Vec<u8>, XlsxError> {
     match formula_office_crypto::decrypt_encrypted_package_ole(bytes, password) {
         Ok(bytes) => Ok(bytes),
-        Err(formula_office_crypto::OfficeCryptoError::InvalidPassword) => Err(XlsxError::InvalidPassword),
+        Err(formula_office_crypto::OfficeCryptoError::InvalidPassword)
+        | Err(formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed) => {
+            Err(XlsxError::InvalidPassword)
+        }
         Err(formula_office_crypto::OfficeCryptoError::UnsupportedEncryption(msg)) => {
             Err(XlsxError::UnsupportedEncryption(msg))
         }
