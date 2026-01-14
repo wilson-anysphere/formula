@@ -275,8 +275,15 @@ fn structured_reference_items_are_not_translated() {
     // inside `Table1[[...],[...]]` canonical (not locale-dependent). We translate only the
     // surrounding formula syntax (function name + argument separators).
     for (canonical, table_spec) in [
+        ("=SUM(Table1[#All],1)", "Table1[#All]"),
+        ("=SUM(Table1[#Data],1)", "Table1[#Data]"),
+        ("=SUM(Table1[#Totals],1)", "Table1[#Totals]"),
         ("=SUM(Table1[[#Headers],[Qty]],1)", "Table1[[#Headers],[Qty]]"),
         ("=SUM(Table1[[#This Row],[Qty]],1)", "Table1[[#This Row],[Qty]]"),
+        (
+            "=SUM(Table1[[#All],[Col1],[Col2]],1)",
+            "Table1[[#All],[Col1],[Col2]]",
+        ),
     ] {
         for locale in [&locale::DE_DE, &locale::FR_FR, &locale::ES_ES] {
             let expected = format!(
