@@ -672,7 +672,10 @@ export async function runOnce({
         const msg =
           reason === 'captured'
             ? 'Timed out waiting for desktop process to exit after capturing metrics'
-            : 'Timed out waiting for desktop process to exit after timing out waiting for metrics';
+            : // Even if the process refuses to die, the primary failure is still that we never saw a
+              // `[startup] ...` line within the configured timeout. Include that context so callers
+              // (and unit tests) can rely on a stable prefix, while still surfacing the shutdown hang.
+              `Timed out after ${timeoutMs}ms waiting for startup metrics (and timed out waiting for desktop process to exit)`;
         settle('reject', new Error(`${msg}${formatOutputForError()}`));
       }, 5000);
     };
