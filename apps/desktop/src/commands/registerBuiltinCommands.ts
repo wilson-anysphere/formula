@@ -14,7 +14,6 @@ import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import {
-  NUMBER_FORMATS,
   setFillColor,
   setFontColor,
   setFontSize,
@@ -1632,49 +1631,6 @@ export function registerBuiltinCommands(params: {
     t,
     category: commandCategoryFormat,
   });
-
-  commandRegistry.registerBuiltinCommand(
-    "format.openFormatCells",
-    t("command.format.openFormatCells"),
-    async () => {
-      type Choice = "general" | "currency" | "percent" | "date";
-      const choice = await showQuickPick<Choice>(
-        [
-          { label: "General", description: "Clear number format", value: "general" },
-          { label: "Currency", description: NUMBER_FORMATS.currency, value: "currency" },
-          { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
-          { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
-        ],
-        { placeHolder: "Format Cells" },
-      );
-      if (!choice) return;
-
-      const patch =
-        choice === "general"
-          ? { numberFormat: null }
-          : {
-              numberFormat: NUMBER_FORMATS[choice],
-            };
-
-      applyFormattingToSelection(
-        "Format Cells",
-        (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        },
-        { forceBatch: true },
-      );
-    },
-    {
-      category: commandCategoryFormat,
-      icon: null,
-      keywords: ["format cells", "number format", "font"],
-    },
-  );
 
   // Find/Replace/Go To commands are registered here so they are discoverable early (e.g. command palette),
   // but are expected to be overridden by the UI host (apps/desktop/src/main.ts) once dialogs are mounted.
