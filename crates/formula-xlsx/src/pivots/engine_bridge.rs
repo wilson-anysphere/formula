@@ -542,7 +542,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
                 show_as,
-                base_field,
+                base_field: base_field.map(Into::into),
                 base_item,
             })
         })

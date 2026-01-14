@@ -4628,7 +4628,15 @@ impl Engine {
             return v;
         }
         if let Some(cell) = self.workbook.get_cell(key) {
-            return cell.value.clone();
+            // When using an external value provider (e.g. columnar sheet backing), the engine can
+            // store "style-only" cell records (blank + no formula + non-default style) for
+            // formatting overlays. These should not clobber provider-backed values.
+            //
+            // Treat blank non-formula cells as *not* providing a value override so lookups can
+            // fall through to the external provider.
+            if cell.formula.is_some() || cell.value != Value::Blank {
+                return cell.value.clone();
+            }
         }
 
         if let Some(provider) = &self.external_value_provider {
@@ -4728,8 +4736,11 @@ impl Engine {
                     }
 
                     if let Some(cell) = cells.get(&addr) {
-                        out[row_off][col_off] = cell.value.clone();
-                        continue;
+                        // See `get_cell_value`: style-only blank cells should not hide provider values.
+                        if cell.formula.is_some() || cell.value != Value::Blank {
+                            out[row_off][col_off] = cell.value.clone();
+                            continue;
+                        }
                     }
 
                     if let Some(sheet_name) = provider_sheet_name {
@@ -6517,7 +6528,11 @@ impl Engine {
                     if cell.value != Value::Blank {
                         return Some(key);
                     }
-                } else if let Some(provider) = &self.external_value_provider {
+                }
+
+                // Blocked by external provider values (e.g. columnar backing). Style-only cells
+                // (blank + no formula) should not mask provider-backed blockers.
+                if let Some(provider) = &self.external_value_provider {
                     if let Some(sheet_name) = self.workbook.sheet_key_name(origin.sheet) {
                         if let Some(v) = provider.get(sheet_name, addr) {
                             if v != Value::Blank {
@@ -10491,7 +10506,15 @@ impl Snapshot {
                     sheet: sheet_id,
                     addr: *addr,
                 };
-                values.insert(key, cell.value.clone());
+                // Mirror `Engine::get_cell_value` semantics:
+                //
+                // - For non-formula blank cells, treat the stored record as "style-only" so
+                //   provider-backed values can flow through (and implicit blanks remain implicit).
+                // - For formulas (even those producing blank), persist the computed result so it
+                //   overrides any provider value.
+                if cell.formula.is_some() || cell.value != Value::Blank {
+                    values.insert(key, cell.value.clone());
+                }
                 if let Some(phonetic) = cell.phonetic.as_ref() {
                     phonetics.insert(key, phonetic.clone());
                 }

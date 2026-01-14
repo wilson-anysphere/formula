@@ -339,7 +339,6 @@ impl PivotRegistry {
         self.entries.clear();
     }
 }
-
 fn rewrite_pivot_destination_for_structural_edit(
     destination: PivotDestination,
     ctx_sheet: &str,

@@ -112,7 +112,11 @@ fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Valu
         return v;
     }
     if let Some(cell) = engine.workbook.get_cell(key) {
-        return cell.value.clone();
+        // Match `Engine::get_cell_value`: allow provider-backed values to flow through
+        // style-only blank cell records.
+        if cell.formula.is_some() || cell.value != Value::Blank {
+            return cell.value.clone();
+        }
     }
 
     if let Some(provider) = &engine.external_value_provider {
