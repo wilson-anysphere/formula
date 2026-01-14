@@ -298,6 +298,20 @@ fn bytecode_indirect_dynamic_external_range_ref_compiles_and_evaluates_via_provi
         provider.calls() > 0,
         "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 } // B1
+            },
+            PrecedentNode::ExternalRange {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 1, col: 0 }, // A2
+            }
+        ]
+    );
 }
 
 #[test]
