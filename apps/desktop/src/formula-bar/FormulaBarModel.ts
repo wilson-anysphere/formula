@@ -136,6 +136,9 @@ export class FormulaBarModel {
   #aiSuggestion: string | null = null;
   #aiSuggestionIsFullDraft = false;
   #aiSuggestionPreview: unknown | null = null;
+  #aiGhostCache:
+    | { suggestion: string; isFullDraft: boolean; draftVersion: number; cursor: number; ghost: string }
+    | null = null;
 
   setActiveCell(info: ActiveCellInfo): void {
     this.#activeCell = { ...info };
@@ -161,6 +164,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
   }
 
   /**
@@ -297,6 +301,7 @@ export class FormulaBarModel {
     if (this.#aiSuggestion != null) {
       this.#aiSuggestion = null;
       this.#aiSuggestionIsFullDraft = false;
+      this.#aiGhostCache = null;
     }
     if (this.#aiSuggestionPreview != null) {
       this.#aiSuggestionPreview = null;
@@ -315,6 +320,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
     this.#hoveredReference = null;
     this.#hoveredReferenceText = null;
     this.#referenceColorByText.clear();
@@ -344,6 +350,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
     this.#hoveredReference = null;
     this.#hoveredReferenceText = null;
     this.#referenceColorByText.clear();
@@ -579,6 +586,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
@@ -599,6 +607,7 @@ export class FormulaBarModel {
       if (this.#aiSuggestion != null) {
         this.#aiSuggestion = null;
         this.#aiSuggestionIsFullDraft = false;
+        this.#aiGhostCache = null;
       }
       if (this.#aiSuggestionPreview != null) this.#aiSuggestionPreview = null;
       return;
@@ -608,6 +617,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
@@ -617,6 +627,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
   }
 
   setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
@@ -627,6 +638,7 @@ export class FormulaBarModel {
       this.#aiSuggestion = null;
       this.#aiSuggestionIsFullDraft = false;
       this.#aiSuggestionPreview = null;
+      this.#aiGhostCache = null;
       return;
     }
 
@@ -636,6 +648,7 @@ export class FormulaBarModel {
       this.#aiSuggestion = suggestionText;
       this.#aiSuggestionIsFullDraft = false;
       this.#aiSuggestionPreview = preview;
+      this.#aiGhostCache = null;
       return;
     }
 
@@ -646,6 +659,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = looksLikeFullSuggestion ? suggestionText : draft.slice(0, start) + suggestionText + draft.slice(end);
     this.#aiSuggestionIsFullDraft = true;
     this.#aiSuggestionPreview = preview;
+    this.#aiGhostCache = null;
   }
 
   aiSuggestion(): string | null {
@@ -657,22 +671,50 @@ export class FormulaBarModel {
   }
 
   aiGhostText(): string {
-    if (!this.#aiSuggestion) return "";
-    if (this.#cursorStart !== this.#cursorEnd) return "";
+    if (!this.#aiSuggestion) {
+      this.#aiGhostCache = null;
+      return "";
+    }
+    if (this.#cursorStart !== this.#cursorEnd) {
+      this.#aiGhostCache = null;
+      return "";
+    }
 
     const cursor = this.#cursorStart;
+    const cache = this.#aiGhostCache;
+    if (
+      cache &&
+      cache.suggestion === this.#aiSuggestion &&
+      cache.isFullDraft === this.#aiSuggestionIsFullDraft &&
+      cache.draftVersion === this.#draftVersion &&
+      cache.cursor === cursor
+    ) {
+      return cache.ghost;
+    }
+
+    let ghost = "";
     if (this.#aiSuggestionIsFullDraft) {
       const suffixLen = this.#draft.length - cursor;
       const end = this.#aiSuggestion.length - suffixLen;
-      if (end < cursor) return "";
-      return this.#aiSuggestion.slice(cursor, end);
+      if (end >= cursor) {
+        ghost = this.#aiSuggestion.slice(cursor, end);
+      }
+    } else {
+      const prefix = this.#draft.slice(0, cursor);
+      const suffix = this.#draft.slice(cursor);
+      if (this.#aiSuggestion.startsWith(prefix) && (!suffix || this.#aiSuggestion.endsWith(suffix))) {
+        ghost = this.#aiSuggestion.slice(cursor, this.#aiSuggestion.length - suffix.length);
+      }
     }
 
-    const prefix = this.#draft.slice(0, cursor);
-    const suffix = this.#draft.slice(cursor);
-    if (!this.#aiSuggestion.startsWith(prefix)) return "";
-    if (suffix && !this.#aiSuggestion.endsWith(suffix)) return "";
-    return this.#aiSuggestion.slice(cursor, this.#aiSuggestion.length - suffix.length);
+    this.#aiGhostCache = {
+      suggestion: this.#aiSuggestion,
+      isFullDraft: this.#aiSuggestionIsFullDraft,
+      draftVersion: this.#draftVersion,
+      cursor,
+      ghost,
+    };
+    return ghost;
   }
 
   acceptAiSuggestion(): boolean {
@@ -707,6 +749,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
+    this.#aiGhostCache = null;
     this.#rangeInsertion = null;
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
