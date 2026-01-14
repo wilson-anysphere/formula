@@ -74,7 +74,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // These are currently handled directly by the desktop `onCommand` switch (not via CommandRegistry),
+    // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
     // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
@@ -103,6 +103,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
                   ],
                 },
+                { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z" },
+                // Non-exempt id to prove the baseline is still working.
+                { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
               ],
             },
           ],
@@ -134,6 +137,14 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
+    const sort = container.querySelector<HTMLButtonElement>('[data-command-id="data.sortFilter.sortAtoZ"]');
+    expect(sort).toBeInstanceOf(HTMLButtonElement);
+    expect(sort?.disabled).toBe(false);
+
+    const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
+    expect(unknown).toBeInstanceOf(HTMLButtonElement);
+    expect(unknown?.disabled).toBe(true);
+
     act(() => {
       trigger?.click();
     });
@@ -148,3 +159,4 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 });
+

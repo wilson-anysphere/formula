@@ -107,6 +107,16 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.fill.right",
   "home.editing.fill.up",
   "home.editing.fill.left",
+  "home.editing.findSelect.find",
+  "home.editing.findSelect.replace",
+  "home.editing.findSelect.goTo",
+  // Sort/filter (ribbon-only handlers / partially implemented).
+  "home.editing.sortFilter.sortAtoZ",
+  "home.editing.sortFilter.sortZtoA",
+  "data.sortFilter.sortAtoZ",
+  "data.sortFilter.sortZtoA",
+  "data.sortFilter.sort.sortAtoZ",
+  "data.sortFilter.sort.sortZtoA",
 
   // --- Comments ---------------------------------------------------------------
   "review.comments.newComment",
