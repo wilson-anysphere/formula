@@ -56,6 +56,8 @@ const REL_TYPE_DRAWING: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
+const REL_TYPE_THEME: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
 
 // Worksheet-level comment relationship types.
 const REL_TYPE_COMMENTS: &str =
@@ -211,14 +213,10 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     };
     workbook.workbook_protection = workbook_protection;
 
-    // Best-effort: load theme palette from `xl/theme/theme1.xml` to enable resolving theme-based
-    // colors (e.g. in styles.xml).
-    if let Ok(Some(theme_xml)) = read_zip_part_optional(archive, "xl/theme/theme1.xml") {
-        if let Ok(palette) = parse_theme_palette(&theme_xml) {
-            workbook.theme = to_model_theme_palette(palette);
-        }
+    // Best-effort: load theme palette to enable resolving theme-based colors (e.g. in styles.xml).
+    if let Some(theme) = read_theme_palette_from_zip(archive, &rels_info) {
+        workbook.theme = theme;
     }
-
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
 
@@ -988,12 +986,9 @@ fn load_from_zip_archive<R: Read + Seek>(
     };
     workbook.workbook_protection = workbook_protection;
 
-    // Best-effort: load theme palette from `xl/theme/theme1.xml` to enable resolving theme-based
-    // colors (e.g. in styles.xml).
-    if let Some(theme_xml) = part_bytes_tolerant(&parts, "xl/theme/theme1.xml") {
-        if let Ok(palette) = parse_theme_palette(theme_xml) {
-            workbook.theme = to_model_theme_palette(palette);
-        }
+    // Best-effort: load theme palette to enable resolving theme-based colors (e.g. in styles.xml).
+    if let Some(theme) = read_theme_palette_from_parts(&parts, &rels_info) {
+        workbook.theme = theme;
     }
     // Conditional formatting dxfs are only needed if a worksheet contains conditional
     // formatting rules. Parse them lazily to avoid unnecessary DOM parsing for workbooks
@@ -1588,6 +1583,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
     let mut shared_strings_target = None;
     let mut metadata_target = None;
     let mut sheet_metadata_target = None;
+    let mut theme_target = None;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e)
@@ -1633,6 +1629,9 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
                             REL_TYPE_METADATA => {
                                 metadata_target.get_or_insert_with(|| target.clone());
                             }
+                            REL_TYPE_THEME => {
+                                theme_target.get_or_insert_with(|| target.clone());
+                            }
                             // Modern Excel emits the metadata part using the `sheetMetadata`
                             // relationship type. Prefer this over the legacy `metadata` relationship
                             // type if both are present, since `sheetMetadata` may point at a
@@ -1656,6 +1655,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
         styles_target,
         shared_strings_target,
         metadata_target: sheet_metadata_target.or(metadata_target),
+        theme_target,
     })
 }
 
@@ -1665,6 +1665,61 @@ struct RelationshipsInfo {
     styles_target: Option<String>,
     shared_strings_target: Option<String>,
     metadata_target: Option<String>,
+    theme_target: Option<String>,
+}
+
+fn read_theme_palette_from_zip<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    rels_info: &RelationshipsInfo,
+) -> Option<formula_model::ThemePalette> {
+    let candidates = if let Some(target) = rels_info
+        .theme_target
+        .as_deref()
+        .filter(|target| !target.trim().is_empty())
+    {
+        resolve_target_candidates(WORKBOOK_PART, target)
+    } else {
+        vec!["xl/theme/theme1.xml".to_string()]
+    };
+
+    for candidate in candidates {
+        let Some(theme_xml) = read_zip_part_optional(archive, &candidate).ok().flatten() else {
+            continue;
+        };
+        let Ok(palette) = parse_theme_palette(&theme_xml) else {
+            continue;
+        };
+        return Some(to_model_theme_palette(palette));
+    }
+
+    None
+}
+
+fn read_theme_palette_from_parts(
+    parts: &BTreeMap<String, Vec<u8>>,
+    rels_info: &RelationshipsInfo,
+) -> Option<formula_model::ThemePalette> {
+    let candidates = if let Some(target) = rels_info
+        .theme_target
+        .as_deref()
+        .filter(|target| !target.trim().is_empty())
+    {
+        resolve_target_candidates(WORKBOOK_PART, target)
+    } else {
+        vec!["xl/theme/theme1.xml".to_string()]
+    };
+
+    for candidate in candidates {
+        let Some(theme_xml) = part_bytes_tolerant(parts, &candidate) else {
+            continue;
+        };
+        let Ok(palette) = parse_theme_palette(theme_xml) else {
+            continue;
+        };
+        return Some(to_model_theme_palette(palette));
+    }
+
+    None
 }
 
 /// Parsed representation of `xl/metadata.xml` for resolving cell `vm` attributes to rich value
