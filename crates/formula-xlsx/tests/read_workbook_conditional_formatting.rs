@@ -1,4 +1,4 @@
-use formula_model::{CfRuleKind, CfRuleSchema};
+use formula_model::{CfRuleKind, CfRuleSchema, DataBarDirection};
 use formula_xlsx::{parse_worksheet_conditional_formatting_streaming, read_workbook};
 
 fn fixture(path: &str) -> String {
@@ -34,6 +34,18 @@ fn read_workbook_populates_conditional_formatting_x14() {
             assert_eq!(db.min_length, Some(0));
             assert_eq!(db.max_length, Some(100));
             assert_eq!(db.gradient, Some(false));
+            assert_eq!(db.direction, Some(DataBarDirection::LeftToRight));
+            assert_eq!(
+                format!(
+                    "{:08X}",
+                    db.negative_fill_color.unwrap().argb().unwrap_or(0)
+                ),
+                "FFFF0000"
+            );
+            assert_eq!(
+                format!("{:08X}", db.axis_color.unwrap().argb().unwrap_or(0)),
+                "FF000000"
+            );
         }
         other => panic!("expected DataBar rule, got {other:?}"),
     }
@@ -53,4 +65,3 @@ fn streaming_extractor_supports_prefixed_worksheet_root() {
     let parsed = parse_worksheet_conditional_formatting_streaming(xml).expect("parse cf");
     assert_eq!(parsed.rules.len(), 1);
 }
-

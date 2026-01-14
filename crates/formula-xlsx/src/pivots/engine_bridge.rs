@@ -417,41 +417,32 @@ fn pivot_table_field_to_engine(
         }
 
         if field.sort_order == SortOrder::Manual {
-            field.manual_sort = table_field
-                .manual_sort_items
-                .as_ref()
-                .and_then(|items| {
-                    let mut out: Vec<PivotKeyPart> = items
-                        .iter()
-                        .filter_map(|item| match item {
-                            PivotTableFieldItem::Name(name) => {
-                                Some(PivotKeyPart::Text(name.clone()))
-                            }
-                            PivotTableFieldItem::Index(item_idx) => cache_def
-                                .cache_fields
-                                .get(field_idx as usize)
-                                .and_then(|f| f.shared_items.as_ref())
-                                .and_then(|items| items.get(*item_idx as usize))
-                                .cloned()
-                                .map(|v| {
-                                    pivot_cache_value_to_engine(
-                                        cache_def,
-                                        field_idx as usize,
-                                        v,
-                                    )
+            field.manual_sort = table_field.manual_sort_items.as_ref().and_then(|items| {
+                let mut out: Vec<PivotKeyPart> = items
+                    .iter()
+                    .filter_map(|item| match item {
+                        PivotTableFieldItem::Name(name) => Some(PivotKeyPart::Text(name.clone())),
+                        PivotTableFieldItem::Index(item_idx) => cache_def
+                            .cache_fields
+                            .get(field_idx as usize)
+                            .and_then(|f| f.shared_items.as_ref())
+                            .and_then(|items| items.get(*item_idx as usize))
+                            .cloned()
+                            .map(|v| {
+                                pivot_cache_value_to_engine(cache_def, field_idx as usize, v)
                                     .to_key_part()
-                                }),
-                        })
-                        .collect();
-                    if out.is_empty() {
-                        None
-                    } else {
-                        // De-dupe while preserving order (Excel seems to treat duplicates as no-ops).
-                        let mut seen: HashSet<PivotKeyPart> = HashSet::new();
-                        out.retain(|p| seen.insert(p.clone()));
-                        Some(out)
-                    }
-                });
+                            }),
+                    })
+                    .collect();
+                if out.is_empty() {
+                    None
+                } else {
+                    // De-dupe while preserving order (Excel seems to treat duplicates as no-ops).
+                    let mut seen: HashSet<PivotKeyPart> = HashSet::new();
+                    out.retain(|p| seen.insert(p.clone()));
+                    Some(out)
+                }
+            });
         }
     }
 
