@@ -91,10 +91,6 @@ pub struct GrandTotals {
     pub columns: bool,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 impl Default for GrandTotals {
     fn default() -> Self {
         Self {
