@@ -15,7 +15,8 @@ describe("pickLocalImageFiles (Tauri)", () => {
     const open = vi.fn(async () => ["/tmp/a.png"]);
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
-      if (cmd === "stat_file") return { size_bytes: 3 };
+      // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
+      if (cmd === "stat_file") return { sizeBytes: 3 };
       if (cmd === "read_binary_file") {
         // eslint-disable-next-line no-undef
         return Buffer.from([1, 2, 3]).toString("base64");
