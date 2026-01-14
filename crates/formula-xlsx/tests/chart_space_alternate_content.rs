@@ -18,6 +18,8 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
         <mc:Fallback>
           <c:barChart>
             <c:barDir val="col"/>
+            <c:axId val="123"/>
+            <c:axId val="456"/>
             <c:ser>
               <c:tx><c:v>Series 1</c:v></c:tx>
               <c:cat>
@@ -43,6 +45,18 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
               </c:val>
             </c:ser>
           </c:barChart>
+          <c:catAx>
+            <c:axId val="123" />
+            <c:axPos val="b" />
+            <c:crossAx val="456" />
+            <c:crosses val="autoZero" />
+          </c:catAx>
+          <c:valAx>
+            <c:axId val="456" />
+            <c:axPos val="l" />
+            <c:crossAx val="123" />
+            <c:crosses val="autoZero" />
+          </c:valAx>
         </mc:Fallback>
       </mc:AlternateContent>
     </c:plotArea>
@@ -60,6 +74,8 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
             .any(|d| d.message.contains("AlternateContent")),
         "expected AlternateContent warning diagnostic"
     );
+
+    assert_eq!(model.axes.len(), 2, "expected two axes to be parsed");
 
     assert_eq!(model.series.len(), 1);
     let ser = &model.series[0];
