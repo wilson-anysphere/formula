@@ -32,6 +32,7 @@ describe("startupMetrics", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (originalTauriDescriptor) {
       Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
     } else {
@@ -142,6 +143,63 @@ describe("startupMetrics", () => {
     // after listeners are registered to request a re-emit of cached timings.
     expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
     expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
+  });
+
+  it("retries reporting once core.invoke becomes available (delayed __TAURI__ injection)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
+
+    // Simulate an environment where the page runs inside a Tauri webview (UA contains "Tauri")
+    // but the injected `__TAURI__` global is not available on the very first JS tick.
+    const originalNavigator = (globalThis as any).navigator;
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { userAgent: "Tauri/2.9.5 (test)" },
+    });
+
+    try {
+      try {
+        // Start with no `__TAURI__` to force the bootstrap's "delayed inject" path.
+        // (If the property is non-configurable, deletion may fail; ignore.)
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        // ignore
+      }
+
+      (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
+
+      // Ensure we re-evaluate the bootstrap module even if a prior test imported it.
+      vi.resetModules();
+      await import("./startupMetricsBootstrap");
+
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+
+      // Inject Tauri globals a moment later.
+      setTimeout(() => {
+        (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      }, 5);
+
+      // Advance time enough for the retry loop to observe the injected globals.
+      vi.advanceTimersByTime(10);
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
+      expect(listen).toHaveBeenCalled();
+    } finally {
+      // Restore navigator so other tests don't depend on our shim.
+      if (typeof originalNavigator === "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).navigator;
+      } else {
+        Object.defineProperty(globalThis, "navigator", { configurable: true, value: originalNavigator });
+      }
+    }
   });
 
   it("treats a throwing __TAURI__ getter as \"missing\" (best-effort hardening)", async () => {
