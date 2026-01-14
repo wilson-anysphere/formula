@@ -352,6 +352,17 @@ test("verify-desktop-release-assets: validateLatestJson fails on wrong version",
   );
 });
 
+test("validate-updater-manifest: validatePlatformEntries passes on the multi-platform fixture", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const result = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.invalidTargets, []);
+  assert.deepEqual(result.missingAssets, []);
+});
+
 test("validate-updater-manifest: validatePlatformEntries enforces per-OS artifact rules (no DMG/DEB)", async () => {
   const manifest = await readJsonFixture("latest.wrong-artifacts.json");
 
@@ -360,6 +371,44 @@ test("validate-updater-manifest: validatePlatformEntries enforces per-OS artifac
 
   assert.ok(errors.length > 0, "expected validation errors");
   assert.match(errors.join("\n"), /(dmg|\\.deb)/i);
+});
+
+test("validate-updater-manifest: validatePlatformEntries fails when a required platform key is missing", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  delete manifest.platforms["linux-aarch64"];
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const { errors } = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.ok(errors.length > 0, "expected validation errors");
+  assert.match(errors.join("\n"), /missing required latest\.json\.platforms keys/i);
+  assert.match(errors.join("\n"), /linux-aarch64/);
+});
+
+test("validate-updater-manifest: validatePlatformEntries rejects platform entries missing a signature", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  delete manifest.platforms["windows-x86_64"].signature;
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const { invalidTargets } = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.ok(invalidTargets.length > 0, "expected invalidTargets to be non-empty");
+  assert.ok(invalidTargets.some((t) => t.target === "windows-x86_64"));
+  assert.ok(invalidTargets.some((t) => /signature/i.test(t.message)));
+});
+
+test("validate-updater-manifest: validatePlatformEntries detects duplicate updater URLs across required targets", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  // Point both Windows targets at the same asset URL (a common last-writer-wins style failure).
+  manifest.platforms["windows-aarch64"].url = manifest.platforms["windows-x86_64"].url;
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const { errors } = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.ok(errors.length > 0, "expected validation errors");
+  assert.match(errors.join("\n"), /Duplicate updater URLs across required targets/i);
+  assert.match(errors.join("\n"), /windows-aarch64/i);
+  assert.match(errors.join("\n"), /windows-x86_64/i);
 });
 
 test("validate-updater-manifest: validatePlatformEntries enforces Windows arch tokens in updater asset names", async () => {
