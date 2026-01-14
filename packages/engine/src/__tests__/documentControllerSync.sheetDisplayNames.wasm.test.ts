@@ -2,11 +2,29 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../../apps/desktop/src/document/documentController.js";
 
-import { engineApplyDocumentChange, engineHydrateFromDocument } from "../documentControllerSync.ts";
+import {
+  engineApplyDocumentChange,
+  engineHydrateFromDocument,
+  type EngineSyncTarget,
+} from "../documentControllerSync.ts";
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 
 const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true";
 const describeWasm = skipWasmBuild ? describe.skip : describe;
+
+function engineWorkerAsSyncTarget(engine: EngineWorker): EngineSyncTarget {
+  // `engineHydrateFromDocument` / `engineApplyDocumentChange` operate on a sheet-first sync surface
+  // (matching wasm-bindgen workbook signatures). `EngineWorker` exposes the public EngineClient API
+  // which uses sheet-last for some calls. Adapt between the two for wasm integration tests.
+  return {
+    loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
+    setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
+    setCells: (updates) => engine.setCells(updates),
+    recalculate: (sheet) => engine.recalculate(sheet),
+    setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
+    setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
+  };
+}
 
 class MockWorkerGlobal {
   private readonly listeners = new Set<(event: MessageEvent<unknown>) => void>();
@@ -104,6 +122,8 @@ describeWasm("DocumentController sheet renames → setSheetDisplayName → CELL(
     });
 
     try {
+      const syncTarget = engineWorkerAsSyncTarget(engine);
+
       const doc = new DocumentController();
       doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
 
@@ -112,7 +132,7 @@ describeWasm("DocumentController sheet renames → setSheetDisplayName → CELL(
       doc.setCellFormula("Sheet1", "A1", 'CELL("address",sheet_2!A1)');
       doc.setCellFormula("Sheet1", "A2", 'CELL("filename",sheet_2!A1)');
 
-      await engineHydrateFromDocument(engine, doc, {
+      await engineHydrateFromDocument(syncTarget, doc, {
         workbookFileMetadata: { directory: null, filename: "book.xlsx" },
       });
 
@@ -132,7 +152,7 @@ describeWasm("DocumentController sheet renames → setSheetDisplayName → CELL(
       expect(Array.isArray(payload?.sheetMetaDeltas)).toBe(true);
       expect(payload.sheetMetaDeltas.length).toBeGreaterThan(0);
 
-      await engineApplyDocumentChange(engine, payload);
+      await engineApplyDocumentChange(syncTarget, payload);
 
       cell = await engine.getCell("A1", "Sheet1");
       expect(cell.value).toBe("Data!$A$1");

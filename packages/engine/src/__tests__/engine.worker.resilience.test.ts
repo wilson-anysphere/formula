@@ -265,9 +265,12 @@ describe("engine.worker resilience", () => {
   it("does not deliver responses from an in-flight request to a new port after re-init", async () => {
     await loadWorkerModule();
 
-    let resolveInit: (() => void) | null = null;
+    // Hold onto the Promise resolver so the test can unblock wasm module initialization. Use a
+    // definite-assignment assertion because the resolver is assigned inside the Promise executor
+    // (TypeScript flow analysis does not track nested assignments).
+    let resolveInit!: () => void;
     (globalThis as any).__ENGINE_WORKER_DELAY_INIT_PROMISE__ = new Promise<void>((resolve) => {
-      resolveInit = resolve;
+      resolveInit = () => resolve();
     });
 
     const delayedWasmModuleUrl = new URL("./fixtures/mockWasmWorkbookDelayedInit.mjs", import.meta.url).href;
@@ -301,7 +304,7 @@ describe("engine.worker resilience", () => {
 
     // Release the delayed init; the old request may resume execution, but must not respond on the
     // new port (generation guards should drop it).
-    resolveInit?.();
+    resolveInit();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const unexpected = await Promise.race([
