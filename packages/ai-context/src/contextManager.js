@@ -2064,12 +2064,23 @@ function classifyStructuredForDlp(value, options = {}) {
       return;
     }
     if (t === "boolean" || t === "symbol" || t === "function") return;
+    if (t !== "object") return;
+
+    // Cycle detection: attachments can contain arbitrary nested objects (including Map/Set/arrays).
+    // Use a shared WeakSet for the whole traversal so self-referential structures do not:
+    //  - hang traversal
+    //  - exceed maxNodes without ever reaching later sibling fields that might contain sensitive content
+    //  - overflow the call stack
+    if (seen.has(v)) return;
+    seen.add(v);
+
     if (v instanceof Date) {
       considerText(v.toISOString());
       return;
     }
     // Avoid scanning large binary blobs.
     if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) return;
+    if (depth >= maxDepth) return;
 
     if (v instanceof Map) {
       for (const [k, val] of v.entries()) {
@@ -2098,9 +2109,6 @@ function classifyStructuredForDlp(value, options = {}) {
     }
 
     if (t === "object") {
-      if (seen.has(v)) return;
-      seen.add(v);
-      if (depth >= maxDepth) return;
       const obj = /** @type {Record<string, unknown>} */ (v);
       for (const key of Object.keys(obj)) {
         if (found) break;

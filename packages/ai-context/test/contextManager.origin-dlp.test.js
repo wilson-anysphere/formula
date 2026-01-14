@@ -150,6 +150,41 @@ test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (e
   assert.equal(auditEvents[0]?.decision?.decision, "redact");
 });
 
+test("buildContext: attachment-only sensitive patterns inside a cyclic Map still trigger DLP REDACT", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const auditEvents = [];
+
+  const map = new Map();
+  map.set("self", map);
+  map.set("ssn", "123-45-6789");
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Hello"], ["World"]],
+    },
+    query: "anything",
+    attachments: [{ type: "chart", reference: "CycleMap", data: map }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## dlp/i);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "redact");
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP BLOCK when policy requires", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
