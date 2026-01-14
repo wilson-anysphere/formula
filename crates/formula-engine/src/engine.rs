@@ -90,6 +90,15 @@ pub enum EngineError {
     AstParse(#[from] crate::ParseError),
     #[error(transparent)]
     AstSerialize(#[from] crate::SerializeError),
+    #[error(
+        "range values dimensions mismatch: expected {expected_rows}x{expected_cols}, got {actual_rows}x{actual_cols}"
+    )]
+    RangeValuesDimensionMismatch {
+        expected_rows: usize,
+        expected_cols: usize,
+        actual_rows: usize,
+        actual_cols: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2129,6 +2138,218 @@ impl Engine {
         Ok(())
     }
 
+    /// Set a rectangular range of literal values.
+    ///
+    /// This is a bulk variant of [`Engine::set_cell_value`]. It applies all values in the range
+    /// while deferring recalculation until the end (at most once).
+    ///
+    /// - `values` must be a matrix with dimensions matching `range.height()` x `range.width()`.
+    /// - When `recalc` is `true` and the workbook is in an automatic calculation mode, the engine
+    ///   recalculates once after the entire range has been applied.
+    pub fn set_range_values(
+        &mut self,
+        sheet: &str,
+        range: Range,
+        values: &[Vec<Value>],
+        recalc: bool,
+    ) -> Result<(), EngineError> {
+        let expected_rows = range.height() as usize;
+        let expected_cols = range.width() as usize;
+
+        if values.len() != expected_rows {
+            let actual_cols = values.get(0).map(|row| row.len()).unwrap_or(0);
+            return Err(EngineError::RangeValuesDimensionMismatch {
+                expected_rows,
+                expected_cols,
+                actual_rows: values.len(),
+                actual_cols,
+            });
+        }
+        for row in values {
+            if row.len() != expected_cols {
+                return Err(EngineError::RangeValuesDimensionMismatch {
+                    expected_rows,
+                    expected_cols,
+                    actual_rows: values.len(),
+                    actual_cols: row.len(),
+                });
+            }
+        }
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+
+        // Enforce Excel's fixed 16,384-column limit and the engine's i32 row bound.
+        if range.end.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
+        if range.end.col >= EXCEL_MAX_COLS {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::ColumnOutOfRange,
+            ));
+        }
+
+        if self.workbook.grow_sheet_dimensions(sheet_id, cell_addr_from_cell_ref(range.end)) {
+            // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. If the sheet
+            // grows, formulas that previously evaluated to `#REF!` may now become valid, so
+            // conservatively mark all compiled formulas dirty to ensure results refresh on the next
+            // recalculation.
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let start_row = range.start.row;
+        let start_col = range.start.col;
+
+        for (r_off, row_values) in values.iter().enumerate() {
+            let row = start_row + r_off as u32;
+            for (c_off, value) in row_values.iter().enumerate() {
+                let col = start_col + c_off as u32;
+                let addr = CellAddr { row, col };
+                let key = CellKey {
+                    sheet: sheet_id,
+                    addr,
+                };
+
+                // Treat `Value::Blank` as clearing the cell to preserve sheet sparsity.
+                let is_blank = *value == Value::Blank;
+
+                let in_spill = self.spill_origin_key(key).is_some();
+                let needs_update = if in_spill {
+                    true
+                } else if let Some(cell) = self.workbook.get_cell(key) {
+                    if is_blank {
+                        // Preserve sparse storage semantics by removing any stored cell entry when
+                        // the requested value is blank.
+                        true
+                    } else {
+                        cell.formula.is_some() || cell.compiled.is_some() || cell.value != *value
+                    }
+                } else {
+                    !is_blank
+                };
+
+                if !needs_update {
+                    continue;
+                }
+
+                let cell_id = cell_id_from_key(key);
+
+                self.clear_spill_for_cell(key);
+                self.clear_blocked_spill_for_origin(key);
+
+                // Replace any existing formula and dependencies.
+                self.calc_graph.remove_cell(cell_id);
+                self.clear_cell_name_refs(key);
+                self.dirty.remove(&key);
+                self.dirty_reasons.remove(&key);
+
+                if is_blank {
+                    if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+                        sheet_state.cells.remove(&addr);
+                    }
+                } else {
+                    let cell = self.workbook.get_or_create_cell_mut(key);
+                    cell.value = value.clone();
+                    cell.formula = None;
+                    cell.compiled = None;
+                    cell.bytecode_compile_reason = None;
+                    cell.volatile = false;
+                    cell.thread_safe = true;
+                    cell.dynamic_deps = false;
+                }
+
+                // Mark downstream dependents dirty.
+                self.mark_dirty_dependents_with_reasons(key);
+                self.calc_graph.mark_dirty(cell_id);
+                self.mark_dirty_blocked_spill_origins_for_cell(key);
+            }
+        }
+
+        self.sync_dirty_from_calc_graph();
+        if recalc && self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
+
+    /// Clears a rectangular range of cells, removing them from the workbook's sparse storage.
+    ///
+    /// This is a bulk variant of [`Engine::clear_cell`]. It clears all cells in the range while
+    /// deferring recalculation until the end (at most once).
+    pub fn clear_range(
+        &mut self,
+        sheet: &str,
+        range: Range,
+        recalc: bool,
+    ) -> Result<(), EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(());
+        };
+
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if range.end.row >= sheet_state.row_count {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
+            }
+            if range.end.col >= sheet_state.col_count {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::ColumnOutOfRange,
+                ));
+            }
+        }
+
+        let start_row = range.start.row;
+        let end_row = range.end.row;
+        let start_col = range.start.col;
+        let end_col = range.end.col;
+
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                let addr = CellAddr { row, col };
+                let key = CellKey {
+                    sheet: sheet_id,
+                    addr,
+                };
+
+                let in_spill = self.spill_origin_key(key).is_some();
+                let has_cell = self
+                    .workbook
+                    .sheets
+                    .get(sheet_id)
+                    .and_then(|s| s.cells.get(&addr))
+                    .is_some();
+                if !in_spill && !has_cell {
+                    continue;
+                }
+
+                let cell_id = cell_id_from_key(key);
+
+                self.clear_spill_for_cell(key);
+                self.clear_blocked_spill_for_origin(key);
+
+                self.calc_graph.remove_cell(cell_id);
+                self.clear_cell_name_refs(key);
+                self.dirty.remove(&key);
+                self.dirty_reasons.remove(&key);
+
+                if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+                    sheet_state.cells.remove(&addr);
+                }
+
+                self.mark_dirty_dependents_with_reasons(key);
+                self.calc_graph.mark_dirty(cell_id);
+                self.mark_dirty_blocked_spill_origins_for_cell(key);
+            }
+        }
+
+        self.sync_dirty_from_calc_graph();
+        if recalc && self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
     /// Clears a cell's stored value/formula *and formatting* so it behaves as if it does not exist.
     ///
     /// This is distinct from setting a cell to [`Value::Blank`], which behaves like Excel "clear
@@ -5055,7 +5276,6 @@ impl Engine {
             bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
             other => BytecodeCompileReason::LowerError(other),
         })?;
-
         // The bytecode backend does not support external workbook references. Since `INDIRECT` can
         // synthesize external references dynamically at runtime (via the external value provider),
         // we conservatively fall back to the AST evaluator when an external provider is configured.
@@ -5064,7 +5284,6 @@ impl Engine {
         if self.external_value_provider.is_some() && bytecode_expr_contains_indirect(&expr) {
             return Err(BytecodeCompileReason::IneligibleExpr);
         }
-
         if let Some(name) = bytecode_expr_first_unsupported_function(&expr) {
             return Err(BytecodeCompileReason::UnsupportedFunction(name));
         }
@@ -14845,6 +15064,73 @@ mod tests {
         assert_eq!(workbook.sheet_name(sheet_b), Some("Data"));
         assert_eq!(workbook.sheet_id("Å"), Some(sheet_a));
         assert_eq!(workbook.sheet_id("Å"), Some(sheet_a));
+    }
+
+    #[test]
+    fn set_range_values_writes_matrix() {
+        let mut engine = Engine::new();
+        let range = Range::from_a1("A1:B2").expect("range");
+        let values = vec![
+            vec![Value::Number(1.0), Value::Number(2.0)],
+            vec![Value::Number(3.0), Value::Text("x".to_string())],
+        ];
+
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "B2"),
+            Value::Text("x".to_string())
+        );
+    }
+
+    #[test]
+    fn clear_range_removes_cells_from_sparse_storage() {
+        let mut engine = Engine::new();
+        let range = Range::from_a1("A1:B2").expect("range");
+        let values = vec![
+            vec![Value::Number(1.0), Value::Number(2.0)],
+            vec![Value::Number(3.0), Value::Number(4.0)],
+        ];
+
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        assert_eq!(engine.workbook.sheets[sheet_id].cells.len(), 4);
+
+        engine.clear_range("Sheet1", range, false).unwrap();
+        assert!(
+            engine.workbook.sheets[sheet_id].cells.is_empty(),
+            "cleared cells should be removed from sparse storage"
+        );
+    }
+
+    #[test]
+    fn set_range_values_recalculates_dependents_when_requested() {
+        let mut engine = Engine::new();
+        engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::Automatic,
+            ..CalcSettings::default()
+        });
+
+        engine
+            .set_cell_formula("Sheet1", "C1", "=A1+B1")
+            .unwrap();
+
+        let range = Range::from_a1("A1:B1").expect("range");
+        let values = vec![vec![Value::Number(2.0), Value::Number(3.0)]];
+
+        engine
+            .set_range_values("Sheet1", range, &values, true)
+            .unwrap();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(5.0));
     }
 
     #[test]

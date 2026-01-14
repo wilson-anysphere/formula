@@ -29,7 +29,7 @@ use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
     CellRange as StorageCellRange, ImportModelWorkbookOptions,
 };
-use formula_model::{SheetVisibility, TabColor};
+use formula_model::{CellRef as ModelCellRef, Range as ModelRange, SheetVisibility, TabColor};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
@@ -4648,6 +4648,105 @@ fn refresh_pivot_registration(
         .name
         .clone();
 
+    fn rect_to_model_range(rect: &CellRect) -> Result<ModelRange, AppStateError> {
+        let start_row = u32::try_from(rect.start_row)
+            .map_err(|_| AppStateError::Pivot("pivot output range row overflow".to_string()))?;
+        let start_col = u32::try_from(rect.start_col)
+            .map_err(|_| AppStateError::Pivot("pivot output range col overflow".to_string()))?;
+        let end_row = u32::try_from(rect.end_row)
+            .map_err(|_| AppStateError::Pivot("pivot output range row overflow".to_string()))?;
+        let end_col = u32::try_from(rect.end_col)
+            .map_err(|_| AppStateError::Pivot("pivot output range col overflow".to_string()))?;
+        Ok(ModelRange::new(
+            ModelCellRef::new(start_row, start_col),
+            ModelCellRef::new(end_row, end_col),
+        ))
+    }
+
+    fn stale_rects(prev: &CellRect, next: &CellRect) -> Vec<CellRect> {
+        let inter_start_row = prev.start_row.max(next.start_row);
+        let inter_start_col = prev.start_col.max(next.start_col);
+        let inter_end_row = prev.end_row.min(next.end_row);
+        let inter_end_col = prev.end_col.min(next.end_col);
+
+        if inter_start_row > inter_end_row || inter_start_col > inter_end_col {
+            return vec![prev.clone()];
+        }
+
+        let mut out = Vec::new();
+
+        if prev.start_row < inter_start_row {
+            out.push(CellRect {
+                start_row: prev.start_row,
+                end_row: inter_start_row.saturating_sub(1),
+                start_col: prev.start_col,
+                end_col: prev.end_col,
+            });
+        }
+        if inter_end_row < prev.end_row {
+            out.push(CellRect {
+                start_row: inter_end_row.saturating_add(1),
+                end_row: prev.end_row,
+                start_col: prev.start_col,
+                end_col: prev.end_col,
+            });
+        }
+        if prev.start_col < inter_start_col {
+            out.push(CellRect {
+                start_row: inter_start_row,
+                end_row: inter_end_row,
+                start_col: prev.start_col,
+                end_col: inter_start_col.saturating_sub(1),
+            });
+        }
+        if inter_end_col < prev.end_col {
+            out.push(CellRect {
+                start_row: inter_start_row,
+                end_row: inter_end_row,
+                start_col: inter_end_col.saturating_add(1),
+                end_col: prev.end_col,
+            });
+        }
+
+        out
+    }
+
+    fn pivot_value_to_engine_value(value: &PivotValue) -> EngineValue {
+        match value {
+            PivotValue::Blank => EngineValue::Blank,
+            PivotValue::Number(n) => EngineValue::Number(*n),
+            PivotValue::Date(d) => EngineValue::Text(d.to_string()),
+            PivotValue::Text(s) => EngineValue::Text(s.clone()),
+            PivotValue::Bool(b) => EngineValue::Bool(*b),
+        }
+    }
+
+    // Apply pivot output to the formula engine using bulk operations.
+    //
+    // Pivot refresh may touch thousands of cells; using per-cell engine APIs can trigger
+    // recalculation repeatedly when calculation mode is automatic.
+    if let Some(prev) = pivot.last_output_range.as_ref() {
+        for rect in stale_rects(prev, &next_range) {
+            let range = rect_to_model_range(&rect)?;
+            engine
+                .clear_range(&dest_sheet_name, range, false)
+                .map_err(|e| AppStateError::Engine(e.to_string()))?;
+        }
+    }
+
+    let engine_values: Vec<Vec<EngineValue>> = grid
+        .iter()
+        .map(|row| row.iter().map(pivot_value_to_engine_value).collect())
+        .collect();
+    engine
+        .set_range_values(
+            &dest_sheet_name,
+            rect_to_model_range(&next_range)?,
+            &engine_values,
+            false,
+        )
+        .map_err(|e| AppStateError::Engine(e.to_string()))?;
+
     let mut updates = Vec::new();
 
     {
@@ -4688,13 +4787,6 @@ fn refresh_pivot_registration(
                 };
                 sheet.set_cell(row, col, new_cell);
 
-                let addr = coord_to_a1(row, col);
-                let engine_value = desired_opt
-                    .as_ref()
-                    .map(scalar_to_engine_value)
-                    .unwrap_or(EngineValue::Blank);
-                let _ = engine.set_cell_value(&dest_sheet_name, &addr, engine_value);
-
                 updates.push(CellUpdateData {
                     sheet_id: dest_sheet_id.clone(),
                     row,
@@ -4707,7 +4799,7 @@ fn refresh_pivot_registration(
         }
     }
 
-    pivot.last_output_range = Some(union_range);
+    pivot.last_output_range = Some(next_range);
     Ok(updates)
 }
 fn format_scalar_for_display(value: &CellScalar, number_format: Option<&str>) -> String {
