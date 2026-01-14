@@ -8,7 +8,10 @@ describe("ToolExecutor rich value normalization", () => {
   it("read_range trims in-cell image alt text", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), {
-      value: { imageId: "img1", altText: "  Logo  " },
+      // In-memory workbook models scalar values, but ToolExecutor supports best-effort
+      // formatting of Excel-like rich values (including in-cell images).
+      // Cast to keep the test focused on ToolExecutor normalization behavior.
+      value: { imageId: "img1", altText: "  Logo  " } as any,
     });
 
     const executor = new ToolExecutor(workbook, {});
@@ -24,4 +27,3 @@ describe("ToolExecutor rich value normalization", () => {
     expect(result.data?.values).toEqual([["Logo"]]);
   });
 });
-
