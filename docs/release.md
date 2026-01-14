@@ -1264,6 +1264,13 @@ If you want a faster check that **does not** download/hash all release bundles (
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run
 ```
 
+To additionally enforce that the release contains **all expected OS/arch targets** (recommended for multi-arch releases), pass the expectations config:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run \
+  --expectations scripts/release-asset-expectations.json
+```
+
 If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
 
 ```bash
