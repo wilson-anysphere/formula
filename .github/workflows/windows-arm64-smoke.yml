@@ -355,11 +355,19 @@ jobs:
           cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
 
       - name: Desktop dist asset report
-        run: node scripts/desktop_dist_asset_report.mjs
+        run: node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets-report.json
         env:
           # Optional: set as GitHub Actions variables to enable gating.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Upload desktop dist asset report (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-desktop-dist-assets-report
+          path: desktop-dist-assets-report.json
+          if-no-files-found: ignore
 
       - name: Verify compiled desktop executable is ARM64
         shell: pwsh
