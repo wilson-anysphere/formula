@@ -367,7 +367,8 @@ export function workbookStateFromYjsDoc(doc) {
         for (const [key, value] of mapEntriesFromArrayRoot(existingArray)) {
           byId.set(key, commentSummaryFromValue(value, key));
         }
-        for (const item of existingArray.toArray()) {
+        for (let i = 0; i < existingArray.length; i++) {
+          const item = existingArray.get(i);
           const id = coerceString(readYMapOrObject(item, "id"));
           if (!id) continue;
           if (byId.has(id)) continue;
@@ -401,7 +402,8 @@ export function workbookStateFromYjsDoc(doc) {
           const commentsArray = getArrayRoot(doc, "comments");
           /** @type {[string, CommentSummary][]} */
           const entries = [];
-          for (const item of commentsArray.toArray()) {
+          for (let i = 0; i < commentsArray.length; i++) {
+            const item = commentsArray.get(i);
             const id = coerceString(readYMapOrObject(item, "id"));
             if (!id) continue;
             entries.push([id, commentSummaryFromValue(item, id)]);
