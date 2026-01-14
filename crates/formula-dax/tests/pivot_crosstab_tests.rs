@@ -2,7 +2,8 @@ mod common;
 
 use common::build_model;
 use formula_dax::{
-    pivot_crosstab, DataModel, FilterContext, GroupByColumn, PivotMeasure, Table, Value,
+    pivot_crosstab, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn,
+    PivotMeasure, Relationship, Table, Value,
 };
 use pretty_assertions::assert_eq;
 
@@ -217,6 +218,119 @@ fn pivot_crosstab_supports_related_dimension_row_and_column_fields() {
                 Value::from("Alice"),
                 Value::from("Bob"),
                 Value::from("Carol"),
+            ],
+            vec![Value::from("East"), 30.0.into(), Value::Blank, 8.0.into()],
+            vec![Value::from("West"), Value::Blank, 5.0.into(), Value::Blank],
+        ]
+    );
+}
+
+#[test]
+fn pivot_crosstab_resolves_unicode_identifiers_case_insensitively_and_preserves_model_casing() {
+    let mut model = DataModel::new();
+    let mut fact = Table::new("Straße", vec!["StraßenId", "Region", "Maß"]);
+    fact.push_row(vec![1.into(), "East".into(), 10.0.into()])
+        .unwrap();
+    fact.push_row(vec![1.into(), "East".into(), 20.0.into()])
+        .unwrap();
+    fact.push_row(vec![2.into(), "West".into(), 5.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    // Use ASCII-only identifiers to ensure ß/SS folding is applied for table and column names.
+    model.add_measure("Total", "SUM('STRASSE'[MASS])").unwrap();
+
+    let result = pivot_crosstab(
+        &model,
+        "strasse",
+        &[GroupByColumn::new("STRASSE", "STRASSENID")],
+        &[GroupByColumn::new("STRASSE", "REGION")],
+        &[PivotMeasure::new("Total", "[TOTAL]").unwrap()],
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.data,
+        vec![
+            vec![
+                Value::from("Straße[StraßenId]"),
+                Value::from("East"),
+                Value::from("West")
+            ],
+            vec![1.into(), 30.0.into(), Value::Blank],
+            vec![2.into(), Value::Blank, 5.0.into()],
+        ]
+    );
+}
+
+#[test]
+fn pivot_crosstab_supports_unicode_related_dimension_row_and_column_fields() {
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "StraßenName", "Region"]);
+    streets
+        .push_row(vec![1.into(), "A".into(), "East".into()])
+        .unwrap();
+    streets
+        .push_row(vec![2.into(), "B".into(), "West".into()])
+        .unwrap();
+    streets
+        .push_row(vec![3.into(), "C".into(), "East".into()])
+        .unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![103.into(), 3.into(), 8.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    // Add relationship using mixed casing and ASCII-only identifiers that casefold to the Unicode
+    // model names (`Straße` -> `STRASSE`, `StraßenId` -> `STRASSENID`).
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Orders[Amount])").unwrap();
+
+    let result = pivot_crosstab(
+        &model,
+        "Orders",
+        &[GroupByColumn::new("STRASSE", "REGION")],
+        &[GroupByColumn::new("STRASSE", "STRASSENNAME")],
+        &[PivotMeasure::new("Total", "[TOTAL]").unwrap()],
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.data,
+        vec![
+            vec![
+                Value::from("Straße[Region]"),
+                Value::from("A"),
+                Value::from("B"),
+                Value::from("C"),
             ],
             vec![Value::from("East"), 30.0.into(), Value::Blank, 8.0.into()],
             vec![Value::from("West"), Value::Blank, 5.0.into(), Value::Blank],
