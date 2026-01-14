@@ -125,3 +125,20 @@ test("workbookFromSpreadsheetApi: includeFormulaValues=true preserves cached for
   assert.equal(cell?.formula, "=1+1");
   assert.equal(cell?.value, 2);
 });
+
+test("workbookFromSpreadsheetApi: include_formula_values=true preserves cached formula values", () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Sheet1"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Sheet1");
+      return [{ address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: 2, formula: "=1+1" } }];
+    },
+  };
+
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId: "wb1", include_formula_values: true });
+  const cell = workbook.sheets[0].cells.get("0,0");
+  assert.equal(cell?.formula, "=1+1");
+  assert.equal(cell?.value, 2);
+});

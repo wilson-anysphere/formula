@@ -26,6 +26,7 @@ import { throwIfAborted } from "../utils/abort.js";
  *   },
  *   workbookId: string,
  *   includeFormulaValues?: boolean,
+ *   include_formula_values?: boolean,
  *   coordinateBase?: "one" | "zero" | "auto"
  *   signal?: AbortSignal
  * }} params
@@ -34,7 +35,7 @@ export function workbookFromSpreadsheetApi(params) {
   const { spreadsheet, workbookId } = params;
   const signal = params.signal;
   const coordinateBase = params.coordinateBase ?? "one";
-  const includeFormulaValues = (params.includeFormulaValues ?? false) === true;
+  const includeFormulaValues = (params.includeFormulaValues ?? params.include_formula_values ?? false) === true;
   if (coordinateBase !== "one" && coordinateBase !== "zero" && coordinateBase !== "auto") {
     throw new Error(`workbookFromSpreadsheetApi: invalid coordinateBase "${coordinateBase}"`);
   }

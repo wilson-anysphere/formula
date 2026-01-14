@@ -7,6 +7,7 @@ export function workbookFromSpreadsheetApi(params: {
   };
   workbookId: string;
   includeFormulaValues?: boolean;
+  include_formula_values?: boolean;
   coordinateBase?: "one" | "zero" | "auto";
   signal?: AbortSignal;
 }): any;
