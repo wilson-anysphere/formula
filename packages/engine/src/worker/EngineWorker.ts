@@ -201,6 +201,10 @@ export class EngineWorker {
     // (which would reject the flush promise and can surface as an unhandled rejection).
     this.pendingCellUpdates = [];
     for (const [id, pending] of this.pending) {
+      pending.timeoutId && clearTimeout(pending.timeoutId);
+      if (pending.signal && pending.abortListener) {
+        pending.signal.removeEventListener("abort", pending.abortListener);
+      }
       pending.reject(new Error(`worker terminated (request ${id})`));
     }
     this.pending.clear();
