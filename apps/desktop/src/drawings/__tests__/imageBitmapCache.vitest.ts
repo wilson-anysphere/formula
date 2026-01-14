@@ -272,4 +272,50 @@ describe("ImageBitmapCache", () => {
     await expect(cache.get(entry)).resolves.toBe(bitmap);
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
   });
+
+  it("does not start decoding when the AbortSignal is already aborted", async () => {
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    const createImageBitmapMock = vi.fn(() => Promise.resolve(bitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry = createEntry("img_1");
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(cache.get(entry, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("negativeCacheMs prevents tight retry loops after decode failures", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+      const createImageBitmapMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("decode failed"))
+        .mockResolvedValueOnce(bitmap);
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      const cache = new ImageBitmapCache({ maxEntries: 10, negativeCacheMs: 250 });
+      const entry = createEntry("img_1");
+
+      await expect(cache.get(entry)).rejects.toThrow("decode failed");
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      // Within the negative-cache window we should not invoke a new decode.
+      await expect(cache.get(entry)).rejects.toThrow("decode failed");
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      // After expiry we should retry.
+      vi.advanceTimersByTime(300);
+      vi.setSystemTime(300);
+      await expect(cache.get(entry)).resolves.toBe(bitmap);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
