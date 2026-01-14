@@ -14,17 +14,21 @@ fn range(a1: &str) -> Range {
     Range::from_a1(a1).unwrap()
 }
 
+fn seed_sales_data_on(engine: &mut Engine, sheet: &str) {
+    engine.set_cell_value(sheet, "A1", "Region").unwrap();
+    engine.set_cell_value(sheet, "B1", "Sales").unwrap();
+    engine.set_cell_value(sheet, "A2", "East").unwrap();
+    engine.set_cell_value(sheet, "B2", 100.0).unwrap();
+    engine.set_cell_value(sheet, "A3", "East").unwrap();
+    engine.set_cell_value(sheet, "B3", 150.0).unwrap();
+    engine.set_cell_value(sheet, "A4", "West").unwrap();
+    engine.set_cell_value(sheet, "B4", 200.0).unwrap();
+    engine.set_cell_value(sheet, "A5", "West").unwrap();
+    engine.set_cell_value(sheet, "B5", 250.0).unwrap();
+}
+
 fn seed_sales_data(engine: &mut Engine) {
-    engine.set_cell_value("Sheet1", "A1", "Region").unwrap();
-    engine.set_cell_value("Sheet1", "B1", "Sales").unwrap();
-    engine.set_cell_value("Sheet1", "A2", "East").unwrap();
-    engine.set_cell_value("Sheet1", "B2", 100.0).unwrap();
-    engine.set_cell_value("Sheet1", "A3", "East").unwrap();
-    engine.set_cell_value("Sheet1", "B3", 150.0).unwrap();
-    engine.set_cell_value("Sheet1", "A4", "West").unwrap();
-    engine.set_cell_value("Sheet1", "B4", 200.0).unwrap();
-    engine.set_cell_value("Sheet1", "A5", "West").unwrap();
-    engine.set_cell_value("Sheet1", "B5", 250.0).unwrap();
+    seed_sales_data_on(engine, "Sheet1");
 }
 
 fn sum_sales_by_region_config() -> PivotConfig {
@@ -103,6 +107,57 @@ fn insert_rows_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
     assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Number(700.0));
     // Original destination remains empty.
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Blank);
+}
+
+#[test]
+fn insert_rows_matches_sheet_names_case_insensitively_for_unicode_text() {
+    let mut engine = Engine::new();
+
+    // Use a Unicode sheet name that requires Unicode-aware case folding (ß -> SS).
+    seed_sales_data_on(&mut engine, "Straße");
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Straße".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Straße".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    // Apply the edit using a different (Unicode-folded) spelling of the sheet name.
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "STRASSE".to_string(),
+            row: 0,
+            count: 2,
+        })
+        .unwrap();
+
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.cell, cell("D3"));
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Straße".to_string(),
+            range: Some(range("A3:B7")),
+        }
+    );
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(
+        engine.get_cell_value("Straße", "D3"),
+        Value::Text("Region".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Straße", "E6"), Value::Number(700.0));
 }
 
 #[test]

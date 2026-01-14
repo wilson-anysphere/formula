@@ -12,7 +12,7 @@ use crate::editing::rewrite::{
 use crate::editing::EditOp;
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::CellAddr;
-use formula_model::{CellRef, Range, Style};
+use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style};
 
 use super::source::coerce_pivot_value_with_number_format;
 use super::{PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
@@ -221,11 +221,7 @@ impl PivotTableDefinition {
         };
 
         // Destination top-left cell behaves like a cell reference.
-        if self
-            .destination
-            .sheet
-            .eq_ignore_ascii_case(edit_sheet)
-        {
+        if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
             if let Some(cell) =
                 rewrite_cell_ref_for_structural_edit(self.destination.cell, &self.destination.sheet, edit)
             {
@@ -243,7 +239,7 @@ impl PivotTableDefinition {
 
         // Update source range reference.
         if let PivotSource::Range { sheet, range } = &mut self.source {
-            if sheet.eq_ignore_ascii_case(edit_sheet) {
+            if sheet_name_eq_case_insensitive(sheet, edit_sheet) {
                 if let Some(r) = *range {
                     *range = rewrite_range_for_structural_edit(r, sheet, edit);
                     if range.is_none() {
@@ -255,7 +251,7 @@ impl PivotTableDefinition {
 
         // Update (or invalidate) last output footprint.
         if let Some(prev) = self.last_output_range {
-            if self.destination.sheet.eq_ignore_ascii_case(edit_sheet) {
+            if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
                 self.last_output_range = rewrite_range_for_structural_edit(prev, &self.destination.sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
@@ -271,7 +267,7 @@ impl PivotTableDefinition {
         let edit_sheet = edit.sheet.as_str();
         let prev_output = self.last_output_range;
 
-        if self.destination.sheet.eq_ignore_ascii_case(edit_sheet) {
+        if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
             if let Some(cell) =
                 rewrite_cell_ref_for_range_map_edit(self.destination.cell, &self.destination.sheet, edit)
             {
@@ -287,7 +283,7 @@ impl PivotTableDefinition {
         }
 
         if let PivotSource::Range { sheet, range } = &mut self.source {
-            if sheet.eq_ignore_ascii_case(edit_sheet) {
+            if sheet_name_eq_case_insensitive(sheet, edit_sheet) {
                 if let Some(r) = *range {
                     *range = rewrite_range_for_range_map_edit(r, sheet, edit);
                     if range.is_none() {
@@ -298,7 +294,7 @@ impl PivotTableDefinition {
         }
 
         if let Some(prev) = self.last_output_range {
-            if self.destination.sheet.eq_ignore_ascii_case(edit_sheet) {
+            if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
                 self.last_output_range =
                     rewrite_range_for_range_map_edit(prev, &self.destination.sheet, edit);
                 if self.last_output_range.is_none() {
@@ -311,7 +307,7 @@ impl PivotTableDefinition {
     }
 
     fn invalidate_if_overlaps(&mut self, sheet: &str, region: &Range) {
-        if !self.destination.sheet.eq_ignore_ascii_case(sheet) {
+        if !sheet_name_eq_case_insensitive(&self.destination.sheet, sheet) {
             return;
         }
         let Some(output) = self.last_output_range else {
@@ -332,7 +328,7 @@ impl PivotTableDefinition {
             | StructuralEdit::InsertCols { sheet, .. }
             | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
         };
-        if !self.destination.sheet.eq_ignore_ascii_case(sheet) {
+        if !sheet_name_eq_case_insensitive(&self.destination.sheet, sheet) {
             return;
         }
 
@@ -382,7 +378,7 @@ impl PivotTableDefinition {
         let Some(output) = prev_output else {
             return;
         };
-        if !self.destination.sheet.eq_ignore_ascii_case(&edit.sheet) {
+        if !sheet_name_eq_case_insensitive(&self.destination.sheet, &edit.sheet) {
             return;
         }
 
