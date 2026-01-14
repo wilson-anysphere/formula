@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { stripComments, stripCssComments, stripHashComments, stripHtmlComments, stripRustComments } from "./sourceTextUtils";
+import {
+  stripComments,
+  stripCssComments,
+  stripHashComments,
+  stripHtmlComments,
+  stripRustComments,
+  stripYamlBlockScalarBodies,
+} from "./sourceTextUtils";
 
 describe("sourceTextUtils.stripComments", () => {
   it("strips line/block comments but preserves string literals", () => {
@@ -109,6 +116,35 @@ describe("sourceTextUtils.stripHashComments", () => {
     expect(out).toContain('name: "build #1"');
     expect(out).toContain("https://example.com/#anchor");
     expect(out).toContain("single: 'it''s # not a comment'");
+  });
+});
+
+describe("sourceTextUtils.stripYamlBlockScalarBodies", () => {
+  it("strips YAML block scalar bodies", () => {
+    const input = [
+      "steps:",
+      "  - name: First",
+      "    run: |",
+      '      echo "name: Should not match"',
+      "      echo ok",
+      "  - name: Second",
+      "    run: echo hi",
+    ].join("\n");
+
+    const out = stripYamlBlockScalarBodies(stripHashComments(input));
+    expect(out).toMatch(/\brun:\s*\|/);
+    expect(out).not.toContain("Should not match");
+    expect(out).not.toContain("echo ok");
+    expect(out).toMatch(/^\s*-\s*name:\s*Second\b/m);
+    expect(out).toMatch(/\brun: echo hi\b/);
+  });
+
+  it("does not end a block scalar early on blank lines", () => {
+    const input = ["run: |", "  echo a", "", "  echo b", "name: After"].join("\n");
+    const out = stripYamlBlockScalarBodies(stripHashComments(input));
+    expect(out).not.toContain("echo a");
+    expect(out).not.toContain("echo b");
+    expect(out).toContain("name: After");
   });
 });
 
