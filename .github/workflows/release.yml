@@ -788,6 +788,7 @@ jobs:
           path: apps/desktop/public/pyodide/
           key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
           restore-keys: |
+            pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
             pyodide-v${{ steps.pyodide.outputs.version }}-
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
