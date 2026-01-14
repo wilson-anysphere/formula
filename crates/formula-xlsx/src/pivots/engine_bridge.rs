@@ -391,7 +391,7 @@ pub fn pivot_table_to_engine_config(
                     format!(
                         "{} of {}",
                         aggregation_display_name(aggregation),
-                        source_field
+                        &source_field
                     )
                 });
 

@@ -38,7 +38,7 @@ pub fn pivot_table_to_model_value_fields(
                     format!(
                         "{} of {}",
                         aggregation_display_name(aggregation),
-                        source_field
+                        &source_field
                     )
                 });
 
