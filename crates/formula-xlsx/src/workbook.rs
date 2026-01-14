@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use formula_model::charts::{
     Chart, ChartAnchor, ChartColorStylePartModel, ChartKind, ChartModel, ChartStylePartModel,
@@ -100,13 +100,13 @@ impl XlsxPackage {
             }
 
             let drawing_rels_part = rels_for_part(&drawing_part);
-            let mut external_drawing_rel_ids = HashSet::new();
+            let mut external_drawing_rel_targets = HashMap::new();
             let drawing_rel_map = match self.part(&drawing_rels_part) {
                 Some(xml) => {
                     let mut map = HashMap::new();
                     for rel in parse_relationships(xml, &drawing_rels_part)? {
                         if is_external_target_mode(rel.target_mode.as_deref()) {
-                            external_drawing_rel_ids.insert(rel.id.clone());
+                            external_drawing_rel_targets.insert(rel.id.clone(), rel.target.clone());
                             continue;
                         }
                         map.insert(rel.id.clone(), rel);
@@ -117,19 +117,67 @@ impl XlsxPackage {
             };
 
             for drawing_ref in drawing_chart_refs {
-                // Ignore charts that point at external targets since there is no in-package OPC part
-                // to load. This avoids producing misleading "missing chart part" diagnostics for
-                // valid workbooks that include external relationships.
-                if external_drawing_rel_ids.contains(&drawing_ref.rel_id) {
+                let mut diagnostics = Vec::new();
+
+                if let Some(external_target) = external_drawing_rel_targets.get(&drawing_ref.rel_id)
+                {
+                    diagnostics.push(ChartDiagnostic {
+                        level: ChartDiagnosticLevel::Warning,
+                        message: format!(
+                            "chart reference {} points to external URI: {}",
+                            drawing_ref.rel_id, external_target
+                        ),
+                        part: Some(drawing_rels_part.clone()),
+                        xpath: None,
+                    });
+
+                    chart_objects.push(ChartObject {
+                        sheet_name: sheet_name.clone(),
+                        sheet_part: sheet_part.clone(),
+                        drawing_part: drawing_part.clone(),
+                        drawing_rel_id: drawing_ref.rel_id,
+                        drawing_object_id: drawing_ref.drawing_object_id,
+                        drawing_object_name: drawing_ref.drawing_object_name,
+                        anchor: drawing_ref.anchor,
+                        drawing_frame_xml: drawing_ref.drawing_frame_xml,
+                        parts: ChartParts {
+                            chart: OpcPart {
+                                path: String::new(),
+                                rels_path: None,
+                                rels_bytes: None,
+                                bytes: Vec::new(),
+                            },
+                            chart_ex: None,
+                            style: None,
+                            colors: None,
+                            user_shapes: None,
+                        },
+                        model: None,
+                        diagnostics,
+                    });
                     continue;
                 }
 
-                let mut diagnostics = Vec::new();
+                let normalized_drawing_part = resolve_target(&drawing_part, "");
 
                 let chart_part_path = match drawing_rel_map.get(&drawing_ref.rel_id) {
                     Some(rel) => {
                         let target = normalize_relationship_target(&rel.target);
-                        resolve_target(&drawing_part, &target)
+                        let resolved = resolve_target(&drawing_part, &target);
+                        if resolved == normalized_drawing_part {
+                            diagnostics.push(ChartDiagnostic {
+                                level: ChartDiagnosticLevel::Error,
+                                message: format!(
+                                    "invalid chart relationship target for {}: {}",
+                                    drawing_ref.rel_id, rel.target
+                                ),
+                                part: Some(drawing_rels_part.clone()),
+                                xpath: None,
+                            });
+                            String::new()
+                        } else {
+                            resolved
+                        }
                     }
                     None => {
                         diagnostics.push(ChartDiagnostic {
@@ -181,12 +229,25 @@ impl XlsxPackage {
                     (chart_rels_path.as_deref(), chart_rels_bytes.as_deref())
                 {
                     let rels = parse_relationships(chart_rels_bytes, chart_rels_path)?;
+                    let normalized_chart_part = resolve_target(&chart_part_path, "");
                     for rel in rels {
                         if is_external_target_mode(rel.target_mode.as_deref()) {
                             continue;
                         }
                         let normalized_target = normalize_relationship_target(&rel.target);
                         let target_path = resolve_target(&chart_part_path, &normalized_target);
+                        if target_path == normalized_chart_part {
+                            diagnostics.push(ChartDiagnostic {
+                                level: ChartDiagnosticLevel::Warning,
+                                message: format!(
+                                    "invalid chart relationship target for {}: {}",
+                                    rel.id, rel.target
+                                ),
+                                part: Some(chart_rels_path.to_string()),
+                                xpath: None,
+                            });
+                            continue;
+                        }
                         let rel_type = rel.type_.to_ascii_lowercase();
                         let rel_target = normalized_target.to_ascii_lowercase();
 

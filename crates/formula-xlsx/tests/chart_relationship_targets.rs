@@ -105,7 +105,7 @@ fn write_relationships_xml(rels: &[formula_xlsx::openxml::Relationship]) -> Vec<
 }
 
 #[test]
-fn chart_object_extraction_strips_fragments_and_ignores_external_chart_relationships() {
+fn chart_object_extraction_strips_fragments_and_handles_external_chart_relationships() {
     let bytes = build_workbook_with_two_charts();
     let mut pkg = XlsxPackage::from_bytes(&bytes).unwrap();
 
@@ -170,12 +170,14 @@ fn chart_object_extraction_strips_fragments_and_ignores_external_chart_relations
     let chart_objects = pkg.extract_chart_objects().unwrap();
     assert_eq!(
         chart_objects.len(),
-        1,
-        "expected external chart relationships to be ignored"
+        2,
+        "expected external chart relationships to be preserved as empty chart objects"
     );
 
-    let chart_object = &chart_objects[0];
-    assert_eq!(chart_object.parts.chart.path, "xl/charts/chart1.xml");
+    let chart_object = chart_objects
+        .iter()
+        .find(|chart| chart.parts.chart.path == "xl/charts/chart1.xml")
+        .expect("expected chart1 object to be extracted");
     assert!(
         chart_object
             .diagnostics
@@ -183,6 +185,23 @@ fn chart_object_extraction_strips_fragments_and_ignores_external_chart_relations
             .all(|d| d.level != ChartDiagnosticLevel::Error),
         "expected no error diagnostics, got: {:#?}",
         chart_object.diagnostics
+    );
+
+    let external_chart_object = chart_objects
+        .iter()
+        .find(|chart| chart.parts.chart.path.is_empty())
+        .expect("expected external chart object to have empty part path");
+    assert!(
+        external_chart_object.parts.chart.bytes.is_empty(),
+        "expected external chart object to have empty bytes"
+    );
+    assert!(
+        external_chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message.to_ascii_lowercase().contains("external")
+        }),
+        "expected warning diagnostic for external chart relationship, got: {:#?}",
+        external_chart_object.diagnostics
     );
 
     let charts = pkg.extract_charts().unwrap();
