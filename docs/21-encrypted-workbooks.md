@@ -375,6 +375,9 @@ Today, the `formula-io` crate:
         encrypted `.xlsx`/`.xlsm` workbooks into a `Workbook`.
         - Encrypted `.xlsb` workbooks are detected but currently surface
           `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
+          - Workaround: open encrypted `.xlsb` directly via
+            `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` or
+            `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(..)`.
       - Use `open_workbook_model_with_password(path, Some(password))` to decrypt and open directly
         into a `formula_model::Workbook` (note: `open_workbook_model_with_options` does **not** decrypt
         encrypted OOXML wrappers).
