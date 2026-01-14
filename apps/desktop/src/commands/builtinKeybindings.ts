@@ -328,9 +328,22 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_SPREADSHEET_READY,
   },
   {
+    // Numpad "+" (or layouts where "+" does not require Shift) should also open Insert Cells.
+    command: "home.cells.insert.insertCells",
+    key: "ctrl+plus",
+    mac: "ctrl+plus",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
     // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
     command: "home.cells.insert.insertCells",
     key: "ctrl+cmd+shift+=",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
+    // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+    command: "home.cells.insert.insertCells",
+    key: "ctrl+cmd+plus",
     when: WHEN_SPREADSHEET_READY,
   },
   {

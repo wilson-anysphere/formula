@@ -21,6 +21,9 @@ const KEY_ALIASES: Record<string, string> = {
   del: "delete",
   return: "enter",
   spacebar: "space",
+  // Common human-readable alias for the "+" key (useful because "+" cannot appear directly in
+  // our keybinding strings since "+" is the token separator).
+  plus: "+",
   pgup: "pageup",
   pgdn: "pagedown",
   pgdown: "pagedown",

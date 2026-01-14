@@ -152,6 +152,12 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("+", { ctrlKey: true, shiftKey: true, code: "Equal" }))).toBe(true);
   });
 
+  it("supports 'plus' as an alias for the '+' key in keybinding strings (ctrl+plus)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+plus");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("+", { ctrlKey: true, code: "NumpadAdd" }))).toBe(true);
+  });
+
   it("matches shifted digits via KeyboardEvent.code fallback (ctrl+shift+1)", () => {
     const binding = parseKeybinding("cmd", "ctrl+shift+1");
     expect(binding).not.toBeNull();
