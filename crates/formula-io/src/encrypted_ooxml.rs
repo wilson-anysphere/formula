@@ -243,30 +243,30 @@ fn decrypt_encrypted_package_standard(
                         &info,
                         plaintext_len_usize,
                         ciphertext,
-                            scheme,
-                            key0,
-                        )?;
-                        if !prefix_ok {
-                            continue;
-                        }
-
-                        let Ok(out) = decrypt_standard_aes_with_scheme(
-                            &info,
-                            password,
-                            plaintext_len_usize,
-                            ciphertext,
-                            scheme,
-                            key0,
-                        ) else {
-                            continue;
-                        };
-
-                        if is_valid_zip(&out) {
-                            return Ok(Some(out));
-                        }
+                        scheme,
+                        key0,
+                    )?;
+                    if !prefix_ok {
+                        continue;
                     }
-                    Ok(None)
-                };
+
+                    let Ok(out) = decrypt_standard_aes_with_scheme(
+                        &info,
+                        password,
+                        plaintext_len_usize,
+                        ciphertext,
+                        scheme,
+                        key0,
+                    ) else {
+                        continue;
+                    };
+
+                    if is_valid_zip(&out) {
+                        return Ok(Some(out));
+                    }
+                }
+                Ok(None)
+            };
 
             let key0 = derive_file_key_standard(&info, password).map_err(|err| {
                 DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}"))
