@@ -332,20 +332,29 @@ jobs:
       - name: Merge TabCompletionEngine results into benchmark-results.json
         if: always()
         run: node scripts/merge-benchmark-results.mjs benchmark-results.json benchmark-results.tab-completion.json
+      
+      - name: Upload merged benchmark results (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: perf-benchmark-results
+          path: benchmark-results.json
+          if-no-files-found: ignore
 
-      - name: Publish benchmark results
+      - name: Publish benchmark results (PR comment)
         # Fork PRs get a read-only token; skip publishing/commenting there.
+        # Main-branch pushes publish in a separate job with a shared concurrency group
+        # to avoid gh-pages push races with other benchmark workflows.
         if: |
-          always() && (
-            github.event_name == 'push' ||
-            (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
-          )
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          auto-push: false
           alert-threshold: '120%'
           comment-on-alert: true
           fail-on-alert: true
@@ -371,3 +380,52 @@ jobs:
       - name: Fail on absolute target regression
         if: always() && steps.perf.outcome == 'failure'
         run: exit 1
+
+  publish:
+    name: Publish benchmark history (gh-pages)
+    needs: benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      # Avoid concurrent gh-pages pushes from multiple benchmark workflows.
+      group: benchmark-gh-pages-publish
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download benchmark results artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: perf-benchmark-results
+          path: artifacts/perf-benchmark-results
+
+      - name: Verify benchmark results are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="artifacts/perf-benchmark-results/benchmark-results.json"
+          if [ ! -f "$path" ]; then
+            echo "::error::Missing ${path}; cannot publish benchmark history."
+            exit 1
+          fi
+          count="$(node -e 'const fs=require(\"fs\");const p=process.argv[1];const v=JSON.parse(fs.readFileSync(p,\"utf8\"));console.log(Array.isArray(v)?v.length:0);' "$path")"
+          if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then
+            echo "::error::Benchmark results file is empty; cannot publish benchmark history."
+            exit 1
+          fi
+
+      - name: Publish benchmark results
+        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: artifacts/perf-benchmark-results/benchmark-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '120%'
+          comment-on-alert: true
+          fail-on-alert: true
