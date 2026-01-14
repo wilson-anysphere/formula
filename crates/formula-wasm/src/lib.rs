@@ -5272,6 +5272,46 @@ impl WasmWorkbook {
         })
     }
 
+    /// Set (or clear) the sheet's default column width in Excel "character" units.
+    ///
+    /// This corresponds to the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">` attribute.
+    ///
+    /// Pass `null`/`undefined` to clear the override back to Excel's standard default width.
+    #[wasm_bindgen(js_name = "setSheetDefaultColWidth")]
+    pub fn set_sheet_default_col_width(
+        &mut self,
+        sheet_name: String,
+        width_chars: JsValue,
+    ) -> Result<(), JsValue> {
+        let width_chars = if width_chars.is_null() || width_chars.is_undefined() {
+            None
+        } else {
+            let raw = width_chars
+                .as_f64()
+                .ok_or_else(|| js_err("widthChars must be a number or null".to_string()))?;
+            if !raw.is_finite() || raw < 0.0 {
+                return Err(js_err(
+                    "widthChars must be a non-negative finite number".to_string(),
+                ));
+            }
+            Some(raw as f32)
+        };
+
+        let sheet_name = sheet_name.trim();
+        let sheet_name = if sheet_name.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet_name
+        };
+
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet_name);
+            this.engine.set_sheet_default_col_width(&sheet, width_chars);
+            Ok(())
+        })
+    }
+
     /// Update workbook file metadata used by Excel-compatible functions like `CELL("filename")`
     /// and `INFO("directory")`.
     #[wasm_bindgen(js_name = "setWorkbookFileMetadata")]

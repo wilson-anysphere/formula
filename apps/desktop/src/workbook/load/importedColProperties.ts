@@ -7,6 +7,7 @@ export type ImportedColPropertiesEntry = {
 
 export type ImportedSheetColPropertiesPayload = {
   schemaVersion?: number;
+  defaultColWidth?: number | null;
   colProperties?: Record<string, ImportedColPropertiesEntry>;
 };
 
@@ -116,4 +117,16 @@ export function hiddenColsFromImportedColProperties(raw: unknown): number[] {
 
   out.sort((a, b) => a - b);
   return out;
+}
+
+/**
+ * Extract the sheet's default column width (OOXML `<sheetFormatPr defaultColWidth="...">`).
+ *
+ * This is expressed in Excel "character" units (the same units used by `col/@width`).
+ */
+export function defaultColWidthCharsFromImportedColProperties(raw: unknown): number | null {
+  const payload = isPlainObject(raw) ? (raw as ImportedSheetColPropertiesPayload) : null;
+  const width = Number(payload?.defaultColWidth);
+  if (!Number.isFinite(width) || width <= 0) return null;
+  return width;
 }

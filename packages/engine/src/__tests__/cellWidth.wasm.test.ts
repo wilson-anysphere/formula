@@ -44,6 +44,9 @@ describeWasm("CELL(\"width\") + column width/hidden metadata (wasm)", () => {
       loadWorkbookFromJson: (json: string) => {
         wb = wasm.WasmWorkbook.fromJson(json);
       },
+      setSheetDefaultColWidth: (sheet: string, widthChars: number | null) => {
+        wb!.setSheetDefaultColWidth(sheet, widthChars);
+      },
       setColWidth: (sheet: string, col: number, widthChars: number | null) => {
         wb!.setColWidth(sheet, col, widthChars);
       },
@@ -66,6 +69,49 @@ describeWasm("CELL(\"width\") + column width/hidden metadata (wasm)", () => {
     expect(wb!.getCell("A2").value).toBe(0);
   });
 
+  it("applies sheet default column width during engineHydrateFromDocument()", async () => {
+    const doc = new DocumentController();
+    (doc as any).__sheetDefaultColWidthChars = { Sheet1: 20 };
+    // Column B: 25 Excel character units => 180px.
+    doc.setColWidth("Sheet1", 1, 180);
+    // Hidden column C.
+    (doc as any).__sheetHiddenCols = { Sheet1: [2] };
+
+    doc.setCellFormula("Sheet1", "A1", '=CELL("width",A1)');
+    doc.setCellFormula("Sheet1", "A2", '=CELL("width",B1)');
+    doc.setCellFormula("Sheet1", "A3", '=CELL("width",C1)');
+
+    const wasm = await loadFormulaWasm();
+    let wb: any | null = null;
+    const engine = {
+      loadWorkbookFromJson: (json: string) => {
+        wb = wasm.WasmWorkbook.fromJson(json);
+      },
+      setSheetDefaultColWidth: (sheet: string, widthChars: number | null) => {
+        wb!.setSheetDefaultColWidth(sheet, widthChars);
+      },
+      setColWidth: (sheet: string, col: number, widthChars: number | null) => {
+        wb!.setColWidth(sheet, col, widthChars);
+      },
+      setColHidden: (sheet: string, col: number, hidden: boolean) => {
+        wb!.setColHidden(sheet, col, hidden);
+      },
+      setCell: (address: string, value: any, sheet?: string) => {
+        wb!.setCell(address, value, sheet);
+      },
+      recalculate: (_sheet?: string) => {
+        wb!.recalculate();
+        return [];
+      },
+    };
+
+    await engineHydrateFromDocument(engine as any, doc);
+
+    expect(wb!.getCell("A1").value).toBe(20);
+    expect(wb!.getCell("A2").value).toBeCloseTo(25.1, 6);
+    expect(wb!.getCell("A3").value).toBe(0);
+  });
+
   it("imports column widths + hidden metadata from XLSX so CELL(\"width\") matches Excel immediately", async () => {
     const wasm = await loadFormulaWasm();
 
@@ -82,4 +128,22 @@ describeWasm("CELL(\"width\") + column width/hidden metadata (wasm)", () => {
     expect(wb.getCell("A1").value).toBeCloseTo(25.1, 6);
     expect(wb.getCell("A2").value).toBe(0);
   });
-});
+
+  it("imports sheet default width + column width/hidden metadata from XLSX so CELL(\"width\") matches Excel", async () => {
+    const wasm = await loadFormulaWasm();
+
+    const fixturePath = fileURLToPath(new URL("../../../../fixtures/xlsx/metadata/cell-width.xlsx", import.meta.url));
+    const bytes = new Uint8Array(readFileSync(fixturePath));
+
+    const wb = wasm.WasmWorkbook.fromXlsxBytes(bytes);
+
+    wb.setCell("A1", '=CELL("width",A1)');
+    wb.setCell("A2", '=CELL("width",B1)');
+    wb.setCell("A3", '=CELL("width",C1)');
+    wb.recalculate();
+
+    expect(wb.getCell("A1").value).toBe(20);
+    expect(wb.getCell("A2").value).toBeCloseTo(25.1, 6);
+    expect(wb.getCell("A3").value).toBe(0);
+  });
+}); 

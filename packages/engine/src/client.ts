@@ -126,6 +126,14 @@ export interface EngineClient {
    */
   setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
+   * Set (or clear) the sheet's default column width in Excel "character" units.
+   *
+   * This corresponds to the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">` and is used
+   * by worksheet info functions like `CELL("width")` for columns without explicit per-column
+   * width overrides.
+   */
+  setSheetDefaultColWidth(sheet: string, widthChars: number | null, options?: RpcOptions): Promise<void>;
+  /**
    * Intern (deduplicate) a style into the workbook's shared style table, returning its id.
    *
    * Style id `0` is always the default style. Passing `null` is treated as the default style.
@@ -614,6 +622,8 @@ export function createEngineClient(options?: {
       await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
     setColHidden: async (col, hidden, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setColHidden(col, hidden, sheet, rpcOptions)),
+    setSheetDefaultColWidth: async (sheet, widthChars, rpcOptions) =>
+      await withEngine((connected) => connected.setSheetDefaultColWidth(sheet, widthChars, rpcOptions)),
     internStyle: async (style, rpcOptions) => await withEngine((connected) => connected.internStyle(style, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     getCalcSettings: async (rpcOptions) => await withEngine((connected) => connected.getCalcSettings(rpcOptions)),

@@ -683,6 +683,7 @@ export type RpcMethod =
   | "setColWidth"
   | "setColWidthChars"
   | "setColHidden"
+  | "setSheetDefaultColWidth"
   | "setColFormatRuns"
   | "internStyle";
 

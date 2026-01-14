@@ -114,6 +114,10 @@ export class WasmWorkbook {
     recordCall("setColHidden", sheet, col, hidden);
   }
 
+  setSheetDefaultColWidth(sheet, widthChars) {
+    recordCall("setSheetDefaultColWidth", sheet, widthChars);
+  }
+
   setColFormatRuns(sheet, col, runs) {
     recordCall("setColFormatRuns", sheet, col, runs);
   }

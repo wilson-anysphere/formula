@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 import {
+  defaultColWidthCharsFromImportedColProperties,
   docColWidthsFromImportedColProperties,
   hiddenColsFromImportedColProperties,
   sheetColWidthsFromViewOrImportedColProperties,
@@ -31,6 +32,7 @@ describe("importedColProperties", () => {
   it("extracts hidden columns from imported column metadata", () => {
     const payload = {
       schemaVersion: 1,
+      defaultColWidth: 20,
       colProperties: {
         "0": { width: 12, hidden: true },
         "1": { hidden: true },
@@ -39,6 +41,16 @@ describe("importedColProperties", () => {
     };
 
     expect(hiddenColsFromImportedColProperties(payload)).toEqual([0, 1]);
+  });
+
+  it("extracts sheet default column width from imported metadata", () => {
+    const payload = {
+      schemaVersion: 1,
+      defaultColWidth: 20,
+      colProperties: {},
+    };
+    expect(defaultColWidthCharsFromImportedColProperties(payload)).toBe(20);
+    expect(defaultColWidthCharsFromImportedColProperties({ schemaVersion: 1, colProperties: {} })).toBeNull();
   });
 
   it("falls back to imported column widths when persisted sheet view colWidths is empty", () => {

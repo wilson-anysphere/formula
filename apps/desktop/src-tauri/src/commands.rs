@@ -4963,10 +4963,15 @@ pub fn get_sheet_imported_col_properties(
         None => {
             return Ok(json!({
                 "schemaVersion": 1,
+                "defaultColWidth": null,
                 "colProperties": {}
             }))
         }
     };
+
+    let default_col_width = sheet
+        .default_col_width
+        .filter(|w| w.is_finite() && *w > 0.0);
 
     let mut props_out = serde_json::Map::new();
     for (col, props) in sheet.col_properties.iter() {
@@ -4987,6 +4992,7 @@ pub fn get_sheet_imported_col_properties(
 
     Ok(json!({
         "schemaVersion": 1,
+        "defaultColWidth": default_col_width,
         "colProperties": props_out
     }))
 }

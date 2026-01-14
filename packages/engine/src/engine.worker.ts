@@ -1037,6 +1037,18 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               }
               result = null;
               break;
+            case "setSheetDefaultColWidth":
+              if (typeof (wb as any).setSheetDefaultColWidth !== "function") {
+                throw new Error(
+                  "setSheetDefaultColWidth: WasmWorkbook.setSheetDefaultColWidth is not available in this WASM build",
+                );
+              }
+              {
+                const sheet = sheetNameOrDefault(params.sheet);
+                (wb as any).setSheetDefaultColWidth(sheet, params.widthChars ?? null);
+              }
+              result = null;
+              break;
             case "setColFormatRuns":
               if (typeof (wb as any).setColFormatRuns !== "function") {
                 throw new Error("setColFormatRuns: WasmWorkbook.setColFormatRuns is not available in this WASM build");

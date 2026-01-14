@@ -224,7 +224,11 @@ import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCel
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
 import { buildImportedDrawingLayerSnapshotAdditions } from "./workbook/load/hydrateImportedDrawings.js";
 import { hydrateSheetBackgroundImagesFromBackend } from "./workbook/load/hydrateSheetBackgroundImages.js";
-import { hiddenColsFromImportedColProperties, sheetColWidthsFromViewOrImportedColProperties } from "./workbook/load/importedColProperties.js";
+import {
+  defaultColWidthCharsFromImportedColProperties,
+  hiddenColsFromImportedColProperties,
+  sheetColWidthsFromViewOrImportedColProperties,
+} from "./workbook/load/importedColProperties.js";
 import {
   mergeFormattingIntoSnapshot,
   type CellFormatClampBounds,
@@ -10523,6 +10527,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // Track user-hidden columns imported from the source workbook so we can seed the UI's outline
   // hidden state ahead of the first render.
   const importedHiddenColsBySheetId = new Map<string, number[]>();
+  // Track per-sheet default column widths (OOXML `<sheetFormatPr defaultColWidth="...">`) in
+  // Excel character units so the WASM formula engine can compute `CELL("width")` correctly for
+  // columns that do not have an explicit per-column width override.
+  const importedDefaultColWidthCharsBySheetId = new Map<string, number>();
 
   for (const sheet of snapshotSheets) {
     const formatting = formattingBySheetId.get(sheet.id) ?? null;
@@ -10540,6 +10548,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     }
     const hiddenCols = hiddenColsFromImportedColProperties(importedColProperties);
     if (hiddenCols.length > 0) importedHiddenColsBySheetId.set(sheet.id, hiddenCols);
+    const defaultColWidthChars = defaultColWidthCharsFromImportedColProperties(importedColProperties);
+    if (defaultColWidthChars != null) importedDefaultColWidthCharsBySheetId.set(sheet.id, defaultColWidthChars);
   }
 
   // Hidden column metadata is not currently persisted in the DocumentController snapshot format,
@@ -10551,6 +10561,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     hiddenColsBySheetId[sheetId] = cols.slice();
   }
   (doc as any).__sheetHiddenCols = hiddenColsBySheetId;
+
+  // Similarly, stash sheet default column widths so the engine can match Excel's encoding for
+  // `CELL("width")` even when a column has no explicit per-column width override.
+  const defaultColWidthCharsBySheetId: Record<string, number> = {};
+  for (const [sheetId, width] of importedDefaultColWidthCharsBySheetId) {
+    const n = Number(width);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    defaultColWidthCharsBySheetId[sheetId] = n;
+  }
+  (doc as any).__sheetDefaultColWidthChars = defaultColWidthCharsBySheetId;
 
   const importedChartObjectsRaw = await importedChartObjectsPromise;
   const importedChartObjects = Array.isArray(importedChartObjectsRaw) ? importedChartObjectsRaw : [];

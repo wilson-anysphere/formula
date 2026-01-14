@@ -840,6 +840,18 @@ export class EngineWorker {
     await this.invoke("setColHidden", { sheet, col, hidden }, options);
   }
 
+  /**
+   * Set (or clear) the sheet's default column width in Excel "character" units.
+   *
+   * This corresponds to the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">` and is used
+   * by worksheet info functions like `CELL("width")` for columns without explicit per-column
+   * width overrides.
+   */
+  async setSheetDefaultColWidth(sheet: string, widthChars: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setSheetDefaultColWidth", { sheet, widthChars }, options);
+  }
+
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];

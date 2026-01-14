@@ -161,6 +161,13 @@ export interface EngineSyncTarget {
    */
   setColHidden?: (sheet: string, col: number, hidden: boolean) => Promise<void> | void;
   /**
+   * Update a sheet's default column width in Excel character units (OOXML `sheetFormatPr/@defaultColWidth`).
+   *
+   * This affects worksheet info functions like `CELL("width")` for columns without explicit per-column
+   * width overrides.
+   */
+  setSheetDefaultColWidth?: (sheet: string, widthChars: number | null) => Promise<void> | void;
+  /**
    * Optional row/col/sheet formatting layer metadata APIs.
    *
    * These are additive and may not be implemented by all engine targets.
@@ -500,6 +507,25 @@ export async function engineHydrateFromDocument(
       const sheetKey = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
       const displayName = resolveDocumentSheetDisplayName(doc, sheetId);
       await engine.setSheetDisplayName(sheetKey, displayName);
+    }
+  }
+
+  // Sync sheet default column widths (best-effort).
+  //
+  // Like hidden columns, DocumentController does not currently persist this in its snapshot schema.
+  // Desktop XLSX import stashes the OOXML `<sheetFormatPr defaultColWidth="...">` value on the
+  // DocumentController instance so `CELL("width")` can match Excel immediately after open.
+  const setSheetDefaultColWidth =
+    typeof engine.setSheetDefaultColWidth === "function" ? engine.setSheetDefaultColWidth.bind(engine) : null;
+  const defaultColWidthCharsBySheetId = doc && typeof doc === "object" ? (doc as any).__sheetDefaultColWidthChars : null;
+  if (setSheetDefaultColWidth && defaultColWidthCharsBySheetId && typeof defaultColWidthCharsBySheetId === "object") {
+    const ids = getDocumentSheetIds(doc);
+    for (const sheetId of ids) {
+      const raw = (defaultColWidthCharsBySheetId as any)[sheetId];
+      const widthChars = Number(raw);
+      if (!Number.isFinite(widthChars) || widthChars <= 0) continue;
+      const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
+      await setSheetDefaultColWidth.call(engine as any, engineSheetId, widthChars);
     }
   }
 

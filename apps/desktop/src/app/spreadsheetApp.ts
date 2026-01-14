@@ -268,6 +268,7 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
     setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
     setColHidden: (sheet, col, hidden) => engine.setColHidden(col, hidden, sheet),
+    setSheetDefaultColWidth: (sheet, widthChars) => engine.setSheetDefaultColWidth(sheet, widthChars),
   };
   // Row/col/sheet style metadata is optional (older WASM builds may not support it). Only expose
   // these hooks when present so `engineApplyDocumentChange` can treat them as best-effort.
