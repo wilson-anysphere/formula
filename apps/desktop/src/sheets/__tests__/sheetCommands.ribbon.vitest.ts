@@ -52,12 +52,14 @@ describe("ribbon sheet commands", () => {
     await handleInsertSheet();
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet3", "Sheet2"]);
     expect(activeSheetId).toBe("Sheet3");
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(1);
 
     // Delete active Sheet2 (Excel-like).
     activeSheetId = "Sheet2";
     await handleDeleteSheet();
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet3"]);
     expect(activeSheetId).toBe("Sheet1");
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(2);
 
     // Formula rewrite: direct references to deleted Sheet2 become #REF!.
     expect(doc.getCell("Sheet1", { row: 0, col: 0 }).formula).toBe("=#REF!");
@@ -95,6 +97,7 @@ describe("ribbon sheet commands", () => {
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1"]);
     expect(activeSheetId).toBe("Sheet1");
     expect(showToast).toHaveBeenCalledWith("Cannot delete the last sheet", "error");
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(1);
   });
 
   it("respects confirmation cancel (no-op)", async () => {
@@ -132,6 +135,7 @@ describe("ribbon sheet commands", () => {
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
     expect(activeSheetId).toBe("Sheet1");
     expect(showToast).not.toHaveBeenCalled();
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(1);
   });
 
   it("blocks sheet insert/delete in read-only collab sessions", async () => {
@@ -182,6 +186,7 @@ describe("ribbon sheet commands", () => {
     // Delete short-circuits before confirmation.
     expect(showToast).toHaveBeenCalledWith(READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
     expect(confirm).not.toHaveBeenCalled();
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(2);
   });
 
   it("inserts a sheet in collab sessions by mutating session.sheets (and activates it)", async () => {
@@ -246,6 +251,7 @@ describe("ribbon sheet commands", () => {
     expect(activeSheetId).toBe(session.sheets.toArray()[1]!.id);
     expect(doc.getSheetIds()).toContain(activeSheetId);
     expect(showToast).not.toHaveBeenCalled();
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(1);
   });
 
   it("deletes the active sheet in collab sessions via CollabWorkbookSheetStore (and rewrites formulas)", async () => {
@@ -325,5 +331,6 @@ describe("ribbon sheet commands", () => {
 
     expect(doc.getCell("sheet_a", { row: 0, col: 0 }).formula).toBe("=#REF!");
     expect(showToast).not.toHaveBeenCalled();
+    expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(1);
   });
 });
