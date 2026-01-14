@@ -261,6 +261,48 @@ describe("registerDesktopCommands", () => {
     expect(openOrganizeSheets).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks sheet-structure commands when collab session is read-only", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const focus = vi.fn();
+    const insertSheet = vi.fn(async () => {});
+    const deleteActiveSheet = vi.fn(async () => {});
+    const openOrganizeSheets = vi.fn(async () => {});
+
+    registerDesktopCommands({
+      commandRegistry,
+      app: { isReadOnly: () => true, focus } as any,
+      layoutController: null,
+      sheetStructureHandlers: { insertSheet, deleteActiveSheet, openOrganizeSheets },
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
+      openFormatCells: () => {},
+      showQuickPick: async () => null,
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      workbenchFileHandlers: {
+        newWorkbook: () => {},
+        openWorkbook: () => {},
+        saveWorkbook: () => {},
+        saveWorkbookAs: () => {},
+        setAutoSaveEnabled: () => {},
+        print: () => {},
+        printPreview: () => {},
+        closeWorkbook: () => {},
+        quit: () => {},
+      },
+    });
+
+    await commandRegistry.executeCommand("home.cells.insert.insertSheet");
+    await commandRegistry.executeCommand("home.cells.delete.deleteSheet");
+    await commandRegistry.executeCommand("home.cells.format.organizeSheets");
+
+    expect(insertSheet).not.toHaveBeenCalled();
+    expect(deleteActiveSheet).not.toHaveBeenCalled();
+    expect(openOrganizeSheets).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalledTimes(3);
+  });
+
   it("registers Data → Queries & Connections commands when dataQueriesHandlers are provided", async () => {
     const commandRegistry = new CommandRegistry();
 

@@ -1,4 +1,5 @@
 import type { DocumentController } from "../document/documentController.js";
+import { showToast } from "../extensions/ui.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 
@@ -58,7 +59,33 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
 
   // Match SpreadsheetApp guards: never mutate while editing.
   if (app.isEditing()) return true;
-  if (typeof app.isReadOnly === "function" && app.isReadOnly()) return true;
+  if (typeof app.isReadOnly === "function" && app.isReadOnly()) {
+    const message = (() => {
+      switch (id) {
+        case "home.cells.insert.insertSheetRows":
+          return "Read-only: you don't have permission to insert rows.";
+        case "home.cells.insert.insertSheetColumns":
+          return "Read-only: you don't have permission to insert columns.";
+        case "home.cells.delete.deleteSheetRows":
+          return "Read-only: you don't have permission to delete rows.";
+        case "home.cells.delete.deleteSheetColumns":
+          return "Read-only: you don't have permission to delete columns.";
+        default:
+          return "Read-only: you don't have permission to modify sheet structure.";
+      }
+    })();
+    try {
+      showToast(message, "warning");
+    } catch {
+      // `showToast` requires a DOM #toast-root; ignore in tests/headless.
+    }
+    try {
+      app.focus();
+    } catch {
+      // ignore
+    }
+    return true;
+  }
 
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();

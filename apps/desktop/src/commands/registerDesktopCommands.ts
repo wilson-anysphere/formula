@@ -16,6 +16,7 @@ import { executeCellsStructuralRibbonCommand } from "../ribbon/cellsStructuralCo
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
 import { exportDocumentRangeToCsv } from "../import-export/csv/export.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -647,7 +648,12 @@ export function registerDesktopCommands(params: {
     "home.cells.insert.insertSheet",
     "Insert Sheet",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
+      if (isReadOnly()) {
+        safeShowToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        focusGrid();
+        return;
+      }
       const handler = sheetStructureHandlers?.insertSheet;
       if (!handler) {
         safeShowToast("Insert Sheet is not available in this environment.", "warning");
@@ -666,7 +672,12 @@ export function registerDesktopCommands(params: {
     "home.cells.delete.deleteSheet",
     "Delete Sheet",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
+      if (isReadOnly()) {
+        safeShowToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        focusGrid();
+        return;
+      }
       const handler = sheetStructureHandlers?.deleteActiveSheet;
       if (!handler) {
         safeShowToast("Delete Sheet is not available in this environment.", "warning");
@@ -685,7 +696,12 @@ export function registerDesktopCommands(params: {
     "home.cells.format.organizeSheets",
     "Organize Sheets…",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
+      if (isReadOnly()) {
+        safeShowToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        focusGrid();
+        return;
+      }
       const handler = sheetStructureHandlers?.openOrganizeSheets;
       if (!handler) {
         safeShowToast("Organize Sheets is not available in this environment.", "warning");
