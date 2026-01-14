@@ -443,9 +443,8 @@ fn encrypt_standard_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     verifier_hash_padded.resize(32, 0);
 
     let key0 = standard_derive_key_sha1(password, &salt, key_bits, 0);
-    let iv0 = [0u8; 16];
-    let encrypted_verifier = aes128_cbc_encrypt(&key0, &iv0, &verifier_plain);
-    let encrypted_verifier_hash = aes128_cbc_encrypt(&key0, &iv0, &verifier_hash_padded);
+    let encrypted_verifier = aes128_ecb_encrypt(&key0, &verifier_plain);
+    let encrypted_verifier_hash = aes128_ecb_encrypt(&key0, &verifier_hash_padded);
 
     let salt_size = salt.len() as u32;
     let verifier_hash_size = verifier_hash.len() as u32;
@@ -464,27 +463,14 @@ fn encrypt_standard_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     encryption_info.extend_from_slice(&header_bytes);
     encryption_info.extend_from_slice(&verifier_bytes);
 
-    // Encrypt the package in 4096-byte segments using per-block keys (blockIndex=N, IV=0).
+    // Encrypt the package as a single AES-ECB stream (zero padding).
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-
-    const SEGMENT_LEN: usize = 4096;
-    let mut offset = 0usize;
-    let mut block = 0u32;
-    while offset < plaintext.len() {
-        let seg_len = (plaintext.len() - offset).min(SEGMENT_LEN);
-        let seg = &plaintext[offset..offset + seg_len];
-        let mut padded = seg.to_vec();
-        let padded_len = (padded.len() + 15) / 16 * 16;
-        padded.resize(padded_len, 0);
-
-        let key = standard_derive_key_sha1(password, &salt, key_bits, block);
-        let cipher = aes128_cbc_encrypt(&key, &iv0, &padded);
-        encrypted_package.extend_from_slice(&cipher);
-
-        offset += seg_len;
-        block += 1;
-    }
+    let mut padded = plaintext.to_vec();
+    let padded_len = (padded.len() + 15) / 16 * 16;
+    padded.resize(padded_len, 0);
+    let cipher = aes128_ecb_encrypt(&key0, &padded);
+    encrypted_package.extend_from_slice(&cipher);
 
     // Write the OLE/CFB wrapper.
     let cursor = Cursor::new(Vec::new());
@@ -732,13 +718,18 @@ fn standard_derive_key_sha1(password: &str, salt: &[u8], key_bits: u32, block: u
     out
 }
 
-fn aes128_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], plaintext: &[u8]) -> Vec<u8> {
+fn aes128_ecb_encrypt(key: &[u8; 16], plaintext: &[u8]) -> Vec<u8> {
     use aes::Aes128;
-    use cbc::Encryptor;
+    use cipher::generic_array::GenericArray;
+    use cipher::KeyInit;
+
+    assert!(plaintext.len() % 16 == 0);
+
     let mut buf = plaintext.to_vec();
-    let enc = Encryptor::<Aes128>::new_from_slices(key, iv).expect("key/iv");
-    enc.encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
-        .expect("encrypt");
+    let mut enc = Aes128::new_from_slice(key).expect("key");
+    for chunk in buf.chunks_exact_mut(16) {
+        enc.encrypt_block_mut(GenericArray::from_mut_slice(chunk));
+    }
     buf
 }
 

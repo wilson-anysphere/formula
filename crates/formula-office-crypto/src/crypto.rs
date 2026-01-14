@@ -264,7 +264,6 @@ pub(crate) fn derive_iv(
     normalize_key_material(&digest[..digest_len], iv_len)
 }
 
-#[cfg(test)]
 pub(crate) fn aes_ecb_encrypt_in_place(
     key: &[u8],
     buf: &mut [u8],
@@ -395,6 +394,15 @@ pub(crate) fn aes_ecb_decrypt(
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     let mut buf = ciphertext.to_vec();
     aes_ecb_decrypt_in_place(key, &mut buf)?;
+    Ok(buf)
+}
+
+pub(crate) fn aes_ecb_encrypt(
+    key: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    let mut buf = plaintext.to_vec();
+    aes_ecb_encrypt_in_place(key, &mut buf)?;
     Ok(buf)
 }
 

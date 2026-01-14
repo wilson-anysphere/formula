@@ -2,12 +2,12 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 
 use crate::crypto::{
-    aes_cbc_decrypt, aes_cbc_encrypt, aes_ecb_decrypt, derive_iv, rc4_xor_in_place, HashAlgorithm,
-    StandardKeyDerivation, StandardKeyDeriver,
+    aes_ecb_decrypt, aes_ecb_encrypt, rc4_xor_in_place, HashAlgorithm, StandardKeyDerivation,
+    StandardKeyDeriver,
 };
 use crate::error::OfficeCryptoError;
 use crate::util::{
-    checked_vec_len, ct_eq, decode_utf16le_nul_terminated, looks_like_zip, read_u32_le, read_u64_le,
+    checked_vec_len, ct_eq, decode_utf16le_nul_terminated, read_u32_le, read_u64_le,
     EncryptionInfoHeader,
 };
 // CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
@@ -210,8 +210,7 @@ pub(crate) fn verify_password_standard(
             verify_password_standard_with_key(header, verifier, hash_alg, key0.as_slice())
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            // Standard AES uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion). Some
-            // non-conforming producers appear to use simple truncation; try both.
+            // Standard AES uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion).
             let deriver_aes = StandardKeyDeriver::new(
                 hash_alg,
                 header.key_bits,
@@ -220,26 +219,7 @@ pub(crate) fn verify_password_standard(
                 StandardKeyDerivation::Aes,
             );
             let key0_aes = deriver_aes.derive_key_for_block(0)?;
-            match verify_password_standard_with_key(header, verifier, hash_alg, key0_aes.as_slice())
-            {
-                Ok(()) => return Ok(()),
-                Err(OfficeCryptoError::InvalidPassword) => {}
-                Err(e) => return Err(e),
-            }
-
-            // Compatibility: truncation (RC4-style) derivation can only work when keyBytes <=
-            // hashLen.
-            let deriver_trunc = StandardKeyDeriver::new(
-                hash_alg,
-                header.key_bits,
-                &verifier.salt,
-                password,
-                StandardKeyDerivation::Rc4,
-            );
-            let Ok(key0_trunc) = deriver_trunc.derive_key_for_block(0) else {
-                return Err(OfficeCryptoError::InvalidPassword);
-            };
-            verify_password_standard_with_key(header, verifier, hash_alg, key0_trunc.as_slice())
+            verify_password_standard_with_key(header, verifier, hash_alg, key0_aes.as_slice())
         }
         other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported cipher AlgID {other:#x}"
@@ -321,76 +301,33 @@ fn verify_password_standard_with_key(
             }
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            let iv0 = [0u8; 16];
-            let verifier_plain_0 = aes_cbc_decrypt(key0, &iv0, &verifier.encrypted_verifier)?;
-            let verifier_hash_plain_0 =
-                aes_cbc_decrypt(key0, &iv0, &verifier.encrypted_verifier_hash)?;
+            // MS-OFFCRYPTO Standard AES verifier fields are decrypted with AES-ECB (no IV).
+            let verifier_plain = aes_ecb_decrypt(key0, &verifier.encrypted_verifier)?;
+            let verifier_hash_plain_full = aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
 
-            // Compatibility: some producers use ECB for `encryptedVerifierHash`.
-            let verifier_hash_plain_ecb =
-                aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash).ok();
-
-            // Compatibility: some producers use IV=salt for the verifier fields.
-            let verifier_plain_salt = verifier
-                .salt
-                .get(..16)
-                .map(|iv| aes_cbc_decrypt(key0, iv, &verifier.encrypted_verifier))
-                .transpose()?;
-            let verifier_hash_plain_salt = verifier
-                .salt
-                .get(..16)
-                .map(|iv| aes_cbc_decrypt(key0, iv, &verifier.encrypted_verifier_hash))
-                .transpose()?;
-
-            // Try each (verifier_plain, verifier_hash_plain_full) pair.
-            for (verifier_plain, verifier_hash_plain_full) in [
-                Some((verifier_plain_0.as_slice(), verifier_hash_plain_0.as_slice())),
-                verifier_plain_salt
-                    .as_deref()
-                    .zip(verifier_hash_plain_salt.as_deref()),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let verifier_hash_plain =
-                    verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat(format!(
-                            "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
-                            verifier_hash_plain_full.len(),
-                            expected_hash_len
-                        ))
-                    })?;
-
-                let verifier_hash = hash_alg.digest(verifier_plain);
-                let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+            let verifier_hash_plain =
+                verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
                     OfficeCryptoError::InvalidFormat(format!(
-                        "hash output shorter than verifierHashSize (got {}, need {})",
-                        verifier_hash.len(),
+                        "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
+                        verifier_hash_plain_full.len(),
                         expected_hash_len
                     ))
                 })?;
 
-                if ct_eq(verifier_hash_plain, verifier_hash) {
-                    return Ok(());
-                }
+            let verifier_hash = hash_alg.digest(&verifier_plain);
+            let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(format!(
+                    "hash output shorter than verifierHashSize (got {}, need {})",
+                    verifier_hash.len(),
+                    expected_hash_len
+                ))
+            })?;
 
-                // ECB fallback for the hash (verifier is one block so CBC(iv=0) == ECB for it).
-                if let Some(plain_ecb) = verifier_hash_plain_ecb.as_deref() {
-                    let verifier_hash_plain_ecb =
-                        plain_ecb.get(..expected_hash_len).ok_or_else(|| {
-                            OfficeCryptoError::InvalidFormat(format!(
-                                "decrypted verifier hash (ECB) shorter than verifierHashSize (got {}, need {})",
-                                plain_ecb.len(),
-                                expected_hash_len
-                            ))
-                        })?;
-                    if ct_eq(verifier_hash_plain_ecb, verifier_hash) {
-                        return Ok(());
-                    }
-                }
+            if ct_eq(verifier_hash_plain, verifier_hash) {
+                Ok(())
+            } else {
+                Err(OfficeCryptoError::InvalidPassword)
             }
-
-            Err(OfficeCryptoError::InvalidPassword)
         }
         other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported cipher AlgID {other:#x}"
@@ -416,7 +353,7 @@ pub(crate) fn decrypt_standard_encrypted_package(
 
     match info.header.alg_id {
         CALG_RC4 => {
-            return decrypt_standard_encrypted_package_rc4(
+            decrypt_standard_encrypted_package_rc4(
                 info,
                 ciphertext,
                 total_size,
@@ -425,183 +362,70 @@ pub(crate) fn decrypt_standard_encrypted_package(
                 hash_alg,
             )
         }
-        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {}
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // MS-OFFCRYPTO Standard AES uses CryptoAPI `CryptDeriveKey` key derivation semantics
+            // and encrypts the verifier + package with AES-ECB (no IV).
+            if info.header.key_bits % 8 != 0 {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "EncryptionHeader keyBits must be divisible by 8 (got {})",
+                    info.header.key_bits
+                )));
+            }
+            let deriver = StandardKeyDeriver::new(
+                hash_alg,
+                info.header.key_bits,
+                &info.verifier.salt,
+                password,
+                StandardKeyDerivation::Aes,
+            );
+            let key0 = deriver.derive_key_for_block(0)?;
+            verify_password_standard_with_key(
+                &info.header,
+                &info.verifier,
+                hash_alg,
+                key0.as_slice(),
+            )?;
+
+            // The encrypted payload is padded to the AES block size (16 bytes). Some producers may
+            // include trailing bytes in the OLE stream beyond the padded plaintext length; ignore
+            // them by decrypting only what we need.
+            let padded_len = if expected_len == 0 {
+                0usize
+            } else {
+                expected_len
+                    .checked_add(15)
+                    .ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "EncryptedPackage expected length overflow".to_string(),
+                        )
+                    })?
+                    / 16
+                    * 16
+            };
+            if ciphertext.len() < padded_len {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
+                    ciphertext.len(),
+                    padded_len
+                )));
+            }
+            let to_decrypt = &ciphertext[..padded_len];
+            let mut plain = aes_ecb_decrypt(key0.as_slice(), to_decrypt)?;
+            if expected_len > plain.len() {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "decrypted package length {} shorter than expected {}",
+                    plain.len(),
+                    expected_len
+                )));
+            }
+            plain.truncate(expected_len);
+            Ok(plain)
+        }
         other => {
-            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            Err(OfficeCryptoError::UnsupportedEncryption(format!(
                 "unsupported cipher AlgID {other:#x} for EncryptedPackage"
             )))
         }
-    }
-
-    // Try a small set of schemes seen in the wild; accept the first that yields a plausible ZIP
-    // archive. (Some incorrect decryptions can start with `PK` by chance; validate the EOCD too.)
-    let schemes: [StandardScheme; 12] = [
-        StandardScheme::EcbStream,
-        StandardScheme::ConstKeyPerBlockIvHash,
-        StandardScheme::ConstKeyPerBlockIvHashBe,
-        StandardScheme::ConstKeyPerBlockIvZero,
-        StandardScheme::ConstKeyPerBlockIvSalt,
-        StandardScheme::PerBlockKeyEcbSegmented,
-        StandardScheme::PerBlockKeyIvZero,
-        StandardScheme::PerBlockKeyPerBlockIvHash,
-        StandardScheme::PerBlockKeyPerBlockIvHashBe,
-        StandardScheme::ConstKeyIvSaltStream,
-        StandardScheme::ConstKeyIvHashStream,
-        StandardScheme::ConstKeyIvZeroStream,
-    ];
-
-    fn try_with_deriver(
-        info: &StandardEncryptionInfo,
-        ciphertext: &[u8],
-        total_size: u64,
-        expected_len: usize,
-        deriver: &StandardKeyDeriver,
-        hash_alg: HashAlgorithm,
-        schemes: &[StandardScheme],
-    ) -> Result<(Option<Vec<u8>>, bool), OfficeCryptoError> {
-        let key0 = deriver.derive_key_for_block(0)?;
-
-        // Validate the password via the `EncryptionVerifier` if possible. If it doesn't validate,
-        // we still attempt to decrypt the package and validate ZIP structure for compatibility:
-        // some writers appear to use non-standard verifier derivation/encryption while keeping the
-        // package decryptable.
-        let verifier_ok = match verify_password_standard_with_key(
-            &info.header,
-            &info.verifier,
-            hash_alg,
-            key0.as_slice(),
-        ) {
-            Ok(()) => true,
-            Err(OfficeCryptoError::InvalidPassword) => false,
-            Err(e) => return Err(e),
-        };
-
-        for &scheme in schemes.iter() {
-            let Ok(out) = decrypt_standard_package_with_scheme(
-                info,
-                ciphertext,
-                total_size,
-                expected_len,
-                deriver,
-                &key0,
-                hash_alg,
-                scheme,
-            ) else {
-                continue;
-            };
-
-            if looks_like_zip(&out) {
-                return Ok((Some(out), verifier_ok));
-            }
-        }
-
-        Ok((None, verifier_ok))
-    }
-
-    // 50k spinCount is Standard/CryptoAPI default. Try AES derivation first, then a truncation
-    // variant for compatibility with some generators.
-    let deriver_aes_50k = StandardKeyDeriver::new(
-        hash_alg,
-        info.header.key_bits,
-        &info.verifier.salt,
-        password,
-        StandardKeyDerivation::Aes,
-    );
-    let (out, mut verifier_ok_any) = try_with_deriver(
-        info,
-        ciphertext,
-        total_size,
-        expected_len,
-        &deriver_aes_50k,
-        hash_alg,
-        schemes.as_slice(),
-    )?;
-    if let Some(out) = out {
-        return Ok(out);
-    }
-
-    // Compatibility: some writers use simple truncation instead of CryptoAPI `CryptDeriveKey`
-    // semantics for AES.
-    let deriver_trunc_50k = StandardKeyDeriver::new(
-        hash_alg,
-        info.header.key_bits,
-        &info.verifier.salt,
-        password,
-        StandardKeyDerivation::Rc4,
-    );
-    match try_with_deriver(
-        info,
-        ciphertext,
-        total_size,
-        expected_len,
-        &deriver_trunc_50k,
-        hash_alg,
-        schemes.as_slice(),
-    ) {
-        Ok((Some(out), _verifier_ok2)) => return Ok(out),
-        Ok((None, verifier_ok2)) => verifier_ok_any |= verifier_ok2,
-        Err(OfficeCryptoError::UnsupportedEncryption(_)) => {}
-        Err(e) => return Err(e),
-    }
-
-    // Compatibility: some fixtures and third-party generators use a non-standard spin count for
-    // CryptoAPI key derivation. Standard (Excel-compatible) encryption uses a fixed 50k spin
-    // count, but retry with a much smaller value if we couldn't validate the password or decrypt
-    // the package.
-    if !verifier_ok_any {
-        const LEGACY_SPIN: u32 = 1_000;
-        let deriver_aes_legacy = StandardKeyDeriver::new_with_spin_count(
-            hash_alg,
-            info.header.key_bits,
-            &info.verifier.salt,
-            password,
-            StandardKeyDerivation::Aes,
-            LEGACY_SPIN,
-        );
-        let (out2, verifier_ok2) = try_with_deriver(
-            info,
-            ciphertext,
-            total_size,
-            expected_len,
-            &deriver_aes_legacy,
-            hash_alg,
-            schemes.as_slice(),
-        )?;
-        verifier_ok_any |= verifier_ok2;
-        if let Some(out2) = out2 {
-            return Ok(out2);
-        }
-
-        let deriver_trunc_legacy = StandardKeyDeriver::new_with_spin_count(
-            hash_alg,
-            info.header.key_bits,
-            &info.verifier.salt,
-            password,
-            StandardKeyDerivation::Rc4,
-            LEGACY_SPIN,
-        );
-        match try_with_deriver(
-            info,
-            ciphertext,
-            total_size,
-            expected_len,
-            &deriver_trunc_legacy,
-            hash_alg,
-            schemes.as_slice(),
-        ) {
-            Ok((Some(out3), _verifier_ok3)) => return Ok(out3),
-            Ok((None, verifier_ok3)) => verifier_ok_any |= verifier_ok3,
-            Err(OfficeCryptoError::UnsupportedEncryption(_)) => {}
-            Err(e) => return Err(e),
-        }
-    }
-
-    if verifier_ok_any {
-        Err(OfficeCryptoError::UnsupportedEncryption(
-            "unable to decrypt Standard EncryptedPackage with supported schemes".to_string(),
-        ))
-    } else {
-        Err(OfficeCryptoError::InvalidPassword)
     }
 }
 
@@ -699,6 +523,12 @@ pub(crate) fn encrypt_standard_encrypted_package(
             "Standard encryption requires SHA1 (CryptoAPI)".to_string(),
         ));
     }
+    if opts.spin_count != 50_000 {
+        return Err(OfficeCryptoError::InvalidOptions(format!(
+            "Standard encryption uses a fixed spin_count=50_000 (got {})",
+            opts.spin_count
+        )));
+    }
 
     let key_bits_u32 = u32::try_from(opts.key_bits).map_err(|_| {
         OfficeCryptoError::InvalidOptions("key_bits does not fit in u32".to_string())
@@ -738,10 +568,9 @@ pub(crate) fn encrypt_standard_encrypted_package(
     let verifier_hash_size = verifier_hash.len() as u32;
     let verifier_hash_padded = pad_zero(&verifier_hash, 16);
 
-    // Standard encryption verifier fields are encrypted with AES-CBC, IV=0.
-    let iv0 = [0u8; 16];
-    let encrypted_verifier = aes_cbc_encrypt(&key0, &iv0, &verifier_plain)?;
-    let encrypted_verifier_hash = aes_cbc_encrypt(&key0, &iv0, &verifier_hash_padded)?;
+    // Standard encryption verifier fields are encrypted with AES-ECB (no IV).
+    let encrypted_verifier = aes_ecb_encrypt(&key0, &verifier_plain)?;
+    let encrypted_verifier_hash = aes_ecb_encrypt(&key0, &verifier_hash_padded)?;
 
     let mut verifier_bytes = Vec::new();
     verifier_bytes.extend_from_slice(&(salt.len() as u32).to_le_bytes());
@@ -782,249 +611,15 @@ pub(crate) fn encrypt_standard_encrypted_package(
     encryption_info.extend_from_slice(&header_bytes);
     encryption_info.extend_from_slice(&verifier_bytes);
 
-    // Encrypt the package in 4096-byte segments with a constant key and per-segment IV derived as
-    // SHA1(salt || segment_index)[0..16].
+    // Standard encryption encrypts the full package with AES-ECB using key(block=0), with
+    // zero-padding to a multiple of 16 bytes.
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(zip_bytes.len() as u64).to_le_bytes());
-
-    const SEGMENT_LEN: usize = 4096;
-    let mut block_index = 0u32;
-    for chunk in zip_bytes.chunks(SEGMENT_LEN) {
-        let iv = derive_iv(HashAlgorithm::Sha1, &salt, &block_index.to_le_bytes(), 16);
-        let plain = pad_zero(chunk, 16);
-        let enc = aes_cbc_encrypt(&key0, &iv, &plain)?;
-        encrypted_package.extend_from_slice(&enc);
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("segment counter overflow".to_string())
-        })?;
-    }
+    let padded = pad_zero(zip_bytes, 16);
+    let enc = aes_ecb_encrypt(&key0, &padded)?;
+    encrypted_package.extend_from_slice(&enc);
 
     Ok((encryption_info, encrypted_package))
-}
-
-#[derive(Debug, Clone, Copy)]
-enum StandardScheme {
-    /// Treat the ciphertext as a single AES-ECB stream using key(block=0).
-    EcbStream,
-    /// Segment the data in 4096-byte chunks; for chunk N use AES-ECB with a key derived with
-    /// blockIndex=N.
-    PerBlockKeyEcbSegmented,
-    /// Segment the data in 4096-byte chunks; for chunk N use a key derived with blockIndex=N and
-    /// IV=0.
-    PerBlockKeyIvZero,
-    /// Segment the data in 4096-byte chunks; for chunk N use a key derived with blockIndex=N and
-    /// IV derived as hash(salt||blockIndex).
-    PerBlockKeyPerBlockIvHash,
-    /// Same as [`PerBlockKeyPerBlockIvHash`], but derive the IV using `BE32(blockIndex)` instead of
-    /// `LE32(blockIndex)` (compatibility with some non-conforming writers).
-    PerBlockKeyPerBlockIvHashBe,
-    /// Segment the data in 4096-byte chunks; use a single key derived with blockIndex=0 and IV
-    /// derived as hash(salt||blockIndex) for each chunk.
-    ConstKeyPerBlockIvHash,
-    /// Same as [`ConstKeyPerBlockIvHash`], but derive the IV using `BE32(blockIndex)` instead of
-    /// `LE32(blockIndex)` (compatibility with some non-conforming writers).
-    ConstKeyPerBlockIvHashBe,
-    /// Segment the data in 4096-byte chunks; use a single key derived with blockIndex=0 and IV=0
-    /// for each chunk.
-    ConstKeyPerBlockIvZero,
-    /// Segment the data in 4096-byte chunks; use a single key derived with blockIndex=0 and
-    /// IV=salt for each chunk.
-    ConstKeyPerBlockIvSalt,
-    /// Treat the ciphertext as a single AES-CBC stream using key(block=0) and IV=salt.
-    ConstKeyIvSaltStream,
-    /// Treat the ciphertext as a single AES-CBC stream using key(block=0) and
-    /// IV=hash(salt||0)[0..16].
-    ConstKeyIvHashStream,
-    /// Treat the ciphertext as a single AES-CBC stream using key(block=0) and IV=0.
-    ConstKeyIvZeroStream,
-}
-
-fn decrypt_standard_package_with_scheme(
-    info: &StandardEncryptionInfo,
-    ciphertext: &[u8],
-    total_size: u64,
-    expected_len: usize,
-    deriver: &StandardKeyDeriver,
-    key0: &zeroize::Zeroizing<Vec<u8>>,
-    hash_alg: HashAlgorithm,
-    scheme: StandardScheme,
-) -> Result<Vec<u8>, OfficeCryptoError> {
-    match scheme {
-        StandardScheme::EcbStream => {
-            let mut plain = aes_ecb_decrypt(key0.as_slice(), ciphertext)?;
-            if expected_len > plain.len() {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "decrypted package length {} shorter than expected {}",
-                    plain.len(),
-                    expected_len
-                )));
-            }
-            plain.truncate(expected_len);
-            Ok(plain)
-        }
-        StandardScheme::PerBlockKeyEcbSegmented => {
-            const SEGMENT_LEN: usize = 4096;
-            let mut out = Vec::new();
-            out.try_reserve_exact(ciphertext.len()).map_err(|source| {
-                OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
-            })?;
-
-            let mut offset = 0usize;
-            let mut block = 0u32;
-            while offset < ciphertext.len() {
-                let seg_len = (ciphertext.len() - offset).min(SEGMENT_LEN);
-                let seg = &ciphertext[offset..offset + seg_len];
-                let key = deriver.derive_key_for_block(block)?;
-                let mut plain = aes_ecb_decrypt(key.as_slice(), seg)?;
-                out.append(&mut plain);
-                offset += seg_len;
-                block = block.checked_add(1).ok_or_else(|| {
-                    OfficeCryptoError::InvalidFormat("segment counter overflow".to_string())
-                })?;
-            }
-
-            if expected_len > out.len() {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "decrypted package length {} shorter than expected {}",
-                    out.len(),
-                    expected_len
-                )));
-            }
-            out.truncate(expected_len);
-            Ok(out)
-        }
-        StandardScheme::PerBlockKeyIvZero => {
-            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
-                let key = deriver.derive_key_for_block(block)?;
-                Ok((key, [0u8; 16].to_vec()))
-            })
-        }
-        StandardScheme::PerBlockKeyPerBlockIvHash => decrypt_segmented(
-            ciphertext,
-            total_size,
-            expected_len,
-            |block| {
-                let key = deriver.derive_key_for_block(block)?;
-                let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_le_bytes(), 16);
-                Ok((key, iv))
-            },
-        ),
-        StandardScheme::PerBlockKeyPerBlockIvHashBe => decrypt_segmented(
-            ciphertext,
-            total_size,
-            expected_len,
-            |block| {
-                let key = deriver.derive_key_for_block(block)?;
-                let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_be_bytes(), 16);
-                Ok((key, iv))
-            },
-        ),
-        StandardScheme::ConstKeyPerBlockIvHash => {
-            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
-                let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_le_bytes(), 16);
-                Ok((key0.clone(), iv))
-            })
-        }
-        StandardScheme::ConstKeyPerBlockIvHashBe => {
-            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
-                let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_be_bytes(), 16);
-                Ok((key0.clone(), iv))
-            })
-        }
-        StandardScheme::ConstKeyPerBlockIvZero => decrypt_segmented(
-            ciphertext,
-            total_size,
-            expected_len,
-            |_block| Ok((key0.clone(), [0u8; 16].to_vec())),
-        ),
-        StandardScheme::ConstKeyPerBlockIvSalt => {
-            let iv = info.verifier.salt.get(..16).ok_or_else(|| {
-                OfficeCryptoError::InvalidFormat("EncryptionVerifier salt too short".to_string())
-            })?;
-            decrypt_segmented(ciphertext, total_size, expected_len, |_block| {
-                Ok((key0.clone(), iv.to_vec()))
-            })
-        }
-        StandardScheme::ConstKeyIvSaltStream => {
-            let iv = info.verifier.salt.get(..16).ok_or_else(|| {
-                OfficeCryptoError::InvalidFormat("EncryptionVerifier salt too short".to_string())
-            })?;
-            let mut plain = aes_cbc_decrypt(key0.as_slice(), iv, ciphertext)?;
-            if expected_len > plain.len() {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "decrypted package length {} shorter than expected {}",
-                    plain.len(),
-                    expected_len
-                )));
-            }
-            plain.truncate(expected_len);
-            Ok(plain)
-        }
-        StandardScheme::ConstKeyIvHashStream => {
-            let iv = derive_iv(hash_alg, &info.verifier.salt, &0u32.to_le_bytes(), 16);
-            let mut plain = aes_cbc_decrypt(key0.as_slice(), &iv, ciphertext)?;
-            if expected_len > plain.len() {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "decrypted package length {} shorter than expected {}",
-                    plain.len(),
-                    expected_len
-                )));
-            }
-            plain.truncate(expected_len);
-            Ok(plain)
-        }
-        StandardScheme::ConstKeyIvZeroStream => {
-            let iv0 = [0u8; 16];
-            let mut plain = aes_cbc_decrypt(key0.as_slice(), &iv0, ciphertext)?;
-            if expected_len > plain.len() {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "decrypted package length {} shorter than expected {}",
-                    plain.len(),
-                    expected_len
-                )));
-            }
-            plain.truncate(expected_len);
-            Ok(plain)
-        }
-    }
-}
-
-fn decrypt_segmented<F>(
-    ciphertext: &[u8],
-    total_size: u64,
-    expected_len: usize,
-    mut key_iv_for_block: F,
-) -> Result<Vec<u8>, OfficeCryptoError>
-where
-    F: FnMut(u32) -> Result<(zeroize::Zeroizing<Vec<u8>>, Vec<u8>), OfficeCryptoError>,
-{
-    const SEGMENT_LEN: usize = 4096;
-    let mut out = Vec::new();
-    out.try_reserve_exact(ciphertext.len()).map_err(|source| {
-        OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
-    })?;
-    let mut offset = 0usize;
-    let mut block = 0u32;
-    while offset < ciphertext.len() {
-        let seg_len = (ciphertext.len() - offset).min(SEGMENT_LEN);
-        let seg = &ciphertext[offset..offset + seg_len];
-        let (key, iv) = key_iv_for_block(block)?;
-        let mut plain = aes_cbc_decrypt(&key, &iv, seg)?;
-        out.append(&mut plain);
-        offset += seg_len;
-        block = block.checked_add(1).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("segment counter overflow".to_string())
-        })?;
-    }
-    if expected_len > out.len() {
-        return Err(OfficeCryptoError::InvalidFormat(format!(
-            "decrypted package length {} shorter than expected {}",
-            out.len(),
-            expected_len
-        )));
-    }
-    out.truncate(expected_len);
-    Ok(out)
 }
 
 fn encode_utf16le_nul_terminated(s: &str) -> Vec<u8> {
@@ -1050,7 +645,7 @@ fn pad_zero(data: &[u8], block_size: usize) -> Vec<u8> {
 pub(crate) mod tests {
     use super::*;
     use crate::crypto::{
-        aes_cbc_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place, HashAlgorithm,
+        aes_ecb_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place, HashAlgorithm,
         StandardKeyDerivation, StandardKeyDeriver,
     };
     use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
@@ -1104,14 +699,12 @@ pub(crate) mod tests {
             StandardKeyDerivation::Aes,
         );
         let key0 = deriver.derive_key_for_block(0).expect("key0");
-        let iv = [0u8; 16];
 
-        let encrypted_verifier =
-            aes_cbc_encrypt(&key0, &iv, &verifier_plain).expect("encrypt verifier");
+        let encrypted_verifier = aes_ecb_encrypt(&key0, &verifier_plain).expect("encrypt verifier");
         let mut verifier_hash_padded = verifier_hash.clone();
         verifier_hash_padded.resize(32, 0);
         let encrypted_verifier_hash =
-            aes_cbc_encrypt(&key0, &iv, &verifier_hash_padded).expect("encrypt verifier hash");
+            aes_ecb_encrypt(&key0, &verifier_hash_padded).expect("encrypt verifier hash");
 
         let salt_size = salt.len() as u32;
         let verifier_hash_size = verifier_hash.len() as u32;
@@ -1163,8 +756,11 @@ pub(crate) mod tests {
         salt: &[u8],
         password: &str,
         block_index: u32,
+        derivation: StandardKeyDerivation,
     ) -> Vec<u8> {
-        // Matches `StandardKeyDeriver` (50k spin) + CryptoAPI CryptDeriveKey behavior.
+        // Matches `StandardKeyDeriver` (50k spin) + MS-OFFCRYPTO Standard derivation:
+        // - RC4: key = H_final[..key_len] (truncation)
+        // - AES: CryptoAPI `CryptDeriveKey` (ipad/opad expansion) even when key_len <= hash_len
         let pw = password_to_utf16le(password);
         let pw_hash = hash_password(hash_alg, salt, &pw, 50_000);
 
@@ -1174,22 +770,25 @@ pub(crate) mod tests {
         let h = hash_alg.digest(&buf);
 
         let key_len = (key_bits as usize) / 8;
-        if key_len <= h.len() {
-            return h[..key_len].to_vec();
+        match derivation {
+            StandardKeyDerivation::Rc4 => h[..key_len].to_vec(),
+            StandardKeyDerivation::Aes => {
+                // CryptoAPI key expansion used by MS-OFFCRYPTO Standard encryption: XOR the hash
+                // into 0x36/0x5C padded 64-byte blocks (HMAC-like), hash each, and concatenate.
+                let mut buf1 = vec![0x36u8; 64];
+                let mut buf2 = vec![0x5cu8; 64];
+                for (i, &b) in h.iter().take(64).enumerate() {
+                    buf1[i] ^= b;
+                    buf2[i] ^= b;
+                }
+                let mut out = hash_alg.digest(&buf1);
+                if key_len > out.len() {
+                    out.extend_from_slice(&hash_alg.digest(&buf2));
+                }
+                out.truncate(key_len);
+                out
+            }
         }
-
-        // CryptoAPI key expansion used by MS-OFFCRYPTO Standard encryption: XOR the hash into
-        // 0x36/0x5C padded 64-byte blocks (HMAC-like), hash each, and concatenate.
-        let mut buf1 = vec![0x36u8; 64];
-        let mut buf2 = vec![0x5cu8; 64];
-        for (i, &b) in h.iter().take(64).enumerate() {
-            buf1[i] ^= b;
-            buf2[i] ^= b;
-        }
-        let mut out = hash_alg.digest(&buf1);
-        out.extend_from_slice(&hash_alg.digest(&buf2));
-        out.truncate(key_len);
-        out
     }
 
     #[test]
@@ -1212,7 +811,14 @@ pub(crate) mod tests {
         ] {
             for key_bits in [40u32, 56u32, 128u32] {
                 // Derive the expected key for block 0 and validate truncation.
-                let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
+                let key_ref = derive_key_ref(
+                    hash_alg,
+                    key_bits,
+                    &salt,
+                    password,
+                    0,
+                    StandardKeyDerivation::Rc4,
+                );
                 let deriver = StandardKeyDeriver::new(
                     hash_alg,
                     key_bits,
@@ -1285,7 +891,14 @@ pub(crate) mod tests {
 
         let key_bits = 256u32;
         let hash_alg = HashAlgorithm::Sha1;
-        let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
+        let key_ref = derive_key_ref(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            0,
+            StandardKeyDerivation::Aes,
+        );
         let deriver = StandardKeyDeriver::new(
             hash_alg,
             key_bits,
@@ -1301,16 +914,15 @@ pub(crate) mod tests {
             "AES-256+SHA1 should require CryptDeriveKey expansion"
         );
 
-        // Encrypt verifier and verifierHash with AES-CBC, IV=0.
-        let iv = [0u8; 16];
+        // Encrypt verifier and verifierHash with AES-ECB (no IV).
         let encrypted_verifier =
-            aes_cbc_encrypt(&key_ref, &iv, &verifier_plain).expect("encrypt verifier");
+            aes_ecb_encrypt(&key_ref, &verifier_plain).expect("encrypt verifier");
 
         let verifier_hash = hash_alg.digest(&verifier_plain);
         let mut verifier_hash_padded = verifier_hash.clone();
         verifier_hash_padded.resize(32, 0);
         let encrypted_verifier_hash =
-            aes_cbc_encrypt(&key_ref, &iv, &verifier_hash_padded).expect("encrypt verifier hash");
+            aes_ecb_encrypt(&key_ref, &verifier_hash_padded).expect("encrypt verifier hash");
 
         let header = EncryptionHeader {
             alg_id: CALG_AES_256,
@@ -1330,5 +942,42 @@ pub(crate) mod tests {
         let err =
             verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong password");
         assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+    }
+
+    #[test]
+    fn cryptderivekey_is_applied_for_aes128_sha1_even_though_keylen_le_digest_len() {
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [0x24u8; 16];
+        let hash_alg = HashAlgorithm::Sha1;
+        let key_bits = 128u32;
+
+        let key_ref = derive_key_ref(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            0,
+            StandardKeyDerivation::Aes,
+        );
+        assert_eq!(key_ref.len(), 16);
+
+        // Ensure the AES derivation is *not* the RC4-style truncation.
+        let pw = password_to_utf16le(password);
+        let pw_hash = hash_password(hash_alg, &salt, &pw, 50_000);
+        let mut buf = Vec::with_capacity(pw_hash.len() + 4);
+        buf.extend_from_slice(&pw_hash);
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        let h_final = hash_alg.digest(&buf);
+        assert_ne!(key_ref.as_slice(), &h_final[..16]);
+
+        let deriver = StandardKeyDeriver::new(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
+        let key0 = deriver.derive_key_for_block(0).expect("derive key");
+        assert_eq!(key0.as_slice(), key_ref.as_slice());
     }
 }
