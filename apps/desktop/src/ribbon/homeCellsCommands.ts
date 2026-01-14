@@ -8,6 +8,8 @@ export type ShowQuickPick = <T>(items: QuickPickItem<T>[], options?: { placeHold
 export type ShowToast = (message: string, type?: "info" | "warning" | "error") => void;
 
 const MAX_STRUCTURAL_CELL_SELECTION = 50_000;
+type InsertCellsChoice = "shiftRight" | "shiftDown" | "entireRow" | "entireColumn";
+type DeleteCellsChoice = "shiftLeft" | "shiftUp" | "entireRow" | "entireColumn";
 
 function selectionCellCount(range: Range): number {
   const r = normalizeSelectionRange(range);
@@ -51,39 +53,108 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
     }
 
     const cellCount = selectionCellCount(range);
-    if (cellCount > MAX_STRUCTURAL_CELL_SELECTION) {
-      showToast(
-        `Selection too large (>${MAX_STRUCTURAL_CELL_SELECTION.toLocaleString()} cells). Select fewer cells and try again.`,
-        "warning",
-      );
-      return true;
-    }
+    const tooLargeForShift = cellCount > MAX_STRUCTURAL_CELL_SELECTION;
+
+    const rowCount = range.endRow - range.startRow + 1;
+    const colCount = range.endCol - range.startCol + 1;
 
     if (commandId === "home.cells.insert.insertCells") {
       const choice = await showQuickPick(
         [
-          { label: "Shift cells right", value: "right" as const },
-          { label: "Shift cells down", value: "down" as const },
+          {
+            label: "Shift cells right",
+            value: "shiftRight" as const satisfies InsertCellsChoice,
+            description: tooLargeForShift ? "Selection too large" : undefined,
+          },
+          {
+            label: "Shift cells down",
+            value: "shiftDown" as const satisfies InsertCellsChoice,
+            description: tooLargeForShift ? "Selection too large" : undefined,
+          },
+          { label: "Entire row", value: "entireRow" as const satisfies InsertCellsChoice },
+          { label: "Entire column", value: "entireColumn" as const satisfies InsertCellsChoice },
         ],
         { placeHolder: "Insert Cells" },
       );
       if (!choice) return true;
 
-      await app.insertCells(range, choice);
-      return true;
+      switch (choice) {
+        case "shiftRight":
+        case "shiftDown": {
+          if (tooLargeForShift) {
+            showToast(
+              `Selection too large (>${MAX_STRUCTURAL_CELL_SELECTION.toLocaleString()} cells). Select fewer cells and try again.`,
+              "warning",
+            );
+            return true;
+          }
+          await app.insertCells(range, choice === "shiftRight" ? "right" : "down");
+          return true;
+        }
+        case "entireRow": {
+          const doc = app.getDocument();
+          const sheetId = app.getCurrentSheetId();
+          doc.insertRows(sheetId, range.startRow, rowCount, { label: "Insert Rows", source: "ribbon" });
+          return true;
+        }
+        case "entireColumn": {
+          const doc = app.getDocument();
+          const sheetId = app.getCurrentSheetId();
+          doc.insertCols(sheetId, range.startCol, colCount, { label: "Insert Columns", source: "ribbon" });
+          return true;
+        }
+        default:
+          return true;
+      }
     }
 
     const choice = await showQuickPick(
       [
-        { label: "Shift cells left", value: "left" as const },
-        { label: "Shift cells up", value: "up" as const },
+        {
+          label: "Shift cells left",
+          value: "shiftLeft" as const satisfies DeleteCellsChoice,
+          description: tooLargeForShift ? "Selection too large" : undefined,
+        },
+        {
+          label: "Shift cells up",
+          value: "shiftUp" as const satisfies DeleteCellsChoice,
+          description: tooLargeForShift ? "Selection too large" : undefined,
+        },
+        { label: "Entire row", value: "entireRow" as const satisfies DeleteCellsChoice },
+        { label: "Entire column", value: "entireColumn" as const satisfies DeleteCellsChoice },
       ],
       { placeHolder: "Delete Cells" },
     );
     if (!choice) return true;
 
-    await app.deleteCells(range, choice);
-    return true;
+    switch (choice) {
+      case "shiftLeft":
+      case "shiftUp": {
+        if (tooLargeForShift) {
+          showToast(
+            `Selection too large (>${MAX_STRUCTURAL_CELL_SELECTION.toLocaleString()} cells). Select fewer cells and try again.`,
+            "warning",
+          );
+          return true;
+        }
+        await app.deleteCells(range, choice === "shiftLeft" ? "left" : "up");
+        return true;
+      }
+      case "entireRow": {
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+        doc.deleteRows(sheetId, range.startRow, rowCount, { label: "Delete Rows", source: "ribbon" });
+        return true;
+      }
+      case "entireColumn": {
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+        doc.deleteCols(sheetId, range.startCol, colCount, { label: "Delete Columns", source: "ribbon" });
+        return true;
+      }
+      default:
+        return true;
+    }
   } finally {
     app.focus();
   }
