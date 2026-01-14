@@ -4446,6 +4446,22 @@ impl WasmWorkbook {
             }
         }
 
+        // Best-effort: import the persisted worksheet view origin (`pane/@topLeftCell`) so
+        // `INFO("origin")` returns an Excel-like value immediately after XLSX import.
+        //
+        // Hosts may still override this later via `setSheetOrigin`.
+        for sheet in &model.sheets {
+            let Some(origin) = sheet.view.pane.top_left_cell else {
+                continue;
+            };
+            let sheet_name = wb
+                .resolve_sheet(&sheet.name)
+                .expect("sheet just ensured must resolve")
+                .to_string();
+            let origin = origin.to_a1();
+            let _ = wb.engine.set_sheet_origin(&sheet_name, Some(&origin));
+        }
+
         // Import worksheet column/row properties (width/hidden/default style) and default column
         // width.
         //
