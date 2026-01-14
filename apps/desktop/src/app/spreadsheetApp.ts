@@ -5780,6 +5780,12 @@ export class SpreadsheetApp {
       const sheetCount = (this.document as any)?.model?.sheets?.size;
       const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
       const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
+      // Workbook metadata changes can affect formula-bar argument previews even while editing.
+      // Force the FormulaBarView to invalidate and re-evaluate the active argument preview so it
+      // stays in sync with functions like `CELL("filename")` / `INFO("directory")`.
+      if (this.formulaBar?.isEditing()) {
+        this.formulaBar.setArgumentPreviewProvider((expr) => this.evaluateFormulaBarArgumentPreview(expr));
+      }
       if (!hasWasmEngine || !useEngineCache) {
         const tooltipRange = this.formulaRangePreviewTooltipLastRange;
         const tooltipRefText = this.formulaRangePreviewTooltipLastRefText;
