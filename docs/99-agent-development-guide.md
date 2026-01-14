@@ -709,6 +709,8 @@ mockups/README.md                # Full design system
 ```css
 --radius: 4px;      /* Panels, buttons */
 --radius-sm: 3px;   /* Tags, small elements */
+--radius-xs: 2px;   /* Micro radius: tiny indicators, highlights */
+--radius-pill: 999px; /* Pills, segmented controls */
 
 /* Grid: 22px rows, 90px columns, 40px row headers */
 ```
