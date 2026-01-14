@@ -163,10 +163,19 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
 
 function signaturePreview(name: string): string {
   const sig = getFunctionSignature(name);
-  if (!sig) return `${name}(…)`;
-  return signatureParts(sig, null, { argSeparator: DEFAULT_ARG_SEPARATOR })
+  if (!sig) return "(…)";
+
+  // The dropdown already shows the function name; display just the argument list for
+  // a compact "signature preview" (Excel-like).
+  const parts = signatureParts(sig, null, { argSeparator: DEFAULT_ARG_SEPARATOR });
+  if (parts.length < 2) return "(…)";
+
+  // `signatureParts` yields: `${NAME}(` + [params/separators] + `)`.
+  const inner = parts
+    .slice(1, -1)
     .map((p) => p.text)
     .join("");
+  return `(${inner})`;
 }
 
 function preserveTypedCasing(typedPrefix: string, canonical: string): string {
