@@ -392,11 +392,13 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     const onCancel = vi.fn();
     const onHoverRange = vi.fn();
+    const onHoverRangeWithText = vi.fn();
     const onReferenceHighlights = vi.fn();
     const view = new FormulaBarView(host, {
       onCommit: () => {},
       onCancel,
       onHoverRange,
+      onHoverRangeWithText,
       onReferenceHighlights,
     });
 
@@ -404,6 +406,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.focus();
 
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([parseA1Range("A1"), "A1"]);
     expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
     view.setReadOnly(true);
@@ -412,6 +415,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.textarea.readOnly).toBe(true);
     expect(onCancel).not.toHaveBeenCalled();
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([null, null]);
     expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     host.remove();
@@ -832,12 +836,14 @@ describe("FormulaBarView commit/cancel UX", () => {
     const onCommit = vi.fn();
     const onCancel = vi.fn();
     const onHoverRange = vi.fn();
+    const onHoverRangeWithText = vi.fn();
     const onReferenceHighlights = vi.fn();
-    const view = new FormulaBarView(host, { onCommit, onCancel, onHoverRange, onReferenceHighlights });
+    const view = new FormulaBarView(host, { onCommit, onCancel, onHoverRange, onHoverRangeWithText, onReferenceHighlights });
     view.setActiveCell({ address: "A1", input: "=A1", value: null });
     view.textarea.focus();
 
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([parseA1Range("A1"), "A1"]);
     expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
     view.textarea.blur();
@@ -845,11 +851,13 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([null, null]);
     expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     // Start editing again so we can verify cancelEdit clears overlays too.
     view.textarea.focus();
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([parseA1Range("A1"), "A1"]);
     expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
     view.textarea.blur();
@@ -857,6 +865,7 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onHoverRangeWithText.mock.calls.at(-1) ?? []).toEqual([null, null]);
     expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     host.remove();
