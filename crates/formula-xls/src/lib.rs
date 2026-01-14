@@ -1741,6 +1741,9 @@ fn import_xls_with_biff_reader(
                                             // less-informative `#UNKNOWN!`.
                                             if !existing.contains("#UNKNOWN!")
                                                 && existing != ErrorValue::Ref.as_str()
+                                                && !is_calamine_unrecognised_formula_placeholder(
+                                                    existing,
+                                                )
                                             {
                                                 continue;
                                             }
@@ -1867,7 +1870,10 @@ fn import_xls_with_biff_reader(
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 if sheet
                                     .formula(anchor)
-                                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                                    .is_some_and(|f| {
+                                        f != ErrorValue::Unknown.as_str()
+                                            && !is_calamine_unrecognised_formula_placeholder(f)
+                                    })
                                 {
                                     continue;
                                 }
@@ -1913,7 +1919,10 @@ fn import_xls_with_biff_reader(
                                     // replace it with a recovered materialized formula when possible.
                                     if sheet
                                         .formula(anchor)
-                                        .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                                        .is_some_and(|f| {
+                                            f != ErrorValue::Unknown.as_str()
+                                                && !is_calamine_unrecognised_formula_placeholder(f)
+                                        })
                                     {
                                         continue;
                                     }
@@ -2070,6 +2079,9 @@ fn import_xls_with_biff_reader(
 
                                         if sheet.formula(anchor).is_some_and(|existing| {
                                             existing != ErrorValue::Unknown.as_str()
+                                                && !is_calamine_unrecognised_formula_placeholder(
+                                                    existing,
+                                                )
                                         }) {
                                             continue;
                                         }
@@ -3376,6 +3388,11 @@ fn cell_error_to_error_value(err: calamine::CellErrorType) -> ErrorValue {
     }
 }
 
+fn is_calamine_unrecognised_formula_placeholder(formula: &str) -> bool {
+    let trimmed = formula.trim_start();
+    trimmed.starts_with("Unrecognised formula") || trimmed.starts_with("Unrecognized formula")
+}
+
 fn apply_row_col_properties(
     sheet: &mut formula_model::Worksheet,
     props: &biff::SheetRowColProperties,
@@ -4521,7 +4538,9 @@ fn import_biff8_shared_formulas(
             // placeholder; otherwise preserve the existing anchor formula.
             if anchor_cell != cell_ref
                 && existing.is_some_and(|f| {
-                    f != ErrorValue::Unknown.as_str() && f != ErrorValue::Ref.as_str()
+                    f != ErrorValue::Unknown.as_str()
+                        && f != ErrorValue::Ref.as_str()
+                        && !is_calamine_unrecognised_formula_placeholder(f)
                 })
             {
                 continue;
@@ -4607,6 +4626,7 @@ fn import_biff8_shared_formulas(
                         && !existing
                             .trim_start()
                             .starts_with(ErrorValue::Unknown.as_str())
+                        && !is_calamine_unrecognised_formula_placeholder(existing)
                     {
                         false
                     } else {
