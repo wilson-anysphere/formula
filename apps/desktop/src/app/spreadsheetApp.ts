@@ -6953,7 +6953,15 @@ export class SpreadsheetApp {
     const resolvedSheetId = sheetId ? String(sheetId) : this.sheetId;
     if (!resolvedSheetId) return [];
     const objects = this.listDrawingObjectsForSheet(resolvedSheetId);
-    return [...objects].sort((a, b) => b.zOrder - a.zOrder);
+    if (objects.length === 0) return [];
+    // `listDrawingObjectsForSheet` returns drawings sorted for rendering (back-to-front, ascending).
+    // For a Selection Pane / command UI we want topmost-first, which corresponds to reverse render
+    // order (including reversing within zOrder ties).
+    const out = new Array<DrawingObject>(objects.length);
+    for (let i = 0; i < objects.length; i += 1) {
+      out[i] = objects[objects.length - 1 - i]!;
+    }
+    return out;
   }
 
   /**

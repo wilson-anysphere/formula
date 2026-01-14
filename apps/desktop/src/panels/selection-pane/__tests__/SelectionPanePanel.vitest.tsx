@@ -136,6 +136,12 @@ describe("Selection Pane panel", () => {
         id: 2,
         kind: { type: "image", imageId: "img_2" },
         anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+      {
+        id: 3,
+        kind: { type: "image", imageId: "img_3" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
         zOrder: 1,
       },
     ];
@@ -177,17 +183,18 @@ describe("Selection Pane panel", () => {
     });
 
     const itemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(itemEls.length).toBe(2);
-    // Topmost first (highest z-order -> id=2).
-    expect(itemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
-    expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(itemEls.length).toBe(3);
+    // Topmost first (highest z-order -> id=3). Within ties, reverse render order (id=2 before id=1).
+    expect(itemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
+    expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
+    expect(itemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
 
     await act(async () => {
-      (itemEls[1] as HTMLElement).click();
+      (itemEls[2] as HTMLElement).click();
     });
 
     expect(app.getSelectedDrawingId()).toBe(1);
-    expect(itemEls[1]?.getAttribute("aria-selected")).toBe("true");
+    expect(itemEls[2]?.getAttribute("aria-selected")).toBe("true");
 
     // Bring Forward should update z-order and re-render the list (so Picture 1 becomes topmost).
     const bringForwardBtn = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-1"]');
@@ -204,8 +211,8 @@ describe("Selection Pane panel", () => {
     const nextDrawings: DrawingObject[] = [
       ...(Array.isArray(currentDrawings) ? currentDrawings : []),
       {
-        id: 3,
-        kind: { type: "shape", label: "Shape 3" },
+        id: 4,
+        kind: { type: "shape", label: "Shape 4" },
         anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
         zOrder: 2,
       },
@@ -216,8 +223,8 @@ describe("Selection Pane panel", () => {
     });
 
     const updatedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(updatedItemEls.length).toBe(3);
-    expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
+    expect(updatedItemEls.length).toBe(4);
+    expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-4");
 
     await act(async () => {
       unmountRibbon?.();
