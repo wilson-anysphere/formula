@@ -377,6 +377,7 @@ mod tests {
         let key40 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, 40, 0);
 
         assert_eq!(key0, key40);
+        // Office represents the 40-bit RC4 key as a 16-byte key padded with zeros.
         assert_eq!(key0.len(), 16);
         assert!(key0[5..].iter().all(|b| *b == 0));
     }
