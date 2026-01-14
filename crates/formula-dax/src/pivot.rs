@@ -1829,7 +1829,6 @@ fn pivot_planned_row_group_by(
 
     let (table_ref, group_key_accessors) =
         build_group_key_accessors(model, base_table, group_by, filter)?;
-    let base_table_key = normalize_ident(base_table);
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
@@ -2047,7 +2046,6 @@ fn pivot_row_scan(
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
     let engine = DaxEngine::new();
-    let base_table_key = normalize_ident(base_table);
 
     let table_ref = model
         .table(base_table)
