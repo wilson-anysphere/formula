@@ -153,17 +153,18 @@ function compareCellRefs(a, b) {
  * @returns {SheetDiff}
  */
 function sortSheetDiff(diff) {
-  return {
-    added: [...diff.added].sort((a, b) => compareCellRefs(a.cell, b.cell)),
-    removed: [...diff.removed].sort((a, b) => compareCellRefs(a.cell, b.cell)),
-    modified: [...diff.modified].sort((a, b) => compareCellRefs(a.cell, b.cell)),
-    formatOnly: [...diff.formatOnly].sort((a, b) => compareCellRefs(a.cell, b.cell)),
-    moved: [...diff.moved].sort((a, b) => {
-      const cmpOld = compareCellRefs(a.oldLocation, b.oldLocation);
-      if (cmpOld !== 0) return cmpOld;
-      return compareCellRefs(a.newLocation, b.newLocation);
-    }),
-  };
+  // `semanticDiff` already allocates fresh arrays; sort in-place to avoid an extra
+  // copy per diff category (which can be large for big restores/merges).
+  diff.added.sort((a, b) => compareCellRefs(a.cell, b.cell));
+  diff.removed.sort((a, b) => compareCellRefs(a.cell, b.cell));
+  diff.modified.sort((a, b) => compareCellRefs(a.cell, b.cell));
+  diff.formatOnly.sort((a, b) => compareCellRefs(a.cell, b.cell));
+  diff.moved.sort((a, b) => {
+    const cmpOld = compareCellRefs(a.oldLocation, b.oldLocation);
+    if (cmpOld !== 0) return cmpOld;
+    return compareCellRefs(a.newLocation, b.newLocation);
+  });
+  return diff;
 }
 
 /**
