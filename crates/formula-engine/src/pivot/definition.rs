@@ -766,6 +766,7 @@ pub(crate) fn refresh_pivot(
                 None
             };
 
+            let mut desired_style_id = None;
             if let Some(fmt) = number_format {
                 let style_id = match style_cache.get(fmt) {
                     Some(id) => *id,
@@ -778,6 +779,15 @@ pub(crate) fn refresh_pivot(
                         style_id
                     }
                 };
+                desired_style_id = Some(style_id);
+            } else if prev_output_range.is_some() && r > 0 && value_field_count > 0 && c >= row_label_width {
+                // When a refresh removes a previously-applied value-field number format (e.g. the
+                // user toggles `apply_number_formats` off), reset value-area cells to the default
+                // style so we don't leave stale number formats behind.
+                desired_style_id = Some(0);
+            }
+
+            if let Some(style_id) = desired_style_id {
                 style_writes.push((
                     CellRef::new(
                         def.destination.cell.row + r as u32,
