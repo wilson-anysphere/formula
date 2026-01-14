@@ -737,6 +737,16 @@ fn build_parts(
     let mut next_drawing_part = next_drawing_part_number(parts.keys().map(|p| p.as_str()));
 
     for (sheet_index, sheet_meta) in sheet_plan.sheets.iter().enumerate() {
+        // Chartsheets (`xl/chartsheets/*.xml`) are not modeled semantically today. They must be
+        // preserved byte-for-byte to keep their DrawingML relationship graph intact (chartsheet ->
+        // drawing -> chart).
+        //
+        // The worksheet patching pipeline re-serializes XML via quick-xml which changes formatting
+        // (whitespace/indentation), so running it on chartsheets would break no-op round-trips even
+        // when the sheet model is untouched.
+        if sheet_meta.path.starts_with("xl/chartsheets/") {
+            continue;
+        }
         let sheet = doc.workbook.sheet(sheet_meta.worksheet_id).ok_or_else(|| {
             WriteError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
