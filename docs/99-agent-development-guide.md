@@ -389,7 +389,7 @@ sudo apt-get install -y \
 
 # If you need to build the Linux release bundles locally (.AppImage + .deb + .rpm),
 # install the additional bundler prerequisites:
-sudo apt-get install -y squashfs-tools fakeroot rpm
+sudo apt-get install -y squashfs-tools fakeroot rpm cpio
 
 # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
 sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
