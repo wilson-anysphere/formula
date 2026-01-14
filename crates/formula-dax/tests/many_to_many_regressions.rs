@@ -1116,6 +1116,152 @@ fn relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_
 }
 
 #[test]
+fn relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_columnar_fact() {
+    // Same regression as `relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys`,
+    // but with a columnar-backed fact table.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Null,
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Dim", "Related Fact Count", "COUNTROWS(RELATEDTABLE(Fact))")
+        .unwrap();
+
+    let dim = model.table("Dim").unwrap();
+    assert_eq!(dim.value(0, "Related Fact Count").unwrap(), 1.into());
+    assert_eq!(dim.value(1, "Related Fact Count").unwrap(), 0.into());
+}
+
+#[test]
+fn relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_columnar_dim_and_fact(
+) {
+    // Same regression as `relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys`,
+    // but with *both* dimension and fact tables columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let dim_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, dim_options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let fact_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, fact_options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Null,
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Dim", "Related Fact Count", "COUNTROWS(RELATEDTABLE(Fact))")
+        .unwrap();
+
+    let dim = model.table("Dim").unwrap();
+    assert_eq!(dim.value(0, "Related Fact Count").unwrap(), 1.into());
+    assert_eq!(dim.value(1, "Related Fact Count").unwrap(), 0.into());
+}
+
+#[test]
 fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m_for_columnar_fact() {
     let mut model = DataModel::new();
 
