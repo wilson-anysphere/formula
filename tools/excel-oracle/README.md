@@ -104,6 +104,11 @@ node scripts/normalize-locale-function-sources.js
 # Regenerate + verify TSVs
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
+
+# Or via pnpm script aliases:
+pnpm normalize:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 ```
 
 Example for Spanish (`es-ES`):
@@ -116,6 +121,11 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
+
+# Or via pnpm script aliases:
+pnpm normalize:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 ```
 
 Notes / caveats:
