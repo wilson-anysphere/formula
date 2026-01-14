@@ -4,8 +4,8 @@ use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotValue,
     SubtotalPosition, ValueField,
 };
-use formula_model::Style;
 use formula_engine::Engine;
+use formula_model::Style;
 
 #[test]
 fn engine_can_calculate_pivot_from_live_range_values() {
@@ -74,7 +74,10 @@ fn engine_can_calculate_pivot_from_live_range_values() {
     );
 
     // Sanity: the formula cell should have contributed (C3 = 150).
-    assert_eq!(engine.get_cell_value("Sheet1", "C3"), formula_engine::Value::Number(150.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C3"),
+        formula_engine::Value::Number(150.0)
+    );
 
     // Ensure the pivot output values are typed as expected.
     assert_eq!(result.data[2][1], PivotValue::Number(450.0));

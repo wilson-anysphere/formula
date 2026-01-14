@@ -223,16 +223,10 @@ fn lookup_wildcard_numeric_text_coercion_respects_value_locale() {
 
     // MATCH (exact match_type=0) applies wildcard matching when the lookup value contains
     // wildcards, and coerces non-text candidates to text first.
-    assert_eq!(
-        sheet.eval("=MATCH(\"*,5\", A1:A2, 0)"),
-        Value::Number(1.0)
-    );
+    assert_eq!(sheet.eval("=MATCH(\"*,5\", A1:A2, 0)"), Value::Number(1.0));
 
     // XMATCH wildcard mode should also coerce non-text candidates using the workbook value locale.
-    assert_eq!(
-        sheet.eval("=XMATCH(\"1,5\", A1:A2, 2)"),
-        Value::Number(1.0)
-    );
+    assert_eq!(sheet.eval("=XMATCH(\"1,5\", A1:A2, 2)"), Value::Number(1.0));
 }
 
 #[test]
@@ -849,10 +843,7 @@ fn lookup_functions_compile_to_bytecode_backend_with_let_bound_arrays() {
         "A1",
         "=LET(t, {1,\"a\";2,\"b\";3,\"c\"}, VLOOKUP(2, t, 2, FALSE))",
     );
-    sheet.set_formula(
-        "A2",
-        "=LET(t, {1,2,3;10,20,30}, HLOOKUP(2, t, 2, FALSE))",
-    );
+    sheet.set_formula("A2", "=LET(t, {1,2,3;10,20,30}, HLOOKUP(2, t, 2, FALSE))");
     sheet.set_formula("A3", "=LET(a, {1;2;3}, MATCH(2, a, 0))");
 
     assert_eq!(sheet.bytecode_program_count(), 3);

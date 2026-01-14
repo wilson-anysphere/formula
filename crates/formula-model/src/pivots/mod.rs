@@ -11,12 +11,12 @@ mod schema;
 pub mod slicers;
 pub mod workbook;
 
+pub use model::{
+    DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
+};
 pub use schema::{
     parse_dax_column_ref, parse_dax_measure_ref, CalculatedField, CalculatedItem, FilterField,
     GrandTotals, Layout, PivotConfig, PivotFieldRef, SubtotalPosition,
-};
-pub use model::{
-    DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
 };
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
