@@ -231,6 +231,22 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   const obj = map ? null : value && typeof value === "object" ? (value as any) : null;
   const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
 
+  const coerceNonNegativeIntField = (raw: unknown): number => {
+    if (typeof raw === "number") return raw;
+    const text = getYText(raw);
+    if (text) {
+      const str = String(yjsValueToJson(text) ?? "").trim();
+      if (!str) return NaN;
+      return Number(str);
+    }
+    if (typeof raw === "string") {
+      const str = raw.trim();
+      if (!str) return NaN;
+      return Number(str);
+    }
+    return NaN;
+  };
+
   // Tolerate older/partial schemas:
   // - `sheetName`/`sheet` instead of `sheetId`
   // - empty `sheetId` values (treat as missing rather than blocking fallback)
@@ -243,10 +259,10 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   const keyId = keyIdRaw?.trim() ?? "";
   if (!sheetId || !keyId) return null;
 
-  const startRow = typeof get("startRow") === "number" ? (get("startRow") as number) : Number(get("startRow"));
-  const startCol = typeof get("startCol") === "number" ? (get("startCol") as number) : Number(get("startCol"));
-  const endRow = typeof get("endRow") === "number" ? (get("endRow") as number) : Number(get("endRow"));
-  const endCol = typeof get("endCol") === "number" ? (get("endCol") as number) : Number(get("endCol"));
+  const startRow = coerceNonNegativeIntField(get("startRow"));
+  const startCol = coerceNonNegativeIntField(get("startCol"));
+  const endRow = coerceNonNegativeIntField(get("endRow"));
+  const endCol = coerceNonNegativeIntField(get("endCol"));
 
   if (![startRow, startCol, endRow, endCol].every((n) => Number.isFinite(n) && Math.floor(n) === n && n >= 0)) {
     return null;

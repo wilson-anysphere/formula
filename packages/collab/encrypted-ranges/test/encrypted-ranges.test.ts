@@ -314,6 +314,41 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 7, col: 2 })).toBe(false);
   });
 
+  it("policy helper supports numeric fields stored as Y.Text", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    const r = new Y.Map<unknown>();
+    r.set("id", "r1");
+    r.set("sheetId", "s1");
+
+    const startRow = new Y.Text();
+    startRow.insert(0, "0");
+    const startCol = new Y.Text();
+    startCol.insert(0, "0");
+    const endRow = new Y.Text();
+    endRow.insert(0, "0");
+    const endCol = new Y.Text();
+    endCol.insert(0, "0");
+
+    r.set("startRow", startRow);
+    r.set("startCol", startCol);
+    r.set("endRow", endRow);
+    r.set("endCol", endCol);
+    r.set("keyId", "k1");
+    ranges.push([r]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
+  });
+
   it("policy helper supports legacy map schema (encryptedRanges as Y.Map<id, Y.Map>)", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
