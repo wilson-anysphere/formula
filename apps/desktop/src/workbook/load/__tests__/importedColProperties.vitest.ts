@@ -66,6 +66,23 @@ describe("importedColProperties", () => {
     expect(sheetColWidthsFromViewOrImportedColProperties(view, importedPayload)).toEqual({ "1": 999 });
   });
 
+  it("merges persisted sheet view colWidths with imported widths for other columns", () => {
+    const importedPayload = {
+      schemaVersion: 1,
+      colProperties: {
+        "1": { width: 25, hidden: false },
+        "2": { width: 8.43, hidden: false },
+      },
+    };
+
+    const view = { schemaVersion: 1, colWidths: { "0": 150 } };
+    expect(sheetColWidthsFromViewOrImportedColProperties(view, importedPayload)).toEqual({
+      "0": 150,
+      "1": 180,
+      "2": 64,
+    });
+  });
+
   it("hydrates DocumentController sheet view state with imported colWidths", () => {
     const payload = {
       schemaVersion: 1,

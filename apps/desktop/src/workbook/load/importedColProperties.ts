@@ -17,22 +17,56 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Resolve the initial `SheetViewState.colWidths` value to apply when opening a workbook.
  *
- * If the persisted sheet view state contains a non-empty `colWidths` override, it is used.
- * Otherwise, we fall back to imported OOXML `<cols>` width metadata (when available).
+ * The persisted sheet view state (when present) stores **user overrides** (CSS px at zoom=1).
+ *
+ * The imported workbook model (`Worksheet.col_properties.width`) stores Excel/OOXML widths
+ * in "character" units.
+ *
+ * On open, merge the two so:
+ * - persisted (user) widths win for any overlapping column indices
+ * - imported widths provide the baseline for columns that have no persisted override
  */
 export function sheetColWidthsFromViewOrImportedColProperties(
   view: unknown,
   importedColProperties: unknown,
 ): unknown | null {
-  const persistedColWidths = isPlainObject(view) ? (view as any).colWidths : (view as any)?.colWidths;
-  const hasPersisted = Array.isArray(persistedColWidths)
-    ? persistedColWidths.length > 0
-    : isPlainObject(persistedColWidths)
-      ? Object.keys(persistedColWidths).length > 0
-      : false;
+  const normalizeColWidths = (raw: unknown): Record<string, number> | null => {
+    if (!raw) return null;
+    const out: Record<string, number> = {};
 
-  if (hasPersisted) return persistedColWidths;
-  return docColWidthsFromImportedColProperties(importedColProperties);
+    if (Array.isArray(raw)) {
+      // Backwards compatibility with older encodings that used arrays of { index, size } or [index,size].
+      for (const entry of raw) {
+        const index = Array.isArray(entry) ? entry[0] : (entry as any)?.col ?? (entry as any)?.index;
+        const size = Array.isArray(entry) ? entry[1] : (entry as any)?.width ?? (entry as any)?.size;
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const value = Number(size);
+        if (!Number.isFinite(value) || value <= 0) continue;
+        out[String(idx)] = value;
+      }
+    } else if (isPlainObject(raw)) {
+      for (const [key, valueRaw] of Object.entries(raw)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const value = Number(valueRaw);
+        if (!Number.isFinite(value) || value <= 0) continue;
+        out[String(idx)] = value;
+      }
+    }
+
+    return Object.keys(out).length > 0 ? out : null;
+  };
+
+  const persistedColWidthsRaw = isPlainObject(view) ? (view as any).colWidths : (view as any)?.colWidths;
+  const persistedColWidths = normalizeColWidths(persistedColWidthsRaw);
+
+  const importedColWidths = docColWidthsFromImportedColProperties(importedColProperties);
+
+  if (persistedColWidths && importedColWidths) {
+    return { ...importedColWidths, ...persistedColWidths };
+  }
+  return persistedColWidths ?? importedColWidths;
 }
 
 /**
