@@ -22,6 +22,8 @@ const WINDOW_DIALOG_RES = [
   /\b(?:globalThis|self)\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
   /\b(?:globalThis|self)\s*\?\.\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
 ];
+const WINDOW_DIALOG_RE_SOURCE = WINDOW_DIALOG_RES.map((re) => `(?:${re.source})`).join("|");
+const WINDOW_DIALOG_RE = new RegExp(WINDOW_DIALOG_RE_SOURCE);
 
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -39,7 +41,32 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
   return out;
 }
 
+function findViolationsInFileContent(content: string, relPath: string): string[] {
+  // Only compute line/column context when there is a match. The common case is that
+  // there are *no* violations, so avoid splitting every file into lines (which gets
+  // expensive as the codebase grows).
+  if (!WINDOW_DIALOG_RE.test(content)) return [];
+
+  const violations: string[] = [];
+  const re = new RegExp(WINDOW_DIALOG_RE_SOURCE, "g");
+  re.lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+  while ((match = re.exec(content))) {
+    const idx = match.index;
+    const lineStart = content.lastIndexOf("\n", idx) + 1;
+    const lineEnd = content.indexOf("\n", idx);
+    const lineText = content.slice(lineStart, lineEnd === -1 ? content.length : lineEnd).trim();
+    // Best-effort line number: only needed when reporting violations, so a simple
+    // split is fine here.
+    const lineNumber = content.slice(0, lineStart).split(/\r?\n/).length;
+    violations.push(`${relPath}:${lineNumber}: ${lineText}`);
+  }
+  return violations;
+}
+
 describe("desktop/src should not use blocking browser dialogs", () => {
+  // This is a source scan over the entire desktop renderer tree and can take
+  // longer than Vitest's default 30s timeout in CI / constrained environments.
   it("does not call window.alert/confirm/prompt anywhere under apps/desktop/src", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
     const violations: string[] = [];
@@ -47,17 +74,11 @@ describe("desktop/src should not use blocking browser dialogs", () => {
     for (const absPath of files) {
       const relPath = path.relative(SRC_ROOT, absPath);
       const content = await readFile(absPath, "utf8");
-      const lines = content.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i] ?? "";
-        if (WINDOW_DIALOG_RES.some((re) => re.test(line))) {
-          violations.push(`${relPath}:${i + 1}: ${line.trim()}`);
-        }
-      }
+      violations.push(...findViolationsInFileContent(content, relPath));
     }
 
     if (violations.length > 0) {
       throw new Error(`Found blocking browser dialogs in desktop renderer code:\n${violations.join("\n")}`);
     }
-  });
+  }, 60_000);
 });
