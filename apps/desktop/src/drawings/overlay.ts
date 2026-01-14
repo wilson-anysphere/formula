@@ -178,8 +178,8 @@ export interface Viewport {
   /**
    * Sheet zoom factor (1 = 100%).
    *
-   * When provided, drawing and interaction code uses this to map between
-   * screen-space pixels and document-space EMUs.
+   * This is applied when converting DrawingML EMU-derived geometry into
+   * screen-space pixels.
    */
   zoom?: number;
   /**
