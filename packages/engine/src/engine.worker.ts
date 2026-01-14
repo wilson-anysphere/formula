@@ -679,16 +679,22 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setRowStyleId !== "function") {
                 throw new Error("setRowStyleId: WasmWorkbook.setRowStyleId is not available in this WASM build");
               }
-              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
-              (wb as any).setRowStyleId(params.sheet ?? "Sheet1", params.row, params.styleId ?? 0);
+              (wb as any).setRowStyleId(
+                params.sheet ?? "Sheet1",
+                params.row,
+                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
+              );
               result = null;
               break;
             case "setColStyleId":
               if (typeof (wb as any).setColStyleId !== "function") {
                 throw new Error("setColStyleId: WasmWorkbook.setColStyleId is not available in this WASM build");
               }
-              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
-              (wb as any).setColStyleId(params.sheet ?? "Sheet1", params.col, params.styleId ?? 0);
+              (wb as any).setColStyleId(
+                params.sheet ?? "Sheet1",
+                params.col,
+                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
+              );
               result = null;
               break;
             case "setSheetDefaultStyleId":
@@ -697,8 +703,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "setSheetDefaultStyleId: WasmWorkbook.setSheetDefaultStyleId is not available in this WASM build"
                 );
               }
-              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
-              (wb as any).setSheetDefaultStyleId(params.sheet ?? "Sheet1", params.styleId ?? 0);
+              (wb as any).setSheetDefaultStyleId(
+                params.sheet ?? "Sheet1",
+                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
+              );
               result = null;
               break;
             case "setColWidth":
