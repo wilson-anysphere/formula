@@ -598,6 +598,7 @@ function tryReadImplicitStructuredReference(input: string, start: number): { tex
   // bracket constructs (e.g. external workbook prefixes), only recognize:
   //   [@Column]
   //   [@[Column Name]]
+  //   [@]
   //   [[#This Row],[Column]]
   // (and related selector-qualified forms).
   let scan = start + 1;

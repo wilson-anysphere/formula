@@ -18,9 +18,11 @@ const QUALIFIED_REFERENCE_RE = new RegExp(
 // Excel permits "this row" shorthand forms:
 //   TableName[@Column]
 //   TableName[@[Column Name]]
+//   TableName[@]
 // and, within the table context, the implicit equivalents:
 //   [@Column]
 //   [@[Column Name]]
+//   [@]
 //
 // The nested-bracket form exists because column names can contain spaces/special chars.
 // Column names may still contain escaped closing brackets via doubling: `]` -> `]]`.

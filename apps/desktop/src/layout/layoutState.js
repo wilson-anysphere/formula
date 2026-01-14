@@ -101,13 +101,14 @@ export function createDefaultLayout(options = {}) {
  * @param {string} panelId
  */
 export function getPanelPlacement(layout, panelId) {
+  if (!layout) return { kind: "closed" };
   for (const side of DOCK_SIDES) {
-    if (layout.docks[side].panels.includes(panelId)) {
+    if (layout.docks?.[side]?.panels?.includes(panelId)) {
       return { kind: "docked", side };
     }
   }
 
-  if (layout.floating[panelId]) return { kind: "floating" };
+  if (layout.floating?.[panelId]) return { kind: "floating" };
 
   return { kind: "closed" };
 }
