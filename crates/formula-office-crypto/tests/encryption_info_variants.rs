@@ -117,6 +117,52 @@ fn decrypt_agile_without_data_integrity_element() {
 }
 
 #[test]
+fn decrypt_agile_missing_hash_size_attributes() {
+    // Some producers omit the `hashSize` attributes on `<keyData/>` and `<p:encryptedKey/>`.
+    // The MS-OFFCRYPTO algorithms use the hash algorithm's digest length in that case.
+    let plaintext = minimal_zip_bytes();
+    let password = "Password";
+
+    let opts = EncryptOptions {
+        scheme: EncryptionScheme::Agile,
+        key_bits: 256,
+        hash_algorithm: HashAlgorithm::Sha512,
+        spin_count: 512,
+    };
+
+    let baseline_ole = encrypt_package_to_ole(&plaintext, password, opts).expect("encrypt");
+    let (baseline_info, baseline_package) = extract_streams_from_ole(&baseline_ole);
+
+    let payload = baseline_info
+        .get(8..)
+        .expect("baseline EncryptionInfo must include version header");
+    let xml_start = payload.iter().position(|&b| b == b'<').expect("xml start");
+    let mut xml_bytes = &payload[xml_start..];
+    while xml_bytes.last() == Some(&0) {
+        xml_bytes = &xml_bytes[..xml_bytes.len() - 1];
+    }
+    let xml_str = std::str::from_utf8(xml_bytes).expect("baseline xml utf8");
+
+    // Remove `hashSize="64"` from both keyData and encryptedKey. (We use SHA-512 in this test.)
+    let xml_no_hash_size = xml_str.replace(" hashSize=\"64\"", "");
+    assert!(
+        !xml_no_hash_size.contains("hashSize=\""),
+        "expected to remove hashSize attributes"
+    );
+
+    // Write a variant EncryptionInfo that includes an explicit XML length prefix.
+    let mut info_len_prefixed = Vec::new();
+    info_len_prefixed.extend_from_slice(&baseline_info[..8]);
+    info_len_prefixed.extend_from_slice(&(xml_no_hash_size.len() as u32).to_le_bytes());
+    info_len_prefixed.extend_from_slice(xml_no_hash_size.as_bytes());
+
+    let ole = build_ole(&info_len_prefixed, &baseline_package);
+    let decrypted =
+        decrypt_encrypted_package_ole(&ole, password).expect("decrypt missing hashSize attributes");
+    assert_eq!(decrypted, plaintext);
+}
+
+#[test]
 fn decrypt_agile_encryption_info_real_world_variants() {
     // Keep the plaintext small to keep the test fast, but ensure it is a valid ZIP archive (the
     // decrypter performs lightweight ZIP validation).
