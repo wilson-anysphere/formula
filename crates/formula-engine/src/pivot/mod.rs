@@ -111,6 +111,49 @@ pub struct PivotSchema {
 }
 
 impl PivotCache {
+    /// Normalizes header captions into non-empty, unique (case-insensitive) pivot field names.
+    ///
+    /// Excel pivot field captions must be unique and cannot be blank. When we build a cache from a
+    /// worksheet/table range we emulate that behavior:
+    /// - Trim leading/trailing whitespace.
+    /// - If the caption is empty after trimming, assign `Column{n}` where `n` is the 1-based
+    ///   ordinal of the blank column in the header row.
+    /// - If a caption collides with a previous caption (case-insensitive), append `" (2)"`,
+    ///   `" (3)"`, ... until the name is unique.
+    fn normalize_field_names(headers: &[PivotValue]) -> Vec<String> {
+        let mut out = Vec::with_capacity(headers.len());
+        let mut used_folded: HashSet<String> = HashSet::with_capacity(headers.len());
+        let mut blank_counter = 0usize;
+
+        for header in headers {
+            let mut base = header.display_string();
+            base = base.trim().to_string();
+
+            if base.is_empty() {
+                blank_counter += 1;
+                base = format!("Column{blank_counter}");
+            }
+
+            let mut name = base.clone();
+            if used_folded.contains(&name.to_ascii_lowercase()) {
+                let mut suffix = 2usize;
+                loop {
+                    name = format!("{base} ({suffix})");
+                    let folded = name.to_ascii_lowercase();
+                    if !used_folded.contains(&folded) {
+                        break;
+                    }
+                    suffix += 1;
+                }
+            }
+
+            used_folded.insert(name.to_ascii_lowercase());
+            out.push(name);
+        }
+
+        out
+    }
+
     pub fn from_range(range: &[Vec<PivotValue>]) -> Result<Self, PivotError> {
         if range.is_empty() {
             return Ok(Self {
@@ -121,10 +164,11 @@ impl PivotCache {
         }
 
         let headers = &range[0];
+        let normalized_names = Self::normalize_field_names(headers);
         let mut fields = Vec::with_capacity(headers.len());
-        for (idx, header) in headers.iter().enumerate() {
+        for (idx, name) in normalized_names.into_iter().enumerate() {
             fields.push(CacheField {
-                name: header.display_string(),
+                name,
                 index: idx,
             });
         }
@@ -2597,5 +2641,116 @@ mod tests {
             let result = PivotEngine::calculate(&cache, &cfg).unwrap();
             assert_eq!(result.data, expected);
         }
+    }
+
+    #[test]
+    fn pivot_cache_normalizes_blank_and_duplicate_headers() {
+        let data = vec![
+            pv_row(&[
+                PivotValue::Text(" ".to_string()),
+                PivotValue::Text(" Sales ".to_string()),
+                PivotValue::Text("sales".to_string()),
+                PivotValue::Blank,
+                PivotValue::Text("Region".to_string()),
+                PivotValue::Text("REGION".to_string()),
+            ]),
+            pv_row(&[
+                PivotValue::Text("East".to_string()),
+                10.into(),
+                20.into(),
+                30.into(),
+                PivotValue::Text("X".to_string()),
+                PivotValue::Text("Y".to_string()),
+            ]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let field_names: Vec<String> = cache.fields.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(
+            field_names,
+            vec![
+                "Column1".to_string(),
+                "Sales".to_string(),
+                "sales (2)".to_string(),
+                "Column2".to_string(),
+                "Region".to_string(),
+                "REGION (2)".to_string(),
+            ]
+        );
+
+        let folded: HashSet<String> = field_names.iter().map(|s| s.to_ascii_lowercase()).collect();
+        assert_eq!(folded.len(), field_names.len());
+
+        assert_eq!(cache.unique_values.len(), field_names.len());
+        for name in &field_names {
+            assert!(cache.unique_values.contains_key(name));
+        }
+    }
+
+    #[test]
+    fn pivot_engine_can_reference_normalized_field_names() {
+        let data = vec![
+            pv_row(&[PivotValue::Blank, "Sales".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into(), 200.into()]),
+            pv_row(&["West".into(), 300.into(), 400.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        // The cache should expose non-empty, unique names.
+        assert_eq!(
+            cache.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            vec!["Column1", "Sales", "Sales (2)"]
+        );
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Column1")],
+            column_fields: vec![],
+            value_fields: vec![
+                ValueField {
+                    source_field: "Sales".to_string(),
+                    name: "Sum of Sales".to_string(),
+                    aggregation: AggregationType::Sum,
+                    number_format: None,
+                    show_as: None,
+                    base_field: None,
+                    base_item: None,
+                },
+                ValueField {
+                    source_field: "Sales (2)".to_string(),
+                    name: "Sum of Sales 2".to_string(),
+                    aggregation: AggregationType::Sum,
+                    number_format: None,
+                    show_as: None,
+                    base_field: None,
+                    base_item: None,
+                },
+            ],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Column1".into(),
+                    "Sum of Sales".into(),
+                    "Sum of Sales 2".into()
+                ],
+                vec!["East".into(), 100.into(), 200.into()],
+                vec!["West".into(), 300.into(), 400.into()],
+                vec!["Grand Total".into(), 400.into(), 600.into()],
+            ]
+        );
     }
 }
