@@ -73,6 +73,9 @@ export function AddStepMenu(props: {
       if (op.type === "addColumn" && typeof op.name === "string" && op.name.trim()) {
         usedColumnNames.add(op.name);
       }
+      if (op.type === "renameColumn" && typeof op.newName === "string" && op.newName.trim()) {
+        usedColumnNames.add(op.newName);
+      }
     }
 
     return [

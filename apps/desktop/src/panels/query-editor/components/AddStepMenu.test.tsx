@@ -169,6 +169,35 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("considers existing renameColumn steps when generating a default Rename Column newName", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query: Query = {
+      ...baseQuery(),
+      steps: [
+        { id: "s1", name: "Renamed", operation: { type: "renameColumn", oldName: "Region", newName: "Region (Renamed)" } },
+      ],
+    };
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query, preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Rename Columns").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({
+      type: "renameColumn",
+      oldName: "Region",
+      newName: "Region (Renamed) 1",
+    });
+  });
+
   it("disables schema-dependent operations when preview schema is missing", async () => {
     const onAddStep = vi.fn();
     await act(async () => {
