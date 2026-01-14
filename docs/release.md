@@ -1288,6 +1288,11 @@ To run the repo’s release sanity checks (version check, updater config validat
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z
 ```
 
+Notes:
+
+- `GH_TOKEN` is also supported (same value as `GITHUB_TOKEN`).
+- For GitHub Enterprise, set `GITHUB_API_URL=https://your-ghe.example/api/v3` and pass `--repo owner/name` if needed.
+
 If you want a faster check that **does not** download/hash all release bundles (still validates `latest.json` + signatures + asset presence), add `--dry-run`:
 
 ```bash
