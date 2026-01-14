@@ -15192,9 +15192,13 @@ fn walk_expr_flags(
             }
         }
         Expr::StructuredRef(r) => {
-            if let SheetReference::External(key) = &r.sheet {
-                if key.starts_with('[') {
-                    *volatile = true;
+            if external_refs_volatile {
+                if let SheetReference::External(key) = &r.sheet {
+                    // Workbook-only external structured refs compile as `SheetReference::External("[Book.xlsx]")`,
+                    // so treat any bracket-prefixed key as an external workbook dependency.
+                    if key.starts_with('[') {
+                        *volatile = true;
+                    }
                 }
             }
         }
@@ -15373,6 +15377,31 @@ fn walk_external_dependencies(
                     } else {
                         external_sheets.insert(key.clone());
                     }
+                }
+            }
+        }
+        Expr::StructuredRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                // Structured refs can be workbook-only (e.g. `[Book.xlsx]Table1[Col]`), so handle
+                // both `[workbook]sheet` and `[workbook]` forms.
+                if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key(key) {
+                    external_workbooks.insert(workbook.to_string());
+                    if crate::eval::is_valid_external_sheet_key(key) {
+                        external_sheets.insert(key.clone());
+                    }
+                } else if key.starts_with('[') {
+                    // Workbook-only external ref key like `[Book.xlsx]`.
+                    let Some(end) = key.rfind(']') else {
+                        return;
+                    };
+                    if end <= 1 {
+                        return;
+                    }
+                    let workbook = &key[1..end];
+                    if workbook.is_empty() {
+                        return;
+                    }
+                    external_workbooks.insert(workbook.to_string());
                 }
             }
         }
@@ -15683,8 +15712,7 @@ fn walk_external_dependencies(
                 );
             }
         }
-        Expr::StructuredRef(_)
-        | Expr::Number(_)
+        Expr::Number(_)
         | Expr::Text(_)
         | Expr::Bool(_)
         | Expr::Blank
@@ -15776,6 +15804,90 @@ fn walk_external_expr(
                             });
                         }
                     }
+                }
+            }
+        }
+        Expr::StructuredRef(sref_expr) => {
+            let SheetReference::External(key) = &sref_expr.sheet else {
+                return;
+            };
+            if !key.starts_with('[') {
+                // `SheetReference::External` without a bracketed workbook prefix represents an
+                // invalid/missing sheet at compile time; preserve `#REF!` semantics.
+                return;
+            }
+
+            // External workbook structured references (e.g. `[Book.xlsx]Sheet1!Table1[Col]`) are
+            // resolved dynamically using provider-supplied table metadata.
+            let provider = match external_value_provider {
+                Some(p) => p,
+                None => return,
+            };
+
+            let (workbook, explicit_sheet_key) = match crate::eval::split_external_sheet_key(key) {
+                Some((workbook, sheet)) if !sheet.contains(':') => (workbook, Some(key.as_str())),
+                Some((_workbook, _sheet)) => {
+                    // External 3D sheet spans are not valid structured-ref prefixes.
+                    return;
+                }
+                None => {
+                    // Workbook-only external reference (`[Book.xlsx]...`); parse the bracketed
+                    // workbook prefix.
+                    let Some(end) = key.rfind(']') else {
+                        return;
+                    };
+                    let workbook = key.get(1..end).unwrap_or_default();
+                    if workbook.is_empty() {
+                        return;
+                    }
+                    (workbook, None)
+                }
+            };
+
+            let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
+                return;
+            };
+
+            // Excel's `[@ThisRow]` semantics depend on the formula being inside the table. For
+            // external workbooks we do not currently model the row context, so preserve `#REF!`
+            // behavior by skipping precedent expansion.
+            if sref_expr.sref.items.iter().any(|item| {
+                matches!(item, crate::structured_refs::StructuredRefItem::ThisRow)
+            }) {
+                return;
+            }
+
+            let Some((table_sheet, table)) = provider.workbook_table(workbook, table_name) else {
+                return;
+            };
+
+            let sheet_key = explicit_sheet_key
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+
+            let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
+                &table,
+                current_cell.addr,
+                &sref_expr.sref,
+            ) {
+                Ok(ranges) => ranges,
+                Err(_) => return,
+            };
+
+            for (start, end) in ranges {
+                let start = clamp_addr_to_excel_dimensions(start);
+                let end = clamp_addr_to_excel_dimensions(end);
+                if start == end {
+                    precedents.insert(PrecedentNode::ExternalCell {
+                        sheet: sheet_key.clone(),
+                        addr: start,
+                    });
+                } else {
+                    precedents.insert(PrecedentNode::ExternalRange {
+                        sheet: sheet_key.clone(),
+                        start,
+                        end,
+                    });
                 }
             }
         }
@@ -16006,8 +16118,7 @@ fn walk_external_expr(
                 );
             }
         }
-        Expr::StructuredRef(_)
-        | Expr::Number(_)
+        Expr::Number(_)
         | Expr::Text(_)
         | Expr::Bool(_)
         | Expr::Blank

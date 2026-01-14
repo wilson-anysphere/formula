@@ -351,6 +351,28 @@ fn precedents_include_external_refs() {
 }
 
 #[test]
+fn precedents_include_external_table_structured_refs_when_metadata_available() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalRange {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            // Table1[Col2] selects the Col2 data column (B2:B4) in the fixture table.
+            start: CellAddr { row: 1, col: 1 },
+            end: CellAddr { row: 3, col: 1 },
+        }]
+    );
+}
+
+#[test]
 fn precedents_include_dynamic_external_precedents_from_indirect() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
@@ -621,6 +643,35 @@ fn external_refs_can_be_non_volatile_with_explicit_invalidation() {
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn external_structured_refs_can_be_non_volatile_with_explicit_invalidation() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+
+    // Mutate the provider without invalidation: the cell should not change because external refs
+    // are treated as non-volatile.
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 100.0);
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(150.0));
 }
 
 #[test]
