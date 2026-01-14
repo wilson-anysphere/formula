@@ -123,6 +123,33 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not begin editing when focusing the address (name box) input", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeTruthy();
+
+    expect(view.model.isEditing).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    address!.focus();
+
+    expect(document.activeElement).toBe(address);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    host.remove();
+  });
+
   it("commitEdit()/cancelEdit() are no-ops when not editing", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
