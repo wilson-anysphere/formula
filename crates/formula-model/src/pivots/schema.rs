@@ -243,7 +243,6 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     //
     // Use Unicode-aware checks so common non-ASCII names (e.g. `Straße`) can remain unquoted.
     // Keep this conservative—quoting is always accepted by DAX.
-    let raw = raw.trim();
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
