@@ -170,6 +170,45 @@ fn external_cell_ref_with_workbook_name_containing_lbracket_and_escaped_rbracket
 }
 
 #[test]
+fn quoted_external_cell_ref_with_workbook_name_containing_lbracket_resolves_via_provider() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[A1[Name.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "='[A1[Name.xlsx]Sheet1'!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
+fn quoted_external_cell_ref_with_workbook_name_containing_lbracket_and_escaped_rbracket_resolves_via_provider(
+) {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book[Name]].xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "='[Book[Name]].xlsx]Sheet1'!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
 fn indirect_external_cell_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(

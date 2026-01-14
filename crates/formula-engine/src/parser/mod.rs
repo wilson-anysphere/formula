@@ -944,7 +944,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 c if is_digit(c)
-                    || ((c == self.locale.decimal_separator || c == '.') && self.peek_next_is_digit()) =>
+                    || ((c == self.locale.decimal_separator || c == '.')
+                        && self.peek_next_is_digit()) =>
                 {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
@@ -1336,7 +1337,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 c if is_digit(c)
-                    || ((c == self.locale.decimal_separator || c == '.') && self.peek_next_is_digit()) =>
+                    || ((c == self.locale.decimal_separator || c == '.')
+                        && self.peek_next_is_digit()) =>
                 {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
@@ -1493,10 +1495,7 @@ impl<'a> Lexer<'a> {
             let is_thousands_sep = Some(ch) == self.locale.thousands_separator
                 || (self.locale.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
                 || (self.locale.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
-            if is_digit(ch)
-                || ch == self.locale.decimal_separator
-                || ch == '.'
-                || is_thousands_sep
+            if is_digit(ch) || ch == self.locale.decimal_separator || ch == '.' || is_thousands_sep
             {
                 end = start + rel + ch.len_utf8();
                 continue;
@@ -3567,19 +3566,14 @@ impl<'a> Parser<'a> {
         // Could be an external workbook prefix ([Book]Sheet!A1) or a structured ref like [@Col].
         // Look ahead for pattern: [ ... ] <sheet> !
         let save = self.pos;
+        let open_span = self.current_span();
         self.expect(TokenKind::LBracket)?;
-        let book_start = self.pos;
         while !matches!(self.peek_kind(), TokenKind::RBracket | TokenKind::Eof) {
             self.next();
         }
         self.expect(TokenKind::RBracket)?;
-        let book_span = Span::new(
-            self.tokens[book_start].span.start,
-            self.tokens[self.pos - 1].span.end,
-        );
-        let workbook = self.src[book_span.start..book_span.end]
-            .trim_matches(&['[', ']'][..])
-            .to_string();
+        let close_span = self.tokens[self.pos - 1].span;
+        let workbook = self.src[open_span.end..close_span.start].to_string();
         self.skip_trivia();
         let start_sheet = match self.peek_kind() {
             TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => self.take_name_token()?,
@@ -3881,48 +3875,70 @@ fn parse_row_number_literal(raw: &str) -> Option<u32> {
 }
 
 fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
-    let Some(rest) = name.strip_prefix('[') else {
-        // Excel sometimes emits external workbook references with an absolute/relative path prefix
-        // inside the quoted sheet identifier, e.g. `'C:\path\[Book.xlsx]Sheet1'!A1`.
-        //
-        // In these cases the raw quoted identifier does not start with `[`, but still contains a
-        // `[workbook]sheet` segment. Canonicalize these by folding the path prefix into the
-        // workbook id so external sheet keys remain unique:
-        // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
-        //
-        // Keep the legacy behavior unchanged for non-bracketed prefixes.
-        let Some(open) = name.rfind('[') else {
-            return (None, name.to_string());
-        };
-        let Some(close_rel) = name[open + 1..].find(']') else {
-            return (None, name.to_string());
-        };
-        let close = open + 1 + close_rel;
-        let path_prefix = &name[..open];
-        let book = &name[open + 1..close];
-        let sheet = &name[close + 1..];
-        if book.is_empty() || sheet.is_empty() {
-            return (None, name.to_string());
+    // Excel external workbook prefixes:
+    // - are not nested (workbook names may contain `[` characters)
+    // - escape literal `]` characters by doubling them (`]]`)
+    //
+    // Sheet references can also be path-qualified inside a quoted sheet identifier, e.g.
+    // `'C:\path\[Book.xlsx]Sheet1'!A1`.
+    //
+    // In these cases the raw quoted identifier does not start with `[`, but still contains a
+    // `[workbook]sheet` segment. Canonicalize these by folding the path prefix into the workbook
+    // id so external sheet keys remain unique:
+    // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
+    let bytes = name.as_bytes();
+    let mut i = 0usize;
+    let mut best: Option<(usize, usize)> = None; // (start, end) where end is exclusive of the closing `]`
+
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(end) = find_workbook_prefix_end(name, i) {
+                // Only treat this as a workbook prefix if there is a remainder (sheet name) after
+                // the closing `]`.
+                if end < name.len() {
+                    best = match best {
+                        None => Some((i, end)),
+                        Some((best_start, best_end)) => {
+                            if end > best_end {
+                                Some((i, end))
+                            } else if end == best_end && i < best_start {
+                                Some((i, end))
+                            } else {
+                                Some((best_start, best_end))
+                            }
+                        }
+                    };
+                }
+
+                // Skip the entire bracketed segment to avoid misclassifying `[` characters inside
+                // the workbook name as the start of a new prefix.
+                i = end;
+                continue;
+            }
         }
-        let mut workbook = String::with_capacity(path_prefix.len().saturating_add(book.len()));
-        workbook.push_str(path_prefix);
-        workbook.push_str(book);
-        return (Some(workbook), sheet.to_string());
-    };
-    // Workbook ids can include path prefixes which may themselves contain `[` / `]` characters.
-    // When parsing a bracketed external prefix (`[workbook]sheet`), locate the *last* closing
-    // bracket so we can recover the full workbook id (mirrors `split_external_sheet_key` used by
-    // the evaluator).
-    let Some(end) = rest.rfind(']') else {
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = name[i..].chars().next().expect("i always at char boundary");
+        i += ch.len_utf8();
+    }
+
+    let Some((open, end)) = best else {
         return (None, name.to_string());
     };
-    let workbook = rest[..end].to_string();
-    let sheet = rest[end + 1..].to_string();
-    if sheet.is_empty() {
-        (None, name.to_string())
-    } else {
-        (Some(workbook), sheet)
+
+    // `end` is exclusive, so `end - 1` is the closing `]`.
+    let book = &name[open + 1..end - 1];
+    let sheet = &name[end..];
+    if book.is_empty() || sheet.is_empty() {
+        return (None, name.to_string());
     }
+
+    let prefix = &name[..open];
+    let mut workbook = String::with_capacity(prefix.len().saturating_add(book.len()));
+    workbook.push_str(prefix);
+    workbook.push_str(book);
+    (Some(workbook), sheet.to_string())
 }
 
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
@@ -4304,7 +4320,11 @@ mod tests {
     #[test]
     fn partial_parse_splits_external_workbook_prefix_in_quoted_name_refs() {
         let parsed = parse_formula_partial("='[Book.xlsx]MyName'", ParseOptions::default());
-        assert!(parsed.error.is_none(), "unexpected parse error: {:?}", parsed.error);
+        assert!(
+            parsed.error.is_none(),
+            "unexpected parse error: {:?}",
+            parsed.error
+        );
         match &parsed.ast.expr {
             Expr::NameRef(r) => {
                 assert_eq!(r.workbook.as_deref(), Some("Book.xlsx"));
