@@ -74,6 +74,20 @@ async function getImageDrawingCount(page: Page): Promise<number> {
   });
 }
 
+async function getDrawingsDebugSummary(page: Page): Promise<{ sheetId: string; selectedId: number | null; imageCount: number }> {
+  return await evaluateWithRetry(page, () => {
+    const app = window.__formulaApp as any;
+    if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+    if (typeof app.getDrawingsDebugState !== "function") {
+      throw new Error("Missing window.__formulaApp.getDrawingsDebugState()");
+    }
+    const state = app.getDrawingsDebugState();
+    const drawings = Array.isArray(state?.drawings) ? state.drawings : [];
+    const imageCount = drawings.filter((drawing: any) => drawing?.kind === "image").length;
+    return { sheetId: String(state?.sheetId ?? ""), selectedId: (state?.selectedId ?? null) as number | null, imageCount };
+  });
+}
+
 test.describe("Insert → Pictures", () => {
   const GRID_MODES = ["legacy", "shared"] as const;
 
@@ -158,6 +172,41 @@ test.describe("Insert → Pictures", () => {
           { timeout: 20_000, message: "Expected at least one inserted picture to have a non-empty drawing rect." },
         )
         .toBeGreaterThanOrEqual(1);
+
+      // Sheet switching should be sheet-scoped: pictures belong to their owning sheet and do not
+      // render/appear in `getDrawingsDebugState` when switching to a different sheet.
+      await evaluateWithRetry(page, () => {
+        const app = window.__formulaApp as any;
+        // Lazily create Sheet2 so the sheet tab appears.
+        app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+      });
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+      await page.getByTestId("sheet-tab-Sheet2").click();
+      await whenIdle(page);
+
+      await expect
+        .poll(
+          async () => {
+            await whenIdle(page, 5_000);
+            return await getDrawingsDebugSummary(page);
+          },
+          { timeout: 20_000, message: "Expected switching sheets to hide Sheet1 pictures and clear selection." },
+        )
+        .toEqual({ sheetId: "Sheet2", selectedId: null, imageCount: 0 });
+
+      await page.getByTestId("sheet-tab-Sheet1").click();
+      await whenIdle(page);
+
+      await expect
+        .poll(
+          async () => {
+            await whenIdle(page, 5_000);
+            return await getDrawingsDebugSummary(page);
+          },
+          { timeout: 20_000, message: "Expected switching back to restore Sheet1 pictures without reselecting them." },
+        )
+        .toEqual({ sheetId: "Sheet1", selectedId: null, imageCount: beforeCount + selectedFiles.length });
     });
   }
 });
