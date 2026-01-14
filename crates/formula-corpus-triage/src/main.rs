@@ -382,9 +382,10 @@ fn run(args: &Args) -> TriageOutput {
 
     let mut format = args.format.resolve(&args.input, &input_bytes);
     if encrypted {
-        // Encrypted workbooks wrap a ZIP-based OOXML payload in an OLE container. Once decrypted we
-        // only support triaging XLSX/XLSM payloads (and skip other kinds like encrypted XLSB).
-        format = WorkbookFormat::Xlsx;
+        // Encrypted workbooks wrap a ZIP-based OOXML payload in an OLE container. Once decrypted,
+        // detect whether the payload is XLSX/XLSM (`xl/workbook.xml`) or XLSB (`xl/workbook.bin`) so
+        // we can route to the correct triage implementation.
+        format = detect_workbook_format_from_zip_payload(workbook_bytes.as_ref());
     }
 
     match format {
@@ -554,13 +555,16 @@ fn run(args: &Args) -> TriageOutput {
             output
         }
         WorkbookFormat::Xlsb => {
-            let input_parts = xlsx_diff::WorkbookArchive::from_bytes(&input_bytes)
+            let input_parts = xlsx_diff::WorkbookArchive::from_bytes(workbook_bytes.as_ref())
                 .map(|a| a.part_names().len())
                 .unwrap_or(0);
 
             // Step: load (formula-xlsb)
             let start = Instant::now();
-            let wb = match XlsbWorkbook::open(&args.input) {
+            let wb = match XlsbWorkbook::open_from_bytes_with_options(
+                workbook_bytes.as_ref(),
+                formula_xlsb::OpenOptions::default(),
+            ) {
                 Ok(wb) => wb,
                 Err(err) => {
                     output
@@ -637,7 +641,7 @@ fn run(args: &Args) -> TriageOutput {
 
             // Step: diff (xlsx-diff)
             let start = Instant::now();
-            let diff_details = match diff_workbooks(&input_bytes, &round_tripped, args) {
+            let diff_details = match diff_workbooks(workbook_bytes.as_ref(), &round_tripped, args) {
                 Ok(details) => details,
                 Err(err) => {
                     output
@@ -728,14 +732,14 @@ fn prepare_workbook_bytes<'a>(
 
     let decrypted = formula_office_crypto::decrypt_encrypted_package(input_bytes, password)
         .context("decrypt encrypted workbook")?;
-    if !looks_like_xlsx(&decrypted) {
+    if !looks_like_ooxml_workbook_zip(&decrypted) {
         return Ok((Cow::Borrowed(input_bytes), Some("encrypted".to_string()), true));
     }
 
     Ok((Cow::Owned(decrypted), None, true))
 }
 
-fn looks_like_xlsx(bytes: &[u8]) -> bool {
+fn looks_like_ooxml_workbook_zip(bytes: &[u8]) -> bool {
     if bytes.len() < 2 || &bytes[..2] != b"PK" {
         return false;
     }
@@ -751,11 +755,29 @@ fn looks_like_xlsx(bytes: &[u8]) -> bool {
             continue;
         }
         let name = file.name().trim_start_matches('/').replace('\\', "/");
-        if name.eq_ignore_ascii_case("xl/workbook.xml") {
+        if name.eq_ignore_ascii_case("xl/workbook.xml") || name.eq_ignore_ascii_case("xl/workbook.bin") {
             return true;
         }
     }
     false
+}
+
+fn detect_workbook_format_from_zip_payload(bytes: &[u8]) -> WorkbookFormat {
+    if bytes.len() < 2 || &bytes[..2] != b"PK" {
+        return WorkbookFormat::Xlsx;
+    }
+    let Ok(archive) = xlsx_diff::WorkbookArchive::from_bytes(bytes) else {
+        return WorkbookFormat::Xlsx;
+    };
+    for part in archive.part_names() {
+        if part.eq_ignore_ascii_case("xl/workbook.bin") {
+            return WorkbookFormat::Xlsb;
+        }
+        if part.eq_ignore_ascii_case("xl/workbook.xml") {
+            // Keep scanning in case the package contains both `.xml` and `.bin` (prefer `.bin`).
+        }
+    }
+    WorkbookFormat::Xlsx
 }
 fn print_json(output: &TriageOutput) -> Result<()> {
     let json = serde_json::to_string(output).context("serialize triage output")?;
@@ -2462,7 +2484,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_encrypted_xlsb_payload_even_when_format_is_xlsb() {
+    fn decrypts_and_triages_encrypted_xlsb_payload_when_password_is_provided() {
         let password = "secret";
         let encrypted_bytes = encrypt_ooxml_agile(&plain_xlsb_bytes(), password);
 
@@ -2498,7 +2520,8 @@ mod tests {
         }
         assert!(!out.result.open_ok);
 
-        // With password -> decrypts, but we only triage XLSX/XLSM today.
+        // With password -> decrypt + triage (load/round-trip/diff). Recalc/render remain opt-in and
+        // are skipped by default.
         let args = Args::try_parse_from([
             "triage",
             "--input",
@@ -2510,22 +2533,8 @@ mod tests {
         ])
         .expect("parse args");
         let out = run(&args);
-        for step in ["load", "round_trip", "diff", "recalc", "render"] {
-            let res = out.steps.get(step).expect("step missing");
-            assert_eq!(res.status, "skipped", "expected {step} to be skipped");
-            assert_eq!(
-                res.details
-                    .as_ref()
-                    .and_then(|v| v.get("reason"))
-                    .and_then(|v| v.as_str()),
-                Some("encrypted"),
-                "expected {step} to have encrypted reason"
-            );
-            assert!(
-                res.error.is_none(),
-                "skipped {step} should not include error digest"
-            );
-        }
-        assert!(!out.result.open_ok);
+        let load = out.steps.get("load").expect("load step missing");
+        assert_eq!(load.status, "ok");
+        assert!(out.result.open_ok, "expected open_ok with correct password");
     }
 }
