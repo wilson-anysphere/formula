@@ -100,10 +100,11 @@ describe("drawings selection handles", () => {
     }
   });
 
-  it("cursorForResizeHandleWithTransform matches cursorForResizeHandle at rotationDeg=0", () => {
+  it("cursorForResizeHandleWithTransform matches cursorForResizeHandle for undefined/identity transforms", () => {
     const identity: DrawingTransform = { rotationDeg: 0, flipH: false, flipV: false };
     const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     for (const handle of handles) {
+      expect(cursorForResizeHandleWithTransform(handle)).toBe(cursorForResizeHandle(handle));
       expect(cursorForResizeHandleWithTransform(handle, identity)).toBe(cursorForResizeHandle(handle));
     }
   });
