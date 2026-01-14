@@ -8891,7 +8891,7 @@ impl Engine {
                         sheet_id,
                         sheet_name.clone(),
                         *addr,
-                        formula.to_string(),
+                        formula.clone(),
                         cell.phonetic.clone(),
                     ));
                 }
