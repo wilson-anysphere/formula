@@ -311,3 +311,40 @@ fn parses_chart_frame_wrapped_in_mc_alternate_content_choice_branch() {
         "expected DrawingPart to materialize a single chart placeholder from the Choice branch"
     );
 }
+
+#[test]
+fn parses_chart_frame_wrapped_in_mc_alternate_content_fallback_branch() {
+    let fallback_frame = chart_frame_xml().to_string();
+
+    // Choice branch contains no chart; we should fall back to the first Fallback branch that does.
+    let object_xml = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:Choice Requires="c14"><xdr:graphicFrame/></mc:Choice>
+  <mc:Fallback>{fallback_frame}</mc:Fallback>
+</mc:AlternateContent>"#
+    );
+
+    let anchor_xml = format!(
+        r#"<xdr:twoCellAnchor>
+  <xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from>
+  <xdr:to><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:to>
+  {object_xml}
+  <xdr:clientData/>
+</xdr:twoCellAnchor>"#
+    );
+    let drawing_xml = wrap_wsdr(&anchor_xml);
+
+    let expected = Anchor::TwoCell {
+        from: AnchorPoint::new(CellRef::new(2, 1), CellOffset::new(0, 0)),
+        to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
+    };
+
+    let drawing_part = assert_anchor_parses_consistently(&drawing_xml, expected);
+    assert!(
+        matches!(
+            &drawing_part.objects[0].kind,
+            DrawingObjectKind::ChartPlaceholder { rel_id, raw_xml } if rel_id == "rId1" && raw_xml.contains("rId1")
+        ),
+        "expected DrawingPart to materialize a chart placeholder from the Fallback branch"
+    );
+}
