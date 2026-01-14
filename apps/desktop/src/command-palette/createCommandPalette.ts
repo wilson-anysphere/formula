@@ -18,6 +18,7 @@ import { searchFunctionResults, type CommandPaletteFunctionResult } from "./comm
 import { getRecentCommandIdsForDisplay, type StorageLike } from "./recents.js";
 import { installCommandPaletteRecentsTracking } from "./installCommandPaletteRecentsTracking.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
+import { isFunctionSignatureCatalogReady, preloadFunctionSignatureCatalog } from "../formula-bar/highlight/functionSignatures.js";
 import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup } from "../../../../packages/search/index.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 
@@ -487,6 +488,18 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     isOpen = true;
     input.setAttribute("aria-expanded", "true");
     document.addEventListener("focusin", handleDocumentFocusIn);
+
+    // Best-effort: warm the function signature catalog in the background so function results can
+    // show signatures/summaries shortly after the palette opens.
+    if (!isFunctionSignatureCatalogReady()) {
+      void preloadFunctionSignatureCatalog().then(() => {
+        if (!isOpen) return;
+        if (!isFunctionSignatureCatalogReady()) return;
+        if (!query.trim()) return;
+        // Re-render to populate signatures for catalog-only functions.
+        renderResults("async");
+      });
+    }
 
     renderResults("sync");
 
