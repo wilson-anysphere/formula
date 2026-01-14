@@ -14,9 +14,14 @@ fn assert_valid_zip(bytes: &[u8]) {
         bytes.starts_with(b"PK"),
         "expected decrypted bytes to be a ZIP"
     );
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open decrypted zip");
-    zip.by_name("xl/workbook.xml")
-        .expect("expected xl/workbook.xml in decrypted zip");
+    let zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open decrypted zip");
+    // `zip` is a dev-dependency for this crate with `default-features = false` to avoid pulling in
+    // compression backends. We only need to assert that the decrypted bytes are a valid OOXML ZIP
+    // container and that it contains the expected file entries.
+    assert!(
+        zip.index_for_name("xl/workbook.xml").is_some(),
+        "expected xl/workbook.xml in decrypted zip"
+    );
 }
 
 #[test]
@@ -41,9 +46,11 @@ fn decrypts_ooxml_encrypted_fixtures_to_valid_zip() {
         assert_valid_zip(&decrypted);
 
         if expect_vba {
-            let mut zip = zip::ZipArchive::new(Cursor::new(&decrypted)).expect("open zip");
-            zip.by_name("xl/vbaProject.bin")
-                .expect("expected xl/vbaProject.bin in decrypted xlsm");
+            let zip = zip::ZipArchive::new(Cursor::new(&decrypted)).expect("open zip");
+            assert!(
+                zip.index_for_name("xl/vbaProject.bin").is_some(),
+                "expected xl/vbaProject.bin in decrypted xlsm"
+            );
         }
     }
 }
