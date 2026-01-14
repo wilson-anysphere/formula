@@ -853,7 +853,6 @@ export class SpreadsheetApp {
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
   private selectedDrawingId: number | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
-  private nextDrawingObjectId = 1;
   private nextDrawingImageId = 1;
   private insertImageInput: HTMLInputElement | null = null;
   private drawingViewportMemo:
@@ -6090,8 +6089,6 @@ export class SpreadsheetApp {
 
     const existingObjects = this.listDrawingObjectsForSheet();
     const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
-    const nextObjectId = this.nextDrawingObjectId++;
-
     const docAny = this.document as any;
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
@@ -6104,7 +6101,6 @@ export class SpreadsheetApp {
       const { objects: combinedObjects, image } = await insertImageFromFile(file, {
         imageId,
         anchor,
-        nextObjectId,
         objects: existingObjects,
         images: this.drawingImages,
       });
