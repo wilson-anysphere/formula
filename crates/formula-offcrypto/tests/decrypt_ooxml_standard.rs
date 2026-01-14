@@ -45,6 +45,8 @@ fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) 
 
     let mut info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
+            // MS-OFFCRYPTO Standard encryption must set `fCryptoAPI`, and because we declare an AES
+            // `algId` we must also set `fAES` to satisfy strict header validation.
             flags: StandardEncryptionHeaderFlags::from_raw(
                 StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
             ),
