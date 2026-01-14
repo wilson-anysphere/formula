@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use formula_io::{open_workbook, save_workbook};
+use formula_io::{open_workbook, save_workbook, Error};
 use xlsx_diff::Severity;
 
 #[test]
@@ -16,9 +16,22 @@ fn roundtrip_xlsx_fixtures_open_save_no_critical_diffs() {
 
     let tmpdir = tempfile::tempdir().expect("temp dir");
 
+    let mut processed = 0usize;
     for (idx, fixture) in fixtures.iter().enumerate() {
-        let wb = open_workbook(fixture)
-            .unwrap_or_else(|err| panic!("open_workbook failed for {}: {err}", fixture.display()));
+        let wb = match open_workbook(fixture) {
+            Ok(wb) => wb,
+            Err(Error::PasswordRequired { .. } | Error::EncryptedWorkbook { .. }) => {
+                // Roundtrip tests are meant for plaintext fixtures. Encrypted OOXML/BIFF files must
+                // be opened via the password APIs and are covered by dedicated encrypted fixture
+                // tests.
+                eprintln!("skipping encrypted fixture {}", fixture.display());
+                continue;
+            }
+            Err(err) => {
+                panic!("open_workbook failed for {}: {err}", fixture.display());
+            }
+        };
+        processed += 1;
 
         let extension = fixture
             .extension()
@@ -54,5 +67,6 @@ fn roundtrip_xlsx_fixtures_open_save_no_critical_diffs() {
             panic!("fixture {} did not round-trip cleanly", fixture.display());
         }
     }
-}
 
+    assert!(processed > 0, "no plaintext fixtures were round-tripped");
+}
