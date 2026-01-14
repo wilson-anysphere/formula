@@ -398,7 +398,8 @@ function main() {
   if (missing.length > 0) {
     errBlock(`Missing Tauri updater signing secrets`, [
       `This release workflow is building a tagged desktop release and needs to sign updater artifacts.`,
-      `Expected secrets: TAURI_PRIVATE_KEY, TAURI_KEY_PASSWORD (required if your private key is encrypted).`,
+      `Expected secrets: TAURI_PRIVATE_KEY (unencrypted minisign secret key; base64).`,
+      `Optional: TAURI_KEY_PASSWORD (only for encrypted PKCS#8 keys; encrypted minisign keys are not supported).`,
       `Missing/empty GitHub Actions repository secrets (Settings → Secrets and variables → Actions):`,
       ...missing.map((name) => name),
       `Generate a new keypair (prints public + private key):`,
