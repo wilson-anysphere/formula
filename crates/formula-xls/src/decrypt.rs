@@ -1900,9 +1900,12 @@ mod tests {
 
         let res = decrypt_biff_workbook_stream(&stream, "pw");
         assert!(
-            matches!(res, Err(DecryptError::UnsupportedEncryption(_))),
+            matches!(&res, Err(DecryptError::UnsupportedEncryption(_))),
             "res={res:?}"
         );
+        if let Err(DecryptError::UnsupportedEncryption(message)) = res {
+            assert!(message.contains("wEncryptionType"), "message={message:?}");
+        }
     }
 
     #[test]
