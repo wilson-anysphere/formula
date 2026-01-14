@@ -61,6 +61,8 @@ Notes / caveats:
   not match `-LocaleId`.
 - For `de-DE`/`es-ES`/`fr-FR`, the extractor also runs a quick sanity check on a few sentinel
   translations (e.g. `SUM`/`IF`) and warns if Excel appears misconfigured.
+- The extractor also warns if Excel maps multiple canonical functions to the same localized
+  spelling; in that case `scripts/generate-locale-function-tsv.js` will fail due to ambiguity.
 
 For debugging, you can also pass:
 

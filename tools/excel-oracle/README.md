@@ -100,6 +100,8 @@ Notes / caveats:
 - The script prints the detected Excel UI locale and will warn if it does not match `-LocaleId`.
 - The script also does a small sanity-check on a few sentinel translations (e.g. `SUM`/`IF`) for
   `de-DE`/`es-ES`/`fr-FR` and warns if Excel appears misconfigured.
+- The script warns if Excel maps multiple canonical functions to the same localized spelling (this
+  would later cause `scripts/generate-locale-function-tsv.js` to fail).
 - Use `-Visible`, `-MaxFunctions N`, and/or PowerShell’s `-Verbose` switch for debugging.
 
 ## CI note (Excel availability)
