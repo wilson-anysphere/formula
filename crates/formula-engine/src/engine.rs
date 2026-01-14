@@ -2861,53 +2861,170 @@ impl Engine {
         let width = range.width() as usize;
         let height = range.height() as usize;
 
+        let mut out: Vec<Vec<Value>> = Vec::with_capacity(height);
+        for _ in 0..height {
+            out.push(vec![Value::Blank; width]);
+        }
+
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
-            return Ok((0..height).map(|_| vec![Value::Blank; width]).collect());
+            return Ok(out);
         };
         let Some(sheet_state) = self.workbook.sheets.get(sheet_id) else {
-            return Ok((0..height).map(|_| vec![Value::Blank; width]).collect());
+            return Ok(out);
         };
 
         let row_count = sheet_state.row_count;
         let col_count = sheet_state.col_count;
         let cells = &sheet_state.cells;
 
-        let provider = self.external_value_provider.as_deref();
-        let provider_sheet_name = self.workbook.sheet_name(sheet_id);
+        let in_bounds_rows = if range.start.row >= row_count {
+            0
+        } else {
+            let remaining = (row_count - range.start.row) as usize;
+            height.min(remaining)
+        };
+        let in_bounds_cols = if range.start.col >= col_count {
+            0
+        } else {
+            let remaining = (col_count - range.start.col) as usize;
+            width.min(remaining)
+        };
 
-        let mut out = Vec::with_capacity(height);
-        for row in range.start.row..=range.end.row {
-            let mut row_out = Vec::with_capacity(width);
-            for col in range.start.col..=range.end.col {
-                // Mirror `get_cell_value`'s #REF! semantics for out-of-bounds reads.
-                if row >= row_count || col >= col_count {
-                    row_out.push(Value::Error(ErrorKind::Ref));
-                    continue;
+        // Fill any out-of-bounds cells with `#REF!` to mirror `get_cell_value`.
+        if in_bounds_rows < height {
+            for row_out in out.iter_mut().skip(in_bounds_rows) {
+                row_out.fill(Value::Error(ErrorKind::Ref));
+            }
+        }
+        if in_bounds_cols < width {
+            for row_out in out.iter_mut().take(in_bounds_rows) {
+                for cell in row_out.iter_mut().skip(in_bounds_cols) {
+                    *cell = Value::Error(ErrorKind::Ref);
                 }
+            }
+        }
 
-                let addr = CellAddr { row, col };
-                let key = CellKey { sheet: sheet_id, addr };
+        // Short-circuit when the entire requested rectangle is out of bounds.
+        if in_bounds_rows == 0 || in_bounds_cols == 0 {
+            return Ok(out);
+        }
 
-                if let Some(v) = self.spilled_cell_value(key) {
-                    row_out.push(v);
-                    continue;
-                }
+        // When an external provider is configured, missing cells can contain non-blank values; we
+        // must query it for each missing coordinate, so fall back to per-cell lookup.
+        if let Some(provider) = self.external_value_provider.as_deref() {
+            let provider_sheet_name = self.workbook.sheet_name(sheet_id);
+            for row_off in 0..in_bounds_rows {
+                let row = range.start.row + row_off as u32;
+                for col_off in 0..in_bounds_cols {
+                    let col = range.start.col + col_off as u32;
+                    let addr = CellAddr { row, col };
+                    let key = CellKey { sheet: sheet_id, addr };
 
-                if let Some(cell) = cells.get(&addr) {
-                    row_out.push(cell.value.clone());
-                    continue;
-                }
-
-                if let (Some(provider), Some(sheet_name)) = (provider, provider_sheet_name) {
-                    if let Some(v) = provider.get(sheet_name, addr) {
-                        row_out.push(v);
+                    if let Some(v) = self.spilled_cell_value(key) {
+                        out[row_off][col_off] = v;
                         continue;
                     }
+
+                    if let Some(cell) = cells.get(&addr) {
+                        out[row_off][col_off] = cell.value.clone();
+                        continue;
+                    }
+
+                    if let Some(sheet_name) = provider_sheet_name {
+                        if let Some(v) = provider.get(sheet_name, addr) {
+                            out[row_off][col_off] = v;
+                        }
+                    }
+                }
+            }
+            return Ok(out);
+        }
+
+        // Heuristic: if the requested rectangle is larger than the number of stored cells, it's
+        // often faster to iterate the sparse `Sheet.cells` map and populate a pre-filled output
+        // buffer than to perform per-cell HashMap lookups.
+        let range_cells = (width as u64).saturating_mul(height as u64);
+        let stored_cells = cells.len() as u64;
+        let use_sparse_fill = range_cells >= stored_cells;
+
+        if use_sparse_fill {
+            for (addr, cell) in cells.iter() {
+                if addr.row < range.start.row
+                    || addr.row > range.end.row
+                    || addr.col < range.start.col
+                    || addr.col > range.end.col
+                {
+                    continue;
+                }
+                if addr.row >= row_count || addr.col >= col_count {
+                    continue;
+                }
+                let row_off = (addr.row - range.start.row) as usize;
+                let col_off = (addr.col - range.start.col) as usize;
+                if row_off < in_bounds_rows && col_off < in_bounds_cols {
+                    out[row_off][col_off] = cell.value.clone();
+                }
+            }
+
+            // Overlay spilled values (spill cells override the workbook map for blank/style-only
+            // cells).
+            for (origin, spill) in &self.spills.by_origin {
+                if origin.sheet != sheet_id {
+                    continue;
+                }
+                let spill_start = origin.addr;
+                let spill_end = spill.end;
+                let start_row = spill_start.row.max(range.start.row);
+                let start_col = spill_start.col.max(range.start.col);
+                let end_row = spill_end.row.min(range.end.row);
+                let end_col = spill_end.col.min(range.end.col);
+                if start_row > end_row || start_col > end_col {
+                    continue;
                 }
 
-                row_out.push(Value::Blank);
+                for row in start_row..=end_row {
+                    if row >= row_count {
+                        break;
+                    }
+                    let row_off = (row - range.start.row) as usize;
+                    if row_off >= in_bounds_rows {
+                        continue;
+                    }
+                    for col in start_col..=end_col {
+                        if col >= col_count {
+                            break;
+                        }
+                        let col_off = (col - range.start.col) as usize;
+                        if col_off >= in_bounds_cols {
+                            continue;
+                        }
+                        let spill_row_off = (row - spill_start.row) as usize;
+                        let spill_col_off = (col - spill_start.col) as usize;
+                        if let Some(v) = spill.array.get(spill_row_off, spill_col_off) {
+                            out[row_off][col_off] = v.clone();
+                        }
+                    }
+                }
             }
-            out.push(row_out);
+        } else {
+            // For small rectangles inside dense sheets, direct per-cell lookups avoid scanning the
+            // entire sheet HashMap.
+            for row_off in 0..in_bounds_rows {
+                let row = range.start.row + row_off as u32;
+                for col_off in 0..in_bounds_cols {
+                    let col = range.start.col + col_off as u32;
+                    let addr = CellAddr { row, col };
+                    let key = CellKey { sheet: sheet_id, addr };
+
+                    if let Some(v) = self.spilled_cell_value(key) {
+                        out[row_off][col_off] = v;
+                        continue;
+                    }
+                    if let Some(cell) = cells.get(&addr) {
+                        out[row_off][col_off] = cell.value.clone();
+                    }
+                }
+            }
         }
 
         Ok(out)
