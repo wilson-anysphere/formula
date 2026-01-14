@@ -72,7 +72,10 @@ export function createAddSheetCommand(params: {
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
         app.activateSheet(id);
-        restoreFocusAfterSheetNavigation();
+        // Ribbon dropdown menu items restore focus to the trigger button after dispatching the command.
+        // Defer grid focus so it wins over that built-in focus restoration (Excel-like).
+        if (typeof queueMicrotask === "function") queueMicrotask(() => restoreFocusAfterSheetNavigation());
+        else restoreFocusAfterSheetNavigation();
         return;
       }
 
@@ -97,7 +100,9 @@ export function createAddSheetCommand(params: {
         // ignore
       }
       app.activateSheet(newSheetId);
-      restoreFocusAfterSheetNavigation();
+      // See note above re: ribbon menu items restoring focus to the trigger control.
+      if (typeof queueMicrotask === "function") queueMicrotask(() => restoreFocusAfterSheetNavigation());
+      else restoreFocusAfterSheetNavigation();
     } catch (err) {
       showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
     } finally {
