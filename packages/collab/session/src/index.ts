@@ -1614,10 +1614,15 @@ export class CollabSession {
       );
     }
 
-    void Promise.all(gates).finally(() => {
-      if (this.isDestroyed) return;
-      provider.connect?.();
-    });
+    void Promise.all(gates)
+      .finally(() => {
+        if (this.isDestroyed) return;
+        provider.connect?.();
+      })
+      .catch(() => {
+        // Best-effort: gates should already swallow errors, but avoid any unexpected
+        // unhandled rejection from the `.finally` bookkeeping chain.
+      });
   }
 
   private emitStatusChange(): void {
