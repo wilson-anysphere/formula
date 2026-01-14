@@ -181,6 +181,38 @@ fn push_warning_bounded(warnings: &mut Vec<String>, warning: impl Into<String>) 
     }
 }
 
+/// Push a warning but ensure it is present even if the warning buffer is already full.
+///
+/// This is used for "critical" warnings (e.g. hardening caps) where we want to surface the
+/// condition even if earlier best-effort parsing already exhausted the warning budget.
+fn push_warning_bounded_force(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    let warning = warning.into();
+
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(warning);
+        return;
+    }
+
+    // Keep the warning buffer size bounded. Prefer preserving the terminal
+    // `WARNINGS_SUPPRESSED_MESSAGE` marker (when present) and replace the last "real" warning.
+    let replace_idx = if warnings.len() == MAX_WARNINGS_PER_SHEET + 1
+        && warnings
+            .last()
+            .is_some_and(|w| w == WARNINGS_SUPPRESSED_MESSAGE)
+    {
+        MAX_WARNINGS_PER_SHEET.saturating_sub(1)
+    } else {
+        warnings.len().saturating_sub(1)
+    };
+
+    if let Some(slot) = warnings.get_mut(replace_idx) {
+        *slot = warning;
+    } else {
+        // Should be unreachable, but fall back to the bounded helper for safety.
+        push_warning_bounded(warnings, warning);
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct SheetRowProperties {
     pub(crate) height: Option<f32>,
@@ -2077,7 +2109,7 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
                 // Hardening: once we hit the cap, stop scanning immediately to avoid additional
                 // allocations and decode work on the rest of the sheet stream.
                 if out.hyperlinks.len() >= MAX_HYPERLINKS_PER_SHEET {
-                    push_warning_bounded(
+                    push_warning_bounded_force(
                         &mut out.warnings,
                         "too many hyperlinks; additional HLINK records skipped".to_string(),
                     );
