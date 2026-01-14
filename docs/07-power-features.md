@@ -866,11 +866,12 @@ export type CellValue =
 
 WASM binding implementation note (important):
 
-- Several Rust structs below implement `Serialize`/`Deserialize` but do **not** use `#[serde(default)]` on optional-ish fields.
-  - If a WASM binding deserializes directly into the Rust type (e.g. `serde_wasm_bindgen::from_value::<GoalSeekParams>(...)`), **all fields must be present**.
-  - To provide a JS-friendly API with optional fields, define a small JS-facing DTO with `Option<T>` fields and map it into the Rust types using constructors:
+- Several Rust request structs provide defaults via constructors (e.g. `GoalSeekParams::new`, `SimulationConfig::new`) rather than via `#[serde(default)]`.
+  - If a WASM binding deserializes directly into the Rust type (e.g. `serde_wasm_bindgen::from_value::<GoalSeekParams>(...)`), you must provide all **non-`Option`** fields explicitly (constructor defaults are not applied).
+  - `Option<T>` fields behave like normal serde optionals: they may be omitted or set to `null`.
+  - To provide a JS-friendly API with optional fields like `maxIterations`, define a JS-facing DTO with optional fields and map it into the Rust types using constructors:
     - `GoalSeekParams::new(...)` + overwrite tuning fields when provided
-    - `SimulationConfig::new(iterations)` + fill `seed`, `histogram_bins`, etc.
+    - `SimulationConfig::new(iterations)` + overwrite `seed`, `correlations`, `histogram_bins`, etc.
 
 Error surface (host contract):
 
@@ -904,7 +905,7 @@ export interface GoalSeekParams {
 
   maxIterations: number;
   tolerance: number;
-  derivativeStep: number | null;
+  derivativeStep?: number | null;
   minDerivative: number;
   maxBracketExpansions: number;
 }
@@ -1105,6 +1106,7 @@ export interface SimulationConfig {
 
   // Required by the Rust struct (u64; require a safe integer for JS determinism).
   seed: number;
+  // Optional in Rust (Option<CorrelationMatrix>) and may be omitted or set to `null`.
   correlations?: CorrelationMatrix | null;
   // Required by the Rust struct.
   histogramBins: number;
