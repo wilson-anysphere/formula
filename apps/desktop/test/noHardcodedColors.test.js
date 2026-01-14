@@ -31,6 +31,10 @@ function walk(dirPath) {
   return entries;
 }
 
+function getLineNumber(text, index) {
+  return text.slice(0, Math.max(0, index)).split("\n").length;
+}
+
 test("core UI does not hardcode colors outside tokens.css", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const files = walk(srcRoot).filter((file) => {
@@ -171,20 +175,36 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     "gi",
   );
 
-  /** @type {{ file: string, match: string }[]} */
+  /** @type {string[]} */
   const violations = [];
 
   for (const file of files) {
     const content = fs.readFileSync(file, "utf8");
     const ext = path.extname(file);
     const stripped = ext === ".css" ? stripCssNonSemanticText(content) : stripComments(content);
-    const hex = stripped.match(hexColor);
-    const rgb = stripped.match(rgbColor);
-    const hsl = stripped.match(hslColor);
-    const modern = modernColorFn.exec(stripped);
+    const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
+
+    hexColor.lastIndex = 0;
+    rgbColor.lastIndex = 0;
+    hslColor.lastIndex = 0;
     modernColorFn.lastIndex = 0;
+
+    const hex = hexColor.exec(stripped);
+    const rgb = rgbColor.exec(stripped);
+    const hsl = hslColor.exec(stripped);
+    const modern = modernColorFn.exec(stripped);
+
+    hexColor.lastIndex = 0;
+    rgbColor.lastIndex = 0;
+    hslColor.lastIndex = 0;
+    modernColorFn.lastIndex = 0;
+
     /** @type {string | null} */
     let named = null;
+    /** @type {number | null} */
+    let namedIndex = null;
+    /** @type {string} */
+    let namedContext = "";
     if (ext === ".css") {
       for (const decl of stripped.matchAll(cssDeclaration)) {
         const prop = decl?.groups?.prop?.toLowerCase() ?? "";
@@ -196,6 +216,10 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         namedColorTokenRe.lastIndex = 0;
         if (match?.groups?.color) {
           named = match.groups.color;
+          const matchStart = decl.index ?? 0;
+          const valueStart = matchStart + (decl[0]?.length ?? 0) - value.length;
+          namedIndex = valueStart + (match.index ?? 0);
+          namedContext = prop;
           break;
         }
       }
@@ -214,21 +238,36 @@ test("core UI does not hardcode colors outside tokens.css", () => {
       jsxAttributeColor.lastIndex = 0;
       jsxAttributeColorExpr.lastIndex = 0;
       named = match?.groups?.color ?? null;
+      if (named) {
+        namedIndex = (match?.index ?? 0) + (match?.[0]?.indexOf(named) ?? 0);
+        namedContext = "named-color";
+      }
     }
     if (named && !allowedColorKeywords.has(named.toLowerCase())) {
-      violations.push({ file, match: named });
+      const line = getLineNumber(stripped, namedIndex ?? 0);
+      violations.push(`${rel}:L${line}: ${namedContext}: ${named}`);
     }
-    if (hex) violations.push({ file, match: hex[0] });
-    if (rgb) violations.push({ file, match: "rgb(...)" });
-    if (hsl) violations.push({ file, match: "hsl(...)" });
-    if (modern) violations.push({ file, match: `${modern.groups?.fn ?? "color"}(...)` });
+    if (hex) {
+      const line = getLineNumber(stripped, hex.index ?? 0);
+      violations.push(`${rel}:L${line}: ${hex[0]}`);
+    }
+    if (rgb) {
+      const line = getLineNumber(stripped, rgb.index ?? 0);
+      violations.push(`${rel}:L${line}: rgb(...)`);
+    }
+    if (hsl) {
+      const line = getLineNumber(stripped, hsl.index ?? 0);
+      violations.push(`${rel}:L${line}: hsl(...)`);
+    }
+    if (modern) {
+      const line = getLineNumber(stripped, modern.index ?? 0);
+      violations.push(`${rel}:L${line}: ${modern.groups?.fn ?? "color"}(...)`);
+    }
   }
 
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded colors in core UI files:\\n${violations
-      .map((v) => `- ${path.relative(srcRoot, v.file)}: ${v.match}`)
-      .join("\\n")}`
+    `Found hardcoded colors in core UI files:\\n${violations.map((v) => `- ${v}`).join("\\n")}`,
   );
 });
