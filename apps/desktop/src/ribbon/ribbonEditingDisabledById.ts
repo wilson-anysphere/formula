@@ -121,6 +121,22 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "data.sortFilter.advanced.advancedFilter": true,
   "data.sortFilter.advanced.clearFilter": true,
 
+  // --- Page Layout → Page Setup ----------------------------------------------
+  // Page Setup commands mutate sheet print settings and should be blocked while editing.
+  "pageLayout.pageSetup.pageSetupDialog": true,
+  "pageLayout.pageSetup.margins": true,
+  "pageLayout.pageSetup.margins.normal": true,
+  "pageLayout.pageSetup.margins.wide": true,
+  "pageLayout.pageSetup.margins.narrow": true,
+  "pageLayout.pageSetup.margins.custom": true,
+  "pageLayout.pageSetup.orientation": true,
+  "pageLayout.pageSetup.orientation.portrait": true,
+  "pageLayout.pageSetup.orientation.landscape": true,
+  "pageLayout.pageSetup.size": true,
+  "pageLayout.pageSetup.size.letter": true,
+  "pageLayout.pageSetup.size.a4": true,
+  "pageLayout.pageSetup.size.more": true,
+
   // --- Page Layout → Print Area ----------------------------------------------
   // Print area mutations rely on selection state and should not run while editing.
   "pageLayout.printArea.setPrintArea": true,
