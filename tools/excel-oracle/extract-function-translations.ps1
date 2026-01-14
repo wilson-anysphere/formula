@@ -43,7 +43,7 @@
 
 .PARAMETER FailOnSkipped
   Fail the extraction if Excel rejects any functions (i.e. if any canonical functions are
-  skipped due to parsing/translation errors or being treated as `_xludf.`).
+  skipped due to parsing/translation errors or being treated as `_xlfn.` / `_xludf.`).
 
   This is recommended when generating locale sources intended to be committed to the repo,
   since missing translations silently fall back to identity mappings (English) during TSV
@@ -53,7 +53,8 @@
   # Generate the de-DE source JSON from a German Excel install (from repo root)
   powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
     -LocaleId de-DE `
-    -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+    -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json `
+    -FailOnSkipped
 
   # Then normalize + regenerate the committed TSVs:
   node scripts/normalize-locale-function-sources.js
@@ -64,7 +65,8 @@
   # Generate the es-ES source JSON from a Spanish Excel install (from repo root)
   powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
     -LocaleId es-ES `
-    -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+    -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json `
+    -FailOnSkipped
 
   # Then normalize + regenerate the committed TSVs:
   node scripts/normalize-locale-function-sources.js
