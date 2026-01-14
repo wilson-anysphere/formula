@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { FormulaBarView, type NameBoxDropdownProvider } from "./FormulaBarView.js";
+import { FormulaBarView } from "./FormulaBarView.js";
 
 describe("FormulaBarView name box dropdown", () => {
   it("opens dropdown and keyboard-selects an item", () => {
@@ -12,7 +12,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn(() => true);
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [
         {
           kind: "namedRange",
@@ -76,7 +76,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn();
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [
         { kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" },
         { kind: "namedRange", key: "namedRange:Costs", label: "Costs", reference: "Costs" },
@@ -114,7 +114,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn(() => true);
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [{ kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" }],
     };
 
@@ -142,7 +142,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn(() => true);
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [{ kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" }],
     };
 
@@ -169,7 +169,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn();
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [],
     };
 
@@ -198,7 +198,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn();
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [{ kind: "namedRange", key: "namedRange:Const", label: "Const", reference: "" }],
     };
 
@@ -229,7 +229,7 @@ describe("FormulaBarView name box dropdown", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn(() => true);
-    const provider: NameBoxDropdownProvider = {
+    const provider = {
       getItems: () => [
         { kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" },
         { kind: "namedRange", key: "namedRange:Costs", label: "Costs", reference: "Costs" },

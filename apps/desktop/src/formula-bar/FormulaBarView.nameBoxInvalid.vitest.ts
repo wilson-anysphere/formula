@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { FormulaBarView, type NameBoxDropdownProvider } from "./FormulaBarView.js";
+import { FormulaBarView } from "./FormulaBarView.js";
 
 describe("FormulaBarView name box invalid reference feedback", () => {
   it("keeps focus + sets aria-invalid when navigation fails, then clears on input and navigates", () => {
@@ -72,7 +72,7 @@ describe("FormulaBarView name box invalid reference feedback", () => {
     document.body.appendChild(host);
 
     const onGoTo = vi.fn(() => false);
-    const provider: NameBoxDropdownProvider = { getItems: () => [] };
+    const provider = { getItems: () => [] };
     new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;

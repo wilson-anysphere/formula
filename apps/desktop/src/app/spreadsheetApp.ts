@@ -1,10 +1,6 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
-import {
-  FormulaBarView,
-  type FormulaBarCommit,
-  type NameBoxDropdownProvider,
-} from "../formula-bar/FormulaBarView";
+import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
@@ -163,6 +159,12 @@ import {
   type CollaboratorListEntry,
 } from "../collab/presence-ui/collaborators-list-ui-controller.js";
 import { DrawingInteractionController } from "../drawings/interaction.js";
+
+type FormulaBarCommit = Parameters<ConstructorParameters<typeof FormulaBarView>[1]["onCommit"]>[1];
+
+type NameBoxDropdownProvider = NonNullable<
+  NonNullable<ConstructorParameters<typeof FormulaBarView>[2]>["nameBoxDropdownProvider"]
+>;
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {

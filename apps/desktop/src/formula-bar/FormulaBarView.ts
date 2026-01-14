@@ -120,7 +120,7 @@ type NameBoxDropdownItem = {
   description?: string;
 };
 
-export interface NameBoxDropdownProvider {
+interface NameBoxDropdownProvider {
   getItems(): NameBoxDropdownItem[];
 }
 
@@ -180,7 +180,7 @@ function nextFunctionPickerListId(): string {
 
 type FormulaBarCommitReason = "enter" | "tab" | "command";
 
-export interface FormulaBarCommit {
+interface FormulaBarCommit {
   reason: FormulaBarCommitReason;
   /**
    * Shift modifier for enter/tab (Shift+Enter moves up, Shift+Tab moves left).
