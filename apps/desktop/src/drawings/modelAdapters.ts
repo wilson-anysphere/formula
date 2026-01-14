@@ -869,7 +869,7 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
 
 function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKind | null {
   if (!isRecord(kindJson)) return null;
-  const type = readOptionalString(pick(kindJson, ["type"])) ?? "";
+  const type = normalizeEnumTag(readOptionalString(pick(kindJson, ["type"])) ?? "");
   const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
   const label = readOptionalString(pick(kindJson, ["label"]));
 
@@ -895,7 +895,7 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
     }
     case "unknown":
       return { type: "unknown", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
-    case "chartPlaceholder": {
+    case "chartplaceholder": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
       if (!chartId || chartId.trim() === "" || chartId === "unknown") {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
