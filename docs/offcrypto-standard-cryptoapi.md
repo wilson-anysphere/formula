@@ -18,12 +18,16 @@ The intent is that an engineer can implement this without reading any external r
 For repo-specific implementation notes (which parameter subsets we accept, crate entrypoints, writer
 defaults), see `docs/office-encryption.md`.
 
-Important nuance: this guide describes the **Excel/`msoffcrypto-tool`-style** Standard/CryptoAPI AES
-variant implemented by `crates/formula-offcrypto`, where the verifier fields and `EncryptedPackage`
-are decrypted with **AES-ECB** (no IV) after key derivation.
+Important nuance: this guide describes the **baseline Excel/`msoffcrypto-tool`-style** Standard/CryptoAPI
+AES scheme where the verifier fields and `EncryptedPackage` are decrypted with **AES-ECB** (no IV)
+after key derivation.
 
-If you need broader real-world compatibility across non-Excel producers, prefer
-`crates/formula-office-crypto`’s Standard decryptor.
+Real-world “Standard/CryptoAPI” files are not perfectly consistent across producers. In addition to
+the baseline ECB scheme described here, this repo’s decryptors include compatibility fallbacks for
+some non-Excel variants (for example: Agile-like CBC verifier fields with `spinCount=1000`,
+CBC-segmented `EncryptedPackage`, AES-128 “truncate `H_block0`” key derivation, and missing
+`EncryptionHeader.flags` bits). For the most permissive implementation (including broader hash
+support), prefer `crates/formula-office-crypto`’s Standard decryptor.
 
 For Agile (4.4) OOXML password decryption details (different scheme; XML descriptor + `dataIntegrity`
 HMAC), see `docs/22-ooxml-encryption.md`.
@@ -43,6 +47,7 @@ If you’re changing or debugging the code, start here:
     * `verify_password_standard`
 * `EncryptedPackage` decryption helpers:
   * `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
+  * `crates/formula-offcrypto/src/encrypted_package.rs`: `decrypt_standard_encrypted_package_auto` (ECB vs CBC-segmented autodetect)
   * `crates/formula-io/src/offcrypto/encrypted_package.rs`:
     * `decrypt_encrypted_package_standard_aes_to_writer` (streaming AES-ECB)
     * `decrypt_standard_encrypted_package_stream` (buffered AES-ECB)
@@ -582,8 +587,12 @@ iv_i = SHA1(Salt || LE32(i))[0..16]
 plaintext_i = AES-CBC-Decrypt(fileKey, iv_i, ciphertext_i)
 ```
 
-This is **not** the Excel-default Standard AES scheme, but `formula-io`’s `EncryptedPackage` helper
-can try it as a fallback when a salt is available (see `docs/offcrypto-standard-encryptedpackage.md`).
+This is **not** the Excel-default Standard AES scheme. In this repo:
+
+- `formula-offcrypto` can autodetect **ECB vs CBC-segmented** package decryption (`decrypt_standard_encrypted_package_auto`).
+- `formula-io`’s higher-level Standard decryptor also tries additional compatibility schemes.
+
+See `docs/offcrypto-standard-encryptedpackage.md`.
 
 #### 7.2.2) RC4 (`CALG_RC4`)
 
@@ -598,10 +607,11 @@ For segment index `i = 0, 1, 2, ...`:
 1. Derive `H_block = Hash(H_final || LE32(i))`.
 2. Let `keySizeBits = KeySize` (if `keySizeBits == 0`, set `keySizeBits = 40` for RC4).
 3. `key_material_i = H_block[0 : keySizeBits/8]` (truncate to the configured key size).
-4. If `keySizeBits == 40`, set `key_i = key_material_i || 0x00*11` (16 bytes).
-   Otherwise set `key_i = key_material_i`.
-5. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of
-   ciphertext.
+4. Set `key_i = key_material_i` (length = `keySizeBits/8` bytes).
+   - Compatibility note: some CryptoAPI implementations treat 40-bit keys as 16-byte keys with 11
+     trailing zero bytes (changing the RC4 keystream because the key length affects RC4 KSA). See
+     `docs/offcrypto-standard-cryptoapi-rc4.md`.
+5. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of ciphertext.
 
 Concatenate segments and truncate to `OriginalPackageSize`.
 
