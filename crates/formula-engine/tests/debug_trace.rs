@@ -983,6 +983,42 @@ fn debug_trace_supports_path_qualified_external_workbook_cell_refs() {
 }
 
 #[test]
+fn debug_trace_supports_path_qualified_external_workbook_range_refs() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(r"[C:\path\Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set(r"[C:\path\Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"='C:\path\[Book.xlsx]Sheet1'!A1:A2"#)
+        .unwrap();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        r#"'C:\path\[Book.xlsx]Sheet1'!A1:A2"#
+    );
+    assert!(matches!(dbg.trace.kind, TraceKind::RangeRef));
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::External(r"[C:\path\Book.xlsx]Sheet1".into()),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 1, col: 0 },
+        })
+    );
+
+    let Value::Array(arr) = dbg.value else {
+        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+    };
+    assert_eq!(arr.rows, 2);
+    assert_eq!(arr.cols, 1);
+    assert_eq!(arr.get(0, 0), Some(&Value::Number(1.0)));
+    assert_eq!(arr.get(1, 0), Some(&Value::Number(2.0)));
+}
+
+#[test]
 fn debug_trace_supports_structured_references() {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
