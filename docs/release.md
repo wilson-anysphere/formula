@@ -685,6 +685,11 @@ Windows ARM64 builds also require a Windows SDK installation with **ARM64** libr
 - `C:\Program Files (x86)\Windows Kits\10\Lib\<version>\um\arm64`
 - `C:\Program Files (x86)\Windows Kits\10\Lib\<version>\ucrt\arm64`
 
+Note: some environments (including GitHub-hosted runners) can have **multiple** Windows SDK
+versions installed, and the newest SDK version may be missing the ARM64 lib subset. CI detects a
+SDK version that actually contains both `um\arm64` and `ucrt\arm64` and pins the MSVC environment
+setup to that SDK version so cross-compiles link reliably.
+
 When cross-compiling locally from an x64 Windows machine, run the build in a Visual Studio
 Developer Prompt configured for **amd64 → arm64** (CI uses `ilammy/msvc-dev-cmd` with `arch:
 amd64_arm64`).
