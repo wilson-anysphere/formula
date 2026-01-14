@@ -740,26 +740,54 @@ function rectToAabb(rect: Rect, cos: number, sin: number, flags: number): Rect {
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
-  const visitCorner = (dx: number, dy: number) => {
-    let x = dx;
-    let y = dy;
-    if (flags & 1) x = -x;
-    if (flags & 2) y = -y;
-    // Forward transform: scale(flip) then rotate(theta).
-    const tx = x * cos - y * sin;
-    const ty = x * sin + y * cos;
-    const wx = cx + tx;
-    const wy = cy + ty;
-    if (wx < minX) minX = wx;
-    if (wx > maxX) maxX = wx;
-    if (wy < minY) minY = wy;
-    if (wy > maxY) maxY = wy;
-  };
+  // Corner 1: (-hw, -hh)
+  let x = -hw;
+  let y = -hh;
+  if (flags & 1) x = -x;
+  if (flags & 2) y = -y;
+  // Forward transform: scale(flip) then rotate(theta).
+  let wx = cx + (x * cos - y * sin);
+  let wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
-  visitCorner(-hw, -hh);
-  visitCorner(hw, -hh);
-  visitCorner(hw, hh);
-  visitCorner(-hw, hh);
+  // Corner 2: (hw, -hh)
+  x = hw;
+  y = -hh;
+  if (flags & 1) x = -x;
+  if (flags & 2) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  // Corner 3: (hw, hh)
+  x = hw;
+  y = hh;
+  if (flags & 1) x = -x;
+  if (flags & 2) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  // Corner 4: (-hw, hh)
+  x = -hw;
+  y = hh;
+  if (flags & 1) x = -x;
+  if (flags & 2) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
