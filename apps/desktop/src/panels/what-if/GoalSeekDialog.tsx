@@ -101,15 +101,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
 
   return (
     <div
-      className="dialog what-if-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={error ? errorId : undefined}
-      aria-busy={running ? true : undefined}
       data-keybinding-barrier="true"
-      data-testid="goal-seek-dialog"
-      ref={dialogRef}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         if (running) return;
@@ -117,118 +109,135 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         event.stopPropagation();
         onClose();
       }}
-      onKeyDownCapture={(event) => {
-        // Keep tab focus inside the dialog while it is open.
-        trapTab(event);
+      className="what-if-dialog-overlay"
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (running) return;
+        onClose();
       }}
     >
-      <div className="what-if-dialog__header">
-        <h3 className="dialog__title" id={titleId}>
-          {t("whatIf.goalSeek.title")}
-        </h3>
-        <button type="button" className="what-if__button" onClick={onClose} disabled={running}>
-          {t("whatIf.goalSeek.close")}
-        </button>
-      </div>
-
-      <div className="what-if-dialog__content">
-        <div className="what-if-grid">
-          <label className="what-if__field">
-            <span className="what-if__label">{t("whatIf.goalSeek.setCell")}</span>
-            <input
-              className="what-if__input what-if__input--mono"
-              value={targetCell}
-              onChange={(e) => setTargetCell(e.target.value)}
-              disabled={running}
-              spellCheck={false}
-              autoCapitalize="off"
-              ref={targetCellRef}
-            />
-          </label>
-
-          <label className="what-if__field">
-            <span className="what-if__label">{t("whatIf.goalSeek.toValue")}</span>
-            <input
-              className="what-if__input"
-              value={targetValue}
-              onChange={(e) => {
-                setTargetValue(e.target.value);
-                if (invalidField === "targetValue") {
-                  setInvalidField(null);
-                  setError(null);
-                }
-              }}
-              disabled={running}
-              inputMode="decimal"
-              aria-invalid={invalidField === "targetValue" ? true : undefined}
-              aria-describedby={invalidField === "targetValue" ? errorId : undefined}
-            />
-          </label>
-
-          <label className="what-if__field">
-            <span className="what-if__label">{t("whatIf.goalSeek.byChangingCell")}</span>
-            <input
-              className="what-if__input what-if__input--mono"
-              value={changingCell}
-              onChange={(e) => setChangingCell(e.target.value)}
-              disabled={running}
-              spellCheck={false}
-              autoCapitalize="off"
-            />
-          </label>
-
-          <div className="what-if__actions">
-            <button type="button" className="what-if__button what-if__button--primary" onClick={run} disabled={running}>
-              {running ? t("whatIf.goalSeek.running") : t("whatIf.goalSeek.solve")}
-            </button>
-          </div>
+      <div
+        className="dialog what-if-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={error ? errorId : undefined}
+        aria-busy={running ? true : undefined}
+        data-testid="goal-seek-dialog"
+        ref={dialogRef}
+        onKeyDownCapture={(event) => {
+          // Keep tab focus inside the dialog while it is open.
+          trapTab(event);
+        }}
+      >
+        <div className="what-if-dialog__header">
+          <h3 className="dialog__title" id={titleId}>
+            {t("whatIf.goalSeek.title")}
+          </h3>
+          <button type="button" className="what-if__button" onClick={onClose} disabled={running}>
+            {t("whatIf.goalSeek.close")}
+          </button>
         </div>
 
-        {error ? (
-          <p className="what-if__message what-if__message--error" role="alert" id={errorId}>
-            {error}
-          </p>
-        ) : null}
+        <div className="what-if-dialog__content">
+          <div className="what-if-grid">
+            <label className="what-if__field">
+              <span className="what-if__label">{t("whatIf.goalSeek.setCell")}</span>
+              <input
+                className="what-if__input what-if__input--mono"
+                value={targetCell}
+                onChange={(e) => setTargetCell(e.target.value)}
+                disabled={running}
+                spellCheck={false}
+                autoCapitalize="off"
+                ref={targetCellRef}
+              />
+            </label>
 
-        {progress ? (
-          <div className="what-if__message what-if__mono-block" role="status" data-testid="goal-seek-progress">
-            <div>
-              {t("whatIf.goalSeek.progress.iteration")}: {progress.iteration}
-            </div>
-            <div>
-              {t("whatIf.goalSeek.progress.input")}: {progress.input}
-            </div>
-            <div>
-              {t("whatIf.goalSeek.progress.output")}: {progress.output}
-            </div>
-            <div>
-              {t("whatIf.goalSeek.progress.error")}: {progress.error}
+            <label className="what-if__field">
+              <span className="what-if__label">{t("whatIf.goalSeek.toValue")}</span>
+              <input
+                className="what-if__input"
+                value={targetValue}
+                onChange={(e) => {
+                  setTargetValue(e.target.value);
+                  if (invalidField === "targetValue") {
+                    setInvalidField(null);
+                    setError(null);
+                  }
+                }}
+                disabled={running}
+                inputMode="decimal"
+                aria-invalid={invalidField === "targetValue" ? true : undefined}
+                aria-describedby={invalidField === "targetValue" ? errorId : undefined}
+              />
+            </label>
+
+            <label className="what-if__field">
+              <span className="what-if__label">{t("whatIf.goalSeek.byChangingCell")}</span>
+              <input
+                className="what-if__input what-if__input--mono"
+                value={changingCell}
+                onChange={(e) => setChangingCell(e.target.value)}
+                disabled={running}
+                spellCheck={false}
+                autoCapitalize="off"
+              />
+            </label>
+
+            <div className="what-if__actions">
+              <button type="button" className="what-if__button what-if__button--primary" onClick={run} disabled={running}>
+                {running ? t("whatIf.goalSeek.running") : t("whatIf.goalSeek.solve")}
+              </button>
             </div>
           </div>
-        ) : null}
 
-        {result ? (
-          <div className="what-if__section" data-testid="goal-seek-result">
-            <h4 className="what-if__section-title">{t("whatIf.goalSeek.result.title")}</h4>
-            <div className="what-if__message what-if__mono-block">
+          {error ? (
+            <p className="what-if__message what-if__message--error" role="alert" id={errorId}>
+              {error}
+            </p>
+          ) : null}
+
+          {progress ? (
+            <div className="what-if__message what-if__mono-block" role="status" data-testid="goal-seek-progress">
               <div>
-                {t("whatIf.goalSeek.result.status")}: {t(`whatIf.goalSeek.status.${result.status}`)}
+                {t("whatIf.goalSeek.progress.iteration")}: {progress.iteration}
               </div>
               <div>
-                {t("whatIf.goalSeek.result.solution")}: {result.solution}
+                {t("whatIf.goalSeek.progress.input")}: {progress.input}
               </div>
               <div>
-                {t("whatIf.goalSeek.result.iterations")}: {result.iterations}
+                {t("whatIf.goalSeek.progress.output")}: {progress.output}
               </div>
               <div>
-                {t("whatIf.goalSeek.result.finalOutput")}: {result.finalOutput}
-              </div>
-              <div>
-                {t("whatIf.goalSeek.result.finalError")}: {result.finalError}
+                {t("whatIf.goalSeek.progress.error")}: {progress.error}
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+
+          {result ? (
+            <div className="what-if__section" data-testid="goal-seek-result">
+              <h4 className="what-if__section-title">{t("whatIf.goalSeek.result.title")}</h4>
+              <div className="what-if__message what-if__mono-block">
+                <div>
+                  {t("whatIf.goalSeek.result.status")}: {t(`whatIf.goalSeek.status.${result.status}`)}
+                </div>
+                <div>
+                  {t("whatIf.goalSeek.result.solution")}: {result.solution}
+                </div>
+                <div>
+                  {t("whatIf.goalSeek.result.iterations")}: {result.iterations}
+                </div>
+                <div>
+                  {t("whatIf.goalSeek.result.finalOutput")}: {result.finalOutput}
+                </div>
+                <div>
+                  {t("whatIf.goalSeek.result.finalError")}: {result.finalError}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

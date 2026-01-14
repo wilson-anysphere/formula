@@ -37,6 +37,17 @@
   box-sizing: border-box;
 }
 
+.what-if-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--dialog-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
 .what-if-dialog * {
   box-sizing: border-box;
 }
