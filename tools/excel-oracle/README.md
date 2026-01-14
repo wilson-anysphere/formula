@@ -139,7 +139,7 @@ Notes / caveats:
     mapping.
 - Before committing, normalize the extracted JSON sources to omit identity mappings and ensure
   deterministic casing:
-  - `node scripts/normalize-locale-function-sources.js`
+  - `node scripts/normalize-locale-function-sources.js` (or `pnpm normalize:locale-function-sources`)
 - After extracting, regenerate + verify with:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`

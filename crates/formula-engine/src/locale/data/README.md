@@ -56,6 +56,8 @@ entries (e.g. `ABS -> ABS`). After generating a source JSON, normalize it in-pla
 
 ```bash
 node scripts/normalize-locale-function-sources.js
+# or:
+pnpm normalize:locale-function-sources
 ```
 
 Note: after normalization, the JSON will typically contain **fewer entries** than
