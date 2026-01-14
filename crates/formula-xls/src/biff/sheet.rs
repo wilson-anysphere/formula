@@ -3586,4 +3586,78 @@ mod tests {
             vec!["too many hyperlinks; additional HLINK records skipped".to_string()]
         );
     }
+
+    #[test]
+    fn sheet_hyperlink_cap_warning_is_emitted_even_when_other_warnings_are_suppressed() {
+        fn internal_hlink_payload(location: &str) -> Vec<u8> {
+            let mut data = Vec::new();
+
+            // ref8 anchor: A1 (0-based row/col).
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+            data.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // colLast
+
+            // guid (ignored).
+            data.extend_from_slice(&[0u8; 16]);
+
+            // streamVersion + linkOpts.
+            data.extend_from_slice(&2u32.to_le_bytes());
+            data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
+
+            // HyperlinkString (u32 char count + UTF-16LE bytes).
+            let u16s: Vec<u16> = location.encode_utf16().collect();
+            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+            for ch in u16s {
+                data.extend_from_slice(&ch.to_le_bytes());
+            }
+
+            data
+        }
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // First, generate enough malformed HLINK records to fill and suppress the warnings buffer.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
+            stream.extend_from_slice(&record(RECORD_HLINK, &[]));
+        }
+
+        // Then emit more HLINK records than the hyperlink cap. The truncation warning should still
+        // be present even though the warning buffer is already full.
+        for _ in 0..(MAX_HYPERLINKS_PER_SHEET + 1) {
+            let payload = internal_hlink_payload("Sheet1!A1");
+            stream.extend_from_slice(&record(RECORD_HLINK, &payload));
+        }
+
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+        assert_eq!(parsed.hyperlinks.len(), MAX_HYPERLINKS_PER_SHEET);
+        assert_eq!(parsed.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w == "too many hyperlinks; additional HLINK records skipped"),
+            "expected hyperlink truncation warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .filter(|w| w.as_str() == WARNINGS_SUPPRESSED_MESSAGE)
+                .count(),
+            1,
+            "expected exactly one suppression warning; warnings={:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(|w| w.as_str()),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "expected suppression message to remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
 }
