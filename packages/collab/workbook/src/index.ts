@@ -257,9 +257,14 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               "frozenCols",
               "backgroundImageId",
               "background_image_id",
+              "backgroundImage",
+              "background_image",
               "colWidths",
               "rowHeights",
               "mergedRanges",
+              "merged_ranges",
+              "mergedRegions",
+              "merged_regions",
               "mergedCells",
               "merged_cells",
               "drawings",
@@ -319,7 +324,15 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               }
 
               // For legacy list keys, prefer non-empty over empty/undefined.
-              if (key === "drawings" || key === "mergedRanges" || key === "mergedCells" || key === "merged_cells") {
+              if (
+                key === "drawings" ||
+                key === "mergedRanges" ||
+                key === "merged_ranges" ||
+                key === "mergedRegions" ||
+                key === "merged_regions" ||
+                key === "mergedCells" ||
+                key === "merged_cells"
+              ) {
                 if (key === "drawings") {
                   const winnerArr = sanitizeDrawingsValue(winnerVal) ?? [];
                   const entryArr = sanitizeDrawingsValue(entryVal) ?? [];
@@ -336,7 +349,12 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 }
               }
 
-              if (key === "backgroundImageId" || key === "background_image_id") {
+              if (
+                key === "backgroundImageId" ||
+                key === "background_image_id" ||
+                key === "backgroundImage" ||
+                key === "background_image"
+              ) {
                 const winnerStr = coerceString(yjsValueToJson(winnerVal))?.trim() ?? "";
                 const entryStr = coerceString(yjsValueToJson(entryVal))?.trim() ?? "";
                 if (!winnerStr && entryStr) {
@@ -374,8 +392,13 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                     if (wNum === 0 && eNum > 0) winnerViewMap.set(k, eNum);
                     continue;
                   }
-
-                  if (k === "backgroundImageId" || k === "background_image_id") {
+ 
+                  if (
+                    k === "backgroundImageId" ||
+                    k === "background_image_id" ||
+                    k === "backgroundImage" ||
+                    k === "background_image"
+                  ) {
                     const wStr = coerceString(yjsValueToJson(wv))?.trim() ?? "";
                     const eStr = coerceString(yjsValueToJson(ev))?.trim() ?? "";
                     if (!wStr && eStr) winnerViewMap.set(k, eStr);
@@ -390,8 +413,16 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                     }
                     continue;
                   }
-
-                  if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+ 
+                  if (
+                    k === "drawings" ||
+                    k === "mergedRanges" ||
+                    k === "merged_ranges" ||
+                    k === "mergedRegions" ||
+                    k === "merged_regions" ||
+                    k === "mergedCells" ||
+                    k === "merged_cells"
+                  ) {
                     if (k === "drawings") {
                       const wArr = sanitizeDrawingsValue(wv) ?? [];
                       const eArr = sanitizeDrawingsValue(ev) ?? [];
@@ -400,7 +431,7 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                       }
                       continue;
                     }
-
+ 
                     const wArr = Array.isArray(yjsValueToJson(wv)) ? yjsValueToJson(wv) : [];
                     const eArr = Array.isArray(yjsValueToJson(ev)) ? yjsValueToJson(ev) : [];
                     if (wArr.length === 0 && eArr.length > 0) {
@@ -433,8 +464,13 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                       if (wNum === 0 && eNum > 0) merged[k] = eNum;
                       continue;
                     }
-
-                    if (k === "backgroundImageId" || k === "background_image_id") {
+ 
+                    if (
+                      k === "backgroundImageId" ||
+                      k === "background_image_id" ||
+                      k === "backgroundImage" ||
+                      k === "background_image"
+                    ) {
                       const wStr = coerceString(wv)?.trim() ?? "";
                       const eStr = coerceString(ev)?.trim() ?? "";
                       if (!wStr && eStr) merged[k] = eStr;
@@ -449,15 +485,22 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                       }
                       continue;
                     }
-
+ 
                     if (k === "drawings") {
                       const wArr = sanitizeDrawingsJson(wv) ?? [];
                       const eArr = sanitizeDrawingsJson(ev) ?? [];
                       if (wArr.length === 0 && eArr.length > 0) merged[k] = eArr;
                       continue;
                     }
-
-                    if (k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+ 
+                    if (
+                      k === "mergedRanges" ||
+                      k === "merged_ranges" ||
+                      k === "mergedRegions" ||
+                      k === "merged_regions" ||
+                      k === "mergedCells" ||
+                      k === "merged_cells"
+                    ) {
                       const wArr = Array.isArray(wv) ? wv : [];
                       const eArr = Array.isArray(ev) ? ev : [];
                       if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
