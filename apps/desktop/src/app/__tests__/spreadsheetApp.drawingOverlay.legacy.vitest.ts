@@ -413,4 +413,60 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("selects drawings on pointerdown using the interaction viewport (legacy grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      // Add a simple placeholder shape anchored at A1.
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "1",
+          kind: { type: "shape" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: pxToEmu(100), cy: pxToEmu(50) },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      selectSpy.mockClear();
+
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+
+      // Row/col headers are 48px/24px in SpreadsheetApp; click inside the drawing just under them.
+      const event = new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        button: 0,
+      });
+      selectionCanvas!.dispatchEvent(event);
+
+      expect(selectSpy).toHaveBeenCalledWith(1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });

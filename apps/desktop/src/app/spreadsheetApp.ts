@@ -2112,6 +2112,11 @@ export class SpreadsheetApp {
         },
         onSelectionChange: (selectedId) => {
           this.selectedDrawingId = selectedId;
+          // Drawings and charts are mutually exclusive selections; selecting a drawing
+          // should clear any active chart selection so selection handles don't double-render.
+          if (selectedId != null && this.selectedChartId != null) {
+            this.setSelectedChartId(null);
+          }
           this.renderDrawings();
         },
       };
@@ -5189,6 +5194,7 @@ export class SpreadsheetApp {
    * Today this mirrors chart selection when available.
    */
   getSelectedDrawingId(): number | null {
+    if (this.selectedDrawingId != null) return this.selectedDrawingId;
     return this.selectedChartId ? this.chartIdToDrawingId(this.selectedChartId) : null;
   }
 
@@ -8525,6 +8531,12 @@ export class SpreadsheetApp {
 
   private setSelectedChartId(id: string | null): void {
     const next = id && String(id).trim() !== "" ? String(id) : null;
+    // Selecting a chart should clear any drawing selection so selection handles don't
+    // double-render and split-view panes can mirror a single "active object" selection.
+    if (next != null && this.selectedDrawingId != null) {
+      this.selectedDrawingId = null;
+      this.renderDrawings();
+    }
     if (next === this.selectedChartId) return;
     this.selectedChartId = next;
     this.renderChartSelectionOverlay();
@@ -8941,6 +8953,12 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     e.stopPropagation();
+
+    // Drawings and charts should behave like a single selection model; selecting a drawing
+    // clears any chart selection so selection handles don't double-render.
+    if (this.selectedChartId != null) {
+      this.setSelectedChartId(null);
+    }
 
     this.selectedDrawingId = hit.object.id;
     if (this.selectedDrawingId !== prevSelected) {
