@@ -83,14 +83,19 @@ fn decrypt_agile_package_key_from_password(
     //
     // Compatibility: some producers appear to derive per-blob IVs using the same `derive_iv`
     // algorithm as other Agile ciphertext fields. We support that via `iv_derivation`.
-    let salt_iv = password_key
-        .salt_value
-        .get(..password_key.block_size)
-        .ok_or_else(|| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "saltValue".to_string(),
-            reason: "saltValue shorter than blockSize".to_string(),
-        })?;
+    let salt_iv = match iv_derivation {
+        PasswordKeyIvDerivation::SaltValue => Some(
+            password_key
+                .salt_value
+                .get(..password_key.block_size)
+                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                    element: "p:encryptedKey".to_string(),
+                    attr: "saltValue".to_string(),
+                    reason: "saltValue shorter than blockSize".to_string(),
+                })?,
+        ),
+        PasswordKeyIvDerivation::Derived => None,
+    };
 
     let (derived_verifier_input_iv, derived_verifier_hash_iv, derived_key_value_iv) =
         match iv_derivation {
@@ -117,9 +122,27 @@ fn decrypt_agile_package_key_from_password(
             ),
         };
 
-    let verifier_input_iv = derived_verifier_input_iv.as_deref().unwrap_or(salt_iv);
-    let verifier_hash_iv = derived_verifier_hash_iv.as_deref().unwrap_or(salt_iv);
-    let key_value_iv = derived_key_value_iv.as_deref().unwrap_or(salt_iv);
+    let verifier_input_iv = match iv_derivation {
+        PasswordKeyIvDerivation::SaltValue => salt_iv
+            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::Derived => derived_verifier_input_iv
+            .as_deref()
+            .expect("derived verifier input iv should be set when using Derived derivation"),
+    };
+    let verifier_hash_iv = match iv_derivation {
+        PasswordKeyIvDerivation::SaltValue => salt_iv
+            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::Derived => derived_verifier_hash_iv
+            .as_deref()
+            .expect("derived verifier hash iv should be set when using Derived derivation"),
+    };
+    let key_value_iv = match iv_derivation {
+        PasswordKeyIvDerivation::SaltValue => salt_iv
+            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::Derived => derived_key_value_iv
+            .as_deref()
+            .expect("derived key value iv should be set when using Derived derivation"),
+    };
 
     // Decrypt verifierHashInput.
     let verifier_input = {
@@ -239,6 +262,17 @@ fn decrypt_agile_package_key_from_password_best_effort(
             package_key_len,
             PasswordKeyIvDerivation::Derived,
         ),
+        Err(OffCryptoError::InvalidAttribute { ref element, ref attr, .. })
+            if element == "p:encryptedKey" && attr == "saltValue" =>
+        {
+            decrypt_agile_package_key_from_password(
+                info,
+                password_hash,
+                key_encrypt_key_len,
+                package_key_len,
+                PasswordKeyIvDerivation::Derived,
+            )
+        }
         Err(other) => Err(other),
     }
 }
