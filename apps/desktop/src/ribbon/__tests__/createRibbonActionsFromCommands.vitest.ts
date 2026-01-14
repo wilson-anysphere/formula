@@ -120,6 +120,21 @@ describe("createRibbonActionsFromCommands", () => {
     expect(onUnknownCommand).not.toHaveBeenCalled();
   });
 
+  it("routes unknown toggles to onUnknownCommand by default (and suppresses any legacy follow-up onCommand)", async () => {
+    const registry = new CommandRegistry();
+    const onUnknownCommand = vi.fn();
+
+    const actions = createRibbonActionsFromCommands({ commandRegistry: registry, onUnknownCommand });
+
+    actions.onToggle?.("ribbon.toggle.unknown", true);
+    // Legacy: some surfaces may still invoke `onCommand` immediately after `onToggle`.
+    actions.onCommand?.("ribbon.toggle.unknown");
+    await flushMicrotasks();
+
+    expect(onUnknownCommand).toHaveBeenCalledTimes(1);
+    expect(onUnknownCommand).toHaveBeenCalledWith("ribbon.toggle.unknown");
+  });
+
   it("uses overrides when provided (even if the command is not registered)", async () => {
     const registry = new CommandRegistry();
     const override = vi.fn();
