@@ -115,10 +115,8 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
       if (!sheetId) continue;
       const before = typeof docAny.getSheetView === "function" ? docAny.getSheetView(sheetId) : null;
       const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
-      const current =
-        typeof (before as any)?.backgroundImageId === "string" && String((before as any).backgroundImageId).trim() !== ""
-          ? String((before as any).backgroundImageId)
-          : null;
+      const currentRaw = typeof (before as any)?.backgroundImageId === "string" ? String((before as any).backgroundImageId).trim() : "";
+      const current = currentRaw ? currentRaw : null;
       if (current === desired) continue;
       const after = { ...(before ?? {}) } as any;
       if (desired) after.backgroundImageId = desired;

@@ -22,8 +22,15 @@ export type PickImagesFromTauriDialogOptions = {
 
 function normalizeOpenPaths(payload: unknown): string[] {
   if (payload == null) return [];
-  if (Array.isArray(payload)) return payload.filter((v): v is string => typeof v === "string" && v.trim() !== "");
-  if (typeof payload === "string" && payload.trim() !== "") return [payload];
+  if (Array.isArray(payload)) {
+    return payload
+      .map((v) => (typeof v === "string" ? v.trim() : ""))
+      .filter((v): v is string => v !== "");
+  }
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (trimmed) return [trimmed];
+  }
   return [];
 }
 
@@ -120,8 +127,10 @@ export async function pickImagesFromTauriDialog(options: PickImagesFromTauriDial
  */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
   const invoke = getTauriInvokeOrThrow();
+  const trimmed = String(path ?? "").trim();
+  if (!trimmed) throw new Error("File path cannot be empty");
 
-  const statPayload = await invoke("stat_file", { path });
+  const statPayload = await invoke("stat_file", { path: trimmed });
   const fileSize = normalizeFileSize(statPayload);
   if (fileSize <= 0) return new Uint8Array(0);
   if (fileSize > MAX_INSERT_IMAGE_BYTES) {
@@ -133,7 +142,7 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
   const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
   const smallFileThreshold = 4 * chunkSize;
   if (fileSize <= smallFileThreshold) {
-    const payload = await invoke("read_binary_file", { path });
+    const payload = await invoke("read_binary_file", { path: trimmed });
     const bytes = normalizeBinaryPayload(payload);
     if (bytes.length > MAX_INSERT_IMAGE_BYTES) {
       throw new FileTooLargeError(bytes.length, MAX_INSERT_IMAGE_BYTES);
@@ -146,7 +155,7 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
 
   while (offset < fileSize) {
     const nextLength = Math.min(chunkSize, fileSize - offset);
-    const payload = await invoke("read_binary_file_range", { path, offset, length: nextLength });
+    const payload = await invoke("read_binary_file_range", { path: trimmed, offset, length: nextLength });
     const bytes = normalizeBinaryPayload(payload);
     if (bytes.length === 0) break;
     chunks.push(bytes);

@@ -14,7 +14,9 @@ export function installOpenFileIpc({
   const openFileListener = listen("open-file", (event) => {
     const payload = (event as any)?.payload;
     if (!Array.isArray(payload)) return;
-    const paths = payload.filter((p) => typeof p === "string" && p.trim() !== "");
+    const paths = payload
+      .map((p) => (typeof p === "string" ? p.trim() : ""))
+      .filter((p) => p !== "");
     if (paths.length === 0) return;
 
     for (const path of paths) {

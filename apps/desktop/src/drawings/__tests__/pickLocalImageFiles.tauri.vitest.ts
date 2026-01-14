@@ -12,7 +12,7 @@ describe("pickLocalImageFiles (Tauri)", () => {
   it("uses __TAURI__.dialog.open and reads bytes via stat_file + read_binary_file", async () => {
     const calls: Array<{ cmd: string; args: any }> = [];
 
-    const open = vi.fn(async () => ["/tmp/a.png"]);
+    const open = vi.fn(async () => ["  /tmp/a.png  "]);
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
       // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
@@ -35,6 +35,7 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"]);
 
     expect(calls.map((c) => c.cmd)).toEqual(["stat_file", "read_binary_file"]);
+    expect(calls[0]?.args?.path).toBe("/tmp/a.png");
     expect(files).toHaveLength(1);
     expect(files[0]!.name).toBe("a.png");
     expect(files[0]!.type).toBe("image/png");

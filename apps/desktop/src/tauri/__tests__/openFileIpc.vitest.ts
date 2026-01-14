@@ -38,11 +38,10 @@ describe("openFileIpc", () => {
 
     installOpenFileIpc({ listen, emit: null, onOpenPath });
 
-    handler?.({ payload: ["book.xlsx", " ", 123, "data.csv"] });
+    handler?.({ payload: ["book.xlsx", "  data.csv  ", " ", 123] });
 
     expect(onOpenPath).toHaveBeenCalledTimes(2);
     expect(onOpenPath).toHaveBeenNthCalledWith(1, "book.xlsx");
     expect(onOpenPath).toHaveBeenNthCalledWith(2, "data.csv");
   });
 });
-
