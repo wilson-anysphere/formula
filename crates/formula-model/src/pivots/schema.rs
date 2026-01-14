@@ -224,6 +224,30 @@ impl fmt::Display for PivotFieldRef {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    // Keep the heuristic conservative: unquoted identifiers must be ASCII and start with a letter
+    // or underscore, with remaining characters limited to alphanumerics/underscore.
+    //
+    // Quoted identifiers are always valid and are accepted by Excel/DAX; quoting more often is OK.
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return true;
+    }
+    if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
+        return true;
+    }
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // DAX escapes literal `'` inside quoted identifiers by doubling them: `''` -> `'`.
+    let escaped = raw.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     if raw.is_empty() {
         return Cow::Borrowed("''");

@@ -1,6 +1,7 @@
 use formula_engine::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_range_map,
     rewrite_formula_for_range_map_with_resolver,
+    rewrite_formula_for_sheet_delete,
     rewrite_formula_for_structural_edit, rewrite_formula_for_structural_edit_with_sheet_order_resolver,
     GridRange, RangeMapEdit, StructuralEdit,
 };
@@ -393,4 +394,53 @@ fn range_map_edits_match_sheet_names_nfkc_case_insensitively() {
 
     assert!(changed);
     assert_eq!(out, "='Kelvin'!A2");
+}
+
+#[test]
+fn sheet_delete_matches_sheet_names_case_insensitively_across_unicode() {
+    // Deleting a sheet should invalidate references even when the delete request uses a Unicode
+    // case-insensitive equivalent name (`ß` uppercases to `SS`).
+    let origin = CellAddr::new(0, 0);
+    let sheet_order = vec!["ß".to_string(), "Other".to_string()];
+
+    let (out, changed) = rewrite_formula_for_sheet_delete("='ß'!A1", origin, "SS", &sheet_order);
+
+    assert!(changed);
+    assert_eq!(out, "=#REF!");
+}
+
+#[test]
+fn sheet_delete_matches_sheet_names_nfkc_case_insensitively() {
+    // Deleting a sheet should respect NFKC equivalence (K == K).
+    let origin = CellAddr::new(0, 0);
+    let sheet_order = vec!["Kelvin".to_string(), "Other".to_string()];
+
+    let (out, changed) =
+        rewrite_formula_for_sheet_delete("='Kelvin'!A1", origin, "KELVIN", &sheet_order);
+
+    assert!(changed);
+    assert_eq!(out, "=#REF!");
+}
+
+#[test]
+fn sheet_delete_shifts_sheet_span_boundaries_using_nfkc_case_insensitive_matching() {
+    // When deleting a 3D span boundary, Excel shifts it one sheet inward based on tab order.
+    // Boundary matching should respect NFKC equivalence (K == K).
+    let origin = CellAddr::new(0, 0);
+    let sheet_order = vec![
+        "Kelvin".to_string(),
+        "Middle".to_string(),
+        "Sheet3".to_string(),
+        "Summary".to_string(),
+    ];
+
+    let (out, changed) = rewrite_formula_for_sheet_delete(
+        "=SUM('Kelvin':Sheet3!A1)",
+        origin,
+        "KELVIN",
+        &sheet_order,
+    );
+
+    assert!(changed);
+    assert_eq!(out, "=SUM(Middle:Sheet3!A1)");
 }
