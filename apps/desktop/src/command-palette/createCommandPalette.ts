@@ -1057,7 +1057,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           chunkSearchController = null;
         }
       }
-    })();
+    })().catch(() => {});
   }
 
   function renderResults(mode: "sync" | "async"): void {

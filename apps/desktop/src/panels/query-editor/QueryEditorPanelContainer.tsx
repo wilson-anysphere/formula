@@ -268,7 +268,7 @@ export function QueryEditorPanelContainer(props: Props) {
       setActiveQueryId(seeded.id);
       saveSelectedQueryId(workbookId, seeded.id);
       setQuery(seeded);
-    })();
+    })().catch(() => {});
 
     return () => {
       cancelled = true;

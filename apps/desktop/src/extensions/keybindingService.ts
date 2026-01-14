@@ -397,7 +397,7 @@ export class KeybindingService {
           // ignore
         }
       }
-    })();
+    })().catch(() => {});
     return true;
   }
 

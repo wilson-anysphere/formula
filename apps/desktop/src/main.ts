@@ -3057,7 +3057,7 @@ let powerQueryServiceInitWorkbookId: string | null = null;
 
 function updateTrayFromPowerQuery(): void {
   const status = powerQueryTrayJobs.size > 0 ? "syncing" : powerQueryTrayHadError ? "error" : "idle";
-  void setTrayStatus(status);
+  void setTrayStatus(status).catch(() => {});
 }
 
 function currentPowerQueryWorkbookId(): string {
@@ -8803,7 +8803,7 @@ registerDesktopCommands({
           console.error("Failed to close window:", err);
           showToast(`Failed to close window: ${String(err)}`, "error");
         }
-      })();
+      })().catch(() => {});
     },
     quit: () => {
       if (!handleCloseRequestForRibbon) {
@@ -11193,7 +11193,7 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
     syncTitlebar();
 
     const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path: savePath, origin_path: null });
-    void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename);
+    void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename).catch(() => {});
 
     await copyPowerQueryPersistence(previousPanelWorkbookId, savePath);
     activePanelWorkbookId = savePath;
@@ -11306,7 +11306,7 @@ async function handleSaveAsPath(
   // Save As establishes a new file identity; keep the WASM engine workbook metadata in sync so
   // `CELL("filename")` / `INFO("directory")` update immediately (Excel semantics).
   const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path: savePath, origin_path: null });
-  void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename);
+  void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename).catch(() => {});
 
   await copyPowerQueryPersistence(previousPanelWorkbookId, savePath);
   activePanelWorkbookId = savePath;
@@ -11440,7 +11440,7 @@ try {
   }
 
   // Ensure the tray indicator starts in a known-good state once the desktop backend is available.
-  void setTrayStatus("idle");
+  void setTrayStatus("idle").catch(() => {});
   window.addEventListener("unload", () => {
     vbaEventMacros?.dispose();
     workbookSync?.stop();
@@ -11469,6 +11469,15 @@ try {
   // - close-prep-done, close-handled
   // - updater-ui-ready, coi-check-result
   const { listen, emit } = getTauriEventApiOrThrow();
+  const listenBestEffort = (...args: Parameters<typeof listen>): void => {
+    try {
+      void listen(...args).catch((err) => {
+        console.error(`Failed to register Tauri listener '${String(args[0])}':`, err);
+      });
+    } catch (err) {
+      console.error(`Failed to register Tauri listener '${String(args[0])}':`, err);
+    }
+  };
   // File/open/save operations can trigger expensive async work (backend sync, workbook loading).
   // Serialize them so overlapping menu/IPC triggers can't interleave and cause inconsistent UI
   // state or missed extension lifecycle events.
@@ -11497,7 +11506,7 @@ try {
         await task;
       } catch (err) {
         console.error("Failed to open workbook:", err);
-        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`).catch(() => {});
       }
     });
   };
@@ -11589,7 +11598,7 @@ try {
 
   // When the Rust host receives a close request, it asks the frontend to flush any pending
   // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
-  void listen("close-prep", async (event) => {
+  listenBestEffort("close-prep", async (event) => {
     const token = (event as any)?.payload;
     if (typeof token !== "string" || token.trim() === "") return;
 
@@ -11652,7 +11661,7 @@ try {
     },
   });
 
-  void listen("file-dropped", async (event) => {
+  listenBestEffort("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
     const firstWorkbookPath = Array.isArray(paths)
       ? paths.find((p) => typeof p === "string" && p.trim() !== "" && isOpenWorkbookPath(p))
@@ -11663,7 +11672,7 @@ try {
     queueOpenWorkbook(firstWorkbookPath);
   });
 
-  void listen("tray-open", () => {
+  listenBestEffort("tray-open", () => {
     queueWorkbookFileCommand(async () => {
       try {
         // Ensure the window is visible so any toast-based error handling is observable.
@@ -11671,12 +11680,12 @@ try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
       } catch (err) {
         console.error("Failed to open workbook:", err);
-        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("tray-new", () => {
+  listenBestEffort("tray-new", () => {
     queueWorkbookFileCommand(async () => {
       try {
         // Ensure the window is visible so any toast-based error handling is observable.
@@ -11684,90 +11693,90 @@ try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
       } catch (err) {
         console.error("Failed to create workbook:", err);
-        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("tray-quit", () => {
+  listenBestEffort("tray-quit", () => {
     void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
       console.error("Failed to quit app:", err);
     });
   });
 
   // Native menu bar integration (desktop shell emits menu-open/menu-save/... events).
-  void listen("menu-open", () => {
+  listenBestEffort("menu-open", () => {
     queueWorkbookFileCommand(async () => {
       try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
       } catch (err) {
         console.error("Failed to open workbook:", err);
-        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("menu-new", () => {
+  listenBestEffort("menu-new", () => {
     queueWorkbookFileCommand(async () => {
       try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
       } catch (err) {
         console.error("Failed to create workbook:", err);
-        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("menu-save", () => {
+  listenBestEffort("menu-save", () => {
     queueWorkbookFileCommand(async () => {
       try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
       } catch (err) {
         console.error("Failed to save workbook:", err);
-        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("menu-save-as", () => {
+  listenBestEffort("menu-save-as", () => {
     queueWorkbookFileCommand(async () => {
       try {
         await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
       } catch (err) {
         console.error("Failed to save workbook:", err);
-        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`).catch(() => {});
       }
     });
   });
 
-  void listen("menu-print", () => {
+  listenBestEffort("menu-print", () => {
     void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print).catch((err) => {
       console.error("Failed to print:", err);
       showToast(`Failed to print: ${String(err)}`, "error");
     });
   });
 
-  void listen("menu-print-preview", () => {
+  listenBestEffort("menu-print-preview", () => {
     void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview).catch((err) => {
       console.error("Failed to open print preview:", err);
       showToast(`Failed to open print preview: ${String(err)}`, "error");
     });
   });
 
-  void listen("menu-export-pdf", () => {
+  listenBestEffort("menu-export-pdf", () => {
     void commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf).catch((err) => {
       console.error("Failed to export PDF:", err);
       showToast(`Failed to export PDF: ${String(err)}`, "error");
     });
   });
 
-  void listen("menu-close-window", () => {
+  listenBestEffort("menu-close-window", () => {
     void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook).catch((err) => {
       console.error("Failed to close window:", err);
     });
   });
 
-  void listen("menu-quit", () => {
+  listenBestEffort("menu-quit", () => {
     void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
       console.error("Failed to quit app:", err);
     });
@@ -11822,7 +11831,7 @@ try {
     app.focus();
   };
 
-  void listen("menu-undo", () => {
+  listenBestEffort("menu-undo", () => {
     const target = getTextEditingTarget();
     if (target) {
       tryExecCommand("undo");
@@ -11831,7 +11840,7 @@ try {
     app.undo();
     app.focus();
   });
-  void listen("menu-redo", () => {
+  listenBestEffort("menu-redo", () => {
     const target = getTextEditingTarget();
     if (target) {
       tryExecCommand("redo");
@@ -11840,7 +11849,7 @@ try {
     app.redo();
     app.focus();
   });
-  void listen("menu-cut", () => {
+  listenBestEffort("menu-cut", () => {
     const target = getTextEditingTarget();
     if (target) {
       if (tryExecCommand("cut")) return;
@@ -11882,12 +11891,12 @@ try {
             // ignore
           }
         }
-      })();
+      })().catch(() => {});
       return;
     }
-    void app.cutToClipboard();
+    void app.cutToClipboard().catch(() => {});
   });
-  void listen("menu-copy", () => {
+  listenBestEffort("menu-copy", () => {
     const target = getTextEditingTarget();
     if (target) {
       if (tryExecCommand("copy")) return;
@@ -11908,12 +11917,12 @@ try {
 
         if (!selectedText) return;
         await writeClipboardTextBestEffort(selectedText);
-      })();
+      })().catch(() => {});
       return;
     }
-    void app.copyToClipboard();
+    void app.copyToClipboard().catch(() => {});
   });
-  void listen("menu-paste", () => {
+  listenBestEffort("menu-paste", () => {
     const target = getTextEditingTarget();
     if (target) {
       if (tryExecCommand("paste")) return;
@@ -11955,19 +11964,19 @@ try {
             // ignore
           }
         }
-      })();
+      })().catch(() => {});
       return;
     }
-    void app.pasteFromClipboard();
+    void app.pasteFromClipboard().catch(() => {});
   });
-  void listen("menu-paste-special", () => {
+  listenBestEffort("menu-paste-special", () => {
     // Paste Special is a spreadsheet command; do not invoke it while focus is inside
     // text editors (formula bar, dialogs, etc.).
     const target = getTextEditingTarget();
     if (target) return;
-    void commandRegistry.executeCommand("clipboard.pasteSpecial");
+    void commandRegistry.executeCommand("clipboard.pasteSpecial").catch(() => {});
   });
-  void listen("menu-select-all", () => {
+  listenBestEffort("menu-select-all", () => {
     const target = getTextEditingTarget();
     if (target) {
       if (tryExecCommand("selectAll")) return;
@@ -12003,17 +12012,17 @@ try {
     app.focus();
   };
 
-  void listen("menu-zoom-in", () => {
+  listenBestEffort("menu-zoom-in", () => {
     applyMenuZoom(Math.round(app.getZoom() * 100) + zoomStepPercent);
   });
-  void listen("menu-zoom-out", () => {
+  listenBestEffort("menu-zoom-out", () => {
     applyMenuZoom(Math.round(app.getZoom() * 100) - zoomStepPercent);
   });
-  void listen("menu-zoom-reset", () => {
+  listenBestEffort("menu-zoom-reset", () => {
     applyMenuZoom(100);
   });
 
-  void listen("menu-about", () => {
+  listenBestEffort("menu-about", () => {
     void (async () => {
       const getName = getTauriAppGetNameOrNull();
       const getVersion = getTauriAppGetVersionOrNull();
@@ -12041,7 +12050,7 @@ try {
 
       const message = version ? `${name}\nVersion ${version}` : name;
       await nativeDialogs.alert(message, { title: `About ${name}` });
-    })();
+    })().catch(() => {});
   });
 
   // Some desktop builds trigger update checks directly from the Rust menu/tray handlers (and
@@ -12053,10 +12062,10 @@ try {
     if (payload?.source !== "manual") return;
     lastManualUpdateCheckEventAtMs = Date.now();
   };
-  void listen("update-check-started", recordManualUpdateCheckEvent);
-  void listen("update-check-already-running", recordManualUpdateCheckEvent);
+  listenBestEffort("update-check-started", recordManualUpdateCheckEvent);
+  listenBestEffort("update-check-already-running", recordManualUpdateCheckEvent);
 
-  void listen("menu-check-updates", () => {
+  listenBestEffort("menu-check-updates", () => {
     // Keep a stable menu event id; the actual update UX is driven by the
     // `update-check-*` events emitted by the Rust updater wrapper.
     const suppressDuplicateWindowMs = 250;
@@ -12079,25 +12088,25 @@ try {
     }, fallbackDelayMs);
   });
 
-  void listen("menu-open-release-page", () => {
+  listenBestEffort("menu-open-release-page", () => {
     void shellOpen(FORMULA_RELEASES_URL).catch((err) => {
       console.error("Failed to open release page:", err);
     });
   });
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
-  void listen("shortcut-quick-open", () => {
+  listenBestEffort("shortcut-quick-open", () => {
     void (async () => {
       // Ensure the window is visible so any toast-based error handling is observable.
       await showTauriWindowBestEffort();
       await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
     })().catch((err) => {
       console.error("Failed to open workbook:", err);
-      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`).catch(() => {});
     });
   });
 
-  void listen("shortcut-command-palette", () => {
+  listenBestEffort("shortcut-command-palette", () => {
     openCommandPalette?.();
   });
 
@@ -12300,7 +12309,7 @@ try {
 
   handleCloseRequestForRibbon = handleCloseRequest;
 
-  void listen("close-requested", async (event) => {
+  listenBestEffort("close-requested", async (event) => {
     const payload = (event as any)?.payload;
     const token = typeof payload?.token === "string" ? String(payload.token) : undefined;
     await handleCloseRequest({ quit: false, beforeCloseUpdates: payload?.updates, closeToken: token });

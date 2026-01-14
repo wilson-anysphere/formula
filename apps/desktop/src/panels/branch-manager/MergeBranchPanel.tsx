@@ -566,7 +566,7 @@ export function MergeBranchPanel({
       } catch (e) {
         setError((e as Error).message);
       }
-    })();
+    })().catch(() => {});
   }, [actor, branchService, sourceBranch, mutationsDisabled]);
 
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);

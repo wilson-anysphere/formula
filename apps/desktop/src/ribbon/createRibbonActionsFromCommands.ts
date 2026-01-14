@@ -128,7 +128,7 @@ export function createRibbonActionsFromCommands(params: {
       } catch (err) {
         reportError(commandId, err);
       }
-    })();
+    })().catch(() => {});
   };
 
   const handleUnknownCommand = async (commandId: string): Promise<void> => {
@@ -251,7 +251,7 @@ export function createRibbonFileActionsFromCommands(params: {
       } catch (err) {
         reportError(commandId, err);
       }
-    })();
+    })().catch(() => {});
   };
 
   const command = (commandId: string | undefined): (() => void) | undefined => {

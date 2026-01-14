@@ -204,7 +204,7 @@ export function ExtensionsPanel({
   const extensionsKey = extensions.map((ext: any) => String(ext.id)).join("|");
 
   React.useEffect(() => {
-    void refreshPermissions();
+    void refreshPermissions().catch(() => {});
   }, [refreshPermissions, manager.ready, manager.error, extensionsKey]);
 
   const executeCommandAndRefreshPermissions = React.useCallback(
@@ -354,7 +354,7 @@ export function ExtensionsPanel({
                               } finally {
                                 setRepairingId((prev) => (prev === item.id ? null : prev));
                               }
-                            })();
+                            })().catch(() => {});
                           }}
                           className="extensions-panel__button extensions-panel__reset-button extensions-panel__repair-button"
                         >

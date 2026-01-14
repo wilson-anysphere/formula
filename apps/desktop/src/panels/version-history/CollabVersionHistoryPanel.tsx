@@ -118,7 +118,7 @@ export function CollabVersionHistoryPanel({
         if (disposed) return;
         setLoadError((e as Error).message);
       }
-    })();
+    })().catch(() => {});
 
     return () => {
       disposed = true;
@@ -142,7 +142,7 @@ export function CollabVersionHistoryPanel({
   useEffect(() => {
     if (!collabVersioning) return;
     if (mutationsDisabled) return;
-    void refresh();
+    void refresh().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collabVersioning, mutationsDisabled]);
 

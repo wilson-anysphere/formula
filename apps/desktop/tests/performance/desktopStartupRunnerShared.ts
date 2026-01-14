@@ -720,7 +720,7 @@ export async function runOnce({
           afterCaptureTimeoutResolve = null;
         }
         beginShutdown('captured');
-      })();
+      })().catch(() => {});
     };
 
     if (child.stdout) {

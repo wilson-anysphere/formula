@@ -48,7 +48,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       } finally {
         setBusy(false);
       }
-    })();
+    })().catch(() => {});
   }, [api]);
 
   const selectedScenario = useMemo(

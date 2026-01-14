@@ -172,7 +172,7 @@ export function VersionHistoryCompareSection({
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    })().catch(() => {});
 
     return () => {
       cancelled = true;

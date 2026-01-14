@@ -134,7 +134,7 @@ export function CollabBranchManagerPanel({
         if (cancelled) return;
         setError((e as Error).message);
       }
-    })();
+    })().catch(() => {});
 
     return () => {
       cancelled = true;
@@ -170,7 +170,7 @@ export function CollabBranchManagerPanel({
         if (cancelled) return;
         setError((e as Error).message);
       }
-    })();
+    })().catch(() => {});
     return () => {
       cancelled = true;
     };

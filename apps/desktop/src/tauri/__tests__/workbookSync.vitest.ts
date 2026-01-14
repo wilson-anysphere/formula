@@ -526,7 +526,7 @@ describe("workbookSync", () => {
       void (async () => {
         await new Promise<void>((resolve) => queueMicrotask(resolve));
         await invoke("move_sheet", { sheet_id: "Sheet1", to_index: 0 });
-      })();
+      })().catch(() => {});
     });
 
     await flushMicrotasks(8);
