@@ -154,6 +154,24 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("does not consume into string literals when disambiguating `]]` in structured references", () => {
+    // Regression: if a formula contains a structured ref followed by a string literal that
+    // includes `]]`, we should not extend the structured ref token into the string.
+    const input = '=SUM(Table1[[#All],[Amount]] & "]]", 1)';
+    const tokens = tokenizeFormula(input).filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["function", "SUM"],
+      ["punctuation", "("],
+      ["reference", "Table1[[#All],[Amount]]"],
+      ["operator", "&"],
+      ["string", '"]]"'],
+      ["punctuation", ","],
+      ["number", "1"],
+      ["punctuation", ")"],
+    ]);
+  });
+
   it("tokenizes structured table specifiers (#All/#Headers/#Data/#Totals) as single reference tokens", () => {
     const input = "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals])";
     const refs = tokenizeFormula(input)

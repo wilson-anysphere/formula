@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { tokenizeFormula as sharedTokenizeFormula } from "../src/formula/tokenizeFormula";
-import { tokenizeFormula as desktopTokenizeFormula } from "../../../apps/desktop/src/formula-bar/highlight/tokenizeFormula.js";
+// Import via the package export path to mirror how downstream consumers (including apps/desktop)
+// resolve the shared tokenizer.
+import { tokenizeFormula as consumerTokenizeFormula } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
 describe("tokenizeFormula (cross-package)", () => {
   it("does not tokenize the tail of invalid unquoted sheet names with spaces", () => {
@@ -12,12 +14,12 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["A1"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for non-BMP Unicode sheet names", () => {
@@ -25,12 +27,12 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["𝔘!A1", "𐐷!B2"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for structured table specifiers and selectors", () => {
@@ -39,7 +41,7 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
@@ -51,7 +53,7 @@ describe("tokenizeFormula (cross-package)", () => {
       "Table1[[#Headers],[Amount]]",
       "Table1[[#Totals],[Amount]]"
     ]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for structured refs followed by operators", () => {
@@ -59,12 +61,12 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["Table1[[#All],[Amount]]"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for structured refs with #This Row selectors", () => {
@@ -72,12 +74,25 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["Table1[[#This Row],[Amount]]"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
+  it("matches between packages for structured refs followed by strings containing `]]`", () => {
+    const input = '=SUM(Table1[[#All],[Amount]] & "]]", 1)';
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["Table1[[#All],[Amount]]"]);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for structured refs with escaped closing brackets in column names", () => {
@@ -85,12 +100,12 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["Table1[[#Headers],[A]]B]]"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 
   it("matches between packages for structured refs with escaped `]` followed by operator characters in column names", () => {
@@ -98,11 +113,11 @@ describe("tokenizeFormula (cross-package)", () => {
     const sharedRefs = sharedTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
-    const desktopRefs = desktopTokenizeFormula(input)
+    const consumerRefs = consumerTokenizeFormula(input)
       .filter((t) => t.type === "reference")
       .map((t) => t.text);
 
     expect(sharedRefs).toEqual(["Table1[[#Headers],[A]]+B]]"]);
-    expect(desktopRefs).toEqual(sharedRefs);
+    expect(consumerRefs).toEqual(sharedRefs);
   });
 });

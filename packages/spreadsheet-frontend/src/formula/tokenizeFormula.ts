@@ -364,6 +364,211 @@ function tryReadReference(input: string, start: number): { text: string; end: nu
   return { text: prefix + first.text, end: i };
 }
 
+const MODE_NORMAL = 0;
+const MODE_STRING = 1;
+const MODE_QUOTED_IDENT = 2;
+
+function encodeState(depth: number, mode: number): number {
+  return (depth << 2) | (mode & 0b11);
+}
+
+function decodeDepth(state: number): number {
+  return state >> 2;
+}
+
+function decodeMode(state: number): number {
+  return state & 0b11;
+}
+
+function pushUnique(list: number[], value: number): void {
+  if (!list.includes(value)) list.push(value);
+}
+
+function pushDepth(states: number[][], pos: number, depth: number): void {
+  if (pos < 0 || pos >= states.length) return;
+  pushUnique(states[pos]!, depth);
+}
+
+function pushState(states: number[][], pos: number, depth: number, mode: number): void {
+  if (mode !== MODE_NORMAL && depth !== 0) return;
+  if (pos < 0 || pos >= states.length) return;
+  pushUnique(states[pos]!, encodeState(depth, mode));
+}
+
+/**
+ * Find the end position (exclusive) for a bracketed segment starting at `start`.
+ *
+ * This mirrors the Rust engine's lexer disambiguation for `]]` inside structured refs/workbook
+ * references:
+ * - `]]` can be either an escaped literal `]` (consume 2 chars; depth unchanged), or
+ * - a closing bracket followed by another `]` (consume 1 char; depth-1; next `]` processed normally).
+ *
+ * The scanner explores both interpretations and returns the earliest closing bracket that can
+ * still lead to a globally valid parse of the remainder (e.g. doesn't end inside an unterminated
+ * string literal and doesn't leave stray `]` tokens outside bracketed segments).
+ */
+function findBracketEnd(src: string, start: number): number | null {
+  if (src[start] !== "[") return null;
+
+  // Track code-unit indices so returned offsets match DOM selection semantics.
+  const chars: string[] = [];
+  for (let i = start; i < src.length; i += 1) chars.push(src[i]!);
+  if (chars[0] !== "[") return null;
+
+  const n = chars.length;
+  if (n < 2) return null;
+
+  const fwd: number[][] = Array.from({ length: n + 1 }, () => []);
+  fwd[1]!.push(1);
+  for (let i = 1; i < n; i += 1) {
+    const depths = fwd[i]!;
+    if (depths.length === 0) continue;
+    for (const depth of depths) {
+      if (depth === 0) continue;
+      const ch = chars[i]!;
+      if (ch === "[") {
+        pushDepth(fwd, i + 1, depth + 1);
+      } else if (ch === "]") {
+        pushDepth(fwd, i + 1, depth - 1);
+        if (chars[i + 1] === "]") pushDepth(fwd, i + 2, depth);
+      } else {
+        pushDepth(fwd, i + 1, depth);
+      }
+    }
+  }
+
+  const bwd: number[][] = Array.from({ length: n + 1 }, () => []);
+  bwd[n]!.push(encodeState(0, MODE_NORMAL));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const ch = chars[i]!;
+    if (ch === "[") {
+      for (const state of bwd[i + 1]!) {
+        const depthAfter = decodeDepth(state);
+        const modeAfter = decodeMode(state);
+        if (modeAfter !== MODE_NORMAL) {
+          pushState(bwd, i, 0, modeAfter);
+        } else if (depthAfter > 0) {
+          pushState(bwd, i, depthAfter - 1, MODE_NORMAL);
+        }
+      }
+      continue;
+    }
+
+    if (ch === "]") {
+      for (const state of bwd[i + 1]!) {
+        const depthAfter = decodeDepth(state);
+        const modeAfter = decodeMode(state);
+        if (modeAfter !== MODE_NORMAL) {
+          pushState(bwd, i, 0, modeAfter);
+        } else {
+          pushState(bwd, i, depthAfter + 1, MODE_NORMAL);
+        }
+      }
+
+      // Escape transitions are only valid while inside brackets (depth > 0).
+      if (chars[i + 1] === "]") {
+        for (const state of bwd[i + 2] ?? []) {
+          const depthAfter = decodeDepth(state);
+          const modeAfter = decodeMode(state);
+          if (modeAfter === MODE_NORMAL && depthAfter > 0) pushState(bwd, i, depthAfter, MODE_NORMAL);
+        }
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      for (const state of bwd[i + 1]!) {
+        const depthAfter = decodeDepth(state);
+        const modeAfter = decodeMode(state);
+        if (modeAfter === MODE_STRING && depthAfter === 0) {
+          // Opening quote (`"`), entering string literal.
+          pushState(bwd, i, 0, MODE_NORMAL);
+          continue;
+        }
+        if (modeAfter === MODE_NORMAL) {
+          if (depthAfter > 0) {
+            // Quotes are literal characters inside brackets.
+            pushState(bwd, i, depthAfter, MODE_NORMAL);
+            continue;
+          }
+          if (chars[i + 1] !== '"') {
+            // Closing quote (`"`), exiting string literal.
+            pushState(bwd, i, 0, MODE_STRING);
+          }
+          continue;
+        }
+        if (modeAfter === MODE_QUOTED_IDENT && depthAfter === 0) {
+          // Quotes are literal characters inside quoted identifiers.
+          pushState(bwd, i, 0, MODE_QUOTED_IDENT);
+        }
+      }
+
+      // Escaped quote (`""`) within a string literal.
+      if (chars[i + 1] === '"') {
+        for (const state of bwd[i + 2] ?? []) {
+          const depthAfter = decodeDepth(state);
+          const modeAfter = decodeMode(state);
+          if (depthAfter === 0 && modeAfter === MODE_STRING) pushState(bwd, i, 0, MODE_STRING);
+        }
+      }
+      continue;
+    }
+
+    if (ch === "'") {
+      for (const state of bwd[i + 1]!) {
+        const depthAfter = decodeDepth(state);
+        const modeAfter = decodeMode(state);
+        if (modeAfter === MODE_QUOTED_IDENT && depthAfter === 0) {
+          // Opening quote (`'`), entering quoted identifier.
+          pushState(bwd, i, 0, MODE_NORMAL);
+          continue;
+        }
+        if (modeAfter === MODE_NORMAL) {
+          if (depthAfter > 0) {
+            // Quotes are literal characters inside brackets.
+            pushState(bwd, i, depthAfter, MODE_NORMAL);
+            continue;
+          }
+          if (chars[i + 1] !== "'") {
+            // Closing quote (`'`), exiting quoted identifier.
+            pushState(bwd, i, 0, MODE_QUOTED_IDENT);
+          }
+          continue;
+        }
+        if (modeAfter === MODE_STRING && depthAfter === 0) {
+          // Quotes are literal characters inside string literals.
+          pushState(bwd, i, 0, MODE_STRING);
+        }
+      }
+
+      // Escaped quote (`''`) within a quoted identifier.
+      if (chars[i + 1] === "'") {
+        for (const state of bwd[i + 2] ?? []) {
+          const depthAfter = decodeDepth(state);
+          const modeAfter = decodeMode(state);
+          if (depthAfter === 0 && modeAfter === MODE_QUOTED_IDENT) pushState(bwd, i, 0, MODE_QUOTED_IDENT);
+        }
+      }
+      continue;
+    }
+
+    for (const state of bwd[i + 1]!) {
+      const depthAfter = decodeDepth(state);
+      const modeAfter = decodeMode(state);
+      pushState(bwd, i, depthAfter, modeAfter);
+    }
+  }
+
+  const goal = encodeState(0, MODE_NORMAL);
+  for (let endIdx = 1; endIdx <= n; endIdx += 1) {
+    if (fwd[endIdx]!.includes(0) && bwd[endIdx]!.includes(goal)) {
+      const end = start + endIdx;
+      return Math.min(end, src.length);
+    }
+  }
+  return null;
+}
+
 function tryReadStructuredReference(input: string, start: number): { text: string; end: number } | null {
   const first = codePointAt(input, start);
   if (!first) return null;
@@ -378,29 +583,12 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
   }
   if (input[i] !== "[") return null;
 
-  // Structured reference tokenization is tricky because Excel escapes `]` inside
-  // structured reference items by doubling it (`]]`). That makes raw bracket
-  // matching ambiguous (two consecutive `]` can either be an escape or the close
-  // of nested groups).
-  //
-  // Instead of trying to fully parse the bracket nesting here, scan forward to
-  // the longest `]`-terminated substring that `parseStructuredReferenceText`
-  // recognizes. This stays in sync with the structured-reference parser and
-  // correctly handles cases like:
-  // - escaped `]` inside column names (`A]]B` => `A]B`)
-  // - structured refs followed by operators (`...]]+1`)
-  // - escaped `]` followed by operator characters inside the column name (`A]]+B`)
-  let bestEnd: number | null = null;
-  for (let j = i; j < input.length; j += 1) {
-    if (input[j] !== "]") continue;
-    const end = j + 1;
-    const text = input.slice(start, end);
-    if (!parseStructuredReferenceText(text)) continue;
-    bestEnd = end;
-  }
-
-  if (bestEnd == null) return null;
-  return { text: input.slice(start, bestEnd), end: bestEnd };
+  const end = findBracketEnd(input, i);
+  if (!end) return null;
+  const text = input.slice(start, end);
+  // Only claim this token when it matches a supported structured ref pattern.
+  if (!parseStructuredReferenceText(text)) return null;
+  return { text, end };
 }
 
 export function tokenizeFormula(input: string): FormulaToken[] {
