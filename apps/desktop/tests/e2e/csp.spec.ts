@@ -97,6 +97,47 @@ async function gotoDesktopRootWithRetry(
   return null;
 }
 
+async function evaluateWithViteRetry<R>(
+  page: import("@playwright/test").Page,
+  fn: () => R | Promise<R>,
+): Promise<R>;
+async function evaluateWithViteRetry<Arg, R>(
+  page: import("@playwright/test").Page,
+  fn: (arg: Arg) => R | Promise<R>,
+  arg: Arg,
+): Promise<R>;
+async function evaluateWithViteRetry(
+  page: import("@playwright/test").Page,
+  fn: (...args: any[]) => unknown,
+  arg?: unknown,
+): Promise<any> {
+  // Vite may trigger a one-time reload or temporarily fail to serve workspace modules while it is
+  // optimizing deps. Retry once so CSP parity tests don't flake on cold caches.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      // Only pass the argument when provided; Playwright treats `undefined` specially when serializing.
+      return arg === undefined ? await page.evaluate(fn as any) : await page.evaluate(fn as any, arg);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("Failed to fetch dynamically imported module") ||
+          message.includes("net::ERR_ABORTED") ||
+          message.includes("net::ERR_NETWORK_CHANGED") ||
+          message.includes("interrupted by another navigation") ||
+          message.includes("frame was detached"))
+      ) {
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        await page.waitForTimeout(250);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Failed to evaluate after retry");
+}
+
 test.describe("Content Security Policy (Tauri parity)", () => {
   test("startup has no CSP violations and allows WASM-in-worker execution", async ({ page }) => {
     const cspViolations: string[] = [];
@@ -132,7 +173,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     // configured policy.
     await expect(page.locator("#grid")).toHaveCount(1);
 
-    const { mainThreadAnswer, workerAnswer } = await page.evaluate(async () => {
+    const { mainThreadAnswer, workerAnswer } = await evaluateWithViteRetry(page, async () => {
       const wasmBytes = new Uint8Array([
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
         0x03, 0x02, 0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x61, 0x6e, 0x73, 0x77, 0x65, 0x72, 0x00,
@@ -427,7 +468,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
       const marketplaceModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
 
-      const result = await page.evaluate(
+      const result = await evaluateWithViteRetry(
+        page,
         async ({ hostModuleUrl, marketplaceModuleUrl, marketplaceBaseUrl, networkUrl }) => {
           // Inject a minimal Tauri IPC surface for the marketplace + extension host.
           (window as any).__TAURI__ = {
@@ -486,7 +528,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           marketplaceModuleUrl,
           marketplaceBaseUrl: `${marketplaceServer.origin}/api`,
           networkUrl: `${networkServer.origin}/hello`
-        }
+        },
       );
 
       expect(result.text).toBe("hello from network");
@@ -522,7 +564,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     const engineEntryUrl = viteFsUrl(path.join(repoRoot, "packages/engine/src/index.ts"));
 
-    const result = await page.evaluate(async ({ engineEntryUrl }) => {
+    const result = await evaluateWithViteRetry(page, async ({ engineEntryUrl }) => {
       const { createEngineClient } = await import(engineEntryUrl);
 
       const engine = createEngineClient();
@@ -567,7 +609,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
 
-    const result = await page.evaluate(
+    const result = await evaluateWithViteRetry(
+      page,
       async ({ manifestUrl, hostModuleUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
@@ -610,7 +653,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
         return { sum, writes, messages };
       },
-      { manifestUrl, hostModuleUrl }
+      { manifestUrl, hostModuleUrl },
     );
 
     expect(result.sum).toBe(10);
@@ -641,7 +684,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     const managerModuleUrl = viteFsUrl(path.join(repoRoot, "apps/desktop/src/extensions/extensionHostManager.ts"));
 
-    const result = await page.evaluate(
+    const result = await evaluateWithViteRetry(
+      page,
       async ({ managerModuleUrl }) => {
         const { DesktopExtensionHostManager } = await import(managerModuleUrl);
 
@@ -835,7 +879,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
       const managerModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
 
-      const result = await page.evaluate(
+      const result = await evaluateWithViteRetry(
+        page,
         async ({ hostModuleUrl, managerModuleUrl, networkUrl }) => {
           (window as any).__TAURI__ = {
             core: {
@@ -934,7 +979,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         const data = await run({ forceData: true });
           return { canBlobModuleUrls, blob, data };
         },
-        { hostModuleUrl, managerModuleUrl, networkUrl: `${networkServer.origin}/hello` }
+        { hostModuleUrl, managerModuleUrl, networkUrl: `${networkServer.origin}/hello` },
       );
 
     expect(result.blob.id).toBe("formula.sample-hello");
@@ -1008,7 +1053,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
 
-    const result = await page.evaluate(
+    const result = await evaluateWithViteRetry(
+      page,
       async ({ manifestUrl, hostModuleUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
@@ -1045,7 +1091,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           await host.dispose();
         }
       },
-      { manifestUrl, hostModuleUrl }
+      { manifestUrl, hostModuleUrl },
     );
 
     expect(result.errorMessage).toContain("Permission denied");
@@ -1074,12 +1120,12 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     await expect(page.locator("#grid")).toHaveCount(1);
     await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHost), undefined, { timeout: 60_000 });
     // Avoid interactive permission dialogs (the prompt waits on user input).
-    await page.evaluate(() => {
+    await evaluateWithViteRetry(page, () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__formulaPermissionPrompt = async () => true;
     });
 
-    await page.evaluate(async () => {
+    await evaluateWithViteRetry(page, async () => {
       // Auto-approve extension permission prompts so the test exercises panel CSP
       // behavior rather than hanging on modal UI.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1109,7 +1155,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const iframeSrc = await iframe.getAttribute("src");
     expect(iframeSrc).toBeTruthy();
 
-    const panelHtml = await page.evaluate(async (src) => {
+    const panelHtml = await evaluateWithViteRetry(page, async (src) => {
       const res = await fetch(String(src));
       return await res.text();
     }, iframeSrc);
