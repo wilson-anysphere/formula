@@ -142,7 +142,7 @@ describe("engine sync helpers", () => {
       return this.internStyleCalls.length;
     }
 
-    async setCellStyleId(address: string, styleId: number, sheet?: string): Promise<void> {
+    async setCellStyleId(sheet: string, address: string, styleId: number): Promise<void> {
       this.setStyleCalls.push({ address, styleId, sheet });
     }
 

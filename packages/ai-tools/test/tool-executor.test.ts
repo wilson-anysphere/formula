@@ -684,6 +684,7 @@ describe("ToolExecutor", () => {
       throw new Error("Expected read_range cell value to be a string");
     }
     // Exact serialization may vary depending on internal rich-value bounding heuristics, but it must be bounded.
+    if (typeof value !== "string") throw new Error("Expected string cell payload");
     expect(value.length).toBeLessThanOrEqual(10_100);
     expect(value).toContain("truncated");
     expect(() => JSON.stringify(result)).not.toThrow();
