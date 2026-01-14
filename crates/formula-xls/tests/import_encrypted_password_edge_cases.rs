@@ -69,6 +69,31 @@ fn decrypts_rc4_standard_with_empty_password() {
 }
 
 #[test]
+fn decrypts_rc4_standard_with_unicode_password() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_rc4_standard_unicode_pw_open.xls");
+
+    let password = "pässwörd";
+    let result = formula_xls::import_xls_path_with_password(&fixture_path, Some(password))
+        .expect("decrypt and import");
+    let sheet1 = result
+        .workbook
+        .sheet_by_name("Sheet1")
+        .expect("Sheet1 missing");
+    assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    let err = formula_xls::import_xls_path_with_password(&fixture_path, Some("wrong"))
+        .expect_err("expected wrong password to fail");
+    assert!(
+        matches!(&err, formula_xls::ImportError::InvalidPassword),
+        "expected ImportError::InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
 fn rc4_cryptoapi_does_not_truncate_password_to_15_chars() {
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
