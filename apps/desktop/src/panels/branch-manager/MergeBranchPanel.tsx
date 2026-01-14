@@ -600,9 +600,11 @@ export function MergeBranchPanel({
         </div>
       )}
       {!preview ? (
-        <div role="status" className="branch-merge__loading">
-          {t("branchMerge.loading")}
-        </div>
+        error ? null : (
+          <div role="status" className="branch-merge__loading">
+            {t("branchMerge.loading")}
+          </div>
+        )
       ) : (
         <>
           <div className="branch-merge__summary">
