@@ -25,6 +25,13 @@ use thiserror::Error;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 pub mod source;
+mod definition;
+pub use definition::{
+    PivotDestination, PivotRefreshError, PivotRefreshOutput, PivotSource, PivotTableDefinition,
+    PivotTableId,
+};
+pub(crate) use definition::refresh_pivot;
+pub(crate) use definition::PivotRefreshContext;
 
 #[derive(Debug, Error)]
 pub enum PivotError {

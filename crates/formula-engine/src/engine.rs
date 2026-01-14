@@ -19,6 +19,10 @@ use crate::locale::{
     canonicalize_formula, canonicalize_formula_with_style, localize_formula,
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
+use crate::pivot::{
+    refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput, PivotTableDefinition,
+    PivotTableId,
+};
 use crate::value::{Array, ErrorKind, Value};
 use formula_format::{
     DateSystem as FmtDateSystem, FormatOptions as FmtFormatOptions, Value as FmtValue,
@@ -285,6 +289,8 @@ struct Workbook {
     styles: StyleTable,
     workbook_directory: Option<String>,
     workbook_filename: Option<String>,
+    pivots: HashMap<PivotTableId, PivotTableDefinition>,
+    next_pivot_id: PivotTableId,
 }
 
 #[cfg(test)]
@@ -1280,6 +1286,40 @@ impl Engine {
         }
 
         true
+    }
+    /// Store a pivot table definition in the engine and return its allocated id.
+    ///
+    /// The engine will automatically rewrite pivot source/destination references on structural
+    /// edits (insert/delete/move ranges).
+    pub fn add_pivot_table(&mut self, mut def: PivotTableDefinition) -> PivotTableId {
+        let id = self.workbook.next_pivot_id;
+        self.workbook.next_pivot_id = self.workbook.next_pivot_id.wrapping_add(1);
+        def.id = id;
+        self.workbook.pivots.insert(id, def);
+        id
+    }
+
+    pub fn pivot_table(&self, pivot_id: PivotTableId) -> Option<&PivotTableDefinition> {
+        self.workbook.pivots.get(&pivot_id)
+    }
+
+    pub fn pivot_table_mut(&mut self, pivot_id: PivotTableId) -> Option<&mut PivotTableDefinition> {
+        self.workbook.pivots.get_mut(&pivot_id)
+    }
+
+    /// Refresh a pivot table by id, writing the computed output into its destination worksheet.
+    pub fn refresh_pivot_table(
+        &mut self,
+        pivot_id: PivotTableId,
+    ) -> Result<PivotRefreshOutput, PivotRefreshError> {
+        let mut def = self
+            .workbook
+            .pivots
+            .remove(&pivot_id)
+            .ok_or(PivotRefreshError::UnknownPivot(pivot_id))?;
+        let result = refresh_pivot(self, &mut def);
+        self.workbook.pivots.insert(pivot_id, def);
+        result
     }
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
@@ -2868,6 +2908,7 @@ impl Engine {
 
     pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {
         let before = self.workbook.clone();
+        let op_clone = op.clone();
         let mut formula_rewrites = Vec::new();
         let mut moved_ranges = Vec::new();
 
@@ -3187,6 +3228,11 @@ impl Engine {
                     &mut formula_rewrites,
                 );
             }
+        }
+
+        // Keep pivot table definitions in sync with the structural workbook edit.
+        for pivot in self.workbook.pivots.values_mut() {
+            pivot.apply_edit_op(&op_clone);
         }
 
         if let Err(err) = self.grow_sheet_dimensions_to_fit_cells(edited_sheet_id) {
@@ -6423,6 +6469,34 @@ impl Engine {
         for id in self.calc_graph.dirty_cells() {
             self.dirty.insert(cell_key_from_id(id));
         }
+    }
+}
+
+impl PivotRefreshContext for Engine {
+    fn read_cell(&mut self, sheet: &str, addr: &str) -> Value {
+        self.get_cell_value(sheet, addr)
+    }
+
+    fn write_cell(&mut self, sheet: &str, addr: &str, value: Value) -> Result<(), EngineError> {
+        self.set_cell_value(sheet, addr, value)
+    }
+
+    fn clear_cell(&mut self, sheet: &str, addr: &str) -> Result<(), EngineError> {
+        Engine::clear_cell(self, sheet, addr)
+    }
+
+    fn resolve_table(&mut self, table_id: u32) -> Option<(String, Range)> {
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if let Some(table) = sheet.tables.iter().find(|t| t.id == table_id) {
+                let name = self
+                    .workbook
+                    .sheet_name(sheet_id)
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| format!("Sheet{sheet_id}"));
+                return Some((name, table.range));
+            }
+        }
+        None
     }
 }
 
