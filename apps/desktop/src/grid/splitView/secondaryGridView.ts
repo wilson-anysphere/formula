@@ -809,6 +809,10 @@ export class SecondaryGridView {
     // index is keyed by the stable `geom` object reference. Invalidate the cached bounds so the
     // overlay recomputes drawing positions under the new row/col sizes.
     this.drawingsOverlay.invalidateSpatialIndex();
+    // Keep version counters in sync with the renderer so the next user-driven scroll doesn't
+    // redundantly invalidate the spatial index for the same axis-size override update.
+    this.rowsVersion = this.grid.renderer.scroll.rows.getVersion();
+    this.colsVersion = this.grid.renderer.scroll.cols.getVersion();
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();
     this.container.dataset.scrollX = String(scroll.x);
