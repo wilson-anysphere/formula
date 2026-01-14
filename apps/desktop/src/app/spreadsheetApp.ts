@@ -10019,7 +10019,9 @@ export class SpreadsheetApp {
         bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
         bounds.width = sheetRect.width;
         bounds.height = sheetRect.height;
-        if (rotationHandleEnabled && hitTestRotationHandle(bounds, x, y, selected.transform)) {
+        // Charts behave like Excel chart objects: movable/resizable but not rotatable.
+        const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+        if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
           return cursorForRotationHandle(false);
         }
         // When selected, handles can extend slightly outside the untransformed bounds. Check the selected

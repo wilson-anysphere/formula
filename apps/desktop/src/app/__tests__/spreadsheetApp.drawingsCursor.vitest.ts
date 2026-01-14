@@ -217,4 +217,62 @@ describe("SpreadsheetApp drawing hover cursor", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("does not show a rotation cursor for chart drawings (rotation handle disabled)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const chartDrawing: DrawingObject = {
+        id: 1,
+        kind: { type: "chart", chartId: "chart_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      };
+
+      // Seed the drawing list and select it so `drawingCursorAtPoint` checks selection handles.
+      app.setDrawingObjects([chartDrawing]);
+      app.selectDrawing(chartDrawing.id);
+
+      const viewport = app.getDrawingInteractionViewport();
+      const bounds = drawingObjectToViewportRect(chartDrawing, viewport, (app as any).drawingGeom);
+      const handleCenter = getRotationHandleCenter(bounds, chartDrawing.transform);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      const priorCanvasCursor = selectionCanvas.style.cursor;
+      root.style.cursor = "crosshair";
+
+      (app as any).onSharedPointerMove({
+        clientX: handleCenter.x,
+        clientY: handleCenter.y,
+        offsetX: handleCenter.x,
+        offsetY: handleCenter.y,
+        buttons: 0,
+        pointerType: "mouse",
+        target: selectionCanvas,
+      } as any);
+
+      expect(root.style.cursor).toBe("");
+      expect(selectionCanvas.style.cursor).toBe(priorCanvasCursor);
+      expect(selectionCanvas.style.cursor).not.toBe("grab");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
