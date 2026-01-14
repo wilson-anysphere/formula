@@ -308,6 +308,29 @@ test("fails when a workflow named CI exists but is not the main ci.yml workflow"
   );
 });
 
+test("fails when the ci.yml workflow exists but has a different name than requested", async () => {
+  const sha = "abababababababababababababababababababab";
+
+  await withMockGitHub(
+    {
+      workflows: [{ id: 123, name: "Build", path: ".github/workflows/ci.yml" }],
+      runsByWorkflowId: { "123": [] },
+    },
+    async (baseUrl) => {
+      const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_API_URL: baseUrl,
+        GITHUB_SERVER_URL: "http://example.local",
+      });
+
+      assert.notEqual(result.code, 0, "expected non-zero exit code");
+      assert.match(result.stderr, /expected the main CI workflow/i);
+      assert.match(result.stderr, /but found \"Build\"/i);
+      assert.match(result.stderr, /--workflow \"Build\"/);
+    },
+  );
+});
+
 test("ignores successful runs for other commits (defensive head_sha validation)", async () => {
   const sha = "cccccccccccccccccccccccccccccccccccccccc";
   const otherSha = "dddddddddddddddddddddddddddddddddddddddd";
