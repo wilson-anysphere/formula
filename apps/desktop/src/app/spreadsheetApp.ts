@@ -221,6 +221,30 @@ function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
 
+async function mapWithConcurrencyLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const count = items.length;
+  if (count === 0) return [];
+  const max = Math.max(1, Math.trunc(limit));
+  const results = new Array<R>(count);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const idx = nextIndex;
+      nextIndex += 1;
+      if (idx >= count) return;
+      results[idx] = await fn(items[idx], idx);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(max, count) }, () => worker()));
+  return results;
+}
+
 function looksLikeExternalHyperlink(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -5382,13 +5406,19 @@ export class SpreadsheetApp {
       if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
     }
 
-    const insertedObjects: DrawingObject[] = [];
-    let lastInsertedId: number | null = null;
-
     const docAny = this.document as any;
-    if (typeof docAny.insertDrawing !== "function") {
+    if (typeof docAny.getSheetDrawings !== "function" || typeof docAny.setSheetDrawings !== "function") {
       throw new Error("Picture insertion is not supported in this build.");
     }
+
+    const existingDrawings = (() => {
+      try {
+        const raw = docAny.getSheetDrawings(this.sheetId);
+        return Array.isArray(raw) ? raw : [];
+      } catch {
+        return [];
+      }
+    })();
 
     const readFileBytes = async (file: File): Promise<Uint8Array> => {
       // Preferred path: the standard File/Blob `arrayBuffer()` API.
@@ -5416,18 +5446,8 @@ export class SpreadsheetApp {
 
       throw new Error("Reading file bytes is not supported in this environment.");
     };
-    const decodeImagePixelSize = async (file: File): Promise<{ width: number; height: number } | null> => {
-      if (typeof createImageBitmap === "function") {
-        try {
-          const bitmap = await createImageBitmap(file);
-          const size = { width: bitmap.width, height: bitmap.height };
-          (bitmap as any).close?.();
-          if (size.width > 0 && size.height > 0) return size;
-        } catch {
-          // ignore
-        }
-      }
 
+    const decodeImagePixelSizeViaImage = async (file: File): Promise<{ width: number; height: number } | null> => {
       const ua = typeof navigator !== "undefined" ? String(navigator.userAgent ?? "") : "";
       if (/jsdom|happy-dom/i.test(ua)) return null;
 
@@ -5468,89 +5488,99 @@ export class SpreadsheetApp {
       }
     };
 
+    const MAX_CONCURRENT_DECODES = 4;
+
+    const prepared = await mapWithConcurrencyLimit(accepted, MAX_CONCURRENT_DECODES, async (file, i) => {
+      const bytes = await readFileBytes(file);
+      if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+        throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+      }
+
+      const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
+      const ext = (() => {
+        const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
+        return raw && raw !== file.name ? raw : null;
+      })();
+      const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
+
+      const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
+
+      const decoded = await (async (): Promise<{ width: number; height: number } | null> => {
+        if (typeof createImageBitmap === "function") {
+          try {
+            const bitmap = await this.drawingOverlay.preloadImage(imageEntry);
+            const width = Number((bitmap as any)?.width);
+            const height = Number((bitmap as any)?.height);
+            if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+              return { width, height };
+            }
+          } catch {
+            // ignore
+          }
+        }
+        return decodeImagePixelSizeViaImage(file);
+      })();
+
+      const fallback = { width: 320, height: 240 };
+      const rawW = decoded?.width ?? fallback.width;
+      const rawH = decoded?.height ?? fallback.height;
+      const widthPx = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : fallback.width;
+      const heightPx = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : fallback.height;
+
+      const scale = Math.min(1, maxW / widthPx, maxH / heightPx);
+      const targetScreenW = Math.max(1, widthPx * scale);
+      const targetScreenH = Math.max(1, heightPx * scale);
+
+      // Store anchors in base (unzoomed) EMUs so render-time zoom scaling produces the desired
+      // on-screen size.
+      const targetBaseW = targetScreenW / zoom;
+      const targetBaseH = targetScreenH / zoom;
+
+      const offsetScreenPx = 16 * i;
+      const offsetBasePx = offsetScreenPx / zoom;
+
+      const anchor: DrawingAnchor = {
+        type: "oneCell",
+        from: {
+          cell: anchorCell,
+          offset: { xEmu: pxToEmu(offsetBasePx), yEmu: pxToEmu(offsetBasePx) },
+        },
+        size: { cx: pxToEmu(targetBaseW), cy: pxToEmu(targetBaseH) },
+      };
+
+      const drawingId = createDrawingObjectId();
+      const drawing: DrawingObject = {
+        id: drawingId,
+        kind: { type: "image", imageId },
+        anchor,
+        zOrder: nextZOrder + i,
+        size: anchor.size,
+      };
+
+      return { imageEntry, drawing };
+    });
+
     this.document.beginBatch({ label: "Insert Picture" });
     try {
-      for (let i = 0; i < accepted.length; i += 1) {
-        const file = accepted[i]!;
-        const bytes = await readFileBytes(file);
-        if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
-          throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
-        }
-        const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
-
-         const ext = (() => {
-           const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
-          return raw && raw !== file.name ? raw : null;
-        })();
-        const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
-
-        const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
+      for (const entry of prepared) {
         // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
         // bloating DocumentController snapshot payloads.
-        this.drawingImages.set(imageEntry);
+        this.drawingImages.set(entry.imageEntry);
         try {
-          this.imageBytesBinder?.onLocalImageInserted(imageEntry);
+          this.imageBytesBinder?.onLocalImageInserted(entry.imageEntry);
         } catch {
           // Best-effort: never fail picture insertion due to collab image propagation.
         }
-
-        // Kick off ImageBitmap decode immediately so the first overlay paint can
-        // reuse an already-decoding promise (avoids blocking on decode during
-        // the render pass right after insertion).
-        // Some environments (e.g. JSDOM unit tests) don't implement `createImageBitmap`;
-        // avoid spawning rejected decode promises in those cases.
-        if (typeof createImageBitmap === "function") {
-          void this.drawingOverlay
-            .preloadImage(imageEntry)
-            // Insertion should succeed even if bitmap decode fails.
-            .catch(() => {});
-        }
-
-        const decoded = await decodeImagePixelSize(file);
-        const fallback = { width: 320, height: 240 };
-        const rawW = decoded?.width ?? fallback.width;
-        const rawH = decoded?.height ?? fallback.height;
-        const widthPx = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : fallback.width;
-        const heightPx = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : fallback.height;
-
-        const scale = Math.min(1, maxW / widthPx, maxH / heightPx);
-        const targetScreenW = Math.max(1, widthPx * scale);
-        const targetScreenH = Math.max(1, heightPx * scale);
-
-        // Store anchors in base (unzoomed) EMUs so render-time zoom scaling produces the desired
-        // on-screen size.
-        const targetBaseW = targetScreenW / zoom;
-        const targetBaseH = targetScreenH / zoom;
-
-        const offsetScreenPx = 16 * i;
-        const offsetBasePx = offsetScreenPx / zoom;
-
-        const anchor: DrawingAnchor = {
-          type: "oneCell",
-          from: {
-            cell: anchorCell,
-            offset: { xEmu: pxToEmu(offsetBasePx), yEmu: pxToEmu(offsetBasePx) },
-          },
-          size: { cx: pxToEmu(targetBaseW), cy: pxToEmu(targetBaseH) },
-        };
-
-        const drawingId = createDrawingObjectId();
-        const drawing = {
-          id: drawingId,
-          kind: { type: "image", imageId },
-          anchor,
-          zOrder: nextZOrder++,
-          size: anchor.size,
-        };
-
-        // Persist the drawing id as a string for compatibility with existing document-schema
-        // expectations (some integrations treat drawing ids as JSON-friendly string keys).
-        // The overlay adapters normalize ids back to numbers for rendering/interaction.
-        docAny.insertDrawing(this.sheetId, { ...drawing, id: String(drawingId) });
-        insertedObjects.push(drawing);
-        lastInsertedId = drawingId;
       }
 
+      // Store drawing ids as strings in the DocumentController payload for back-compat with
+      // integrations that treat drawing ids as JSON-friendly keys. The UI continues to use
+      // numeric ids (see `DrawingObject.id`).
+      const nextDrawings = [
+        ...existingDrawings,
+        ...prepared.map((p) => ({ ...(p.drawing as any), id: String(p.drawing.id) })),
+      ];
+      docAny.setSheetDrawings(this.sheetId, nextDrawings, { label: "Insert Picture" });
       this.document.endBatch();
       toastSkippedOversized();
     } catch (err) {
@@ -5558,7 +5588,9 @@ export class SpreadsheetApp {
       throw err;
     }
 
-    if (insertedObjects.length > 0) {
+    if (prepared.length > 0) {
+      const insertedObjects = prepared.map((p) => p.drawing);
+      const lastInsertedId = insertedObjects[insertedObjects.length - 1]!.id;
       this.setDrawingObjectsForSheet([...existingObjects, ...insertedObjects]);
       this.selectedDrawingId = lastInsertedId;
       this.drawingOverlay.setSelectedId(lastInsertedId);
@@ -5572,6 +5604,7 @@ export class SpreadsheetApp {
     this.renderSelection();
     this.focus();
   }
+
 
   private arrangeSelectedDrawing(direction: "forward" | "backward" | "front" | "back"): void {
     const sheetId = this.sheetId;
@@ -10679,7 +10712,6 @@ export class SpreadsheetApp {
       target === this.auditingCanvas ||
       target === this.presenceCanvas;
     if (!isGridSurface) return;
-
     const objects = this.listDrawingObjectsForSheet();
     const prevSelected = this.selectedDrawingId;
     const editorWasOpen = this.editor.isOpen();
