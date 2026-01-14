@@ -1376,7 +1376,9 @@ def triage_workbook(
         # Some unit tests patch `_run_rust_triage` with a legacy signature. Only forward optional
         # params when the target callable can accept them.
         optional_kwargs = {
-            "workbook_name": workbook.display_name,
+            # Use the privacy-mode-adjusted display name so the Rust helper never sees raw
+            # filenames in private mode. The helper only uses this for extension/format inference.
+            "workbook_name": display_name,
             "diff_ignore_globs": diff_ignore_globs,
             "diff_ignore_presets": diff_ignore_presets,
             "round_trip_fail_on": round_trip_fail_on,

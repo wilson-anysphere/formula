@@ -75,11 +75,9 @@ class IngestTriageInvocationTests(unittest.TestCase):
             triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
 
         self.assertEqual(observed["exe"], Path("noop"))
-        self.assertEqual(observed["workbook_name"], "book.xlsx")
         self.assertEqual(observed["diff_limit"], 25)
         self.assertEqual(observed["recalc"], False)
         self.assertEqual(observed["render_smoke"], False)
-        self.assertEqual(observed["workbook_name"], "book.xlsx")
 
         diff_ignore = observed["diff_ignore"]
         self.assertIsInstance(diff_ignore, set)
@@ -94,6 +92,7 @@ class IngestTriageInvocationTests(unittest.TestCase):
             report["display_name"],
             f"workbook-{report['sha256'][:16]}.xlsx",
         )
+        self.assertEqual(observed["workbook_name"], report["display_name"])
 
 
 if __name__ == "__main__":
