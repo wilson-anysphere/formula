@@ -1,6 +1,8 @@
 use formula_model::drawings::DrawingObjectKind;
 use formula_xlsx::drawings::DrawingPart;
 use formula_xlsx::XlsxPackage;
+use std::io::Cursor;
+use zip::ZipArchive;
 
 const FIXTURE: &[u8] = include_bytes!("../../../fixtures/xlsx/basic/smartart.xlsx");
 
@@ -39,3 +41,25 @@ fn drawing_part_does_not_treat_smartart_graphic_frame_as_chart_placeholder() {
     assert!(raw.contains("drawingml/2006/diagram"));
 }
 
+#[test]
+fn drawing_part_parse_from_archive_does_not_treat_smartart_graphic_frame_as_chart_placeholder() {
+    let cursor = Cursor::new(FIXTURE);
+    let mut archive = ZipArchive::new(cursor).expect("open smartart.xlsx as zip");
+    let mut workbook = formula_model::Workbook::new();
+
+    let part = DrawingPart::parse_from_archive(
+        0,
+        "xl/drawings/drawing1.xml",
+        &mut archive,
+        &mut workbook,
+    )
+    .expect("parse drawing part");
+
+    assert!(
+        !part.objects.iter().any(|obj| matches!(
+            obj.kind,
+            DrawingObjectKind::ChartPlaceholder { .. }
+        )),
+        "SmartArt drawings are represented as graphicFrames but should not be parsed as charts"
+    );
+}
