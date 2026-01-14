@@ -33,7 +33,7 @@ function usage(): string {
     `  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: ${defaults.runs})`,
     `  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: ${defaults.timeoutMs})`,
     `  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: ${defaults.settleMs})`,
-    '  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)',
+    '  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN; resolved relative to repo root)',
     `  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB / FORMULA_DESKTOP_MEMORY_TARGET_MB, default: ${defaults.targetMb})`,
     '  --json, --json-path <path> Write JSON output (samples + summary) to this path',
     '  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)',

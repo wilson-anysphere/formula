@@ -50,7 +50,7 @@ function usage(): string {
     "  --mode <cold|warm>               Startup mode (env: FORMULA_DESKTOP_STARTUP_MODE, default: cold)",
     `  --runs <n>                       Iterations (env: FORMULA_DESKTOP_STARTUP_RUNS, default: ${defaults.runs})`,
     `  --timeout-ms <ms>                Timeout per run (env: FORMULA_DESKTOP_STARTUP_TIMEOUT_MS, default: ${defaults.timeoutMs})`,
-    "  --bin, --bin-path <path>         Desktop binary path (env: FORMULA_DESKTOP_BIN)",
+    "  --bin, --bin-path <path>         Desktop binary path (env: FORMULA_DESKTOP_BIN; resolved relative to repo root)",
     "  --startup-bench, --shell         Shell-only startup (default in CI)",
     "  --full                           Full app startup (default locally)",
     "  --window-target-ms <ms>          p95 target (overrides env targets)",
