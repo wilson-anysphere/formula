@@ -1107,17 +1107,14 @@ export function registerDesktopCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "data.sortFilter.advanced.clearFilter",
     "Clear Filter",
-    async () => {
-      if (isEditingFn()) return;
-      const handlers = getAutoFilterHandlers();
-      if (!handlers) return;
-      await handlers.clear();
-    },
+    // Ribbon-only alias for the canonical Clear command.
+    () => commandRegistry.executeCommand("data.sortFilter.clear"),
     {
       category: commandCategoryData,
       icon: null,
-      description: "Clear AutoFilter criteria (show all rows)",
-      keywords: ["clear filter", "filter", "auto filter", "autofilter"],
+      // Hide from the command palette so we don't surface both "Clear" and "Clear Filter"
+      // entries for the same underlying behavior.
+      when: "false",
     },
   );
 
