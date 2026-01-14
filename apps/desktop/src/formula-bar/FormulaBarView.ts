@@ -1928,16 +1928,18 @@ export class FormulaBarView {
       let previewInserted = false;
       let highlightHtml = "";
 
-      const referenceBySpanKey = new Map<string, { color: string; index: number; active: boolean }>();
-      if (isFormulaEditing) {
-        for (const ref of coloredReferences) {
-          referenceBySpanKey.set(`${ref.start}:${ref.end}`, {
-            color: ref.color,
-            index: ref.index,
-            active: activeReferenceIndex === ref.index,
-          });
-        }
-      }
+      const refs = coloredReferences;
+      let refCursor = 0;
+
+      const findContainingRef = (start: number, end: number) => {
+        // `coloredReferences` are ordered by appearance in the formula string, so we can
+        // walk them alongside the highlight spans (also ordered by start offset).
+        while (refCursor < refs.length && refs[refCursor]!.end <= start) refCursor += 1;
+        const ref = refs[refCursor];
+        if (!ref) return null;
+        if (ref.start <= start && end <= ref.end) return ref;
+        return null;
+      };
 
       const renderSpan = (
         span: { kind: string; start: number; end: number; className?: string },
@@ -1953,12 +1955,9 @@ export class FormulaBarView {
           return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
         }
 
-        let meta = referenceBySpanKey.get(`${span.start}:${span.end}`) ?? null;
-        if (!meta && span.kind !== "error") {
-          // The formula highlighter may split a logical reference into multiple spans (e.g. structured
-          // refs like `Table1[Amount]`, or engine-backed syntax error highlighting). Preserve reference
-          // colors by falling back to a containment lookup.
-          const containing = coloredReferences.find((ref) => ref.start <= span.start && span.end <= ref.end) ?? null;
+        let meta: { color: string; index: number; active: boolean } | null = null;
+        if (span.kind !== "error") {
+          const containing = findContainingRef(span.start, span.end);
           if (containing) {
             meta = {
               color: containing.color,
@@ -2983,8 +2982,11 @@ export class FormulaBarView {
   }
 }
 
+const ESCAPE_HTML_RE = /[&<>]/g;
+const ESCAPE_HTML_MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
+
 function escapeHtml(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return text.replace(ESCAPE_HTML_RE, (ch) => ESCAPE_HTML_MAP[ch] ?? ch);
 }
 
 function formatPreview(value: unknown): string {
