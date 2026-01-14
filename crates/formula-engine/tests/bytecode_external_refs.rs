@@ -113,7 +113,7 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 }
 
 #[test]
-fn bytecode_indirect_external_cell_ref_falls_back_and_resolves_via_provider() {
+fn bytecode_indirect_external_cell_ref_falls_back_and_is_ref_error() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -122,10 +122,12 @@ fn bytecode_indirect_external_cell_ref_falls_back_and_resolves_via_provider() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
 
-    // The bytecode backend does not currently support dynamically parsing external workbook refs
-    // inside INDIRECT, so this formula falls back to the AST evaluator when the external reference
-    // is visible at compile time (string literal). The AST evaluator can then consult the external
-    // value provider.
+    // Excel semantics: INDIRECT does not resolve references into external workbooks (even if an
+    // external value provider is configured).
+    //
+    // The bytecode backend currently falls back when an external workbook reference is visible at
+    // compile time (string literal), but the result must still be `#REF!` and must not consult the
+    // provider.
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
     assert_eq!(stats.compiled, 0);
@@ -145,10 +147,14 @@ fn bytecode_indirect_external_cell_ref_falls_back_and_resolves_via_provider() {
     assert_eq!(engine.bytecode_program_count(), 0);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
-    assert!(
-        provider.calls() > 0,
-        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "expected INDIRECT to reject external workbook refs without consulting the provider"
     );
 }
 
