@@ -2953,15 +2953,28 @@ fn write_patched_cell_children(
     // This matters for worksheets where the `<f>` element appears *after* `<v>/<is>` (unusual, but
     // legal) since the patcher inserts `<f>` before the value for stability.
     let formula_template = if update_formula && patch_formula.is_some() {
-        inner_events.iter().find_map(|ev| match ev {
-            Event::Start(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
-                Some(e.clone())
+        let mut depth = 0usize;
+        let mut template = None;
+        for ev in inner_events {
+            match ev {
+                Event::Start(e) => {
+                    if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"f") {
+                        template = Some(e.clone());
+                        break;
+                    }
+                    depth += 1;
+                }
+                Event::Empty(e) => {
+                    if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"f") {
+                        template = Some(e.clone());
+                        break;
+                    }
+                }
+                Event::End(_) => depth = depth.saturating_sub(1),
+                _ => {}
             }
-            Event::Empty(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
-                Some(e.clone())
-            }
-            _ => None,
-        })
+        }
+        template
     } else {
         None
     };
@@ -3107,7 +3120,13 @@ fn write_patched_cell_children(
                     value_written = true;
                 }
 
-                writer.write_event(ev.clone())?;
+                match ev {
+                    Event::Start(_) => {
+                        idx = write_owned_subtree(writer, inner_events, idx)?;
+                        continue;
+                    }
+                    _ => writer.write_event(ev.clone())?,
+                }
             }
         }
         idx += 1;
@@ -3400,20 +3419,17 @@ fn worksheet_has_default_spreadsheetml_ns(e: &BytesStart<'_>) -> Result<bool, Xl
 }
 
 fn is_element_named(name: &[u8], expected_prefix: Option<&[u8]>, local: &[u8]) -> bool {
-    let (prefix, local_name) = match name.iter().rposition(|b| *b == b':') {
-        Some(idx) => (Some(&name[..idx]), &name[idx + 1..]),
-        None => (None, name),
-    };
-
-    if local_name != local {
-        return false;
-    }
-
-    match (prefix, expected_prefix) {
-        (None, None) => true,
-        (Some(p), Some(e)) => p == e,
-        _ => false,
-    }
+    // Most worksheet parts either:
+    // - use the default SpreadsheetML namespace (no prefixes), or
+    // - use a consistent explicit prefix for all SpreadsheetML elements.
+    //
+    // Some producers, however, mix the two: e.g. a prefixed `<x:c>` with unprefixed `<v>/<f>/<is>`
+    // children where the unprefixed elements still resolve via a default `xmlns=...` declaration.
+    //
+    // The patcher is prefix-preserving when *writing*, but should be prefix-tolerant when *reading*
+    // existing semantics to avoid unnecessary cell rewrites.
+    let _ = expected_prefix;
+    local_name(name) == local
 }
 
 fn parse_row_r(row: &BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
