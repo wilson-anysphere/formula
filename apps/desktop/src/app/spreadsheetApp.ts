@@ -6650,6 +6650,14 @@ export class SpreadsheetApp {
     // Row/col size overrides change `cellOriginPx` / `cellSizePx`, so any cached
     // drawings bounds must be recomputed.
     this.invalidateDrawingGeometryCaches();
+    // Keep the shared-grid axis version counters in sync so the next scroll event does not
+    // redundantly invalidate drawing geometry for the same axis override update.
+    try {
+      this.sharedGridRowsVersion = this.sharedGrid.renderer.scroll.rows.getVersion();
+      this.sharedGridColsVersion = this.sharedGrid.renderer.scroll.cols.getVersion();
+    } catch {
+      // ignore
+    }
   }
 
   freezePanes(): void {
@@ -12391,6 +12399,14 @@ export class SpreadsheetApp {
     // auto-fit, etc). The drawing geometry is backed by live shared-grid scroll
     // state, so cached sheet-space bounds must be recomputed.
     this.invalidateDrawingGeometryCaches();
+    // The resize already updated the renderer sizes; sync our cached axis versions so the
+    // next scroll callback doesn't redundantly invalidate for the same resize.
+    try {
+      this.sharedGridRowsVersion = this.sharedGrid.renderer.scroll.rows.getVersion();
+      this.sharedGridColsVersion = this.sharedGrid.renderer.scroll.cols.getVersion();
+    } catch {
+      // ignore
+    }
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
     // (cell editor, formula bar, inline edit). This keeps edit state isolated from unrelated
