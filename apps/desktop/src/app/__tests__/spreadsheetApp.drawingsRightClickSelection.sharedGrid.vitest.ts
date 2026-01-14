@@ -225,4 +225,45 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("hitTestDrawingAtClientPoint treats selection handles as drawing hits", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+
+    const sheetId = app.getCurrentSheetId();
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    (app as any).drawingObjectsCache = null;
+
+    // Select the drawing so selection handles are active.
+    app.selectDrawingById(1);
+
+    // Top-left resize handle is centered on the top-left corner of the drawing bounds and extends
+    // half its size beyond the drawing rect. Right-click slightly outside the rect but within the
+    // handle region.
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+    const hit = app.hitTestDrawingAtClientPoint(rowHeaderWidth + 100 - 1, colHeaderHeight + 100 - 1);
+    expect(hit).toEqual({ id: 1 });
+
+    app.destroy();
+    root.remove();
+  });
 });

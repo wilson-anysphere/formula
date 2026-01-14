@@ -7644,7 +7644,8 @@ export class SpreadsheetApp {
     // list if the cache hasn't been populated yet.
     const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
     if (objects.length === 0) return null;
-    const bounds = this.drawingHitTestScratchRect;
+    const scratchBounds = this.drawingHitTestScratchRect;
+    const selectedId = this.selectedDrawingId;
 
     // --- Primary pane ----------------------------------------------------------
     this.maybeRefreshRootPosition({ force: true });
@@ -7655,7 +7656,23 @@ export class SpreadsheetApp {
       const viewport = this.getDrawingInteractionViewport(sharedViewport);
       if (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height) {
         const index = this.getDrawingHitTestIndex(objects);
-        const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
+        // Treat right-clicks on selection handles/rotation handle as a hit for the selected drawing.
+        // (Handles are centered on the outline and extend beyond the anchor rect, so `hitTestDrawings`
+        // alone won't consider them.)
+        if (selectedId != null) {
+          const selectedIndex = index.byId.get(selectedId);
+          const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
+          if (selectedObject) {
+            const selectedBounds = drawingObjectToViewportRect(selectedObject, viewport, this.drawingGeom);
+            if (
+              hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform) ||
+              hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform)
+            ) {
+              return { id: selectedId };
+            }
+          }
+        }
+        const hit = hitTestDrawingsInto(index, viewport, x, y, scratchBounds);
         if (hit) return { id: hit.id };
       }
     }
@@ -7716,7 +7733,21 @@ export class SpreadsheetApp {
       };
 
       const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
-      const hit = hitTestDrawingsInto(index, viewport, sx, sy, bounds);
+      if (selectedId != null) {
+        const selectedIndex = index.byId.get(selectedId);
+        const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
+        if (selectedObject) {
+          const selectedBounds = drawingObjectToViewportRect(selectedObject, viewport, geom);
+          if (
+            hitTestRotationHandle(selectedBounds, sx, sy, selectedObject.transform) ||
+            hitTestResizeHandle(selectedBounds, sx, sy, selectedObject.transform)
+          ) {
+            return { id: selectedId };
+          }
+        }
+      }
+
+      const hit = hitTestDrawingsInto(index, viewport, sx, sy, scratchBounds);
       if (hit) return { id: hit.id };
     }
 
