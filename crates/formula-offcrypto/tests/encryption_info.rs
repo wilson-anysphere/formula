@@ -341,34 +341,32 @@ fn truncation_missing_verifier_fields() {
 
 #[test]
 fn csp_name_accepts_terminated_and_non_terminated_utf16le() {
-    let bytes_term =
-        build_standard_encryption_info(
-            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
-            &utf16le_bytes("CSP", true),
-            CALG_AES_128,
-            CALG_SHA1,
-            128,
-            16,
-            20,
-            32,
-        );
+    let bytes_term = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+        &utf16le_bytes("CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
     let info = parse_encryption_info(&bytes_term).expect("terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
     };
     assert_eq!(header.csp_name, "CSP");
 
-    let bytes_no_term =
-        build_standard_encryption_info(
-            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
-            &utf16le_bytes("CSP", false),
-            CALG_AES_128,
-            CALG_SHA1,
-            128,
-            16,
-            20,
-            32,
-        );
+    let bytes_no_term = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+        &utf16le_bytes("CSP", false),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
     let info = parse_encryption_info(&bytes_no_term).expect("non-terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
@@ -516,74 +514,43 @@ fn rejects_standard_external_encryption_flag() {
     let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI
         | StandardEncryptionHeaderFlags::F_EXTERNAL
         | StandardEncryptionHeaderFlags::F_AES;
-    let bytes = build_standard_encryption_info(
-        header_flags,
-        &[],
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes =
+        build_standard_encryption_info(header_flags, &[], CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
     let err = parse_encryption_info(&bytes).unwrap_err();
     assert_eq!(err, OffcryptoError::UnsupportedExternalEncryption);
 }
 
 #[test]
-fn rejects_standard_without_cryptoapi_flag() {
-    let bytes = build_standard_encryption_info(
-        0,
-        &[],
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
-    let err = parse_encryption_info(&bytes).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
+fn parses_standard_without_cryptoapi_flag() {
+    let bytes = build_standard_encryption_info(0, &[], CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { header, .. } = info else {
+        panic!("expected standard");
+    };
+    assert!(!header.flags.f_cryptoapi);
 }
 
 #[test]
-fn rejects_aes_algid_without_faes_flag() {
+fn parses_aes_algid_without_faes_flag() {
     let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
-    let bytes = build_standard_encryption_info(
-        header_flags,
-        &[],
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
-    let err = parse_encryption_info(&bytes).unwrap_err();
-    assert_eq!(
-        err,
-        OffcryptoError::InvalidFlags {
-            flags: header_flags,
-            alg_id: CALG_AES_128
-        }
-    );
+    let bytes =
+        build_standard_encryption_info(header_flags, &[], CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { header, .. } = info else {
+        panic!("expected standard");
+    };
+    assert_eq!(header.alg_id, CALG_AES_128);
+    assert!(!header.flags.f_aes);
 }
 
 #[test]
 fn rejects_faes_flag_with_non_aes_algid() {
     // CALG_RC4
     let alg_id = 0x0000_6801;
-    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES;
-    let bytes = build_standard_encryption_info(
-        header_flags,
-        &[],
-        alg_id,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let header_flags =
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES;
+    let bytes =
+        build_standard_encryption_info(header_flags, &[], alg_id, CALG_SHA1, 128, 16, 20, 32);
     let err = parse_encryption_info(&bytes).unwrap_err();
     assert_eq!(
         err,

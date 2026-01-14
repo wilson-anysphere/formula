@@ -687,20 +687,16 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
 
     let size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;
     let alg_id = hr.read_u32_le("EncryptionHeader.algId")?;
-    // Most real-world "Standard" encrypted OOXML packages use CryptoAPI, but some producers omit
-    // `fCryptoAPI` even though the rest of the header follows the CryptoAPI schema (notably for
-    // RC4-encrypted files).
+    // Many real-world "Standard" encrypted OOXML packages use CryptoAPI, but some producers omit
+    // `fCryptoAPI` even though the rest of the header is well-formed. Treat the flag as advisory
+    // and rely on algorithm/parameter validation below.
     //
-    // Be strict for AES variants (to avoid misclassifying arbitrary data as Standard encryption),
-    // but tolerate missing `fCryptoAPI` for RC4 so we can decrypt fixtures observed in the wild.
-    if !flags.f_cryptoapi && alg_id != CALG_RC4 {
-        return Err(OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
-    }
-
-    // Policy: be strict about the AES flag/AlgId relationship. This reduces false positives when
-    // parsing arbitrary OLE streams as "Standard encryption".
+    // Some producers also emit inconsistent `fAES` flag values. Be tolerant when `algId` clearly
+    // indicates AES (fixtures exist with AES `algId` but missing `fAES`), but keep rejecting inputs
+    // that claim `fAES` with a non-AES `algId` (helps avoid false positives when parsing arbitrary
+    // OLE streams).
     let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
-    if flags.f_aes != alg_is_aes {
+    if flags.f_aes && !alg_is_aes {
         return Err(OffcryptoError::InvalidFlags {
             flags: raw_flags,
             alg_id,
@@ -2303,28 +2299,8 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     ensure_stream_exists(&mut ole, "EncryptedPackage")?;
 
     let info = StandardEncryptionInfo { header, verifier };
-
-    match info.header.alg_id {
-        CALG_RC4 => {
-            let h = standard_rc4::verify_password(&info, password)?;
-            let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
-            standard_rc4::decrypt_encrypted_package_with_h(
-                &info,
-                &encrypted_package,
-                h.as_slice(),
-            )
-        }
-        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            let key = standard_derive_key_zeroizing(&info, password)?;
-            standard_verify_key(&info, key.as_slice())?;
-
-            let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
-            encrypted_package::decrypt_standard_encrypted_package(key.as_slice(), &encrypted_package)
-        }
-        other => Err(OffcryptoError::UnsupportedAlgorithm(format!(
-            "algId=0x{other:08x}"
-        ))),
-    }
+    let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
+    decrypt_standard_encrypted_package_with_password(&info, &encrypted_package, password)
 }
 
 /// ECMA-376 Standard Encryption password→key derivation.
@@ -2507,6 +2483,154 @@ fn looks_like_zip_container(bytes: &[u8]) -> bool {
     false
 }
 
+// Some third-party producers emit a Standard (CryptoAPI) `EncryptionInfo` (versionMinor == 2) but
+// encrypt the verifier and package using an Agile-like AES-CBC layout. This differs from the
+// MS-OFFCRYPTO baseline Standard AES-ECB scheme and is not uniformly implemented across tooling.
+//
+// The variant supported here matches committed Standard OOXML fixtures:
+// - Password hash uses a reduced spin count (`1000`).
+// - File key = `SHA1(pwHash || LE32(0))` truncated/padded to `keySize/8` bytes.
+// - `EncryptionVerifier.encryptedVerifier` is decrypted with AES-CBC using
+//   `IV = SHA1(salt || LE32(0))[..16]`.
+// - `EncryptionVerifier.encryptedVerifierHash` is decrypted with AES-CBC using
+//   `IV = SHA1(salt || LE32(1))[..16]`.
+// - `EncryptedPackage` may be either AES-ECB or segmented AES-CBC (4096-byte segments) depending on
+//   the producer.
+const STANDARD_CBC_VARIANT_SPIN_COUNT: u32 = 1_000;
+
+fn standard_derive_key_cbc_variant(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+
+    let limits = DecryptLimits::default();
+    let pw_hash = derive_iterated_hash_from_password(
+        password,
+        &info.verifier.salt,
+        HashAlgorithm::Sha1,
+        STANDARD_CBC_VARIANT_SPIN_COUNT,
+        &limits,
+        None,
+    )?;
+
+    let key_bits = usize::try_from(info.header.key_size_bits).map_err(|_| {
+        OffcryptoError::InvalidKeySizeBits {
+            key_size_bits: info.header.key_size_bits,
+        }
+    })?;
+
+    derive_encryption_key(
+        pw_hash.as_slice(),
+        &0u32.to_le_bytes(),
+        HashAlgorithm::Sha1,
+        key_bits,
+    )
+}
+
+fn standard_verify_key_cbc_variant(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+
+    let iv_verifier =
+        derive_iv_from_salt_and_block_key(&info.verifier.salt, HashAlgorithm::Sha1, &0u32.to_le_bytes());
+    let iv_hash =
+        derive_iv_from_salt_and_block_key(&info.verifier.salt, HashAlgorithm::Sha1, &1u32.to_le_bytes());
+
+    let verifier_plain = aes_cbc_decrypt(info.verifier.encrypted_verifier.as_slice(), key, &iv_verifier)?;
+    let verifier_hash_plain_full =
+        aes_cbc_decrypt(info.verifier.encrypted_verifier_hash.as_slice(), key, &iv_hash)?;
+
+    let expected_hash: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(verifier_plain.as_slice()));
+    let verifier_hash_plain = verifier_hash_plain_full.get(..SHA1_LEN).ok_or(
+        OffcryptoError::InvalidVerifierHashLength {
+            len: verifier_hash_plain_full.len(),
+        },
+    )?;
+
+    if util::ct_eq(&expected_hash[..], verifier_hash_plain) {
+        Ok(())
+    } else {
+        Err(OffcryptoError::InvalidPassword)
+    }
+}
+
+fn standard_derive_ecb_key_variants(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<(Zeroizing<Vec<u8>>, Option<Zeroizing<Vec<u8>>>), OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+
+    let key_len = match info.header.key_size_bits.checked_div(8) {
+        Some(v) if info.header.key_size_bits % 8 == 0 => v as usize,
+        _ => {
+            return Err(OffcryptoError::InvalidKeySizeBits {
+                key_size_bits: info.header.key_size_bits,
+            })
+        }
+    };
+
+    // Password-derived material should not linger in heap buffers longer than needed.
+    let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
+
+    // H = SHA1(salt || password_utf16le)
+    let mut hasher = Sha1::new();
+    hasher.update(&info.verifier.salt);
+    hasher.update(password_utf16.as_slice());
+    let mut h: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(hasher.finalize().into());
+
+    // for i in 0..ITER_COUNT: H = SHA1(LE32(i) || H)
+    let mut buf: Zeroizing<[u8; 4 + SHA1_LEN]> = Zeroizing::new([0u8; 4 + SHA1_LEN]);
+    for i in 0..ITER_COUNT {
+        buf[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        buf[4..].copy_from_slice(&h[..]);
+        *h = sha1(&buf[..]);
+    }
+
+    // H_block0 = SHA1(H || LE32(0))
+    let mut buf0: Zeroizing<[u8; SHA1_LEN + 4]> = Zeroizing::new([0u8; SHA1_LEN + 4]);
+    buf0[..SHA1_LEN].copy_from_slice(&h[..]);
+    buf0[SHA1_LEN..].copy_from_slice(&0u32.to_le_bytes());
+    let h_block0: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf0[..]));
+
+    // Baseline MS-OFFCRYPTO AES key derivation: apply the `CryptDeriveKey` expansion step even for
+    // AES-128 (matches `standard_derive_key` / `msoffcrypto-tool` vectors).
+    let mut buf1: Zeroizing<[u8; 64]> = Zeroizing::new([0x36u8; 64]);
+    let mut buf2: Zeroizing<[u8; 64]> = Zeroizing::new([0x5cu8; 64]);
+    for i in 0..SHA1_LEN {
+        buf1[i] ^= h_block0[i];
+        buf2[i] ^= h_block0[i];
+    }
+    let x1: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf1[..]));
+    let x2: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf2[..]));
+
+    let mut expanded: Zeroizing<[u8; SHA1_LEN * 2]> = Zeroizing::new([0u8; SHA1_LEN * 2]);
+    expanded[..SHA1_LEN].copy_from_slice(&x1[..]);
+    expanded[SHA1_LEN..].copy_from_slice(&x2[..]);
+    if key_len > expanded.len() {
+        return Err(OffcryptoError::DerivedKeyTooLong {
+            key_size_bits: info.header.key_size_bits,
+            required_bytes: key_len,
+            available_bytes: expanded.len(),
+        });
+    }
+    let key_expanded = Zeroizing::new(expanded[..key_len].to_vec());
+
+    // Compatibility: some producers truncate `H_block0` directly for AES-128 instead of applying
+    // the `CryptDeriveKey` expansion step.
+    let key_trunc = if key_len <= SHA1_LEN {
+        let trunc = Zeroizing::new(h_block0[..key_len].to_vec());
+        if trunc.as_slice() == key_expanded.as_slice() {
+            None
+        } else {
+            Some(trunc)
+        }
+    } else {
+        None
+    };
+
+    Ok((key_expanded, key_trunc))
+}
+
 fn decrypt_standard_encrypted_package_with_password(
     info: &StandardEncryptionInfo,
     encrypted_package: &[u8],
@@ -2522,12 +2646,63 @@ fn decrypt_standard_encrypted_package_with_password(
             validate_standard_encryption_info(info)?;
             validate_standard_encrypted_package_stream(encrypted_package)?;
 
-            // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password
-            // attempts don't leave key material lingering in heap allocations.
-            let key = standard_derive_key_zeroizing(info, password)?;
-            standard_verify_key(info, key.as_slice())?;
+            let try_decrypt_with_key = |key: &[u8]| -> Result<Vec<u8>, OffcryptoError> {
+                let out = encrypted_package::decrypt_standard_encrypted_package_auto(
+                    key,
+                    info.verifier.salt.as_slice(),
+                    encrypted_package,
+                )?;
+                if looks_like_zip_container(&out) {
+                    Ok(out)
+                } else {
+                    Err(OffcryptoError::InvalidPassword)
+                }
+            };
 
-            encrypted_package::decrypt_standard_encrypted_package(key.as_slice(), encrypted_package)?
+            // 1) Try the CBC-based Standard variant first (cheaper: 1k spins vs 50k).
+            let try_cbc_variant = || -> Result<Vec<u8>, OffcryptoError> {
+                let key = standard_derive_key_cbc_variant(info, password)?;
+                standard_verify_key_cbc_variant(info, key.as_slice())?;
+                try_decrypt_with_key(key.as_slice())
+            };
+
+            match try_cbc_variant() {
+                Ok(out) => out,
+                Err(OffcryptoError::InvalidPassword) => {
+                    // 2) Standard AES-ECB key derivation variants.
+                    //
+                    // Some producers follow the baseline MS-OFFCRYPTO `CryptDeriveKey` expansion
+                    // for AES-128, while others derive the key by truncating `H_block0` directly.
+                    // Compute both variants from the same 50k password hash to avoid repeating the
+                    // expensive loop.
+                    let (key_expanded, key_trunc) =
+                        standard_derive_ecb_key_variants(info, password)?;
+
+                    let try_ecb_key = |key: &[u8]| -> Result<Vec<u8>, OffcryptoError> {
+                        standard_verify_key(info, key)?;
+                        try_decrypt_with_key(key)
+                    };
+
+                    match try_ecb_key(key_expanded.as_slice()) {
+                        Ok(out) => out,
+                        Err(OffcryptoError::InvalidPassword) => {
+                            if let Some(key_trunc) = key_trunc {
+                                match try_ecb_key(key_trunc.as_slice()) {
+                                    Ok(out) => out,
+                                    Err(OffcryptoError::InvalidPassword) => {
+                                        return Err(OffcryptoError::InvalidPassword)
+                                    }
+                                    Err(other) => return Err(other),
+                                }
+                            } else {
+                                return Err(OffcryptoError::InvalidPassword);
+                            }
+                        }
+                        Err(other) => return Err(other),
+                    }
+                }
+                Err(other) => return Err(other),
+            }
         }
         other => {
             return Err(OffcryptoError::UnsupportedAlgorithm(format!(

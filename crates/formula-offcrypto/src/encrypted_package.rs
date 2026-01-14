@@ -3,6 +3,7 @@ use crate::{AgileEncryptionInfo, DecryptOptions, OffcryptoError, Reader};
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+use sha1::{Digest as _, Sha1};
 
 /// Office encrypted packages are segmented into 4096-byte blocks.
 pub const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 4096;
@@ -77,7 +78,9 @@ where
     // lengths implied by `total_size`.
     let ciphertext_len = reader.remaining().len();
     if ciphertext_len % AES_BLOCK_LEN != 0 {
-        return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
+        return Err(OffcryptoError::InvalidCiphertextLength {
+            len: ciphertext_len,
+        });
     }
 
     // Minimum ciphertext length implied by `total_size`.
@@ -150,11 +153,12 @@ pub fn agile_decrypt_package(
             context: "EncryptedPackageHeader.original_size",
         });
     }
-    let size_bytes: [u8; 8] = encrypted_package[..8]
-        .try_into()
-        .map_err(|_| OffcryptoError::Truncated {
-            context: "EncryptedPackageHeader.original_size",
-        })?;
+    let size_bytes: [u8; 8] =
+        encrypted_package[..8]
+            .try_into()
+            .map_err(|_| OffcryptoError::Truncated {
+                context: "EncryptedPackageHeader.original_size",
+            })?;
     let total_size = u64::from_le_bytes(size_bytes);
     let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
     if total_size > plausible_max {
@@ -238,6 +242,152 @@ pub fn decrypt_standard_encrypted_package(
         pt.copy_from_slice(ct);
         crate::aes_ecb_decrypt_in_place(key, pt)
     })
+}
+
+fn looks_like_zip_prefix(bytes: &[u8]) -> bool {
+    if bytes.len() >= 4 {
+        matches!(&bytes[..4], b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08")
+    } else {
+        bytes.len() >= 2 && &bytes[..2] == b"PK"
+    }
+}
+
+fn derive_standard_iv(salt: &[u8], segment_index: u32) -> [u8; 16] {
+    let mut hasher = Sha1::new();
+    hasher.update(salt);
+    hasher.update(&segment_index.to_le_bytes());
+    let digest = hasher.finalize();
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+    iv
+}
+
+fn aes_cbc_decrypt_in_place(
+    key: &[u8],
+    iv: &[u8; 16],
+    buf: &mut [u8],
+) -> Result<(), OffcryptoError> {
+    if buf.len() % AES_BLOCK_LEN != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength { len: buf.len() });
+    }
+    let len = buf.len();
+
+    match key.len() {
+        16 => {
+            let decryptor = Decryptor::<Aes128>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+            decryptor
+                .decrypt_padded_mut::<NoPadding>(buf)
+                .map_err(|_| OffcryptoError::InvalidCiphertextLength { len })?;
+        }
+        24 => {
+            let decryptor = Decryptor::<Aes192>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+            decryptor
+                .decrypt_padded_mut::<NoPadding>(buf)
+                .map_err(|_| OffcryptoError::InvalidCiphertextLength { len })?;
+        }
+        32 => {
+            let decryptor = Decryptor::<Aes256>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+            decryptor
+                .decrypt_padded_mut::<NoPadding>(buf)
+                .map_err(|_| OffcryptoError::InvalidCiphertextLength { len })?;
+        }
+        _ => return Err(OffcryptoError::InvalidKeyLength { len: key.len() }),
+    }
+
+    Ok(())
+}
+
+/// Decrypt a Standard (CryptoAPI) `EncryptedPackage` stream using segmented AES-CBC.
+///
+/// This scheme is observed in the wild for Standard-encrypted OOXML and matches the per-segment IV
+/// derivation used by Agile encryption:
+/// `IV = SHA1(salt || u32le(segment_index))[:16]`.
+///
+/// The key is the output of `standard_derive_key`; the salt comes from `EncryptionVerifier.salt`.
+pub fn decrypt_standard_encrypted_package_cbc(
+    key: &[u8],
+    salt: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    crate::validate_standard_encrypted_package_stream(encrypted_package)?;
+    decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
+        let iv = derive_standard_iv(salt, segment_index);
+        plaintext.copy_from_slice(ciphertext);
+        aes_cbc_decrypt_in_place(key, &iv, plaintext)
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StandardEncryptedPackageScheme {
+    Ecb,
+    CbcSegmented,
+}
+
+fn detect_standard_scheme(
+    key: &[u8],
+    salt: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Option<StandardEncryptedPackageScheme>, OffcryptoError> {
+    // Only decrypt the first segment for detection (avoids allocating the full output twice).
+    let mut reader = Reader::new(encrypted_package);
+    let total_size = reader.read_u64_le("EncryptedPackageHeader.original_size")?;
+    let plaintext_len = std::cmp::min(total_size, ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
+    let ciphertext_len = padded_aes_len(plaintext_len);
+
+    // Enforce basic framing invariants up front.
+    let ciphertext_total = reader.remaining();
+    if ciphertext_total.len() % AES_BLOCK_LEN != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength {
+            len: ciphertext_total.len(),
+        });
+    }
+    let ciphertext = reader.take(ciphertext_len, "EncryptedPackage.ciphertext_segment")?;
+
+    // `ciphertext_len <= 4096 + 15`; use a fixed stack buffer.
+    let mut buf = [0u8; ENCRYPTED_PACKAGE_SEGMENT_LEN + AES_BLOCK_LEN];
+
+    buf[..ciphertext_len].copy_from_slice(ciphertext);
+    crate::aes_ecb_decrypt_in_place(key, &mut buf[..ciphertext_len])?;
+    let ecb_ok = looks_like_zip_prefix(&buf[..plaintext_len]);
+
+    buf[..ciphertext_len].copy_from_slice(ciphertext);
+    let iv = derive_standard_iv(salt, 0);
+    aes_cbc_decrypt_in_place(key, &iv, &mut buf[..ciphertext_len])?;
+    let cbc_ok = looks_like_zip_prefix(&buf[..plaintext_len]);
+
+    Ok(match (ecb_ok, cbc_ok) {
+        (true, false) => Some(StandardEncryptedPackageScheme::Ecb),
+        (false, true) => Some(StandardEncryptedPackageScheme::CbcSegmented),
+        (true, true) => Some(StandardEncryptedPackageScheme::Ecb),
+        (false, false) => None,
+    })
+}
+
+/// Decrypt a Standard (CryptoAPI) `EncryptedPackage` stream using scheme auto-detection.
+///
+/// Standard-encrypted OOXML packages are ZIP archives; we therefore detect the correct decryption
+/// scheme by attempting both ECB and segmented CBC on the first package segment and selecting the
+/// scheme that yields a `PK..` ZIP signature.
+pub fn decrypt_standard_encrypted_package_auto(
+    key: &[u8],
+    salt: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    crate::validate_standard_encrypted_package_stream(encrypted_package)?;
+
+    let scheme = detect_standard_scheme(key, salt, encrypted_package)?;
+    match scheme {
+        Some(StandardEncryptedPackageScheme::Ecb) => {
+            decrypt_standard_encrypted_package(key, encrypted_package)
+        }
+        Some(StandardEncryptedPackageScheme::CbcSegmented) => {
+            decrypt_standard_encrypted_package_cbc(key, salt, encrypted_package)
+        }
+        None => Err(OffcryptoError::InvalidPassword),
+    }
 }
 
 #[cfg(test)]
