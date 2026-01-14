@@ -60,7 +60,8 @@ jobs:
     permissions:
       contents: read
     # Pinned runner images keep release workflows deterministic and avoid breakages
-    # when GitHub updates the default `*-latest` hosted runner images.
+    # when GitHub updates the default `*-latest` hosted runner images. Update
+    # these pins deliberately after validating the newer runner images.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -307,7 +308,8 @@ jobs:
       # updater manifest in a dedicated job after all platform builds complete.
       matrix:
         # Pinned runner images keep release workflows deterministic and avoid breakages
-        # when GitHub updates the default `*-latest` hosted runner images.
+        # when GitHub updates the default `*-latest` hosted runner images. Update
+        # these pins deliberately after validating the newer runner images.
         include:
           - platform: macos-14
             label: macos-14
