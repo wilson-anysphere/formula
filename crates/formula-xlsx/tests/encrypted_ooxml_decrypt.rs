@@ -163,3 +163,24 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
         );
     }
 }
+
+#[test]
+fn xlsxpackage_from_bytes_with_password_decrypts_agile_and_standard_xlsm() {
+    for encrypted in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+        let path = fixture_path_buf(encrypted);
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
+
+        let pkg = XlsxPackage::from_bytes_with_password(&bytes, PASSWORD)
+            .unwrap_or_else(|err| panic!("from_bytes_with_password {encrypted}: {err}"));
+        assert!(
+            pkg.part_names()
+                .any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+            "{encrypted}: decrypted package missing xl/workbook.xml"
+        );
+        let vba = pkg
+            .vba_project_bin()
+            .expect("expected decrypted xlsm to contain xl/vbaProject.bin");
+        assert!(!vba.is_empty(), "expected vbaProject.bin to be non-empty");
+    }
+}
