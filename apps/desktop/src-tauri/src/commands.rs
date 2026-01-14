@@ -9089,11 +9089,41 @@ mod tests {
             }
         );
 
+        // Quoted table names are valid DAX column refs and should still parse when passed as legacy
+        // string IPC payloads.
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!("'Dim Product'[Category]")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelColumn {
+                table: "Dim Product".to_string(),
+                column: "Category".to_string(),
+            }
+        );
+
+        // Brackets inside identifiers are escaped as `]]` in DAX; ensure we unescape on ingress.
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!("T[Col]]Name]")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelColumn {
+                table: "T".to_string(),
+                column: "Col]Name".to_string(),
+            }
+        );
+
         let field: IpcPivotFieldRef =
             serde_json::from_value(serde_json::json!("[Total Sales]")).unwrap();
         assert_eq!(
             PivotFieldRef::from(field),
             PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!("[Meas]]ure]")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelMeasure("Meas]ure".to_string())
         );
 
         let field: IpcPivotFieldRef =
