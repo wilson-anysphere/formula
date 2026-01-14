@@ -81,6 +81,12 @@ fn volatile_rng_is_deterministic_wrt_insertion_order() {
     let snap1 = snapshot(&forward);
     assert_rng_bounds(&snap1);
 
+    // Multi-threaded scheduling must match single-threaded for the same initial state.
+    let mut multi = Engine::new();
+    set_formulas(&mut multi, false);
+    multi.recalculate_multi_threaded();
+    assert_eq!(snapshot(&multi), snap1);
+
     let mut reverse = Engine::new();
     set_formulas(&mut reverse, true);
     reverse.recalculate_single_threaded();
@@ -95,10 +101,13 @@ fn volatile_rng_is_deterministic_wrt_insertion_order() {
     // determinism should still hold between identical workbooks.
     forward.recalculate_single_threaded();
     reverse.recalculate_single_threaded();
+    multi.recalculate_multi_threaded();
     let snap2 = snapshot(&forward);
     let snap2_reverse = snapshot(&reverse);
+    let snap2_multi = snapshot(&multi);
     assert_rng_bounds(&snap2);
     assert_eq!(snap2_reverse, snap2);
+    assert_eq!(snap2_multi, snap2);
 
     // Extremely unlikely to collide for all cells; this is a sanity check that recalc_id advances.
     assert_ne!(snap2, snap1);
