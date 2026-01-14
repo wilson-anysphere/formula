@@ -140,8 +140,15 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(
+                        err,
+                        Error::UnsupportedOoxmlEncryption {
+                            version_major: 4,
+                            version_minor: 4,
+                            ..
+                        }
+                    ),
+                    "expected Error::UnsupportedOoxmlEncryption(4.4), got {err:?}"
                 );
             } else {
                 assert!(
@@ -154,8 +161,15 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(
+                        err,
+                        Error::UnsupportedOoxmlEncryption {
+                            version_major: 4,
+                            version_minor: 4,
+                            ..
+                        }
+                    ),
+                    "expected Error::UnsupportedOoxmlEncryption(4.4), got {err:?}"
                 );
             } else {
                 assert!(

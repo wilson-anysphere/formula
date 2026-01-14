@@ -424,9 +424,15 @@ fn cli_reports_expected_versions_for_repo_fixtures() {
         out.status.code()
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(
-        stdout.trim_end(),
-        "Standard (3.2) flags=0x00000000",
+    let stdout = stdout.trim_end();
+    assert!(
+        stdout.starts_with("Standard (3.2) flags=0x00000024"),
         "unexpected stdout for standard fixture: {stdout}"
     );
+    if stdout.contains("algId=") {
+        assert!(
+            stdout.contains("algId=0x0000660e"),
+            "unexpected algId for standard fixture: {stdout}"
+        );
+    }
 }

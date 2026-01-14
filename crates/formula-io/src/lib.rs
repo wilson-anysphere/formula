@@ -2595,74 +2595,26 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+#[allow(dead_code)]
 fn open_encrypted_ooxml_model_workbook(
     path: &Path,
     password: &str,
 ) -> Result<Option<formula_model::Workbook>, Error> {
-    let Some((format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
+    let Some(decrypted) = try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))?
+    else {
         return Ok(None);
     };
-
-    match format {
-        WorkbookFormat::Xlsb => {
-            let wb = xlsb::XlsbWorkbook::open_from_vec_with_options(
-                decrypted,
-                xlsb::OpenOptions {
-                    preserve_unknown_parts: false,
-                    preserve_parsed_parts: false,
-                    preserve_worksheets: false,
-                    decode_formulas: true,
-                    ..Default::default()
-                },
-            )
-            .map_err(|source| Error::OpenXlsb {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            xlsb_to_model_workbook(&wb).map(Some).map_err(|source| Error::OpenXlsb {
-                path: path.to_path_buf(),
-                source,
-            })
-        }
-        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm | WorkbookFormat::Unknown => {
-            let cursor = std::io::Cursor::new(decrypted);
-            xlsx::read_workbook_from_reader(cursor).map(Some).map_err(|source| Error::OpenXlsx {
-                path: path.to_path_buf(),
-                source,
-            })
-        }
-        _ => Err(Error::InvalidPassword {
-            path: path.to_path_buf(),
-        }),
-    }
+    open_workbook_model_from_decrypted_ooxml_zip_bytes(path, decrypted).map(Some)
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+#[allow(dead_code)]
 fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<Workbook>, Error> {
-    let Some((format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
+    let Some(decrypted) = try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))?
+    else {
         return Ok(None);
     };
-
-    match format {
-        WorkbookFormat::Xlsb => {
-            let wb = xlsb::XlsbWorkbook::open_from_vec(decrypted).map_err(|source| Error::OpenXlsb {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            Ok(Some(Workbook::Xlsb(wb)))
-        }
-        _ => {
-            // Some callers encrypt arbitrary ZIP payloads in an OOXML-in-OLE container (including
-            // synthetic fixtures). Treat the decrypted bytes as an OPC package even when the
-            // contents do not look like a specific workbook kind (XLSX/XLSM).
-            let package =
-                xlsx::XlsxLazyPackage::from_vec(decrypted).map_err(|source| Error::OpenXlsx {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-            Ok(Some(Workbook::Xlsx(package)))
-        }
-    }
+    open_workbook_from_decrypted_ooxml_zip_bytes(path, decrypted).map(Some)
 }
 
 /// Decrypt an Office-encrypted OOXML workbook (OLE `EncryptionInfo` + `EncryptedPackage`) into the
@@ -2670,6 +2622,7 @@ fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<W
 ///
 /// Returns `Ok(None)` when the file does not appear to be an encrypted OOXML container.
 #[cfg(feature = "encrypted-workbooks")]
+#[allow(dead_code)]
 fn decrypt_encrypted_ooxml_package(
     path: &Path,
     password: &str,
@@ -3066,6 +3019,7 @@ fn decrypt_encrypted_ooxml_package(
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+#[allow(dead_code)]
 fn workbook_format_from_ooxml_zip_bytes(bytes: &[u8]) -> Option<WorkbookFormat> {
     use std::io::Cursor;
 
@@ -3525,19 +3479,20 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                 // - classic VBA (`xl/vbaProject.bin`)
                 // - Excel 4.0 macro sheets (`xl/macrosheets/**`)
                 // - legacy dialog sheets (`xl/dialogsheets/**`)
-                if kind.is_macro_free() && out.macro_presence().any() {
-                    out.remove_vba_project()
+                let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
+                if should_strip_macros {
+                    out.remove_vba_project_with_kind(kind)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                } else {
+                    out.enforce_workbook_kind(kind)
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
                             source,
                         })?;
                 }
-
-                out.enforce_workbook_kind(kind)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
 
                 let res = atomic_write(path, |file| out.write_to(file));
                 match res {
@@ -3673,18 +3628,20 @@ fn save_workbook_encrypted_ooxml(
                     xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
 
                 let mut out = package.clone();
-                if kind.is_macro_free() && out.macro_presence().any() {
-                    out.remove_vba_project()
+                let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
+                if should_strip_macros {
+                    out.remove_vba_project_with_kind(kind)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                } else {
+                    out.enforce_workbook_kind(kind)
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
                             source,
                         })?;
                 }
-                out.enforce_workbook_kind(kind)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
 
                 out.write_to_bytes().map_err(|source| Error::SaveXlsxPackage {
                     path: path.to_path_buf(),

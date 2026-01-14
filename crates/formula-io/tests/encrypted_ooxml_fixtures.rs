@@ -139,7 +139,10 @@ fn parse_utf16le_z(bytes: &[u8], context: &'static str) -> Result<Option<String>
     for chunk in bytes.chunks_exact(2) {
         code_units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
-    let end = code_units.iter().position(|u| *u == 0).unwrap_or(code_units.len());
+    let end = code_units
+        .iter()
+        .position(|u| *u == 0)
+        .unwrap_or(code_units.len());
     let s = String::from_utf16(&code_units[..end])
         .map_err(|_| format!("{context} is not valid UTF-16LE"))?;
     if s.is_empty() {
@@ -164,7 +167,8 @@ fn parse_standard_encryption_info(
         ));
     }
 
-    let header_size = read_u32_le(encryption_info, &mut pos, "EncryptionInfo.header_size")? as usize;
+    let header_size =
+        read_u32_le(encryption_info, &mut pos, "EncryptionInfo.header_size")? as usize;
     let header_bytes = encryption_info
         .get(pos..pos + header_size)
         .ok_or_else(|| "EncryptionInfo truncated while reading EncryptionHeader".to_string())?;
@@ -217,23 +221,27 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
     ));
 
     let common_expected = StandardEncryptionInfoParams {
-        // Standard (CryptoAPI) flags observed in the committed fixtures (fCryptoAPI + fAES).
+        // MS-OFFCRYPTO `EncryptionVersionInfo.flags`: `fCryptoAPI` (0x04) + `fAES` (0x20).
         version_flags: 0x0000_0024,
         alg_id: 0x0000_660E,      // CALG_AES_128
         alg_id_hash: 0x0000_8004, // CALG_SHA1
         key_size_bits: 128,
         provider_type: 24, // PROV_RSA_AES
-        csp_name: None, // set per fixture below
+        csp_name: None,    // set per fixture below
         salt_size: 16,
     };
 
-    for fixture_name in ["standard.xlsx", "standard-basic.xlsm", "standard-large.xlsx"] {
+    for fixture_name in [
+        "standard.xlsx",
+        "standard-basic.xlsm",
+        "standard-large.xlsx",
+    ] {
         let fixture_path = fixture_dir.join(fixture_name);
 
         let file = std::fs::File::open(&fixture_path)
             .unwrap_or_else(|err| panic!("open {fixture_name}: {err}"));
-        let mut ole =
-            cfb::CompoundFile::open(file).unwrap_or_else(|err| panic!("parse {fixture_name}: {err}"));
+        let mut ole = cfb::CompoundFile::open(file)
+            .unwrap_or_else(|err| panic!("parse {fixture_name}: {err}"));
         let mut stream = ole
             .open_stream("EncryptionInfo")
             .or_else(|_| ole.open_stream("/EncryptionInfo"))
@@ -247,15 +255,12 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
             .unwrap_or_else(|err| panic!("parse {fixture_name} Standard EncryptionInfo: {err}"));
 
         let expected = StandardEncryptionInfoParams {
-            csp_name: match fixture_name {
-                _ => Some("Microsoft Enhanced RSA and AES Cryptographic Provider".to_string()),
-            },
+            csp_name: Some("Microsoft Enhanced RSA and AES Cryptographic Provider".to_string()),
             ..common_expected.clone()
         };
 
         assert_eq!(
-            parsed,
-            expected,
+            parsed, expected,
             "{fixture_name}: Standard encryption fixture parameters drifted.\n\
              If this change is intentional, update:\n\
              - fixtures/encrypted/ooxml/README.md\n\
