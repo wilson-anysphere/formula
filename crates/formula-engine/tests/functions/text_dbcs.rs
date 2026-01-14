@@ -820,3 +820,22 @@ fn changing_text_codepage_marks_formulas_dirty() {
     sheet.recalc();
     assert_eq!(sheet.get("A1"), Value::Text("ＡＢＣ　１２３".to_string()));
 }
+
+#[test]
+fn phonetic_accepts_reference_values_passed_through_lambda_params() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "abc");
+
+    // LAMBDA parameters can carry reference values through the lexical environment.
+    // PHONETIC should treat those like normal reference arguments.
+    assert_eq!(
+        sheet.eval("=LAMBDA(r, PHONETIC(r))(A1)"),
+        Value::Text("abc".to_string())
+    );
+
+    sheet.set_phonetic("A1", Some("あびし"));
+    assert_eq!(
+        sheet.eval("=LAMBDA(r, PHONETIC(r))(A1)"),
+        Value::Text("あびし".to_string())
+    );
+}

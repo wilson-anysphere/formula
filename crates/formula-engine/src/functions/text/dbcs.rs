@@ -255,6 +255,10 @@ pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(reference) => phonetic_from_reference(ctx, reference),
+        // References passed through higher-order constructs like LAMBDA/LET can appear as scalar
+        // `Value::Reference` values. Treat them like normal reference arguments.
+        ArgValue::Scalar(Value::Reference(reference)) => phonetic_from_reference(ctx, reference),
+        ArgValue::Scalar(Value::ReferenceUnion(_)) => Value::Error(ErrorKind::Value),
         // TODO: Verify Excel's behavior for scalar/non-reference arguments (e.g. `PHONETIC("abc")`).
         // Historically, the engine treated PHONETIC as a string-coercion placeholder; preserve that
         // behavior until we have an Excel oracle case for scalar arguments.
