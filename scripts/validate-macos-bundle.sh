@@ -89,6 +89,9 @@ Environment:
   APPLE_CERTIFICATE  When non-empty, enable codesign + spctl verification.
   APPLE_ID + APPLE_PASSWORD
                      When both non-empty, additionally validate notarization stapling.
+  FORMULA_TAURI_CONF_PATH
+                     Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing).
+                     If the path is relative, it is resolved relative to the repo root.
 EOF
 }
 
@@ -117,8 +120,13 @@ fi
 
 command -v python3 >/dev/null || die "python3 not found (required to parse tauri.conf.json and Info.plist)"
 
+TAURI_CONF_PATH="${FORMULA_TAURI_CONF_PATH:-$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json}"
+if [[ "${TAURI_CONF_PATH}" != /* ]]; then
+  TAURI_CONF_PATH="${REPO_ROOT}/${TAURI_CONF_PATH}"
+fi
+
 get_product_name() {
-  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  local tauri_conf="$TAURI_CONF_PATH"
   if [ ! -f "$tauri_conf" ]; then
     echo "Formula"
     return 0
@@ -157,7 +165,7 @@ EXPECTED_APP_BUNDLE="${APP_NAME}.app"
 
 get_tauri_conf_value() {
   local key="$1"
-  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  local tauri_conf="$TAURI_CONF_PATH"
   [ -f "$tauri_conf" ] || return 1
 
   local value
@@ -197,10 +205,10 @@ EXPECTED_BUNDLE_IDENTIFIER="$(get_tauri_conf_value identifier || true)"
 EXPECTED_DESKTOP_VERSION="$(get_tauri_conf_value version || true)"
 EXPECTED_MAIN_BINARY_NAME="$(get_tauri_conf_value mainBinaryName || true)"
 if [ -z "$EXPECTED_BUNDLE_IDENTIFIER" ]; then
-  die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"identifier\" field."
+  die "Expected ${TAURI_CONF_PATH} to contain a non-empty \"identifier\" field."
 fi
 if [ -z "$EXPECTED_DESKTOP_VERSION" ]; then
-  die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"version\" field."
+  die "Expected ${TAURI_CONF_PATH} to contain a non-empty \"version\" field."
 fi
 if [ -z "$EXPECTED_MAIN_BINARY_NAME" ]; then
   EXPECTED_MAIN_BINARY_NAME="formula-desktop"
@@ -209,7 +217,7 @@ fi
 get_expected_file_extensions() {
   # Read the configured file associations from `tauri.conf.json` so this validation doesn't
   # silently drift when we add/remove supported extensions.
-  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  local tauri_conf="$TAURI_CONF_PATH"
   [ -f "$tauri_conf" ] || return 1
 
   python3 - "$tauri_conf" <<'PY'
@@ -244,7 +252,7 @@ while IFS= read -r ext; do
 done < <(get_expected_file_extensions 2>/dev/null || true)
 
 if [ "${#EXPECTED_FILE_EXTENSIONS[@]}" -eq 0 ]; then
-  warn "no file association extensions found in apps/desktop/src-tauri/tauri.conf.json (bundle.fileAssociations); skipping file association validation"
+  warn "no file association extensions found in ${TAURI_CONF_PATH} (bundle.fileAssociations); skipping file association validation"
 fi
 
 get_expected_url_schemes() {
@@ -588,7 +596,7 @@ PY
   if [ "$status" -eq 2 ]; then
     die "failed to parse Info.plist at ${plist_path}: ${output}"
   elif [ "$status" -ne 0 ]; then
-    die "Info.plist is missing file association metadata. Details: ${output}. (Check bundle.fileAssociations in apps/desktop/src-tauri/tauri.conf.json)"
+    die "Info.plist is missing file association metadata. Details: ${output}. (Check bundle.fileAssociations in ${TAURI_CONF_PATH})"
   fi
 }
 
@@ -674,7 +682,7 @@ validate_compliance_artifacts() {
   [ -d "$resources_dir" ] || die "missing Contents/Resources in app bundle: $app_path"
 
   # The release process must ship OSS/compliance artifacts with the installed app.
-  # We bundle these via apps/desktop/src-tauri/tauri.conf.json -> bundle.resources.
+  # We bundle these via tauri.conf.json -> bundle.resources.
   for filename in LICENSE NOTICE; do
     if [ ! -f "${resources_dir}/${filename}" ]; then
       die "missing compliance file in app bundle resources: ${resources_dir}/${filename}"

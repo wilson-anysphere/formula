@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -170,6 +170,69 @@ test(
     assert.equal(proc.status, 0, proc.stderr);
   },
 );
+
+test("validate-macos-bundle honors FORMULA_TAURI_CONF_PATH (override identifier/version/productName)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+
+  const mountPoint = join(tmp, "mnt");
+  const devEntry = "/dev/disk99s1";
+  mkdirSync(mountPoint, { recursive: true });
+  writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+  const overrideIdentifier = "com.example.formula.override";
+  const overrideVersion = "0.0.0";
+  const overrideProductName = "FormulaOverride";
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(
+    confPath,
+    JSON.stringify(
+      {
+        identifier: overrideIdentifier,
+        version: overrideVersion,
+        productName: overrideProductName,
+        mainBinaryName: "formula-desktop",
+        bundle: { fileAssociations: [] },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  try {
+    const appRoot = join(mountPoint, `${overrideProductName}.app`, "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: overrideIdentifier,
+      version: overrideVersion,
+    });
+    writeComplianceResources(appRoot);
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidator({
+      dmgPath,
+      binDir,
+      env: {
+        FORMULA_TAURI_CONF_PATH: relative(repoRoot, confPath),
+      },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
 
 test(
   "validate-macos-bundle fails when DMG is empty",
