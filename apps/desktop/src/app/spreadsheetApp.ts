@@ -5766,28 +5766,10 @@ export class SpreadsheetApp {
     const maxH = cellAreaH * 0.6;
     const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
 
-    const existingObjects = this.listDrawingObjectsForSheet(this.sheetId);
-
-    // Ensure new pictures stack on top of existing drawings.
-    let nextZOrder = 0;
-    for (const obj of existingObjects) {
-      const z = Number(obj.zOrder);
-      if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
-    }
-
     const docAny = this.document as any;
     if (typeof docAny.getSheetDrawings !== "function" || typeof docAny.setSheetDrawings !== "function") {
       throw new Error("Picture insertion is not supported in this build.");
     }
-
-    const existingDrawings = (() => {
-      try {
-        const raw = docAny.getSheetDrawings(this.sheetId);
-        return Array.isArray(raw) ? raw : [];
-      } catch {
-        return [];
-      }
-    })();
 
     const readFileBytes = async (file: File): Promise<Uint8Array> => {
       // Preferred path: the standard File/Blob `arrayBuffer()` API.
@@ -5922,7 +5904,9 @@ export class SpreadsheetApp {
         id: drawingId,
         kind: { type: "image", imageId },
         anchor,
-        zOrder: nextZOrder + i,
+        // zOrder is assigned at commit time based on the latest sheet drawings list (so we
+        // don't clobber remote drawing inserts that may happen while decoding files).
+        zOrder: 0,
         size: anchor.size,
       };
 
@@ -5942,11 +5926,33 @@ export class SpreadsheetApp {
         }
       }
 
+      // Merge with the latest sheet drawings at commit time. File decoding can take long enough
+      // that remote collaborators insert/delete drawings while we're preparing images; avoid
+      // overwriting those changes by re-reading the current sheet drawings here.
+      const baseDrawings = (() => {
+        try {
+          const raw = docAny.getSheetDrawings(this.sheetId);
+          return Array.isArray(raw) ? raw : [];
+        } catch {
+          return [];
+        }
+      })();
+
+      // Ensure new pictures stack on top of existing drawings.
+      let nextZOrder = 0;
+      for (const raw of baseDrawings) {
+        const z = Number((raw as any)?.zOrder ?? (raw as any)?.z_order);
+        if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
+      }
+      for (let i = 0; i < prepared.length; i += 1) {
+        prepared[i]!.drawing.zOrder = nextZOrder + i;
+      }
+
       // Store drawing ids as strings in the DocumentController payload for back-compat with
       // integrations that treat drawing ids as JSON-friendly keys. The UI continues to use
       // numeric ids (see `DrawingObject.id`).
       const nextDrawings = [
-        ...existingDrawings,
+        ...baseDrawings,
         ...prepared.map((p) => ({ ...(p.drawing as any), id: String(p.drawing.id) })),
       ];
       docAny.setSheetDrawings(this.sheetId, nextDrawings, { label: "Insert Picture" });
@@ -5960,7 +5966,11 @@ export class SpreadsheetApp {
     if (prepared.length > 0) {
       const insertedObjects = prepared.map((p) => p.drawing);
       const lastInsertedId = insertedObjects[insertedObjects.length - 1]!.id;
-      this.setDrawingObjectsForSheet([...existingObjects, ...insertedObjects]);
+      // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
+      // (This avoids caching a stale pre-insert list if drawings changed while decoding files.)
+      this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
       const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = lastInsertedId;
       this.drawingOverlay.setSelectedId(lastInsertedId);
@@ -6721,14 +6731,10 @@ export class SpreadsheetApp {
 
     // Include locally-cached drawings (e.g. drag/resize interactions) that may not yet be
     // reflected in the DocumentController snapshot.
-    for (const obj of this.drawingObjects) {
-      if (obj.kind.type === "image") keep.add(obj.kind.imageId);
-    }
+    scanDrawings(this.drawingObjects);
     const cachedObjects = this.drawingObjectsCache;
     if (cachedObjects && cachedObjects.sheetId === this.sheetId) {
-      for (const obj of cachedObjects.objects) {
-        if (obj.kind.type === "image") keep.add(obj.kind.imageId);
-      }
+      scanDrawings(cachedObjects.objects);
     }
 
     try {
@@ -17762,7 +17768,6 @@ export class SpreadsheetApp {
 
     const prevSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
-    const prevSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
     if (this.selectedChartId != null) {
       this.setSelectedChartId(null);

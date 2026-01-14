@@ -145,7 +145,7 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     };
 
     const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
-    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync };
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
 
     await app.garbageCollectDrawingImages();
 
