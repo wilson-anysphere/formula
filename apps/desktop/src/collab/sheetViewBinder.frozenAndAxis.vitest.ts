@@ -127,5 +127,41 @@ describe("bindSheetViewToCollabSession (frozen + axis overrides)", () => {
 
     binder.destroy();
   });
-});
 
+  it("hydrates legacy axis overrides encoded as arrays when `view` is missing", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    // Support both tuple and `{index,size}` shapes.
+    sheetMap.set("colWidths", [
+      [1, 100],
+      [2, 200],
+      [-1, 50], // ignored
+      ["bad", 50], // ignored
+      [3, 0], // ignored (non-positive)
+    ]);
+    sheetMap.set("rowHeights", [
+      { index: 0, size: 25 },
+      { index: 2, size: 30 },
+      { index: -1, size: 10 }, // ignored
+      { index: 1, size: 0 }, // ignored (non-positive)
+    ]);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getSheetView(sheetId).colWidths).toEqual({ "1": 100, "2": 200 });
+    expect(document.getSheetView(sheetId).rowHeights).toEqual({ "0": 25, "2": 30 });
+
+    binder.destroy();
+  });
+});

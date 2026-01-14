@@ -50,6 +50,36 @@ describe("bindSheetViewToCollabSession (backgroundImageId)", () => {
     binder.destroy();
   });
 
+  it("hydrates backgroundImageId stored as Y.Text (mixed/legacy encoding)", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheets.push([sheetMap]);
+
+    const yText = new Y.Text();
+    yText.insert(0, "bg-ytext.png");
+    doc.transact(() => {
+      const view = new Y.Map<any>();
+      view.set("backgroundImageId", yText);
+      sheetMap.set("view", view);
+    });
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getSheetBackgroundImageId(sheetId)).toBe("bg-ytext.png");
+
+    binder.destroy();
+  });
+
   it("does not remove a provided origin token from session.localOrigins on destroy", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");

@@ -71,6 +71,36 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
     binder.destroy();
   });
 
+  it("hydrates mergedRanges stored as a Y.Array (legacy/experimental encoding)", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheets.push([sheetMap]);
+
+    const yRanges = new Y.Array<any>();
+    yRanges.push([{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+    doc.transact(() => {
+      const view = new Y.Map<any>();
+      view.set("mergedRanges", yRanges);
+      sheetMap.set("view", view);
+    });
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getMergedRanges(sheetId)).toEqual([{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+
+    binder.destroy();
+  });
+
   it("hydrates mergedRanges from the legacy mergedCells key when mergedRanges is absent", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");
@@ -100,4 +130,3 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
     binder.destroy();
   });
 });
-
