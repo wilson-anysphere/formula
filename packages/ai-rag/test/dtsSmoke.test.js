@@ -1,10 +1,27 @@
-import { test } from "vitest";
-import * as ts from "typescript";
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createRequire } from "node:module";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]) {
+const require = createRequire(import.meta.url);
+
+function hasTypeScriptDependency() {
+  try {
+    require.resolve("typescript");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const hasTypeScript = hasTypeScriptDependency();
+/** @type {import("typescript") | null} */
+const ts = hasTypeScript ? require("typescript") : null;
+
+function formatDiagnostics(diagnostics) {
+  assert.ok(ts);
   return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCanonicalFileName: (fileName) => fileName,
     getCurrentDirectory: ts.sys.getCurrentDirectory,
@@ -12,14 +29,15 @@ function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]) {
   });
 }
 
-function collectNamedExports(sourceFile: ts.SourceFile) {
-  const exports: string[] = [];
+function collectNamedExports(sourceFile) {
+  assert.ok(ts);
+  const exports = [];
 
-  function hasExportModifier(node: ts.Node & { modifiers?: ts.NodeArray<ts.ModifierLike> }) {
+  function hasExportModifier(node) {
     return Boolean(node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword));
   }
 
-  function isConstEnum(node: ts.EnumDeclaration) {
+  function isConstEnum(node) {
     return Boolean(node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ConstKeyword));
   }
 
@@ -40,7 +58,7 @@ function collectNamedExports(sourceFile: ts.SourceFile) {
     }
 
     // `export class Foo {}`, `export function foo() {}`, `export const x = ...`
-    if (!hasExportModifier(node as any)) continue;
+    if (!hasExportModifier(node)) continue;
 
     if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) {
       // Type-only exports; ignore for runtime alignment.
@@ -70,8 +88,9 @@ function collectNamedExports(sourceFile: ts.SourceFile) {
   return exports;
 }
 
-function collectNamedImports(sourceFile: ts.SourceFile, moduleSpecifier: string) {
-  const imports: string[] = [];
+function collectNamedImports(sourceFile, moduleSpecifier) {
+  assert.ok(ts);
+  const imports = [];
   for (const node of sourceFile.statements) {
     if (!ts.isImportDeclaration(node)) continue;
     if (!ts.isStringLiteral(node.moduleSpecifier)) continue;
@@ -88,17 +107,17 @@ function collectNamedImports(sourceFile: ts.SourceFile, moduleSpecifier: string)
   return imports;
 }
 
-function stableSorted(arr: Iterable<string>) {
+function stableSorted(arr) {
   return Array.from(new Set(arr)).sort((a, b) => a.localeCompare(b));
 }
 
-function assertSameSet(label: string, a: Iterable<string>, b: Iterable<string>) {
+function assertSameSet(label, a, b) {
   const left = stableSorted(a);
   const right = stableSorted(b);
   const leftOnly = left.filter((x) => !right.includes(x));
   const rightOnly = right.filter((x) => !left.includes(x));
   if (leftOnly.length === 0 && rightOnly.length === 0) return;
-  throw new Error(
+  assert.fail(
     [
       `${label} mismatch:`,
       leftOnly.length ? `  Only in left: ${leftOnly.join(", ")}` : null,
@@ -109,7 +128,8 @@ function assertSameSet(label: string, a: Iterable<string>, b: Iterable<string>) 
   );
 }
 
-test("ai-rag index exports match index.d.ts (API surface consistency)", async () => {
+test("ai-rag index exports match index.d.ts (API surface consistency)", { skip: !hasTypeScript }, async () => {
+  assert.ok(ts);
   const runtimeModule = await import("../src/index.js");
   const runtimeExports = Object.keys(runtimeModule).filter((key) => key !== "default");
 
@@ -128,11 +148,12 @@ test("ai-rag index exports match index.d.ts (API surface consistency)", async ()
   assertSameSet("dtsSmokeProgram imports", runtimeExports, smokeImports);
 });
 
-test("ai-rag module exports match adjacent .d.ts files", async () => {
+test("ai-rag module exports match adjacent .d.ts files", { skip: !hasTypeScript }, async () => {
+  assert.ok(ts);
   const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
 
-  async function collectDtsFiles(dir: string): Promise<string[]> {
-    const out: string[] = [];
+  async function collectDtsFiles(dir) {
+    const out = [];
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = join(dir, entry.name);
@@ -170,7 +191,8 @@ test("ai-rag module exports match adjacent .d.ts files", async () => {
   }
 });
 
-test("ai-rag d.ts smoke test (public API stays in sync)", () => {
+test("ai-rag d.ts smoke test (public API stays in sync)", { skip: !hasTypeScript }, () => {
+  assert.ok(ts);
   const configPath = fileURLToPath(new URL("./tsconfig.dts-smoke.json", import.meta.url));
   const configDir = dirname(configPath);
 
