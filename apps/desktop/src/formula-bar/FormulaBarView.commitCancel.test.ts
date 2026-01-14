@@ -335,6 +335,37 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("setReadOnly(true) clears hover + reference highlights without firing onCancel", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onCancel,
+      onHoverRange,
+      onReferenceHighlights,
+    });
+
+    view.setActiveCell({ address: "A1", input: "=A1", value: null });
+    view.textarea.focus();
+
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
+
+    view.setReadOnly(true);
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.textarea.readOnly).toBe(true);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
+
+    host.remove();
+  });
+
   it("setReadOnly(false) re-enables focus-to-edit behavior after being read-only", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
