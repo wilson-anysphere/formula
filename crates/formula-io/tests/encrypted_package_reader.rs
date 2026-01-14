@@ -4,6 +4,7 @@ use cbc::cipher::{
     block_padding::{NoPadding, Pkcs7},
     BlockCipher, BlockEncryptMut, KeyIvInit,
 };
+use proptest::prelude::*;
 use sha1::{Digest, Sha1};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::io::ErrorKind;
@@ -95,6 +96,105 @@ fn make_encrypted_package(plaintext: &[u8], key: &[u8], salt: &[u8]) -> Vec<u8> 
 fn make_plaintext(len: usize) -> Vec<u8> {
     // Deterministic, non-compressible-ish bytes.
     (0..len).map(|i| ((i * 31) % 251) as u8).collect()
+}
+
+#[derive(Debug, Clone)]
+enum ReadSeekOp {
+    SeekStart(u64),
+    SeekCurrent(i64),
+    SeekEnd(i64),
+    Read(usize),
+}
+
+fn read_seek_op_strategy() -> impl Strategy<Value = ReadSeekOp> {
+    // Keep the ranges conservative so the test is fast and avoids exploring pathological i64
+    // corner cases. The goal is to stress the segmented-ciphertext + caching logic across a wide
+    // variety of random access patterns.
+    let seek_abs_max = 25_000u64;
+    let seek_rel_max = 25_000i64;
+    let read_len_max = SEGMENT_LEN * 2;
+
+    prop_oneof![
+        (0u64..=seek_abs_max).prop_map(ReadSeekOp::SeekStart),
+        (-seek_rel_max..=seek_rel_max).prop_map(ReadSeekOp::SeekCurrent),
+        (-seek_rel_max..=seek_rel_max).prop_map(ReadSeekOp::SeekEnd),
+        (0usize..=read_len_max).prop_map(ReadSeekOp::Read),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        max_shrink_iters: 0,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_reader_seek_read_matches_plaintext(
+        plaintext in proptest::collection::vec(any::<u8>(), 0..=20_000),
+        ops in proptest::collection::vec(read_seek_op_strategy(), 0..=64),
+    ) {
+        let key = [0x11u8; 32];
+        let salt = [0x22u8; 16];
+
+        let encrypted = make_encrypted_package(&plaintext, &key, &salt);
+        let cursor = Cursor::new(encrypted);
+        let mut reader = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
+            .expect("new reader");
+
+        let mut expected_pos: u64 = 0;
+        let plaintext_len = plaintext.len() as u64;
+
+        for op in ops {
+            match op {
+                ReadSeekOp::SeekStart(pos) => {
+                    let res = reader.seek(SeekFrom::Start(pos));
+                    prop_assert!(res.is_ok());
+                    expected_pos = pos;
+                }
+                ReadSeekOp::SeekCurrent(off) => {
+                    let new_pos = expected_pos as i128 + off as i128;
+                    let res = reader.seek(SeekFrom::Current(off));
+                    if new_pos < 0 {
+                        prop_assert!(res.is_err());
+                    } else {
+                        prop_assert_eq!(res.unwrap(), new_pos as u64);
+                        expected_pos = new_pos as u64;
+                    }
+                }
+                ReadSeekOp::SeekEnd(off) => {
+                    let new_pos = plaintext_len as i128 + off as i128;
+                    let res = reader.seek(SeekFrom::End(off));
+                    if new_pos < 0 {
+                        prop_assert!(res.is_err());
+                    } else {
+                        prop_assert_eq!(res.unwrap(), new_pos as u64);
+                        expected_pos = new_pos as u64;
+                    }
+                }
+                ReadSeekOp::Read(len) => {
+                    let mut buf = vec![0u8; len];
+                    let n = reader.read(&mut buf).expect("read should not error");
+
+                    let expected_n = if expected_pos >= plaintext_len {
+                        0usize
+                    } else {
+                        let remaining = (plaintext_len - expected_pos) as usize;
+                        remaining.min(len)
+                    };
+                    prop_assert_eq!(n, expected_n);
+
+                    if n > 0 {
+                        prop_assert_eq!(
+                            &buf[..n],
+                            &plaintext[expected_pos as usize..expected_pos as usize + n]
+                        );
+                        expected_pos += n as u64;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
