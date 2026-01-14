@@ -1182,7 +1182,7 @@ wired to the correct **updater-consumed** artifacts:
 To run the repo’s release sanity checks (version check, updater config validation, and GitHub Release asset/manifest verification) in one command:
 
 ```bash
-# Use a GitHub token to avoid rate limits (or pass --token).
+# Requires a GitHub token (or pass --token).
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name
 ```
 
