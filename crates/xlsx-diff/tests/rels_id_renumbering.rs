@@ -337,3 +337,51 @@ fn rels_id_renumbering_is_detected_even_when_other_relationships_have_duplicate_
     assert_eq!(report.differences[0].expected.as_deref(), Some("rId1"));
     assert_eq!(report.differences[0].actual.as_deref(), Some("rId5"));
 }
+
+#[test]
+fn rels_id_renumbering_with_removed_relationship_does_not_emit_attribute_noise_for_reused_ids() {
+    // When a relationship is removed, some producers renumber the remaining relationships such
+    // that an existing Id is reused. The raw XML diff (keyed by Id) would report this as
+    // attribute diffs for the reused Id, even though the meaningful change is:
+    // - one relationship's Id changed
+    // - another relationship was removed
+    //
+    // Ensure we keep the synthesized `relationship_id_changed` diff, but do not surface noisy
+    // `attribute_*` diffs for the reused Id.
+    let expected_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+    )]);
+
+    let actual_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "relationship_id_changed"
+                && d.expected.as_deref() == Some("rId2")
+                && d.actual.as_deref() == Some("rId1")),
+        "expected a relationship_id_changed diff for the worksheet relationship, got {:#?}",
+        report.differences
+    );
+    assert!(
+        !report.differences.iter().any(|d| d.kind.starts_with("attribute_")),
+        "did not expect attribute diffs for reused relationship ids, got {:#?}",
+        report.differences
+    );
+}

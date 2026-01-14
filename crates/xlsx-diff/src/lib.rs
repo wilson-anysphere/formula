@@ -614,6 +614,54 @@ fn postprocess_relationship_id_renumbering(
         });
     }
 
+    // If a relationship Id is reused due to a renumbering (e.g. removing one relationship and
+    // shifting the remaining ones), the raw Id-keyed XML diff will report confusing attribute
+    // changes for the reused Id. Synthesize explicit missing/added relationship diffs keyed by
+    // relationship semantics so callers see the real change instead of attribute noise.
+    for (key, expected_id) in &expected_map {
+        if actual_map.contains_key(key) {
+            continue;
+        }
+        // Only synthesize when the Id is reused on the other side by a relationship involved in
+        // an Id renumbering change. Otherwise the base XML diff will already emit a
+        // `child_missing` diff for this Id.
+        if !suppress_added.contains(expected_id) {
+            continue;
+        }
+        if ignore.matches(&key.resolved_target) {
+            continue;
+        }
+        synthesized.push(xml::XmlDiff {
+            severity: Severity::Critical,
+            path: key.to_diff_path(),
+            kind: "relationship_missing".to_string(),
+            expected: Some(expected_id.clone()),
+            actual: None,
+        });
+    }
+
+    for (key, actual_id) in &actual_map {
+        if expected_map.contains_key(key) {
+            continue;
+        }
+        // Only synthesize when the Id is reused on the other side by a relationship involved in
+        // an Id renumbering change. Otherwise the base XML diff will already emit a `child_added`
+        // diff for this Id.
+        if !suppress_missing.contains(actual_id) {
+            continue;
+        }
+        if ignore.matches(&key.resolved_target) {
+            continue;
+        }
+        synthesized.push(xml::XmlDiff {
+            severity: Severity::Critical,
+            path: key.to_diff_path(),
+            kind: "relationship_added".to_string(),
+            expected: None,
+            actual: Some(actual_id.clone()),
+        });
+    }
+
     let mut out: Vec<xml::XmlDiff> = diffs
         .into_iter()
         .filter(|diff| match diff.kind.as_str() {
@@ -625,6 +673,12 @@ fn postprocess_relationship_id_renumbering(
                 Some(id) => !suppress_added.contains(id),
                 None => true,
             },
+            "attribute_changed" | "attribute_missing" | "attribute_added" => {
+                match relationship_id_from_path(&diff.path) {
+                    Some(id) => !suppress_missing.contains(id) && !suppress_added.contains(id),
+                    None => true,
+                }
+            }
             _ => true,
         })
         .collect();
