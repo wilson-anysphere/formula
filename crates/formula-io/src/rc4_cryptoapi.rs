@@ -109,6 +109,16 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     /// RC4 key length in bytes (e.g. `keySize / 8` from EncryptionHeader).
     key_len: usize,
     hash_alg: HashAlg,
+    /// Compatibility toggle for legacy 40-bit RC4 key blobs.
+    ///
+    /// MS-OFFCRYPTO Standard RC4 uses the raw 5-byte key material when `keySize == 0/40` (i.e.
+    /// `key_len == 5`). However, some legacy CryptoAPI implementations treat a 40-bit RC4 key as a
+    /// 16-byte key blob where the remaining 11 bytes are zero (which changes the RC4 KSA because it
+    /// depends on key length).
+    ///
+    /// When constructed via [`Self::from_encrypted_package_stream`], we attempt to auto-detect this
+    /// quirk by decrypting the first 4 ciphertext bytes and checking for a ZIP `PK..` signature.
+    pad_40_bit_to_128: bool,
 
     rc4: Option<Rc4>,
     block_index: Option<u32>,
@@ -126,6 +136,7 @@ impl<R: Read + Seek> fmt::Debug for Rc4CryptoApiDecryptReader<R> {
             .field("h_len", &self.h.len())
             .field("key_len", &self.key_len)
             .field("hash_alg", &self.hash_alg)
+            .field("pad_40_bit_to_128", &self.pad_40_bit_to_128)
             .field("block_index", &self.block_index)
             .field("block_offset", &self.block_offset)
             .field("rc4_initialized", &self.rc4.is_some())
@@ -240,13 +251,61 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             })?;
         inner.seek(SeekFrom::Start(ciphertext_start))?;
 
-        Ok(Self::new_with_hash_alg(
-            inner,
-            package_size,
-            h,
-            key_len_u32 as usize,
-            hash_alg,
-        )?)
+        let key_len = key_len_u32 as usize;
+
+        // Compatibility: Some producers zero-pad 40-bit key material to a 16-byte RC4 key blob.
+        // Since `EncryptedPackage` plaintext should be a ZIP container, we can usually detect this
+        // by checking whether the decrypted prefix looks like `PK..`.
+        let mut pad_40_bit_to_128 = false;
+        if key_len == 5 && package_size >= 4 {
+            let mut ciphertext_prefix = [0u8; 4];
+            inner.read_exact(&mut ciphertext_prefix)?;
+            inner.seek(SeekFrom::Start(ciphertext_start))?;
+
+            fn is_zip_sig(prefix: &[u8; 4]) -> bool {
+                matches!(
+                    prefix,
+                    b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08"
+                )
+            }
+
+            let digest0 = Zeroizing::new(match hash_alg {
+                HashAlg::Sha1 => {
+                    let mut hasher = Sha1::new();
+                    hasher.update(&h);
+                    hasher.update(0u32.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+                HashAlg::Md5 => {
+                    let mut hasher = Md5::new();
+                    hasher.update(&h);
+                    hasher.update(0u32.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+            });
+
+            // Spec-correct: raw 5-byte key.
+            let mut plain_unpadded = ciphertext_prefix;
+            let mut rc4 = Rc4::new(&digest0[..5]);
+            rc4.apply_keystream(&mut plain_unpadded);
+
+            // Compatibility: 16-byte key blob `key_material || 0x00 * 11`.
+            let mut padded_key = Zeroizing::new([0u8; 16]);
+            padded_key[..5].copy_from_slice(&digest0[..5]);
+            let mut plain_padded = ciphertext_prefix;
+            let mut rc4 = Rc4::new(padded_key.as_slice());
+            rc4.apply_keystream(&mut plain_padded);
+
+            let unpadded_zip = is_zip_sig(&plain_unpadded);
+            let padded_zip = is_zip_sig(&plain_padded);
+            if padded_zip && !unpadded_zip {
+                pad_40_bit_to_128 = true;
+            }
+        }
+
+        let mut reader = Self::new_with_hash_alg(inner, package_size, h, key_len, hash_alg)?;
+        reader.pad_40_bit_to_128 = pad_40_bit_to_128;
+        Ok(reader)
     }
 
     /// Create a decrypting reader wrapping `inner`.
@@ -295,6 +354,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             h: Zeroizing::new(h),
             key_len,
             hash_alg,
+            pad_40_bit_to_128: false,
             rc4: None,
             block_index: None,
             block_offset: 0,
@@ -359,10 +419,15 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             }
         });
 
-        // For 40-bit RC4 (`keySize == 0`/`40` → `key_len == 5`), the key material is the first
-        // 5 bytes of the digest. Do **not** pad the key to 16 bytes; RC4's KSA depends on the key
-        // length and a zero-padded 16-byte key produces a different keystream.
-        let mut rc4 = Rc4::new(&digest[..self.key_len]);
+        let mut rc4 = if self.pad_40_bit_to_128 && self.key_len == 5 {
+            // Compatibility: treat a 40-bit key as a 16-byte key blob with the high 88 bits zero.
+            let mut padded_key = Zeroizing::new([0u8; 16]);
+            padded_key[..5].copy_from_slice(&digest[..5]);
+            Rc4::new(padded_key.as_slice())
+        } else {
+            // Spec-correct: raw digest truncation.
+            Rc4::new(&digest[..self.key_len])
+        };
         // Drop the `Zeroizing` wrapper early so derived key material is wiped as soon as we've
         // initialized the RC4 state.
         drop(digest);
@@ -585,6 +650,7 @@ mod tests {
             h: Zeroizing::new(h_bytes),
             key_len: 5,
             hash_alg: HashAlg::Sha1,
+            pad_40_bit_to_128: false,
             rc4: None,
             block_index: None,
             block_offset: 0,
@@ -629,6 +695,53 @@ mod tests {
             // the digest. Do not pad to 16 bytes: RC4's key schedule depends on the key length.
             let key = &digest[..key_len];
             let mut rc4 = Rc4::new(key);
+
+            let block_len = (plaintext.len() - offset).min(RC4_BLOCK_SIZE);
+            out[offset..offset + block_len].copy_from_slice(&plaintext[offset..offset + block_len]);
+            rc4.apply_keystream(&mut out[offset..offset + block_len]);
+
+            offset += block_len;
+            block_index += 1;
+        }
+        out
+    }
+
+    fn encrypt_rc4_cryptoapi_padded_40_bit_key(
+        plaintext: &[u8],
+        h: &[u8],
+        key_len: usize,
+        hash_alg: HashAlg,
+    ) -> Vec<u8> {
+        assert!(key_len <= hash_alg.hash_len());
+
+        let mut out = vec![0u8; plaintext.len()];
+        let mut offset = 0usize;
+        let mut block_index = 0u32;
+        while offset < plaintext.len() {
+            let digest = match hash_alg {
+                HashAlg::Sha1 => {
+                    let mut hasher = Sha1::new();
+                    hasher.update(h);
+                    hasher.update(block_index.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+                HashAlg::Md5 => {
+                    let mut hasher = Md5::new();
+                    hasher.update(h);
+                    hasher.update(block_index.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+            };
+
+            let mut rc4 = if key_len == 5 {
+                // Compatibility behavior: treat a 40-bit key as a 16-byte key blob
+                // `key_material || 0x00 * 11`.
+                let mut padded_key = [0u8; 16];
+                padded_key[..5].copy_from_slice(&digest[..5]);
+                Rc4::new(&padded_key)
+            } else {
+                Rc4::new(&digest[..key_len])
+            };
 
             let block_len = (plaintext.len() - offset).min(RC4_BLOCK_SIZE);
             out[offset..offset + block_len].copy_from_slice(&plaintext[offset..offset + block_len]);
@@ -768,6 +881,38 @@ mod tests {
             CALG_SHA1,
         )
         .expect("create RC4 decrypt reader with reserved size prefix high DWORD");
+
+        let mut out = vec![0u8; plaintext.len()];
+        reader.read_exact(&mut out).unwrap();
+        assert_eq!(out, plaintext);
+    }
+
+    #[test]
+    fn encrypted_package_can_auto_detect_padded_40_bit_rc4_key_blob() {
+        // Some producers treat a 40-bit RC4 key as a 16-byte key blob where the high 88 bits are
+        // zero. `from_encrypted_package_stream` can auto-detect this quirk for EncryptedPackage
+        // payloads by probing for a ZIP `PK..` signature.
+        let h = b"0123456789ABCDEFGHIJ".to_vec(); // 20 bytes
+        let key_len = 5; // 40-bit
+
+        let mut plaintext = b"PK\x03\x04".to_vec();
+        plaintext.extend_from_slice(&[0u8; 1024]);
+
+        let ciphertext =
+            encrypt_rc4_cryptoapi_padded_40_bit_key(&plaintext, &h, key_len, HashAlg::Sha1);
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&ciphertext);
+
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            0, // keySize (bits) => 40-bit per MS-OFFCRYPTO
+            CALG_SHA1,
+        )
+        .expect("create RC4 decrypt reader for padded 40-bit key blob");
 
         let mut out = vec![0u8; plaintext.len()];
         reader.read_exact(&mut out).unwrap();
