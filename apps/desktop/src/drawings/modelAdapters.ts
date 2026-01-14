@@ -741,6 +741,21 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
   } catch {
     // ignore; fall back to treating `anchorJson` as a plain DocumentController anchor object.
   }
+  // Some snapshots attach metadata keys (e.g. `sheetId`) alongside an externally-tagged enum:
+  // `{ sheetId: "...", Absolute: { ... } }`. Detect that encoding so we don't drop drawings or
+  // incorrectly fall back to model parsing.
+  if (!tag) {
+    const candidateKeys = Object.keys(outer).filter((key) => key !== "sheetId" && key !== "sheet_id");
+    const variantKeys = candidateKeys.filter((key) => isRecord((outer as any)[key]));
+    if (variantKeys.length === 1) {
+      const variant = variantKeys[0]!;
+      const value = (outer as any)[variant];
+      if (isRecord(value)) {
+        tag = variant;
+        payload = value as JsonRecord;
+      }
+    }
+  }
 
   let anchorType = normalizeEnumTag(tag);
   // Some persistence layers may include the DrawingML element name in the tag

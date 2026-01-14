@@ -182,3 +182,30 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects unwraps externally-tagged a
     size: { cx: 789, cy: 321 },
   });
 });
+
+test("convertDocumentSheetDrawingsToUiDrawingObjects unwraps externally-tagged anchors even when metadata keys are present (e.g. sheetId)", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        sheetId: "Sheet1",
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 789, cy: 321 },
+        },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.kind?.type, "shape");
+  assert.equal(ui[0]?.kind?.label, "Box");
+  assert.deepEqual(ui[0]?.anchor, {
+    type: "absolute",
+    pos: { xEmu: 0, yEmu: 0 },
+    size: { cx: 789, cy: 321 },
+  });
+});

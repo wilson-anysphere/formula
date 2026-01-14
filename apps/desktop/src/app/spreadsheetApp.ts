@@ -10918,8 +10918,18 @@ export class SpreadsheetApp {
       // downstream serde deserializers while still applying the UI edits.
       if (!("type" in rawAnchor) && !("kind" in rawAnchor)) {
         const keys = Object.keys(rawAnchor);
-        if (keys.length === 1) {
-          const tag = keys[0]!;
+        const tag = (() => {
+          if (keys.length === 1) return keys[0]!;
+          // Some payloads include metadata keys (e.g. `sheetId`) alongside the externally-tagged
+          // enum. Detect that shape too: `{ sheetId: \"...\", Absolute: { ... } }`.
+          const candidates = keys.filter((k) => k !== "sheetId" && k !== "sheet_id");
+          const variantKeys = candidates.filter((k) => {
+            const value = (rawAnchor as any)[k];
+            return value && typeof value === "object";
+          });
+          return variantKeys.length === 1 ? variantKeys[0]! : null;
+        })();
+        if (tag) {
           const value = (rawAnchor as any)[tag];
           const normalized = normalizeTag(tag);
           if (value && typeof value === "object") {
