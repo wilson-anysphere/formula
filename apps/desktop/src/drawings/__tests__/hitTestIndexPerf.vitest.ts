@@ -65,6 +65,18 @@ describe("drawings hit test index perf", () => {
     expect(sortSpy).toHaveBeenCalledTimes(0);
   });
 
+  it("hit tests ties in reverse render order when input is already descending", () => {
+    // Render order (after stable sort ascending by zOrder) will preserve the input
+    // order for ties; the later object is drawn last and should be considered "on top".
+    const objects: DrawingObject[] = [
+      absoluteObject(1, 10, { x: 0, y: 0, width: 10, height: 10 }),
+      absoluteObject(2, 10, { x: 0, y: 0, width: 10, height: 10 }),
+    ];
+    const index = buildHitTestIndex(objects, geom, { bucketSizePx: 128 });
+    const hit = hitTestDrawings(index, viewport, 5, 5, geom);
+    expect(hit?.object.id).toBe(2);
+  });
+
   it("returns the top-most object when multiple overlap (including global candidates)", () => {
     const objects: DrawingObject[] = [
       // Large object spans many buckets and should end up in the `global` list.
