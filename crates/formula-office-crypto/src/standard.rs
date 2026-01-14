@@ -565,15 +565,48 @@ pub(crate) fn decrypt_standard_encrypted_package(
     let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
 
     match info.header.alg_id {
-        CALG_RC4 => decrypt_standard_encrypted_package_rc4(
-            info,
-            ciphertext,
-            total_size,
-            expected_len,
-            password,
-            hash_alg,
-        ),
+        CALG_RC4 => {
+            // Standard RC4 has no padding; ciphertext must contain at least `expected_len` bytes.
+            // Check this before running the password KDF to reject obviously truncated inputs.
+            if ciphertext.len() < expected_len {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
+                    ciphertext.len(),
+                    expected_len
+                )));
+            }
+            decrypt_standard_encrypted_package_rc4(
+                info,
+                ciphertext,
+                total_size,
+                expected_len,
+                password,
+                hash_alg,
+            )
+        }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // The encrypted payload is padded to the AES block size (16 bytes). Some producers may
+            // include trailing bytes in the OLE stream beyond the padded plaintext length; ignore
+            // them by decrypting only what we need.
+            //
+            // Check ciphertext length *before* running the password KDF to reject obviously
+            // truncated inputs cheaply.
+            let padded_len = if expected_len == 0 {
+                0usize
+            } else {
+                expected_len.checked_add(15).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string())
+                })? / 16
+                    * 16
+            };
+            if ciphertext.len() < padded_len {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
+                    ciphertext.len(),
+                    padded_len
+                )));
+            }
+
             // MS-OFFCRYPTO Standard AES uses CryptoAPI `CryptDeriveKey` key derivation semantics
             // and encrypts the verifier + package with AES-ECB (no IV).
             if info.header.key_bits % 8 != 0 {
@@ -635,26 +668,6 @@ pub(crate) fn decrypt_standard_encrypted_package(
                 }
             };
 
-            // The encrypted payload is padded to the AES block size (16 bytes). Some producers may
-            // include trailing bytes in the OLE stream beyond the padded plaintext length; ignore
-            // them by decrypting only what we need.
-            let padded_len = if expected_len == 0 {
-                0usize
-            } else {
-                expected_len.checked_add(15).ok_or_else(|| {
-                    OfficeCryptoError::InvalidFormat(
-                        "EncryptedPackage expected length overflow".to_string(),
-                    )
-                })? / 16
-                    * 16
-            };
-            if ciphertext.len() < padded_len {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
-                    ciphertext.len(),
-                    padded_len
-                )));
-            }
             let to_decrypt = &ciphertext[..padded_len];
             let mut plain = Vec::new();
             plain.try_reserve_exact(padded_len).map_err(|source| {
