@@ -250,6 +250,77 @@ class CompatGateTests(unittest.TestCase):
             self.assertIn("open", out)
             self.assertIn("round-trip", out)
 
+    def test_gate_uses_attempted_denominator_for_calc_and_render(self) -> None:
+        # Calculate/render are optional steps. Gates should use the attempted denominators rather
+        # than total workbooks (otherwise enabling recalc/render would look like massive regressions
+        # when many workbooks legitimately skip those checks).
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 5,
+                            "calculate_attempted": 5,
+                            "render_ok": 2,
+                            "render_attempted": 2,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-rate",
+                        "1.0",
+                        "--min-render-rate",
+                        "1.0",
+                    ]
+                )
+            self.assertEqual(rc, 0, buf.getvalue())
+
+    def test_gate_errors_when_calc_gate_is_set_but_no_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 0,
+                            "calculate_attempted": 0,
+                            "render_ok": 0,
+                            "render_attempted": 0,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-rate",
+                        "1.0",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 2, out)
+            self.assertIn("no calculate results were attempted", out)
+
 
 if __name__ == "__main__":
     unittest.main()
