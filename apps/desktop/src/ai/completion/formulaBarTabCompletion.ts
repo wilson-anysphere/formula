@@ -11,7 +11,6 @@ import { extractFormulaReferences, fromA1, type FormulaReferenceRange } from "@f
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
-import { getLocale } from "../../i18n/index.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
@@ -130,7 +129,7 @@ export class FormulaBarTabCompletionController {
         const extra = externalSchemaProvider?.getCacheKey?.() ?? "";
         // The partial parser is locale-aware (argument separators, etc). Include locale in the cache key so
         // tab completion recomputes suggestions if the UI locale changes at runtime.
-        const locale = getLocale();
+        const locale = this.#formulaBar.currentLocaleId();
         const combined = extra ? `${base}|${extra}` : base;
         return locale ? `${combined}|locale:${locale}` : combined;
       },
@@ -317,6 +316,7 @@ export class FormulaBarTabCompletionController {
             document: this.#document,
             sheetId,
             cellAddress: activeCell,
+            localeId: this.#formulaBar.currentLocaleId(),
             schemaProvider: this.#schemaProvider,
             sheetNameResolver: this.#sheetNameResolver,
             getWorkbookFileMetadata: this.#getWorkbookFileMetadata,
@@ -392,6 +392,7 @@ function createPreviewEvaluator(params: {
   document: DocumentController;
   sheetId: string;
   cellAddress: string;
+  localeId?: string;
   schemaProvider?: SchemaProvider | null;
   sheetNameResolver?: SheetNameResolver | null;
   getWorkbookFileMetadata?: (() => { directory: string | null; filename: string | null } | null) | null;
@@ -484,11 +485,12 @@ function createPreviewEvaluator(params: {
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
     const localeId = (() => {
-      try {
-        return getLocale();
-      } catch {
-        return undefined;
-      }
+      const raw =
+        params.localeId ??
+        (typeof document !== "undefined" ? document.documentElement?.lang : "") ??
+        undefined;
+      const trimmed = String(raw ?? "").trim();
+      return trimmed || undefined;
     })();
 
     const workbookFileMetadata = typeof getWorkbookFileMetadata === "function" ? getWorkbookFileMetadata() : null;
