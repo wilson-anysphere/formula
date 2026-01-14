@@ -761,21 +761,32 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     return null;
   }
 
-  function findMatch(cell: { sheetId: string; row: number; col: number }): EncryptedRange | null {
-    const normalized = normalizeCell(cell);
-    if (!normalized) return null;
+  // Cache sheet-id -> display-name lookups per policy instance so we don't repeatedly
+  // scan workbook sheet metadata on every cell match.
+  const sheetNameByIdCi = new Map<string, string | null>();
+  let lastSheetCount: number | null = null;
+  const resolveSheetNameCached = (id: string): string | null => {
+    const trimmed = String(id ?? "").trim();
+    if (!trimmed) return null;
+    try {
+      const count = typeof (sheetsRoot as any)?.length === "number" ? (sheetsRoot as any).length : null;
+      if (count != null && count !== lastSheetCount) {
+        sheetNameByIdCi.clear();
+        lastSheetCount = count;
+      }
+    } catch {
+      // ignore
+    }
 
-    const { sheetId, row, col } = normalized;
-    const sheetNameByIdCi = new Map<string, string | null>();
-    const resolveSheetNameCached = (id: string): string | null => {
-      const trimmed = String(id ?? "").trim();
-      if (!trimmed) return null;
-      const key = trimmed.toLowerCase();
-      if (sheetNameByIdCi.has(key)) return sheetNameByIdCi.get(key) ?? null;
-      const resolved = resolveSheetName(trimmed);
-      sheetNameByIdCi.set(key, resolved);
-      return resolved;
-    };
+    const key = trimmed.toLowerCase();
+    if (sheetNameByIdCi.has(key)) return sheetNameByIdCi.get(key) ?? null;
+    const resolved = resolveSheetName(trimmed);
+    sheetNameByIdCi.set(key, resolved);
+    return resolved;
+  };
+
+  function findMatchNormalized(cell: { sheetId: string; row: number; col: number }): EncryptedRange | null {
+    const { sheetId, row, col } = cell;
 
     // Cache the resolved display name for the *cell's* sheet id so we avoid
     // repeatedly scanning the sheets metadata when a caller passes an unknown
@@ -879,14 +890,16 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
       // Fail closed: if `metadata.encryptedRanges` exists but is in an unknown schema, treat
       // all valid cells as encrypted so keyless clients refuse plaintext writes rather than
       // potentially violating a newer encryption policy they cannot parse.
-      if (!normalizeCell(cell)) return false;
+      const normalized = normalizeCell(cell);
+      if (!normalized) return false;
       if (isEncryptedRangesSchemaUnknown()) return true;
-      return findMatch(cell) != null;
+      return findMatchNormalized(normalized) != null;
     },
     keyIdForCell(cell): string | null {
-      if (!normalizeCell(cell)) return null;
+      const normalized = normalizeCell(cell);
+      if (!normalized) return null;
       if (isEncryptedRangesSchemaUnknown()) return null;
-      return findMatch(cell)?.keyId ?? null;
+      return findMatchNormalized(normalized)?.keyId ?? null;
     },
   };
 }
