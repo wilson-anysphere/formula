@@ -108,7 +108,9 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.clear.clearAll",
   "home.editing.clear.clearFormats",
   "home.editing.clear.clearContents",
-
+  // Legacy AutoSum trigger/menu ids (current schema uses `edit.autoSum`).
+  "home.editing.autoSum",
+  "home.editing.autoSum.sum",
   "home.editing.autoSum.average",
   "home.editing.autoSum.countNumbers",
   "home.editing.autoSum.max",
