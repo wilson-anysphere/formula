@@ -986,11 +986,12 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
             if (rotationDeg != null) {
               const flipHRaw = pick(record, ["flipH", "flip_h"]);
               const flipVRaw = pick(record, ["flipV", "flip_v"]);
-              // Older snapshots may have only stored rotation values before flip support existed.
-              // Default missing flip keys to false so the UI layer always sees a complete DrawingTransform.
-              const flipH = typeof flipHRaw === "boolean" ? flipHRaw : false;
-              const flipV = typeof flipVRaw === "boolean" ? flipVRaw : false;
-              transform = { rotationDeg, flipH, flipV };
+              // Treat incomplete payloads as malformed: require both flip values to be present
+              // booleans so we don't accidentally "repair" partial snapshots and then rewrite
+              // them during unrelated move/resize commits.
+              if (typeof flipHRaw === "boolean" && typeof flipVRaw === "boolean") {
+                transform = { rotationDeg, flipH: flipHRaw, flipV: flipVRaw };
+              }
             }
           }
         }
