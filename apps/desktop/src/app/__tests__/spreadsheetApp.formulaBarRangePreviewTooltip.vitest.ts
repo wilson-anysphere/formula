@@ -152,6 +152,50 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("clears the tooltip when the active cell changes while hovering a reference in view mode", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, 2);
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 3);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 4);
+    doc.setCellFormula("Sheet1", { row: 0, col: 2 }, "=SUM(A1:B2)");
+
+    // Select the formula cell so view-mode highlight shows the reference span.
+    app.activateCell({ row: 0, col: 2 });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("A1:B2");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+    expect((app as any).referencePreview).not.toBeNull();
+
+    // Changing the active cell can swap out the highlighted <pre> without firing `mouseleave`.
+    // Ensure the tooltip/hover outline are explicitly cleared.
+    app.activateCell({ row: 0, col: 3 });
+    expect(tooltip?.hidden).toBe(true);
+    expect((app as any).referencePreview).toBeNull();
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("skips sheet-qualified previews when the referenced sheet is not active", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");

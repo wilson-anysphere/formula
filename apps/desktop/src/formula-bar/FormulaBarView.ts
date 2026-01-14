@@ -1114,12 +1114,19 @@ export class FormulaBarView {
     }
 
     if (this.model.isEditing) return;
+    // If the user was hovering a reference span in view mode, switching the active cell can
+    // replace the highlighted markup without triggering a `mouseleave` event. Capture whether we
+    // had any hover-derived overlays so we can explicitly clear them after re-rendering.
+    const hadHoverOverride = this.#hoverOverride != null || this.#hoverOverrideText != null;
     this.model.setActiveCell(activeCell);
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
+    if (hadHoverOverride) {
+      this.#emitOverlays();
+    }
   }
 
   isEditing(): boolean {
