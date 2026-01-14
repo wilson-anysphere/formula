@@ -1204,6 +1204,13 @@ export class SpreadsheetApp {
   private readonly workbookImageManager: WorkbookImageManager;
 
   private wasmEngine: EngineClient | null = null;
+  /**
+   * Transient engine client used while `initWasmEngine()` is booting the worker.
+   *
+   * This is kept separate from `wasmEngine` so `destroy()` can terminate a still-initializing
+   * worker before it is fully hydrated/registered (preventing leaks in tests/hot reload).
+   */
+  private wasmEngineInit: EngineClient | null = null;
   private workbookFileMetadata: { directory: string | null; filename: string | null } = { directory: null, filename: null };
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
@@ -4410,6 +4417,14 @@ export class SpreadsheetApp {
     this.sharedProvider = null;
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
+    // `initWasmEngine` can still be booting the worker when destroy runs. Terminate any
+    // in-flight init client so it doesn't leak a WebWorker or keep this app instance alive.
+    try {
+      (this.wasmEngineInit as any)?.terminate?.();
+    } catch {
+      // ignore
+    }
+    this.wasmEngineInit = null;
     this.auditingUnsubscribe?.();
     this.auditingUnsubscribe = null;
     this.externalRepaintUnsubscribe?.();
@@ -7115,6 +7130,7 @@ export class SpreadsheetApp {
   private async initWasmEngine(): Promise<void> {
     if (this.wasmEngine) return;
     if (typeof Worker === "undefined") return;
+    if (this.disposed) return;
 
     let postInitHydrate: Promise<void> | null = null;
 
@@ -7126,6 +7142,7 @@ export class SpreadsheetApp {
       .then(async () => {
         // Another init call may have completed while we were waiting on the prior promise.
         if (this.wasmEngine) return;
+        if (this.disposed) return;
 
         const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
         const wasmModuleUrl =
@@ -7136,12 +7153,17 @@ export class SpreadsheetApp {
         let engine: EngineClient | null = null;
         try {
           engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
+          this.wasmEngineInit = engine;
           let changedDuringInit = false;
           const unsubscribeInit = this.document.on("change", () => {
             changedDuringInit = true;
           });
           try {
             await engine.init();
+            if (this.disposed) {
+              engine.terminate();
+              return;
+            }
 
             // `engineHydrateFromDocument` is relatively expensive, but we need to ensure we don't miss
             // edits that happen while the WASM worker is booting. If the user edits the document
@@ -7152,109 +7174,122 @@ export class SpreadsheetApp {
             // This is especially important for fast e2e runs that start editing immediately after
             // navigation.
             for (let attempt = 0; attempt < 2; attempt += 1) {
+              if (this.disposed) {
+                engine.terminate();
+                return;
+              }
               changedDuringInit = false;
               this.clearComputedValuesByCoord();
               const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
                 workbookFileMetadata: this.workbookFileMetadata,
                 localeId: getLocale(),
               });
+              if (this.disposed) {
+                engine.terminate();
+                return;
+              }
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
             }
           } finally {
             unsubscribeInit();
           }
- 
-           this.wasmEngine = engine;
-           this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
-             if (!this.wasmEngine || this.wasmSyncSuspended) return;
+          if (this.disposed) {
+            engine.terminate();
+            return;
+          }
 
-             const source = typeof payload?.source === "string" ? payload.source : "";
+          this.wasmEngine = engine;
+          this.wasmEngineInit = null;
+          this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
+            if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
-             if (source === "applyState") {
-               this.clearComputedValuesByCoord();
-               void this.enqueueWasmSync(async (worker) => {
+            const source = typeof payload?.source === "string" ? payload.source : "";
+
+            if (source === "applyState") {
+              this.clearComputedValuesByCoord();
+              void this.enqueueWasmSync(async (worker) => {
                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
                   workbookFileMetadata: this.workbookFileMetadata,
                   localeId: getLocale(),
                 });
                 this.applyComputedChanges(changes);
               });
-               return;
-             }
+              return;
+            }
 
-               const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
-               const sheetOrderDelta = payload?.sheetOrderDelta ?? null;
-               const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
-                 if (!delta) return false;
-                 // Sheet add/delete.
-                 if (delta.before == null || delta.after == null) return true;
-                 // Sheet rename.
-                 const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
-                 const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
-                 return beforeName !== afterName;
-               });
+            const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+            const sheetOrderDelta = payload?.sheetOrderDelta ?? null;
+            const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
+              if (!delta) return false;
+              // Sheet add/delete.
+              if (delta.before == null || delta.after == null) return true;
+              // Sheet rename.
+              const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
+              const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
+              return beforeName !== afterName;
+            });
 
-              if (sheetMetaRequiresHydrate || sheetOrderDelta) {
-                this.clearComputedValuesByCoord();
+            if (sheetMetaRequiresHydrate || sheetOrderDelta) {
+              this.clearComputedValuesByCoord();
+              void this.enqueueWasmSync(async (worker) => {
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                  workbookFileMetadata: this.workbookFileMetadata,
+                  localeId: getLocale(),
+                });
+                this.applyComputedChanges(changes);
+              });
+              return;
+            }
+
+            const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+            const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
+            const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
+            const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
+            const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+            const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
+            const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+            const hasViews = sheetViewDeltas.length > 0;
+            const hasRangeRuns = rangeRunDeltas.length > 0;
+            const hasSheetMeta = sheetMetaDeltas.length > 0;
+
+            const recalc = payload?.recalc;
+            const wantsRecalc = recalc === true;
+
+            // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
+            // task unless the payload can impact calculation results.
+            if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
+              if (wantsRecalc) {
                 void this.enqueueWasmSync(async (worker) => {
-                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                   workbookFileMetadata: this.workbookFileMetadata,
-                   localeId: getLocale(),
-                 });
-                 this.applyComputedChanges(changes);
-               });
-                return;
+                  const changes = await worker.recalculate();
+                  this.applyComputedChanges(changes);
+                });
               }
+              return;
+            }
 
-             const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-             const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
-             const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
-             const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
-             const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-             const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
-             const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
-             const hasViews = sheetViewDeltas.length > 0;
-             const hasRangeRuns = rangeRunDeltas.length > 0;
-             const hasSheetMeta = sheetMetaDeltas.length > 0;
+            const sheetNameCache = new Map<string, string>();
+            const sheetIdToSheet = (sheetId: string): string => {
+              const key = String(sheetId ?? "").trim();
+              if (!key) return "Sheet1";
+              const cached = sheetNameCache.get(key);
+              if (cached) return cached;
 
-             const recalc = payload?.recalc;
-             const wantsRecalc = recalc === true;
+              const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
+              const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
+              const resolved = metaName || key;
+              sheetNameCache.set(key, resolved);
+              return resolved;
+            };
 
-              // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
-              // task unless the payload can impact calculation results.
-              if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
-                if (wantsRecalc) {
-                  void this.enqueueWasmSync(async (worker) => {
-                    const changes = await worker.recalculate();
-                    this.applyComputedChanges(changes);
-                  });
-                }
-                return;
-              }
-
-             const sheetNameCache = new Map<string, string>();
-             const sheetIdToSheet = (sheetId: string): string => {
-               const key = String(sheetId ?? "").trim();
-               if (!key) return "Sheet1";
-               const cached = sheetNameCache.get(key);
-               if (cached) return cached;
-
-               const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
-               const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
-               const resolved = metaName || key;
-               sheetNameCache.set(key, resolved);
-               return resolved;
-             };
-
-             void this.enqueueWasmSync(async (worker) => {
-               const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
-                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
-                 sheetIdToSheet,
-               });
-               this.applyComputedChanges(changes);
-             });
-           });
+            void this.enqueueWasmSync(async (worker) => {
+              const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
+                getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
+                sheetIdToSheet,
+              });
+              this.applyComputedChanges(changes);
+            });
+          });
 
            // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
            // interactions) before the `document.on("change")` listener is installed. If the
@@ -7273,14 +7308,16 @@ export class SpreadsheetApp {
             });
             this.applyComputedChanges(changes);
           });
-          } catch {
-            // Ignore initialization failures (e.g. missing WASM bundle).
-            engine?.terminate();
-            this.wasmEngine = null;
-            this.wasmUnsubscribe?.();
-            this.wasmUnsubscribe = null;
-            this.clearComputedValuesByCoord();
-          }
+        } catch {
+          // Ignore initialization failures (e.g. missing WASM bundle).
+          engine?.terminate();
+          this.wasmEngine = null;
+          this.wasmUnsubscribe?.();
+          this.wasmUnsubscribe = null;
+          this.clearComputedValuesByCoord();
+        } finally {
+          if (this.wasmEngineInit === engine) this.wasmEngineInit = null;
+        }
       })
       .catch(() => {
         // Ignore WASM init failures; the app continues to function using the in-process mock engine.
