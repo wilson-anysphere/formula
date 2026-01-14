@@ -642,9 +642,12 @@ Notes:
 
 - This path re-wraps the decrypted OOXML package with freshly generated `EncryptionInfo` +
   `EncryptedPackage` streams using `crates/formula-office-crypto`.
-  - Today, `formula-io` uses `formula_office_crypto::EncryptOptions::default()` for output, which
-    means the saved file is typically re-encrypted as **Agile (4.4)** (even if the input used Standard).
+  - `OpenedWorkbookWithPreservedOle::save_preserving_encryption` currently uses
+    `formula_office_crypto::EncryptOptions::default()` for output, which means the saved file is
+    typically re-encrypted as **Agile (4.4)** (even if the input used Standard).
 - The password is required at save time because `OpenedWorkbookWithPreservedOle` does not store it.
+- If you want to write a **new encrypted output** workbook (without preserving extra OLE metadata
+  streams), use `save_workbook_with_options(.., SaveOptions { password: Some(..), encryption_scheme: ... })`.
 - This path can also re-encrypt and save `.xlsb` workbooks (use an `.xlsb` output extension if you
   want to keep the binary format).
 - Legacy `.xls` `FILEPASS` encryption is not preserved on save.
