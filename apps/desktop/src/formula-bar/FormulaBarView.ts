@@ -427,6 +427,7 @@ export class FormulaBarView {
     const textarea = document.createElement("textarea");
     textarea.className = "formula-bar-input";
     textarea.dataset.testid = "formula-input";
+    textarea.setAttribute("aria-label", "Formula bar");
     textarea.spellcheck = false;
     textarea.autocapitalize = "off";
     textarea.autocomplete = "off";
