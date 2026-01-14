@@ -46,26 +46,12 @@ export interface EngineSyncTarget {
   setCells?: (
     updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
   ) => Promise<void> | void;
-  /**
-   * Intern a formatting/protection style object into the engine and return its engine-specific id.
-   *
-   * Optional: engines that don't implement formatting metadata can omit this method.
-   */
-  internStyle?: (style: unknown) => Promise<number> | number;
-  /**
-   * Set the engine style id for a single cell.
-   *
-   * Optional: engines that don't implement formatting metadata can omit this method.
-   */
-  setCellStyleId?: (address: string, styleId: number, sheet?: string) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
   /**
    * Optional formatting metadata interning + application methods.
-   *
-   * These are additive and may not be implemented by all engine targets.
-   * Sync helpers must treat them as best-effort.
    */
   internStyle?: (styleObj: unknown) => Promise<number> | number;
+  setCellStyleId?: (address: string, styleId: number, sheet?: string) => Promise<void> | void;
   setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
   setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
   setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
