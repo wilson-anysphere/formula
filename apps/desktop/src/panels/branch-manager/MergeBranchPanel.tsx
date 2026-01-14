@@ -191,6 +191,21 @@ function jsonSummary(value: unknown) {
   }
 }
 
+function formatConflictReason(reason: string): string {
+  switch (reason) {
+    case "content":
+      return t("branchMerge.reason.content");
+    case "format":
+      return t("branchMerge.reason.format");
+    case "delete-vs-edit":
+      return t("branchMerge.reason.deleteVsEdit");
+    case "move-destination":
+      return t("branchMerge.reason.moveDestination");
+    default:
+      return reason;
+  }
+}
+
 function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver | null) {
   const displayName = (sheetId: string | null | undefined): string => {
     const id = String(sheetId ?? "").trim();
@@ -200,7 +215,7 @@ function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver |
 
   if (c.type === "cell" || c.type === "move") {
     const sheetName = displayName(c.sheetId);
-    return `${formatSheetNameForA1(sheetName)}!${c.cell} (${c.reason})`;
+    return `${formatSheetNameForA1(sheetName)}!${c.cell} (${formatConflictReason(c.reason)})`;
   }
   if (c.type === "sheet") {
     if (c.reason === "rename") return `sheet rename: ${displayName(c.sheetId)}`;
