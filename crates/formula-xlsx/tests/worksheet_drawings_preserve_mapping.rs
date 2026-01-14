@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read, Write};
 
+use formula_model::drawings::DrawingObjectId;
 use formula_model::{CellRef, CellValue};
 use formula_xlsx::load_from_bytes;
 use roxmltree::Document;
@@ -303,6 +304,52 @@ fn xlsx_document_roundtrip_preserves_drawing_mapping_after_cell_edit() {
         doc.set_cell_value(sheet1_id, CellRef::new(0, 1), CellValue::Number(42.0)),
         "expected set_cell_value to succeed"
     );
+
+    let saved = doc.save_to_vec().expect("save");
+    let _doc2 = load_from_bytes(&saved).expect("reload");
+
+    let sheet1_rels = zip_part_string(&saved, "xl/worksheets/_rels/sheet1.xml.rels")
+        .expect("output sheet1 rels");
+    let (sheet1_out_id, sheet1_out_target) =
+        sheet_drawing_relationship(&sheet1_rels).expect("output sheet1 drawing rel");
+    let sheet2_rels = zip_part_string(&saved, "xl/worksheets/_rels/sheet2.xml.rels")
+        .expect("output sheet2 rels");
+    let (sheet2_out_id, sheet2_out_target) =
+        sheet_drawing_relationship(&sheet2_rels).expect("output sheet2 drawing rel");
+
+    assert_eq!(sheet1_out_id, "rId1");
+    assert_eq!(sheet1_out_target, "../drawings/drawing1.xml");
+    assert_eq!(sheet2_out_id, "rId1");
+    assert_eq!(sheet2_out_target, "../drawings/drawing2.xml");
+
+    let in_parts = drawing_part_names(&input);
+    let out_parts = drawing_part_names(&saved);
+    assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
+}
+
+#[test]
+fn xlsx_document_roundtrip_preserves_drawing_mapping_after_drawing_edit() {
+    let input = build_two_sheet_drawing_workbook();
+    let mut doc = load_from_bytes(&input).expect("load synthetic workbook");
+
+    let sheet1 = doc
+        .workbook
+        .sheets
+        .iter_mut()
+        .find(|s| s.name == "Sheet1")
+        .expect("Sheet1");
+    let existing = sheet1
+        .drawings
+        .first()
+        .cloned()
+        .expect("expected Sheet1 to contain at least one drawing object");
+    let mut cloned = existing.clone();
+    cloned.id = DrawingObjectId(existing.id.0.saturating_add(1));
+    // Force the writer to allocate a new embed relationship + pic XML for this cloned object so we
+    // exercise the drawing-part rewrite path, not just a no-op clone.
+    cloned.preserved.remove("xlsx.embed_rel_id");
+    cloned.preserved.remove("xlsx.pic_xml");
+    sheet1.drawings.push(cloned);
 
     let saved = doc.save_to_vec().expect("save");
     let _doc2 = load_from_bytes(&saved).expect("reload");
