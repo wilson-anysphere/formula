@@ -1002,11 +1002,7 @@ impl DataModel {
                         v.is_blank() || &v != key
                     });
                 }
-                UnmatchedFactRows::Dense {
-                    bits,
-                    len,
-                    count,
-                } => {
+                UnmatchedFactRows::Dense { bits, len, count } => {
                     let key = &key_for_updates;
                     let len = *len;
                     let mut clear_row = |row: usize| {
