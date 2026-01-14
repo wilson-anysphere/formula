@@ -210,8 +210,12 @@ fn formulatext_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(v) => return v,
     };
 
-    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
-        && reference.start == ctx.current_cell_addr();
+    // FORMULATEXT reads formula metadata (not the computed cell value), so a direct self-reference
+    // (e.g. `=FORMULATEXT(A1)` in `A1`) is not a true dependency and should not be recorded for
+    // dynamic dependency tracing (avoids spurious self-edges).
+    let is_self_reference =
+        matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+            && reference.start == ctx.current_cell_addr();
     if !is_self_reference {
         ctx.record_reference(&reference);
     }
@@ -242,8 +246,11 @@ fn isformula_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(v) => return v,
     };
 
-    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
-        && reference.start == ctx.current_cell_addr();
+    // ISFORMULA reads formula presence metadata (not the computed value), so a direct self-reference
+    // should not be recorded as a dynamic dependency.
+    let is_self_reference =
+        matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+            && reference.start == ctx.current_cell_addr();
     if !is_self_reference {
         ctx.record_reference(&reference);
     }

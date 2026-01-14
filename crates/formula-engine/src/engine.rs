@@ -15082,47 +15082,198 @@ fn walk_calc_expr(
                             return;
                         }
 
-                        // For direct references, keep the precedent edge so edits to the referenced
-                        // cell mark this formula dirty. For reference-producing expressions (e.g.
-                        // OFFSET/INDIRECT), walk in a "reference context" to avoid spurious
-                        // self-edges while still tracking dependencies used to compute the
-                        // reference.
+                        // These functions accept a reference argument but only consult its metadata,
+                        // not its evaluated value. Avoid introducing range-node cycles by
+                        // representing direct references as single-cell precedents.
+                        let insert_cell =
+                            |precedents: &mut HashSet<Precedent>, sheet_id: SheetId, addr: CellAddr| {
+                                if sheet_id == current_cell.sheet && addr == current_cell.addr {
+                                    return;
+                                }
+                                precedents.insert(Precedent::Cell(CellId::new(
+                                    sheet_id_for_graph(sheet_id),
+                                    addr.row,
+                                    addr.col,
+                                )));
+                            };
+
                         match arg0 {
-                            Expr::CellRef(_)
-                            | Expr::RangeRef(_)
-                            | Expr::StructuredRef(_)
-                            | Expr::SpillRange(_) => {
-                                walk_calc_expr(
-                                    arg0,
-                                    current_cell,
-                                    tables_by_sheet,
-                                    workbook,
-                                    spills,
-                                    precedents,
-                                    visiting_names,
-                                    lexical_scopes,
-                                );
+                            Expr::CellRef(r) => {
+                                if let Some(sheets) =
+                                    resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
+                                {
+                                    let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                                        return;
+                                    };
+                                    for sheet_id in sheets {
+                                        insert_cell(precedents, sheet_id, addr);
+                                    }
+                                }
                             }
-                            Expr::ImplicitIntersection(inner)
-                                if matches!(
-                                    inner.as_ref(),
-                                    Expr::CellRef(_)
-                                        | Expr::RangeRef(_)
-                                        | Expr::StructuredRef(_)
-                                        | Expr::SpillRange(_)
-                                ) =>
-                            {
-                                walk_calc_expr(
-                                    arg0,
-                                    current_cell,
-                                    tables_by_sheet,
-                                    workbook,
-                                    spills,
-                                    precedents,
-                                    visiting_names,
-                                    lexical_scopes,
-                                );
+                            Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                                if let Some(sheets) =
+                                    resolve_sheet_span(sheet, current_cell.sheet, workbook)
+                                {
+                                    let Some(start) = start.resolve(current_cell.addr) else {
+                                        return;
+                                    };
+                                    let Some(end) = end.resolve(current_cell.addr) else {
+                                        return;
+                                    };
+                                    let addr = CellAddr {
+                                        row: start.row.min(end.row),
+                                        col: start.col.min(end.col),
+                                    };
+                                    for sheet_id in sheets {
+                                        insert_cell(precedents, sheet_id, addr);
+                                    }
+                                }
                             }
+                            Expr::StructuredRef(sref_expr) => {
+                                if matches!(&sref_expr.sheet, SheetReference::External(_)) {
+                                    return;
+                                }
+                                if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
+                                    tables_by_sheet,
+                                    current_cell.sheet,
+                                    current_cell.addr,
+                                    &sref_expr.sref,
+                                ) {
+                                    for (sheet_id, start, end) in ranges {
+                                        let addr = CellAddr {
+                                            row: start.row.min(end.row),
+                                            col: start.col.min(end.col),
+                                        };
+                                        insert_cell(precedents, sheet_id, addr);
+                                    }
+                                }
+                            }
+                            Expr::SpillRange(inner) => {
+                                if let Some(target) = spill_range_target_cell(inner, current_cell) {
+                                    insert_cell(precedents, target.sheet, target.addr);
+                                } else {
+                                    walk_calc_expr_reference_context(
+                                        inner,
+                                        current_cell,
+                                        tables_by_sheet,
+                                        workbook,
+                                        spills,
+                                        precedents,
+                                        visiting_names,
+                                        lexical_scopes,
+                                    );
+                                }
+                            }
+                            Expr::ImplicitIntersection(inner) => match inner.as_ref() {
+                                Expr::CellRef(r) => {
+                                    if let Some(sheets) =
+                                        resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
+                                    {
+                                        let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                                            return;
+                                        };
+                                        for sheet_id in sheets {
+                                            insert_cell(precedents, sheet_id, addr);
+                                        }
+                                    }
+                                }
+                                Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                                    let Some(start) = start.resolve(current_cell.addr) else {
+                                        return;
+                                    };
+                                    let Some(end) = end.resolve(current_cell.addr) else {
+                                        return;
+                                    };
+                                    let row_start = start.row.min(end.row);
+                                    let row_end = start.row.max(end.row);
+                                    let col_start = start.col.min(end.col);
+                                    let col_end = start.col.max(end.col);
+                                    let cur = current_cell.addr;
+
+                                    let intersected = if row_start == row_end && col_start == col_end {
+                                        Some(CellAddr {
+                                            row: row_start,
+                                            col: col_start,
+                                        })
+                                    } else if col_start == col_end {
+                                        (cur.row >= row_start && cur.row <= row_end).then(|| CellAddr {
+                                            row: cur.row,
+                                            col: col_start,
+                                        })
+                                    } else if row_start == row_end {
+                                        (cur.col >= col_start && cur.col <= col_end).then(|| CellAddr {
+                                            row: row_start,
+                                            col: cur.col,
+                                        })
+                                    } else {
+                                        (cur.row >= row_start
+                                            && cur.row <= row_end
+                                            && cur.col >= col_start
+                                            && cur.col <= col_end)
+                                            .then(|| cur)
+                                    };
+
+                                    if let (Some(intersected), Some(sheets)) = (
+                                        intersected,
+                                        resolve_sheet_span(sheet, current_cell.sheet, workbook),
+                                    ) {
+                                        for sheet_id in sheets {
+                                            insert_cell(precedents, sheet_id, intersected);
+                                        }
+                                    }
+                                }
+                                Expr::StructuredRef(sref_expr) => {
+                                    if matches!(&sref_expr.sheet, SheetReference::External(_)) {
+                                        return;
+                                    }
+                                    if let Ok(ranges) =
+                                        crate::structured_refs::resolve_structured_ref(
+                                            tables_by_sheet,
+                                            current_cell.sheet,
+                                            current_cell.addr,
+                                            &sref_expr.sref,
+                                        )
+                                    {
+                                        for (sheet_id, start, end) in ranges {
+                                            let addr = CellAddr {
+                                                row: start.row.min(end.row),
+                                                col: start.col.min(end.col),
+                                            };
+                                            insert_cell(precedents, sheet_id, addr);
+                                        }
+                                    }
+                                }
+                                Expr::SpillRange(inner) => {
+                                    if let Some(target) =
+                                        spill_range_target_cell(inner, current_cell)
+                                    {
+                                        insert_cell(precedents, target.sheet, target.addr);
+                                    } else {
+                                        walk_calc_expr_reference_context(
+                                            inner,
+                                            current_cell,
+                                            tables_by_sheet,
+                                            workbook,
+                                            spills,
+                                            precedents,
+                                            visiting_names,
+                                            lexical_scopes,
+                                        );
+                                    }
+                                }
+                                other => {
+                                    walk_calc_expr_reference_context(
+                                        other,
+                                        current_cell,
+                                        tables_by_sheet,
+                                        workbook,
+                                        spills,
+                                        precedents,
+                                        visiting_names,
+                                        lexical_scopes,
+                                    );
+                                }
+                            },
                             other => {
                                 walk_calc_expr_reference_context(
                                     other,
@@ -16030,6 +16181,36 @@ mod tests {
 
         assert_eq!(engine.circular_reference_count(), 0);
         assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
+    }
+
+    #[test]
+    fn formulatext_multi_cell_range_including_formula_cell_is_not_circular() {
+        let mut engine = Engine::new();
+        // This reference is invalid for FORMULATEXT (expects a single cell) but should still return
+        // `#N/A` rather than being forced into circular-reference handling when the range includes
+        // the formula cell.
+        engine
+            .set_cell_formula("Sheet1", "A2", "=FORMULATEXT(A1:A3)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
+    }
+
+    #[test]
+    fn isformula_multi_cell_range_including_formula_cell_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A2", "=ISFORMULA(A1:A3)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Error(ErrorKind::Value)
+        );
     }
 
     #[test]
