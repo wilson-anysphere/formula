@@ -86,22 +86,22 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       },
       // setProperty("margin-top", "8px")
       {
-        re: /\.style\.setProperty\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\.style\??\.setProperty\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty",
       },
       // setProperty via bracket notation (e.g. `el.style["setProperty"]("margin-top", "8px")`)
       {
-        re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty[prop]",
       },
       // setProperty("margin-top", 8)
       {
-        re: /\.style\.setProperty\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style\??\.setProperty\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty-number",
       },
       // setProperty via bracket notation (numeric) (e.g. `el.style["setProperty"]("margin-top", 8)`)
       {
-        re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty[prop]-number",
       },
     ];

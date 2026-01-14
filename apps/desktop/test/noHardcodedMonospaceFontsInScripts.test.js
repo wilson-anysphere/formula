@@ -75,18 +75,18 @@ test("desktop UI scripts should not hardcode monospace font stacks in inline sty
     { re: /\.style\s*\[\s*(?:["'`])font(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style[font]" },
     // setProperty("font-family", "ui-monospace")
     {
-      re: /\.style\.setProperty\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style\??\.setProperty\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(font-family)",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("font-family", "ui-monospace")`)
     {
-      re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[font-family]",
     },
     // setProperty("font", "12px ui-monospace")
-    { re: /\.style\.setProperty\(\s*(["'])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi, kind: "setProperty(font)" },
+    { re: /\.style\??\.setProperty\(\s*(["'])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi, kind: "setProperty(font)" },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("font", "12px ui-monospace")`)
-    { re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi, kind: "setProperty[font]" },
+    { re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi, kind: "setProperty[font]" },
   ];
 
   for (const file of files) {

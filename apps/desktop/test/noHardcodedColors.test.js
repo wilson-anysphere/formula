@@ -177,12 +177,12 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   const setAttributeStyleAssignment = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
-    String.raw`\.style\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.style\??\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket notation (e.g. `el.style["setProperty"]("color", "red")`)
-    String.raw`\.style\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.style(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setAttributeColor = new RegExp(
