@@ -203,7 +203,20 @@ function getTauriFs(): any {
   } catch {
     tauri = null;
   }
-  return tauri?.fs ?? tauri?.plugin?.fs ?? null;
+  const safeGetProp = (obj: any, prop: string): any | undefined => {
+    if (!obj) return undefined;
+    try {
+      return obj[prop];
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Prefer `__TAURI__.fs`, but fall back to plugin container shapes. Some hardened environments
+  // (or tests) may define getters that throw for blocked namespaces; treat those as unavailable.
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  return safeGetProp(tauri, "fs") ?? safeGetProp(plugin, "fs") ?? safeGetProp(plugins, "fs") ?? null;
 }
 
 function normalizeBinaryPayload(payload: unknown): Uint8Array {

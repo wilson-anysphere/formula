@@ -60,4 +60,30 @@ describe("Power Query file adapter listDir", () => {
       /too many files|too deeply nested/i,
     );
   });
+
+  it("falls back to __TAURI__.plugin.fs when a throwing __TAURI__.fs getter blocks direct FS access", async () => {
+    const readTextFile = vi.fn().mockResolvedValue("hello");
+    const readFile = vi.fn().mockResolvedValue(new Uint8Array());
+
+    const tauri: any = {
+      plugin: {
+        fs: {
+          readTextFile,
+          readFile,
+        },
+      },
+    };
+    Object.defineProperty(tauri, "fs", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked fs access");
+      },
+    });
+    (globalThis as any).__TAURI__ = tauri;
+
+    const engine = createDesktopQueryEngine();
+    await expect(engine.fileAdapter.readText("/tmp/file.txt")).resolves.toBe("hello");
+    expect(readTextFile).toHaveBeenCalledTimes(1);
+    expect(readTextFile).toHaveBeenCalledWith("/tmp/file.txt");
+  });
 });
