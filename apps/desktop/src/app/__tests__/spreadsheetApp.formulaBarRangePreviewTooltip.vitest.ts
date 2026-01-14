@@ -238,6 +238,54 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("associates the tooltip with the formula input via aria-describedby", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=A1", value: null });
+
+    const textarea = formulaBar.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("A1");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+    expect(tooltip?.getAttribute("role")).toBe("tooltip");
+    expect(tooltip?.getAttribute("aria-hidden")).toBe("false");
+
+    const tooltipId = tooltip?.id ?? "";
+    expect(tooltipId).not.toBe("");
+    expect(textarea!.getAttribute("aria-describedby")).toContain(tooltipId);
+
+    // Hide by leaving the highlight surface; should remove aria-describedby association.
+    highlight?.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+    expect(tooltip?.hidden).toBe(true);
+    expect(tooltip?.getAttribute("aria-hidden")).toBe("true");
+    expect(textarea!.getAttribute("aria-describedby") ?? "").not.toContain(tooltipId);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("clears the tooltip when the active cell changes while hovering a reference in view mode", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");
