@@ -702,6 +702,124 @@ class ComparePrivacyModeTests(unittest.TestCase):
             self.assertNotIn(secret_value, report_text)
             self.assertNotIn(other_value, report_text)
 
+    def test_privacy_mode_hashes_domain_like_string_values(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            secret_value = "corp.example.com"
+            other_value = "other.internal"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {
+                        "id": "case-a",
+                        "formula": "=A1",
+                        "outputCell": "C1",
+                        "inputs": [{"cell": "A1", "value": secret_value}],
+                    }
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "s", "v": secret_value},
+                        "address": "C1",
+                        "displayText": secret_value,
+                    }
+                ],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "s", "v": other_value},
+                        "address": "C1",
+                        "displayText": other_value,
+                    }
+                ],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--privacy-mode",
+                    "private",
+                    "--max-mismatch-rate",
+                    "1.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"compare.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            mismatches = report.get("mismatches", [])
+            self.assertIsInstance(mismatches, list)
+            self.assertEqual(len(mismatches), 1)
+            m = mismatches[0]
+
+            secret_hash = hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
+            other_hash = hashlib.sha256(other_value.encode("utf-8")).hexdigest()
+
+            self.assertEqual(m.get("expected"), {"t": "s", "v": f"sha256={secret_hash}"})
+            self.assertEqual(m.get("actual"), {"t": "s", "v": f"sha256={other_hash}"})
+            self.assertEqual(m.get("expectedDisplayText"), f"sha256={secret_hash}")
+            self.assertEqual(m.get("actualDisplayText"), f"sha256={other_hash}")
+
+            inputs = m.get("inputs")
+            self.assertIsInstance(inputs, list)
+            self.assertEqual(inputs[0].get("value"), f"sha256={secret_hash}")
+
+            report_text = json.dumps(report)
+            self.assertNotIn(secret_value, report_text)
+            self.assertNotIn(other_value, report_text)
+
     def test_privacy_mode_hashes_path_like_string_literals_in_formulas(self) -> None:
         compare_py = Path(__file__).resolve().parents[1] / "compare.py"
         self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")

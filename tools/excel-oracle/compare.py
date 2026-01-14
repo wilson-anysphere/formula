@@ -160,8 +160,9 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
     if value.startswith("sha256="):
         return value
 
-    # Keep repo-relative paths readable; only hash strings that look like absolute filesystem paths
-    # or URI-like paths (file://, smb://, etc).
+    # Keep repo-relative paths readable; only hash strings that look like absolute filesystem paths,
+    # URI-like paths (file://, smb://, etc), or contain domain/filename-like tokens that can leak
+    # corporate/internal identifiers.
     parsed = urllib.parse.urlparse(value)
     looks_abs = bool(
         value.startswith(("/", "\\", "~"))
@@ -170,6 +171,19 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
         # urlparse treats `C:\foo` as scheme "c" on non-Windows too; that's fine (it is a path).
         or (parsed.scheme and ":" in value)
     )
+    if not looks_abs:
+        lowered = value.casefold()
+        # Redact domain-like strings even when they are not full URLs (e.g. `corp.example.com`).
+        if "://" in value:
+            looks_abs = True
+        elif re.search(r"\.(com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b", lowered):
+            looks_abs = True
+        elif re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", value):
+            looks_abs = True
+        # Spreadsheet-ish filenames (often used for linked workbooks) can embed internal project
+        # names even when they are relative paths.
+        elif re.search(r"\.(xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b", lowered):
+            looks_abs = True
     if not looks_abs:
         return value
 
