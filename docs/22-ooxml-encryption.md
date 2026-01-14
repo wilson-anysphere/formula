@@ -281,9 +281,9 @@ Do **not** reuse the per-segment IV logic from `EncryptedPackage` here.
 
 Compatibility note: some non-Excel producers appear to derive the IV as
 `IV = Truncate(Hash(saltValue || blockKey), blockSize)` (similar to other Agile IV derivations).
-To maximize real-world compatibility, `crates/formula-xlsx::offcrypto` will try both strategies
-(treating a verifier mismatch as a signal to retry with the alternative IV derivation). In
-contrast, `crates/formula-office-crypto` uses `saltValue` directly as the IV.
+To maximize real-world compatibility, both `crates/formula-xlsx::offcrypto` and
+`crates/formula-office-crypto` will try both strategies (treating a verifier mismatch as a signal to
+retry with the alternative IV derivation).
 
 ## Decrypting `EncryptedPackage`
 
