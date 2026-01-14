@@ -24,7 +24,7 @@ early:
 - Extract the generated `*.AppImage` via `--appimage-extract` (no FUSE required)
 - Verify the extracted main ELF binary architecture via `readelf -h`
 - Run `ldd` and fail the workflow if any shared libraries are `not found`
-- Validate the extracted `.desktop` file exists and advertises file associations + deep-link integration (via `bundle.fileAssociations` and `formula://`)
+- Then validate desktop integration metadata from the extracted payload (file associations from `bundle.fileAssociations`, plus `formula://` deep links)
 
 See `scripts/ci/check-appimage.sh`.
 See also `scripts/validate-linux-appimage.sh` (desktop integration metadata + bundle version checks vs `tauri.conf.json`).
