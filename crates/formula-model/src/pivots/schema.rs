@@ -29,7 +29,7 @@ impl PivotFieldRef {
     /// Returns the underlying worksheet/pivot-cache field name, if this is a cache-backed field.
     pub fn as_cache_field_name(&self) -> Option<&str> {
         match self {
-            PivotFieldRef::CacheFieldName(name) => Some(name),
+            PivotFieldRef::CacheFieldName(name) => Some(name.as_str()),
             _ => None,
         }
     }
