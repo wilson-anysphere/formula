@@ -341,6 +341,7 @@ struct PythonRpcHost<'a> {
     active_sheet_id: String,
     selection: PythonSelection,
     updates: Vec<CellUpdateData>,
+    abort_reason: Option<String>,
 }
 
 impl<'a> PythonRpcHost<'a> {
@@ -392,7 +393,12 @@ impl<'a> PythonRpcHost<'a> {
             active_sheet_id,
             selection,
             updates: Vec::new(),
+            abort_reason: None,
         })
+    }
+
+    fn take_abort_reason(&mut self) -> Option<String> {
+        self.abort_reason.take()
     }
 
     fn extend_updates(&mut self, updates: Vec<CellUpdateData>) -> Result<(), String> {
@@ -421,7 +427,9 @@ impl<'a> PythonRpcHost<'a> {
                 self.updates[idx] = update;
             } else {
                 if self.updates.len() >= max_updates {
-                    return Err(python_updates_limit_error(max_updates));
+                    let msg = python_updates_limit_error(max_updates);
+                    self.abort_reason = Some(msg.clone());
+                    return Err(msg);
                 }
                 index_by_key.insert(key, self.updates.len());
                 self.updates.push(update);
@@ -943,6 +951,7 @@ pub fn run_python_script(
 
     let mut host = PythonRpcHost::new(state, context)?;
     let mut runner_result: Option<(bool, Option<String>, Option<String>)> = None;
+    let mut fatal_err: Option<String> = None;
 
     let mut reader = BufReader::new(stdout);
     let mut line_buf = Vec::new();
@@ -958,7 +967,8 @@ pub fn run_python_script(
                 if let Ok(mut child) = child.lock() {
                     let _ = child.kill();
                 }
-                return Err(err);
+                fatal_err = Some(err);
+                break;
             }
         };
 
@@ -974,9 +984,10 @@ pub fn run_python_script(
                 if let Ok(mut child) = child.lock() {
                     let _ = child.kill();
                 }
-                return Err(format!(
+                fatal_err = Some(format!(
                     "Python runtime protocol error (invalid JSON line): {err}: {trimmed}"
                 ));
+                break;
             }
         };
 
@@ -984,7 +995,16 @@ pub fn run_python_script(
             RunnerMessage::Rpc { id, method, params } => {
                 let (result, error) = match host.handle_rpc(&method, params) {
                     Ok(value) => (value, None),
-                    Err(err) => (JsonValue::Null, Some(err)),
+                    Err(err) => {
+                        if let Some(reason) = host.take_abort_reason() {
+                            if let Ok(mut child) = child.lock() {
+                                let _ = child.kill();
+                            }
+                            fatal_err = Some(reason);
+                            break;
+                        }
+                        (JsonValue::Null, Some(err))
+                    }
                 };
                 let response = RpcResponseMessage {
                     msg_type: "rpc_response",
@@ -1004,6 +1024,10 @@ pub fn run_python_script(
                 runner_result = Some((success, error, traceback));
                 break;
             }
+        }
+
+        if fatal_err.is_some() {
+            break;
         }
     }
 
@@ -1030,6 +1054,10 @@ pub fn run_python_script(
                 stack: None,
             }),
         });
+    }
+
+    if let Some(err) = fatal_err {
+        return Err(err);
     }
 
     let Some((success, error, traceback)) = runner_result else {
@@ -1155,6 +1183,11 @@ mod tests {
         assert!(
             err.contains("3"),
             "expected error to mention limit (3 updates): {err}"
+        );
+        assert_eq!(
+            host.take_abort_reason(),
+            Some(err.clone()),
+            "expected host to mark update limit errors as fatal"
         );
     }
 
