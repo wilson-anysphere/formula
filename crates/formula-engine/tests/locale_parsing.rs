@@ -578,6 +578,30 @@ fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
 }
 
 #[test]
+fn localized_boolean_keywords_are_not_translated_in_field_access() {
+    // Locales use translated boolean keywords (e.g. `WAHR`, `VRAI`, `VERDADERO`), but those should
+    // still be allowed as record field names in dot-access position.
+    assert_eq!(
+        locale::canonicalize_formula("=A1.WAHR", &locale::DE_DE).unwrap(),
+        "=A1.WAHR"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=A1.VRAI", &locale::FR_FR).unwrap(),
+        "=A1.VRAI"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=A1.VERDADERO", &locale::ES_ES).unwrap(),
+        "=A1.VERDADERO"
+    );
+
+    // Control: standalone boolean literals should still be translated.
+    assert_eq!(
+        locale::canonicalize_formula("=WENN(WAHR;1;0)", &locale::DE_DE).unwrap(),
+        "=IF(TRUE,1,0)"
+    );
+}
+
+#[test]
 fn localized_boolean_keywords_are_not_translated_in_3d_sheet_spans() {
     // In de-DE, `WAHR` is the TRUE keyword, but it can also be a sheet name.
     // Ensure we treat `WAHR:Sheet3!A1` as a 3D sheet span, not a boolean literal.
