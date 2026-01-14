@@ -52,6 +52,9 @@ fn assert_fixture_roundtrip_preserves_drawings(
     let expected_drawing_rels_parts = collect_parts(&expected, is_drawing_rels_part);
     let actual_drawing_rels_parts = collect_parts(&actual, is_drawing_rels_part);
 
+    let expected_sheet_rels_parts = collect_parts(&expected, is_worksheet_rels_part);
+    let actual_sheet_rels_parts = collect_parts(&actual, is_worksheet_rels_part);
+
     let expected_media_parts = collect_media_parts_referenced_by_drawings(&expected, &expected_drawing_rels_parts)?;
 
     let mut issues: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -68,12 +71,24 @@ fn assert_fixture_roundtrip_preserves_drawings(
         "drawing_rels",
         &mut issues,
     );
+    report_part_set_differences(
+        &expected_sheet_rels_parts,
+        &actual_sheet_rels_parts,
+        "worksheet_rels",
+        &mut issues,
+    );
 
     // Compare bytes for all drawing parts and their drawing-level rels.
     for part in expected_drawing_xml_parts
         .iter()
         .chain(expected_drawing_rels_parts.iter())
     {
+        compare_part_bytes(&expected, &actual, part, &mut issues);
+    }
+
+    // Compare bytes for worksheet `.rels` parts as well; the writer should not need to touch them
+    // when round-tripping drawings unchanged.
+    for part in expected_sheet_rels_parts.iter() {
         compare_part_bytes(&expected, &actual, part, &mut issues);
     }
 
@@ -114,7 +129,9 @@ fn assert_fixture_cell_edit_preserves_drawings(
         .expect("sheet exists")
         .set_value(
             CellRef::from_a1("A1").expect("valid A1"),
-            CellValue::Number(123.0),
+            // Use a string so the writer must also patch shared string tables/relationships, which
+            // should still not cause drawing parts to be rewritten.
+            CellValue::String("hello".to_string()),
         );
 
     let roundtripped_bytes = doc.save_to_vec()?;
@@ -127,6 +144,9 @@ fn assert_fixture_cell_edit_preserves_drawings(
 
     let expected_drawing_rels_parts = collect_parts(&expected, is_drawing_rels_part);
     let actual_drawing_rels_parts = collect_parts(&actual, is_drawing_rels_part);
+
+    let expected_sheet_rels_parts = collect_parts(&expected, is_worksheet_rels_part);
+    let actual_sheet_rels_parts = collect_parts(&actual, is_worksheet_rels_part);
 
     let expected_media_parts =
         collect_media_parts_referenced_by_drawings(&expected, &expected_drawing_rels_parts)?;
@@ -145,12 +165,22 @@ fn assert_fixture_cell_edit_preserves_drawings(
         "drawing_rels",
         &mut issues,
     );
+    report_part_set_differences(
+        &expected_sheet_rels_parts,
+        &actual_sheet_rels_parts,
+        "worksheet_rels",
+        &mut issues,
+    );
 
     // Compare bytes for all drawing parts and their drawing-level rels.
     for part in expected_drawing_xml_parts
         .iter()
         .chain(expected_drawing_rels_parts.iter())
     {
+        compare_part_bytes(&expected, &actual, part, &mut issues);
+    }
+
+    for part in expected_sheet_rels_parts.iter() {
         compare_part_bytes(&expected, &actual, part, &mut issues);
     }
 
@@ -194,6 +224,10 @@ fn is_drawing_xml_part(name: &str) -> bool {
 
 fn is_drawing_rels_part(name: &str) -> bool {
     name.starts_with("xl/drawings/_rels/") && name.ends_with(".rels")
+}
+
+fn is_worksheet_rels_part(name: &str) -> bool {
+    name.starts_with("xl/worksheets/_rels/") && name.ends_with(".rels")
 }
 
 fn collect_media_parts_referenced_by_drawings(
