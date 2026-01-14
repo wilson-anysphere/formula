@@ -4328,26 +4328,22 @@ export class SpreadsheetApp {
   }
 
   freezePanes(): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     const active = this.selection.active;
     this.document.setFrozen(this.sheetId, active.row, active.col, { label: t("command.view.freezePanes") });
   }
 
   freezeTopRow(): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 1, 0, { label: t("command.view.freezeTopRow") });
   }
 
   freezeFirstColumn(): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 0, 1, { label: t("command.view.freezeFirstColumn") });
   }
 
   unfreezePanes(): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 0, 0, { label: t("command.view.unfreezePanes") });
   }
@@ -5904,7 +5900,7 @@ export class SpreadsheetApp {
     //
     // Note: DesktopSharedGrid updates the renderer sizes interactively during the drag, so when we
     // no-op the document mutation we must also restore the renderer to its previous size.
-    if (this.isReadOnly() || this.isEditing()) {
+    if (this.isEditing()) {
       const renderer = this.sharedGrid.renderer;
       const EPS = 1e-6;
       if (change.kind === "col") {
@@ -5920,8 +5916,6 @@ export class SpreadsheetApp {
       }
 
       // Restore focus to the active editing surface so the user can continue typing.
-      // In read-only mode there should be no active editor, but keep the defensive
-      // focus restore logic so this stays resilient to mid-session permission changes.
       if (this.editor.isOpen()) {
         try {
           (this.editor.element as any).focus?.({ preventScroll: true });

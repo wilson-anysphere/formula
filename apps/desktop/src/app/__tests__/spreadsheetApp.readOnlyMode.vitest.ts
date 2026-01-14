@@ -235,11 +235,12 @@ describe("SpreadsheetApp read-only collab UX", () => {
     expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
     expect(app.undo()).toBe(false);
 
-    // Read-only users should not be able to change sheet view state (e.g. Freeze Panes),
-    // since those changes won't sync via the collab binder.
+    // Read-only users can still adjust sheet view state (e.g. Freeze Panes) locally.
+    // Collaboration binders are responsible for preventing these view mutations from
+    // being persisted into the shared Yjs document.
     expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
     app.freezeTopRow();
-    expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
+    expect(app.getFrozen()).toEqual({ frozenRows: 1, frozenCols: 0 });
 
     // Hide/unhide rows/cols are also sheet-view mutations and must no-op in read-only.
     const provider = (app as any).usedRangeProvider();
