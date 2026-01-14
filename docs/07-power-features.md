@@ -989,7 +989,7 @@ WASM binding validation rules (current `formula-wasm` implementation):
 - `sheet`:
   - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
   - must refer to an existing sheet (otherwise the call throws).
-  - lookup is case-insensitive (matches `formula-wasm` sheet resolution semantics).
+  - lookup is case-insensitive for ASCII letters (matches current `formula-wasm` sheet resolution semantics).
 - `targetCell` / `changingCell`:
   - must be non-empty strings
   - must be valid A1 addresses
@@ -1136,7 +1136,7 @@ Proposed WASM binding validation rules (if/when implemented):
 - `sheet`:
   - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
   - must refer to an existing sheet (otherwise throw `"missing sheet: ..."` like other `formula-wasm` APIs).
-  - lookup should be case-insensitive for consistency with other `formula-wasm` APIs.
+  - lookup should be case-insensitive for ASCII letters for consistency with other `formula-wasm` APIs.
 - `changingCells` / `resultCells`:
   - each cell must be a non-empty string
   - must be a valid A1 address
@@ -1306,7 +1306,7 @@ Proposed WASM binding validation rules (if/when implemented):
 - `sheet`:
   - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
   - must refer to an existing sheet (otherwise throw).
-  - lookup should be case-insensitive for consistency with other `formula-wasm` APIs.
+  - lookup should be case-insensitive for ASCII letters for consistency with other `formula-wasm` APIs.
 - `iterations` / `histogramBins`:
   - must be finite numbers, integer-valued, and `> 0`.
 - `inputDistributions[*].cell` / `outputCells[*]`:
@@ -1511,7 +1511,7 @@ Proposed WASM binding validation rules (if/when implemented):
 - `sheet`:
   - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
   - must refer to an existing sheet (otherwise throw).
-  - lookup should be case-insensitive for consistency with other `formula-wasm` APIs.
+  - lookup should be case-insensitive for ASCII letters for consistency with other `formula-wasm` APIs.
 - `objectiveCell`, `variableCells[*]`, `constraintCells[*]`:
   - must be non-empty strings
   - must be valid A1 addresses
