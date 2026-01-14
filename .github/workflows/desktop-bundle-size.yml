@@ -353,7 +353,7 @@ jobs:
       - name: Smoke test produced AppImage (extract + ldd + arch)
         run: bash scripts/ci/check-appimage.sh
 
-      - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
+      - name: Validate produced AppImage desktop integration (.desktop + file associations + deep links)
         run: bash scripts/validate-linux-appimage.sh
 
       - name: Validate produced RPM package payload (rpm -qp)
