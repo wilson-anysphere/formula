@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-gha-runner-pins.sh");
 
+const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
+const hasBash = !bashProbe.error && bashProbe.status === 0;
+
 /**
  * @param {string} yaml
  */
@@ -27,7 +30,7 @@ function run(yaml) {
   return proc;
 }
 
-test("passes when runner images are pinned", () => {
+test("passes when runner images are pinned", { skip: !hasBash }, () => {
   const proc = run(`
 jobs:
   build:
@@ -38,7 +41,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("fails when runs-on uses ubuntu-latest", () => {
+test("fails when runs-on uses ubuntu-latest", { skip: !hasBash }, () => {
   const proc = run(`
 jobs:
   build:
@@ -51,7 +54,7 @@ jobs:
   assert.match(proc.stderr, /ubuntu-latest/);
 });
 
-test("fails when a matrix includes windows-latest", () => {
+test("fails when a matrix includes windows-latest", { skip: !hasBash }, () => {
   const proc = run(`
 jobs:
   build:
@@ -67,7 +70,7 @@ jobs:
   assert.match(proc.stderr, /windows-latest/);
 });
 
-test("ignores comment-only occurrences of *-latest", () => {
+test("ignores comment-only occurrences of *-latest", { skip: !hasBash }, () => {
   const proc = run(`
 # ubuntu-latest
 jobs:
@@ -79,7 +82,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("ignores *-latest occurrences inside YAML block scalars", () => {
+test("ignores *-latest occurrences inside YAML block scalars", { skip: !hasBash }, () => {
   const proc = run(`
 jobs:
   build:
@@ -91,4 +94,3 @@ jobs:
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
-
