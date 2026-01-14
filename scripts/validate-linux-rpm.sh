@@ -33,7 +33,9 @@ Usage:
 Options:
   --rpm <path>        Validate a specific .rpm (or a directory containing .rpm files).
                       If omitted, the script searches common Tauri output locations:
+                        - \$CARGO_TARGET_DIR/**/release/bundle/rpm/*.rpm (if set)
                         - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm
+                        - apps/desktop/target/**/release/bundle/rpm/*.rpm
                         - target/**/release/bundle/rpm/*.rpm
   --no-container      Skip the Fedora container installability check (static checks only).
   --image <image>     Fedora image to use for the container step (default: fedora:40).
@@ -278,7 +280,11 @@ main() {
   if [[ ${#rpms[@]} -eq 0 ]]; then
     err "No RPM files found."
     err "Searched (repo-relative):"
+    if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+      err "  - \$CARGO_TARGET_DIR/**/release/bundle/rpm/*.rpm (\$CARGO_TARGET_DIR=${CARGO_TARGET_DIR})"
+    fi
     err "  - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm"
+    err "  - apps/desktop/target/**/release/bundle/rpm/*.rpm"
     err "  - target/**/release/bundle/rpm/*.rpm"
     err "Tip: Use --rpm <path> to specify one explicitly."
     exit 1
