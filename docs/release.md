@@ -169,6 +169,7 @@ node scripts/ci/check-tauri-cli-version.mjs
 # Ensures the commit you're about to release has a successful run of the main CI workflow on GitHub
 # (prevents tagging/releasing a commit that never passed CI).
 # Requires a token with Actions read access (in GitHub Actions, this is provided via secrets.GITHUB_TOKEN).
+# Accepts either GITHUB_TOKEN (preferred) or GH_TOKEN.
 GITHUB_TOKEN=... node scripts/check-tag-ci-status.mjs --repo owner/repo --sha <commit>
 
 # Ensures the tag version matches both:
