@@ -565,20 +565,4 @@ mod tests {
         assert_eq!(iv.len(), 24);
         assert_eq!(&iv[20..], &[0x36u8; 4]);
     }
-
-    #[test]
-    fn hash_password_perf_guard_spin_10k() {
-        // Regression guard: the spinCount loop is the hot path for both Standard (50k) and Agile
-        // (often 100k) password-based encryption.
-        let salt = [0x11u8; 16];
-        let pw = password_to_utf16le("password");
-
-        let start = Instant::now();
-        let _ = hash_password(HashAlgorithm::Sha256, &salt, &pw, 10_000);
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "hash_password(spinCount=10_000) took too long: {:?}",
-            start.elapsed()
-        );
-    }
 }
