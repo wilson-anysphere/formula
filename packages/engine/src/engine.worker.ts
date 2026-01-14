@@ -923,7 +923,17 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "applyOperation":
               if (typeof (wb as any).applyOperation === "function") {
-                result = cloneToPlainData((wb as any).applyOperation(params.op));
+                const op = params.op as any;
+                if (op && typeof op === "object") {
+                  const sheet = (op as any).sheet as unknown;
+                  if (typeof sheet === "string" && sheet.trim() === "") {
+                    // Defensive: avoid creating an empty-named sheet via `ensure_sheet("")` when
+                    // callers accidentally pass a blank sheet id.
+                    (op as any).sheet = "Sheet1";
+                  }
+                }
+
+                result = cloneToPlainData((wb as any).applyOperation(op));
               } else {
                 throw new Error("applyOperation: WasmWorkbook.applyOperation is not available in this WASM build");
               }

@@ -484,6 +484,27 @@ describe("engine.worker workbook metadata RPCs", () => {
       delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
     }
   });
+
+  it("defaults blank sheet names to Sheet1 for applyOperation", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const op = { type: "InsertRows", sheet: "   ", row: 0, count: 1 } as const;
+      const resp = await sendRequest(port, { type: "request", id: 1, method: "applyOperation", params: { op } });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["applyOperation", { type: "InsertRows", sheet: "Sheet1", row: 0, count: 1 }]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;

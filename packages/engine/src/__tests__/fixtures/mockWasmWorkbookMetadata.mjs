@@ -39,6 +39,10 @@ export class WasmWorkbook {
   setRange(range, values, sheet) {
     recordCall("setRange", range, values, sheet);
   }
+  applyOperation(op) {
+    recordCall("applyOperation", op);
+    return { changedCells: [], movedRanges: [], formulaRewrites: [] };
+  }
   recalculate(_sheet) {
     return [];
   }
