@@ -313,35 +313,31 @@ jobs:
       - name: Print Tauri CLI version
         run: cargo tauri --version
 
-      - name: Build desktop bundles (dry run, signing disabled)
-        if: ${{ !inputs.enableSigning }}
+      # Ensure platform signing is truly optional:
+      # - when `enableSigning` is false (default), this step forces signing disabled for the run.
+      # - when `enableSigning` is true, it only exports signing/notarization env vars when secrets exist.
+      - name: Prepare optional Tauri signing config (macOS/Windows)
+        run: node scripts/ci/prepare-tauri-signing-config.mjs
+        env:
+          # Gate all signing-related secrets behind the workflow input so forks can run unsigned builds
+          # even if the upstream repo has secrets configured.
+          APPLE_CERTIFICATE: ${{ inputs.enableSigning && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.enableSigning && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ inputs.enableSigning && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ inputs.enableSigning && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ inputs.enableSigning && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ inputs.enableSigning && secrets.APPLE_TEAM_ID || '' }}
+
+          WINDOWS_CERTIFICATE: ${{ inputs.enableSigning && secrets.WINDOWS_CERTIFICATE || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ inputs.enableSigning && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+
+          TAURI_PRIVATE_KEY: ${{ inputs.enableSigning && secrets.TAURI_PRIVATE_KEY || '' }}
+          TAURI_KEY_PASSWORD: ${{ inputs.enableSigning && secrets.TAURI_KEY_PASSWORD || '' }}
+
+      - name: Build desktop bundles (dry run)
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: apps/desktop
-          tauriScript: cargo tauri
-
-      - name: Build desktop bundles (dry run, signing enabled)
-        if: ${{ inputs.enableSigning }}
-        uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # Tauri updater signing (optional; enables updater signatures).
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
-          # Optional platform code signing (see docs/release.md)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/desktop
           tauriScript: cargo tauri
@@ -400,8 +396,6 @@ jobs:
 
       - name: Validate macOS DMG
         if: matrix.platform == 'macos-latest'
-        env:
-          ENABLE_SIGNING: ${{ inputs.enableSigning }}
         run: |
           set -euo pipefail
           roots=()
@@ -447,7 +441,9 @@ jobs:
                 exit 1
               fi
 
-              if [ "$ENABLE_SIGNING" = "true" ]; then
+              # Only verify signatures when signing secrets are actually configured (forks/dry-runs
+              # should be able to build unsigned bundles successfully).
+              if [ -n "${APPLE_CERTIFICATE:-}" ]; then
                 codesign --verify --deep --strict --verbose=2 "$app"
               fi
 
@@ -466,10 +462,9 @@ jobs:
       - name: Validate Windows installers (MSI/NSIS)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
-        env:
-          ENABLE_SIGNING: ${{ inputs.enableSigning }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $checkSigning = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
 
           $targetRoots = @(
             (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\src-tauri\target'),
@@ -491,7 +486,7 @@ jobs:
 
           foreach ($msi in $msis) {
             Write-Host "windows-validate: MSI -> $($msi.FullName)"
-            if ($env:ENABLE_SIGNING -eq 'true') {
+            if ($checkSigning) {
               $sig = Get-AuthenticodeSignature -FilePath $msi.FullName
               if ($sig.Status -ne 'Valid') {
                 throw "windows-validate: ERROR: MSI Authenticode signature status is $($sig.Status) for $($msi.FullName)"
@@ -519,7 +514,7 @@ jobs:
           foreach ($exe in $exes) {
             Write-Host "windows-validate: NSIS -> $($exe.FullName)"
 
-            if ($env:ENABLE_SIGNING -eq 'true') {
+            if ($checkSigning) {
               $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
               if ($sig.Status -ne 'Valid') {
                 throw "windows-validate: ERROR: NSIS installer Authenticode signature status is $($sig.Status) for $($exe.FullName)"
