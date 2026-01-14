@@ -1479,8 +1479,7 @@ pub struct IpcPivotField {
 }
 
 /// IPC-friendly mirror of `formula_engine::pivot::PivotFieldRef` with resource limits applied.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum IpcPivotFieldRef {
     /// Backward-compatible worksheet/cache field name.
     Text(PivotText),
@@ -1490,6 +1489,107 @@ pub enum IpcPivotFieldRef {
     Measure { measure: PivotText },
     /// Alternate structured Data Model measure shape (matches `formula_model` schema).
     MeasureName { name: PivotText },
+}
+
+impl<'de> Deserialize<'de> for IpcPivotFieldRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct PivotFieldRefVisitor;
+
+        impl PivotFieldRefVisitor {
+            fn parse_text<E>(value: &str) -> Result<IpcPivotFieldRef, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > crate::resource_limits::MAX_PIVOT_TEXT_BYTES {
+                    return Err(E::custom(format!(
+                        "string is too large (max {} bytes)",
+                        crate::resource_limits::MAX_PIVOT_TEXT_BYTES
+                    )));
+                }
+                Ok(IpcPivotFieldRef::Text(LimitedString(value.to_owned())))
+            }
+        }
+
+        impl<'de> de::Visitor<'de> for PivotFieldRefVisitor {
+            type Value = IpcPivotFieldRef;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a pivot field ref (string or object)")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::parse_text(v)
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::parse_text(v)
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > crate::resource_limits::MAX_PIVOT_TEXT_BYTES {
+                    return Err(E::custom(format!(
+                        "string is too large (max {} bytes)",
+                        crate::resource_limits::MAX_PIVOT_TEXT_BYTES
+                    )));
+                }
+                Ok(IpcPivotFieldRef::Text(LimitedString(v)))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut table: Option<PivotText> = None;
+                let mut column: Option<PivotText> = None;
+                let mut measure: Option<PivotText> = None;
+                let mut name: Option<PivotText> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "table" => table = Some(map.next_value::<PivotText>()?),
+                        "column" => column = Some(map.next_value::<PivotText>()?),
+                        "measure" => measure = Some(map.next_value::<PivotText>()?),
+                        "name" => name = Some(map.next_value::<PivotText>()?),
+                        _ => {
+                            let _ = map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                if table.is_some() || column.is_some() {
+                    let table = table.ok_or_else(|| de::Error::missing_field("table"))?;
+                    let column = column.ok_or_else(|| de::Error::missing_field("column"))?;
+                    return Ok(IpcPivotFieldRef::Column { table, column });
+                }
+
+                if let Some(measure) = measure {
+                    return Ok(IpcPivotFieldRef::Measure { measure });
+                }
+
+                if let Some(name) = name {
+                    return Ok(IpcPivotFieldRef::MeasureName { name });
+                }
+
+                Err(de::Error::custom(
+                    "pivot field ref object must specify either {table,column}, {measure}, or {name}",
+                ))
+            }
+        }
+
+        deserializer.deserialize_any(PivotFieldRefVisitor)
+    }
 }
 
 impl From<IpcPivotFieldRef> for PivotFieldRef {

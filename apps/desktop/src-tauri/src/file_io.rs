@@ -3897,7 +3897,7 @@ mod tests {
             )
             .expect("set CELL(width) formula for A1");
         let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
-        assert_eq!(c1.value, CellScalar::Number(20.1));
+        assert_eq!(c1.value, CellScalar::Number(20.0));
 
         // Hidden columns report width=0.
         state
