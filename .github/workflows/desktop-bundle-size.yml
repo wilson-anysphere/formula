@@ -235,6 +235,31 @@ jobs:
           restore-keys: |
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Detect Pyodide version (for caching)
+        id: pyodide
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -e "const fs=require('node:fs'); const src=fs.readFileSync('apps/desktop/scripts/ensure-pyodide-assets.mjs','utf8'); const m=src.match(/const\\s+PYODIDE_VERSION\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]/); if(!m) throw new Error('PYODIDE_VERSION not found'); process.stdout.write(m[1]);")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pyodide asset cache
+        id: pyodide-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
+      - name: Ensure Pyodide assets are present
+        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
+
+      - name: Save Pyodide asset cache
+        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
       - name: Build desktop bundles (Tauri)
         env:
           # The AppImage tooling used by Tauri is itself distributed as an AppImage.
