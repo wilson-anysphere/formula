@@ -228,12 +228,24 @@ impl CompiledFormula {
 struct BytecodeFormula {
     ast: CompiledExpr,
     program: Arc<bytecode::Program>,
+    /// Whether this program is sensitive to sheet-dimension changes.
+    ///
+    /// The bytecode lowering step expands whole-row/whole-column references (`A:A`, `1:1`) into
+    /// explicit range endpoints based on the sheet's current dimensions. Those programs can become
+    /// stale if any sheet's dimensions change afterwards, so the engine falls back to AST
+    /// evaluation when [`BytecodeFormula::sheet_dims_generation`] no longer matches.
+    ///
+    /// Most formulas do not use whole-row/whole-column references. Their bytecode programs remain
+    /// correct across sheet-dimension changes because the runtime performs per-access bounds checks
+    /// against the current sheet dimensions.
+    depends_on_sheet_dims: bool,
     /// Snapshot of the sheet-dimensions generation when this program was compiled.
     ///
     /// Whole-row/whole-column references (`A:A`, `1:1`) are expanded into explicit range endpoints
     /// during bytecode compilation. If any sheet's dimensions change afterwards (e.g. the sheet
     /// grows), the stored bytecode program can become stale. We track a global generation counter
-    /// and fall back to AST evaluation when it no longer matches.
+    /// and fall back to AST evaluation when it no longer matches (see
+    /// [`BytecodeFormula::depends_on_sheet_dims`]).
     sheet_dims_generation: u64,
 }
 
@@ -866,7 +878,7 @@ pub struct Engine {
     external_refs_volatile: bool,
     /// Monotonic counter incremented whenever any sheet's configured dimensions change.
     ///
-    /// See [`BytecodeFormula::sheet_dims_generation`].
+    /// See [`BytecodeFormula::sheet_dims_generation`] and [`BytecodeFormula::depends_on_sheet_dims`].
     sheet_dims_generation: u64,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
@@ -2577,7 +2589,8 @@ impl Engine {
         //   endpoints are expanded during compilation)
         //
         // Mark all compiled formula cells dirty so results refresh on the next recalculation, and
-        // bump `sheet_dims_generation` so stale bytecode programs fall back to AST evaluation.
+        // bump `sheet_dims_generation` so stale, dimension-dependent bytecode programs fall back to
+        // AST evaluation.
         self.mark_all_compiled_cells_dirty();
 
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
@@ -3584,10 +3597,11 @@ impl Engine {
                     cell.thread_safe,
                     cell.dynamic_deps,
                 ) {
-                    Ok(program) => (
+                    Ok((program, depends_on_sheet_dims)) => (
                         CompiledFormula::Bytecode(BytecodeFormula {
                             ast,
                             program,
+                            depends_on_sheet_dims,
                             sheet_dims_generation: self.sheet_dims_generation,
                         }),
                         None,
@@ -4473,10 +4487,11 @@ impl Engine {
                         thread_safe,
                         dynamic_deps,
                     ) {
-                        Ok(program) => (
+                        Ok((program, depends_on_sheet_dims)) => (
                             CompiledFormula::Bytecode(BytecodeFormula {
                                 ast: ast.clone(),
                                 program,
+                                depends_on_sheet_dims,
                                 sheet_dims_generation: self.sheet_dims_generation,
                             }),
                             None,
@@ -4763,10 +4778,11 @@ impl Engine {
 
             let (compiled_formula, bytecode_compile_reason) =
                 match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps) {
-                    Ok(program) => (
+                    Ok((program, depends_on_sheet_dims)) => (
                         CompiledFormula::Bytecode(BytecodeFormula {
                             ast: compiled_ast.clone(),
                             program,
+                            depends_on_sheet_dims,
                             sheet_dims_generation: self.sheet_dims_generation,
                         }),
                         None,
@@ -5069,10 +5085,11 @@ impl Engine {
 
         let (compiled_formula, bytecode_compile_reason) =
             match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps) {
-                Ok(program) => (
+                Ok((program, depends_on_sheet_dims)) => (
                     CompiledFormula::Bytecode(BytecodeFormula {
                         ast: compiled.clone(),
                         program,
+                        depends_on_sheet_dims,
                         sheet_dims_generation: self.sheet_dims_generation,
                     }),
                     None,
@@ -6150,8 +6167,11 @@ impl Engine {
                         continue;
                     };
 
-                    // Sheet-dim changes force AST fallback, which does not use the bytecode range cache.
-                    if bc.sheet_dims_generation != sheet_dims_generation {
+                    // Sheet-dim changes only force AST fallback for programs that used sheet
+                    // dimensions during lowering (whole-row/whole-column refs). Those formulas
+                    // won't benefit from the bytecode range cache.
+                    if bc.depends_on_sheet_dims && bc.sheet_dims_generation != sheet_dims_generation
+                    {
                         continue;
                     }
                     if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty()
@@ -6283,7 +6303,9 @@ impl Engine {
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
-                        if bc.sheet_dims_generation != sheet_dims_generation {
+                        if bc.depends_on_sheet_dims
+                            && bc.sheet_dims_generation != sheet_dims_generation
+                        {
                             let evaluator =
                                 crate::eval::Evaluator::new_with_date_system_and_locales(
                                     &snapshot,
@@ -6382,7 +6404,9 @@ impl Engine {
                 let compiled = match compiled_cell {
                     CompiledFormula::Ast(expr) => CompiledFormula::Ast(expr.clone()),
                     CompiledFormula::Bytecode(bc) => {
-                        if bc.sheet_dims_generation != sheet_dims_generation {
+                        if bc.depends_on_sheet_dims
+                            && bc.sheet_dims_generation != sheet_dims_generation
+                        {
                             // Sheet dimensions changed since this program was compiled; fall back to
                             // AST evaluation so whole-row/whole-column references stay consistent.
                             CompiledFormula::Ast(bc.ast.clone())
@@ -7467,7 +7491,7 @@ impl Engine {
         key: CellKey,
         thread_safe: bool,
         _dynamic_deps: bool,
-    ) -> Result<Arc<bytecode::Program>, BytecodeCompileReason> {
+    ) -> Result<(Arc<bytecode::Program>, bool), BytecodeCompileReason> {
         if !self.bytecode_enabled {
             return Err(BytecodeCompileReason::Disabled);
         }
@@ -7516,6 +7540,7 @@ impl Engine {
             &self.workbook,
         );
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
+        let depends_on_sheet_dims = canonical_expr_depends_on_sheet_dims(expr_to_lower);
 
         // External workbook references and invalid sheet prefixes can be introduced via defined
         // name inlining (or eliminated by it). Run the prefix check on the final expression shape
@@ -7587,7 +7612,10 @@ impl Engine {
             (sheet_rows, sheet_cols),
             &mut sheet_bounds,
         )?;
-        Ok(self.bytecode_cache.get_or_compile(&expr))
+        Ok((
+            self.bytecode_cache.get_or_compile(&expr),
+            depends_on_sheet_dims,
+        ))
     }
 
     fn inline_static_defined_names_for_bytecode(
@@ -8801,10 +8829,11 @@ impl Engine {
                         thread_safe,
                         dynamic_deps,
                     ) {
-                        Ok(program) => (
+                        Ok((program, depends_on_sheet_dims)) => (
                             CompiledFormula::Bytecode(BytecodeFormula {
                                 ast: ast.clone(),
                                 program,
+                                depends_on_sheet_dims,
                                 sheet_dims_generation: self.sheet_dims_generation,
                             }),
                             None,
@@ -10828,6 +10857,45 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
         | crate::Expr::CellRef(_)
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
+        | crate::Expr::Missing => false,
+    }
+}
+
+fn canonical_expr_depends_on_sheet_dims(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => true,
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_depends_on_sheet_dims(access.base.as_ref())
+        }
+        crate::Expr::FunctionCall(call) => call
+            .args
+            .iter()
+            .any(|arg| canonical_expr_depends_on_sheet_dims(arg)),
+        crate::Expr::Call(call) => {
+            canonical_expr_depends_on_sheet_dims(call.callee.as_ref())
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| canonical_expr_depends_on_sheet_dims(arg))
+        }
+        crate::Expr::Unary(u) => canonical_expr_depends_on_sheet_dims(&u.expr),
+        crate::Expr::Postfix(p) => canonical_expr_depends_on_sheet_dims(&p.expr),
+        crate::Expr::Binary(b) => {
+            canonical_expr_depends_on_sheet_dims(&b.left)
+                || canonical_expr_depends_on_sheet_dims(&b.right)
+        }
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(|el| canonical_expr_depends_on_sheet_dims(el)),
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::NameRef(_)
+        | crate::Expr::CellRef(_)
+        | crate::Expr::StructuredRef(_)
         | crate::Expr::Missing => false,
     }
 }
@@ -22196,6 +22264,7 @@ mod tests {
         let compiled = CompiledFormula::Bytecode(BytecodeFormula {
             ast,
             program,
+            depends_on_sheet_dims: false,
             sheet_dims_generation: engine.sheet_dims_generation,
         });
 
@@ -22212,6 +22281,83 @@ mod tests {
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
 
         assert!(column_cache.by_sheet[sheet_id].is_empty());
+    }
+
+    #[test]
+    fn sheet_dimension_generation_only_invalidates_dim_dependent_bytecode_programs() {
+        let mut engine = Engine::new();
+        engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::Manual,
+            ..CalcSettings::default()
+        });
+        engine
+            .set_cell_value("Sheet1", "A1", Value::Number(123.0))
+            .unwrap();
+
+        // B1 is a dimension-independent formula. We'll swap in a bytecode program that reads A1 so
+        // the test can observe whether evaluation used bytecode or AST.
+        engine.set_cell_formula("Sheet1", "B1", "=1").unwrap();
+
+        // C1 depends on sheet dimensions via a whole-column reference.
+        engine
+            .set_cell_formula("Sheet1", "C1", "=ROWS(A:A)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let b1_addr = parse_a1("B1").unwrap();
+        let c1_addr = parse_a1("C1").unwrap();
+
+        {
+            let cell = engine.workbook.sheets[sheet_id]
+                .cells
+                .get(&c1_addr)
+                .expect("C1 stored");
+            let compiled = cell.compiled.as_ref().expect("compiled formula stored");
+            let CompiledFormula::Bytecode(bc) = compiled else {
+                panic!("expected C1 to compile to bytecode");
+            };
+            assert!(
+                bc.depends_on_sheet_dims,
+                "whole-column references should mark bytecode programs as dimension-dependent"
+            );
+        }
+
+        {
+            let cell = engine.workbook.sheets[sheet_id]
+                .cells
+                .get_mut(&b1_addr)
+                .expect("B1 stored");
+            let ast = cell.compiled.as_ref().expect("compiled").ast().clone();
+
+            let mut program = bytecode::Program::new(Arc::from("sheet_dimension_generation_test"));
+            program.cell_refs.push(bytecode::Ref::new(0, 0, true, true)); // A1
+            program
+                .instrs
+                .push(bytecode::Instruction::new(bytecode::OpCode::LoadCell, 0, 0));
+
+            cell.compiled = Some(CompiledFormula::Bytecode(BytecodeFormula {
+                ast,
+                program: Arc::new(program),
+                depends_on_sheet_dims: false,
+                sheet_dims_generation: engine.sheet_dims_generation,
+            }));
+        }
+
+        // Changing sheet dimensions bumps `sheet_dims_generation`. Only dimension-dependent programs
+        // should fall back to AST; dimension-independent programs should continue to use bytecode.
+        engine.set_sheet_dimensions("Sheet1", 10, 10).unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "B1"),
+            Value::Number(123.0),
+            "dimension-independent programs should not fall back to AST on sheet-dim changes"
+        );
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "C1"),
+            Value::Number(10.0),
+            "dimension-dependent programs should fall back to AST on sheet-dim changes"
+        );
     }
 
     #[test]
@@ -22996,6 +23142,7 @@ mod tests {
         cell.compiled = Some(CompiledFormula::Bytecode(BytecodeFormula {
             ast,
             program: Arc::new(program),
+            depends_on_sheet_dims: false,
             sheet_dims_generation: engine.sheet_dims_generation,
         }));
 
