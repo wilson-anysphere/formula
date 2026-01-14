@@ -1747,11 +1747,9 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => apply_recovered_formulas(
-                            recovered,
-                            &mut warnings,
-                            &mut warnings_suppressed,
-                        ),
+                        Ok(recovered) => {
+                            apply_recovered_formulas(recovered, &mut warnings, &mut warnings_suppressed)
+                        }
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(
@@ -1766,11 +1764,9 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => apply_recovered_formulas(
-                            recovered,
-                            &mut warnings,
-                            &mut warnings_suppressed,
-                        ),
+                        Ok(recovered) => {
+                            apply_recovered_formulas(recovered, &mut warnings, &mut warnings_suppressed)
+                        }
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(
