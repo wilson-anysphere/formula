@@ -270,6 +270,56 @@ test("CollabSession cellConflicts.maxOpRecordAgeMs prunes old persisted op log r
   doc.destroy();
 });
 
+test("CollabSession maxOpRecordAgeMs pruning is conservative relative to local op queue head", () => {
+  const doc = new Y.Doc();
+  const ops = doc.getMap("cellStructuralOps");
+  const now = Date.now();
+
+  doc.transact(() => {
+    ops.set("local-old", {
+      id: "local-old",
+      kind: "edit",
+      userId: "local",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+    ops.set("remote-newer", {
+      id: "remote-newer",
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 30_000,
+      beforeState: [],
+      afterState: [],
+    });
+    ops.set("remote-older", {
+      id: "remote-older",
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 120_000,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  const session = createCollabSession({
+    doc,
+    cellConflicts: {
+      localUserId: "local",
+      onConflict: () => {},
+      maxOpRecordAgeMs: 1_000,
+    },
+  });
+
+  const pruned = doc.getMap("cellStructuralOps");
+  assert.equal(pruned.has("remote-older"), false);
+  assert.equal(pruned.has("remote-newer"), true);
+  assert.equal(pruned.has("local-old"), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CellStructuralConflictMonitor detects conflicts after re-instantiating a session with pre-existing local op log entries", async () => {
   const docA1 = new Y.Doc();
   const docB = new Y.Doc();
