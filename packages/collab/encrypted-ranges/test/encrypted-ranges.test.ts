@@ -503,6 +503,32 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "budget", row: 0, col: 0 })).toBe("k1");
   });
 
+  it("policy helper does not treat other sheets' stable ids as the active sheet name", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    // Two sheets:
+    // - sheet-123 has display name "Budget"
+    // - a *different* sheet has stable id "Budget"
+    const sheets = doc.getArray("sheets");
+    const sheetA = new Y.Map<unknown>();
+    sheetA.set("id", "sheet-123");
+    sheetA.set("name", "Budget");
+    const sheetB = new Y.Map<unknown>();
+    sheetB.set("id", "Budget");
+    sheetB.set("name", "Other");
+    sheets.push([sheetA, sheetB]);
+
+    const mgr = new EncryptedRangeManager({ doc });
+    mgr.add({ sheetId: "Budget", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k-b" });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    // Should match only the sheet with id "Budget".
+    expect(policy.shouldEncryptCell({ sheetId: "Budget", row: 0, col: 0 })).toBe(true);
+    // Should not match sheet-123 even though its display name is "Budget".
+    expect(policy.shouldEncryptCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe(false);
+  });
+
   it("policy helper matches legacy sheet names case-insensitively", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
