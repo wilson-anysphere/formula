@@ -1172,7 +1172,7 @@ fn parse_text_from_tx(
     None
 }
 
-fn parse_rich_text(rich_node: Node<'_, '_>) -> RichText {
+pub(crate) fn parse_rich_text(rich_node: Node<'_, '_>) -> RichText {
     // Chart text is DrawingML (`a:p` + `a:r` runs). Preserve run boundaries and
     // capture basic formatting from `a:rPr` when present.
     let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();

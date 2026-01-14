@@ -22,7 +22,6 @@ pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel}
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortOrder {

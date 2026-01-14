@@ -6785,7 +6785,7 @@ fn rewrite_all_formulas_structural(
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> =
-        HashMap::with_capacity(workbook.sheet_order.len());
+        HashMap::with_capacity(workbook.sheet_ids_in_order().len());
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
         let Some(name) = workbook.sheet_name(sheet_id) else {
             continue;
@@ -6832,7 +6832,7 @@ fn rewrite_all_formulas_range_map(
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> =
-        HashMap::with_capacity(workbook.sheet_order.len());
+        HashMap::with_capacity(workbook.sheet_ids_in_order().len());
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
         let Some(name) = workbook.sheet_name(sheet_id) else {
             continue;

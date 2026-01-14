@@ -8,6 +8,7 @@ use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
+use super::parse_chart_space::parse_rich_text;
 use super::REL_NS;
 
 #[derive(Debug, thiserror::Error)]
@@ -798,9 +799,9 @@ fn parse_text_from_tx(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "rich")
     {
-        let text = collect_rich_text(rich_node);
+        let rich_text = parse_rich_text(rich_node);
         return Some(TextModel {
-            rich_text: RichText::new(text),
+            rich_text,
             formula: None,
             style: None,
             box_style: None,
@@ -988,15 +989,6 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         Some(model)
     }
 }
-
-fn collect_rich_text(rich_node: Node<'_, '_>) -> String {
-    rich_node
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "t")
-        .filter_map(|n| n.text())
-        .collect::<String>()
-}
-
 fn parse_legend_position(value: &str, diagnostics: &mut Vec<ChartDiagnostic>) -> LegendPosition {
     match value {
         "l" => LegendPosition::Left,
