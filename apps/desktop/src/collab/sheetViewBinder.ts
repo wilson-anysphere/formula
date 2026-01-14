@@ -430,13 +430,31 @@ export function bindSheetViewToCollabSession(options: {
   let destroyed = false;
   let applyingRemote = false;
 
-  const findSheetMap = (sheetId: string): any | null => {
-    const arr = session.sheets?.toArray?.() ?? [];
-    for (const entry of arr) {
-      const id = getSheetIdFromSheetMap(entry as any);
-      if (id === sheetId) return entry as any;
+  const findYjsSheetEntriesById = (sheetId: string): any[] => {
+    if (!sheetId) return [];
+    /** @type {any[]} */
+    const out: any[] = [];
+    const len = typeof (session.sheets as any)?.length === "number" ? (session.sheets as any).length : 0;
+    for (let i = 0; i < len; i += 1) {
+      const entry = (session.sheets as any).get(i);
+      const id = getSheetIdFromSheetMap(entry);
+      if (id === sheetId) out.push(entry);
     }
-    return null;
+    return out;
+  };
+
+  const findYjsSheetEntryById = (sheetId: string): any | null => {
+    if (!sheetId) return null;
+    // Deterministic choice: pick the last matching entry by array index. This mirrors
+    // `ensureWorkbookSchema` duplicate-sheet pruning behavior.
+    let found: any | null = null;
+    const len = typeof (session.sheets as any)?.length === "number" ? (session.sheets as any).length : 0;
+    for (let i = 0; i < len; i += 1) {
+      const entry = (session.sheets as any).get(i);
+      const id = getSheetIdFromSheetMap(entry);
+      if (id === sheetId) found = entry;
+    }
+    return found;
   };
 
   const applyYjsToDocumentController = (sheetIds: Iterable<string>): void => {
@@ -449,7 +467,7 @@ export function bindSheetViewToCollabSession(options: {
       typeof (documentController as any).applyExternalDrawingDeltas === "function";
 
     for (const sheetId of sheetIds) {
-      const sheet = findSheetMap(sheetId);
+      const sheet = findYjsSheetEntryById(sheetId);
       if (!sheet) continue;
 
       const after = readSheetViewFromSheetMap(sheet);
@@ -572,81 +590,84 @@ export function bindSheetViewToCollabSession(options: {
           const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
           if (!sheetId) continue;
 
-          const sheet = findSheetMap(sheetId);
-          if (!sheet) continue;
+          const sheetsToUpdate = findYjsSheetEntriesById(sheetId);
+          if (sheetsToUpdate.length === 0) continue;
 
           const after = delta?.after as SheetViewState | undefined;
           const before = delta?.before as SheetViewState | undefined;
           if (!after) continue;
 
-          // Mirror top-level frozen rows/cols for backwards compatibility.
-          if (sheet.get("frozenRows") !== after.frozenRows) sheet.set("frozenRows", after.frozenRows);
-          if (sheet.get("frozenCols") !== after.frozenCols) sheet.set("frozenCols", after.frozenCols);
-
-          const viewMap = ensureNestedYMap(sheet, "view");
-
-          if (viewMap.get("frozenRows") !== after.frozenRows) viewMap.set("frozenRows", after.frozenRows);
-          if (viewMap.get("frozenCols") !== after.frozenCols) viewMap.set("frozenCols", after.frozenCols);
-
           const nextBackgroundImageId = normalizeOptionalId((after as any).backgroundImageId);
           const prevBackgroundImageId = normalizeOptionalId((before as any)?.backgroundImageId);
-          if (nextBackgroundImageId !== prevBackgroundImageId) {
-            if (nextBackgroundImageId) {
-              viewMap.set("backgroundImageId", nextBackgroundImageId);
-              // Back-compat mirror (similar to other sheet view keys).
-              sheet.set("backgroundImageId", nextBackgroundImageId);
-            } else {
-              viewMap.delete("backgroundImageId");
-              sheet.delete("backgroundImageId");
-            }
-          }
-
-          const colWidthsMap = ensureNestedYMap(viewMap, "colWidths");
-          const rowHeightsMap = ensureNestedYMap(viewMap, "rowHeights");
-
-          applyAxisDelta(colWidthsMap, before?.colWidths, after.colWidths);
-          applyAxisDelta(rowHeightsMap, before?.rowHeights, after.rowHeights);
 
           const nextMergedRanges =
             Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0 ? after.mergedRanges : undefined;
           const prevMergedRanges =
             Array.isArray(before?.mergedRanges) && before.mergedRanges.length > 0 ? before.mergedRanges : undefined;
 
-          if (!nextMergedRanges) {
-            if (prevMergedRanges) {
-              viewMap.delete("mergedRanges");
-              sheet.delete("mergedRanges");
-              // Backwards compatibility cleanup.
-              viewMap.delete("mergedCells");
-              sheet.delete("mergedCells");
-            }
-          } else if (!mergedRangesEquals(prevMergedRanges, nextMergedRanges)) {
-            const cloned = nextMergedRanges.map((r) => ({
-              startRow: r.startRow,
-              endRow: r.endRow,
-              startCol: r.startCol,
-              endCol: r.endCol,
-            }));
-            // Store on both the nested view map (preferred) and the top-level for backwards compatibility.
-            viewMap.set("mergedRanges", cloned);
-            sheet.set("mergedRanges", cloned);
-            // Also write the legacy key so older clients can still render merged regions.
-            viewMap.set("mergedCells", cloned);
-            sheet.set("mergedCells", cloned);
-          }
-
           const drawingsBefore = Array.isArray(before?.drawings) && before.drawings.length > 0 ? before.drawings : null;
           const drawingsAfter = Array.isArray(after.drawings) && after.drawings.length > 0 ? after.drawings : null;
 
-          if (!deepEquals(drawingsBefore, drawingsAfter)) {
-            if (drawingsAfter) {
-              const cloned = cloneJsonValue(drawingsAfter);
-              viewMap.set("drawings", cloned);
-              // Back-compat: mirror to the sheet root so older clients can still observe updates.
-              sheet.set("drawings", cloned);
-            } else {
-              viewMap.delete("drawings");
-              sheet.delete("drawings");
+          for (const sheet of sheetsToUpdate) {
+            // Mirror top-level frozen rows/cols for backwards compatibility.
+            if (sheet.get("frozenRows") !== after.frozenRows) sheet.set("frozenRows", after.frozenRows);
+            if (sheet.get("frozenCols") !== after.frozenCols) sheet.set("frozenCols", after.frozenCols);
+
+            const viewMap = ensureNestedYMap(sheet, "view");
+
+            if (viewMap.get("frozenRows") !== after.frozenRows) viewMap.set("frozenRows", after.frozenRows);
+            if (viewMap.get("frozenCols") !== after.frozenCols) viewMap.set("frozenCols", after.frozenCols);
+
+            if (nextBackgroundImageId !== prevBackgroundImageId) {
+              if (nextBackgroundImageId) {
+                viewMap.set("backgroundImageId", nextBackgroundImageId);
+                // Back-compat mirror (similar to other sheet view keys).
+                sheet.set("backgroundImageId", nextBackgroundImageId);
+              } else {
+                viewMap.delete("backgroundImageId");
+                sheet.delete("backgroundImageId");
+              }
+            }
+
+            const colWidthsMap = ensureNestedYMap(viewMap, "colWidths");
+            const rowHeightsMap = ensureNestedYMap(viewMap, "rowHeights");
+
+            applyAxisDelta(colWidthsMap, before?.colWidths, after.colWidths);
+            applyAxisDelta(rowHeightsMap, before?.rowHeights, after.rowHeights);
+
+            if (!nextMergedRanges) {
+              if (prevMergedRanges) {
+                viewMap.delete("mergedRanges");
+                sheet.delete("mergedRanges");
+                // Backwards compatibility cleanup.
+                viewMap.delete("mergedCells");
+                sheet.delete("mergedCells");
+              }
+            } else if (!mergedRangesEquals(prevMergedRanges, nextMergedRanges)) {
+              const cloned = nextMergedRanges.map((r) => ({
+                startRow: r.startRow,
+                endRow: r.endRow,
+                startCol: r.startCol,
+                endCol: r.endCol,
+              }));
+              // Store on both the nested view map (preferred) and the top-level for backwards compatibility.
+              viewMap.set("mergedRanges", cloned);
+              sheet.set("mergedRanges", cloned);
+              // Also write the legacy key so older clients can still render merged regions.
+              viewMap.set("mergedCells", cloned);
+              sheet.set("mergedCells", cloned);
+            }
+
+            if (!deepEquals(drawingsBefore, drawingsAfter)) {
+              if (drawingsAfter) {
+                const cloned = cloneJsonValue(drawingsAfter);
+                viewMap.set("drawings", cloned);
+                // Back-compat: mirror to the sheet root so older clients can still observe updates.
+                sheet.set("drawings", cloned);
+              } else {
+                viewMap.delete("drawings");
+                sheet.delete("drawings");
+              }
             }
           }
         }
@@ -655,23 +676,25 @@ export function bindSheetViewToCollabSession(options: {
           const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
           if (!sheetId) continue;
 
-          const sheet = findSheetMap(sheetId);
-          if (!sheet) continue;
+          const sheetsToUpdate = findYjsSheetEntriesById(sheetId);
+          if (sheetsToUpdate.length === 0) continue;
 
           const beforeDrawings = Array.isArray(delta?.before) && delta.before.length > 0 ? delta.before : null;
           const afterDrawings = Array.isArray(delta?.after) && delta.after.length > 0 ? delta.after : null;
 
           if (deepEquals(beforeDrawings, afterDrawings)) continue;
 
-          const viewMap = ensureNestedYMap(sheet, "view");
-          if (afterDrawings) {
-            const cloned = cloneJsonValue(afterDrawings);
-            viewMap.set("drawings", cloned);
-            // Back-compat: mirror to the sheet root so older clients can still observe updates.
-            sheet.set("drawings", cloned);
-          } else {
-            viewMap.delete("drawings");
-            sheet.delete("drawings");
+          for (const sheet of sheetsToUpdate) {
+            const viewMap = ensureNestedYMap(sheet, "view");
+            if (afterDrawings) {
+              const cloned = cloneJsonValue(afterDrawings);
+              viewMap.set("drawings", cloned);
+              // Back-compat: mirror to the sheet root so older clients can still observe updates.
+              sheet.set("drawings", cloned);
+            } else {
+              viewMap.delete("drawings");
+              sheet.delete("drawings");
+            }
           }
         }
       },
