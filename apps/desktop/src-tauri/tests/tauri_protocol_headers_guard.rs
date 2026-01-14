@@ -40,27 +40,55 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
     &rest[..end]
 }
 
-fn extract_tauri_scheme_protocol_asset_resolver_block<'a>(handler_block: &'a str) -> &'a str {
-    // The `tauri://` handler is expected to:
-    // - resolve bundled assets via `AssetResolver`
-    // - emit COOP/COEP headers on those asset responses (not just on the `--startup-bench` fast path)
-    //
-    // The handler also has a `--startup-bench` early return which can include COOP/COEP headers.
-    // This guardrail must ensure headers are applied on the *production* asset-serving path too.
-    //
-    // We avoid brittle brace parsing by slicing from the `asset_resolver().get(...)` call onwards.
-    //
-    // Prefer the explicit asset resolver call (current implementation), but fall back to
-    // `asset.csp_header` in case the resolver call is refactored into a helper function.
-    let start_marker = "asset_resolver().get";
-    let start = handler_block
-        .find(start_marker)
-        .or_else(|| handler_block.find("asset.csp_header"))
-        .unwrap_or_else(|| {
-            panic!("failed to find `{start_marker}` (or `asset.csp_header`) in the `tauri://` handler block")
-        });
+fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
+    let bytes = src.as_bytes();
+    let mut depth: i32 = 0;
+    for i in open_brace..bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &src[open_brace..=i];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated brace block starting at byte offset {open_brace}");
+}
 
-    &handler_block[start..]
+fn extract_tauri_scheme_protocol_asset_success_block<'a>(handler_block: &'a str) -> &'a str {
+    // The `tauri://` handler should apply COOP/COEP headers on *successful* asset responses.
+    //
+    // Note: production requests hit the `AssetResolver` path, not the `--startup-bench` early return.
+    // We therefore extract the `Some(asset)` / `if let Some(asset)` block specifically.
+    let if_let_marker = "if let Some(asset)";
+    if let Some(start) = handler_block.find(if_let_marker) {
+        let rest = &handler_block[start..];
+        let open = rest.find('{').unwrap_or_else(|| {
+            panic!("failed to find `{{` after `{if_let_marker}` in the `tauri://` handler block")
+        });
+        let block = extract_brace_block(rest, open);
+        return &rest[..open + block.len()];
+    }
+
+    // Backwards-compat: older implementations used a `match` arm (`Some(asset) => { ... }`).
+    let match_arm_marker = "Some(asset)";
+    if let Some(start) = handler_block.find(match_arm_marker) {
+        let rest = &handler_block[start..];
+        let open = rest.find('{').unwrap_or_else(|| {
+            panic!("failed to find `{{` after `{match_arm_marker}` in the `tauri://` handler block")
+        });
+        let block = extract_brace_block(rest, open);
+        return &rest[..open + block.len()];
+    }
+
+    panic!(
+        "failed to find the `AssetResolver` success path (`if let Some(asset)` or `Some(asset) =>`) in the `tauri://` handler block.\n\
+         Searched within:\n\
+         {handler_block}"
+    );
 }
 
 #[test]
@@ -74,28 +102,30 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     );
 
     let handler_block = extract_tauri_scheme_protocol_handler_block(&main_rs_src);
-    let asset_resolver_block = extract_tauri_scheme_protocol_asset_resolver_block(handler_block);
+    let asset_success_block = extract_tauri_scheme_protocol_asset_success_block(handler_block);
 
     // 2) Ensure the handler applies COOP/COEP headers (required for cross-origin isolation).
     //
     // Prefer checking for the helper call (current implementation), but allow direct insertion of
     // either the header names or the associated constants in case the handler is refactored.
     //
-    // Important: scan the `Some(asset)` response branch, not just the overall handler block, so a
-    // `--startup-bench`-only header injection doesn't mask a production regression.
-    let has_apply_call = asset_resolver_block.contains("apply_cross_origin_isolation_headers(");
-    let has_header_strings = asset_resolver_block.contains("cross-origin-opener-policy")
-        && asset_resolver_block.contains("cross-origin-embedder-policy");
-    let has_header_constants = asset_resolver_block.contains("CROSS_ORIGIN_OPENER_POLICY")
-        && asset_resolver_block.contains("CROSS_ORIGIN_EMBEDDER_POLICY");
+    // Important: scan the *successful asset response path* (`Some(asset)` / `if let Some(asset)`),
+    // not just the overall handler block, so:
+    // - a `--startup-bench`-only header injection doesn't mask a production regression
+    // - a "headers only on 404 responses" bug doesn't pass the guardrail.
+    let has_apply_call = asset_success_block.contains("apply_cross_origin_isolation_headers(");
+    let has_header_strings = asset_success_block.contains("cross-origin-opener-policy")
+        && asset_success_block.contains("cross-origin-embedder-policy");
+    let has_header_constants = asset_success_block.contains("CROSS_ORIGIN_OPENER_POLICY")
+        && asset_success_block.contains("CROSS_ORIGIN_EMBEDDER_POLICY");
 
     assert!(
         has_apply_call || has_header_strings || has_header_constants,
         "expected the `tauri://` protocol handler to inject COOP/COEP headers.\n\
          Missing `apply_cross_origin_isolation_headers(...)` (or direct insertion of the COOP/COEP header names).\n\
          This is required for `globalThis.crossOriginIsolated` and SharedArrayBuffer in packaged desktop builds.\n\
-         Searched within the asset resolver block of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
-         {asset_resolver_block}"
+         Searched within the AssetResolver success path of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
+         {asset_success_block}"
     );
 
     // 3) Ensure we preserve Tauri's configured CSP header when available.
@@ -103,25 +133,25 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     // Dropping the CSP in the custom handler would reduce production parity with the stock Tauri
     // asset protocol and can break worker/module loading.
     assert!(
-        asset_resolver_block.contains("asset.csp_header"),
+        asset_success_block.contains("asset.csp_header"),
         "expected the `tauri://` protocol handler to reference `asset.csp_header` (to preserve the CSP computed by Tauri's AssetResolver)"
     );
     assert!(
-        asset_resolver_block.contains("Content-Security-Policy"),
+        asset_success_block.contains("Content-Security-Policy"),
         "expected the `tauri://` protocol handler to set the `Content-Security-Policy` header when `asset.csp_header` is present"
     );
 
-    let csp_is_conditional = (asset_resolver_block.contains("if let Some")
-        && asset_resolver_block.contains("asset.csp_header"))
-        || asset_resolver_block.contains("match asset.csp_header")
-        || asset_resolver_block.contains("asset.csp_header.map")
-        || asset_resolver_block.contains("asset.csp_header.is_some")
-        || asset_resolver_block.contains("asset.csp_header.is_some_and");
+    let csp_is_conditional = (asset_success_block.contains("if let Some")
+        && asset_success_block.contains("asset.csp_header"))
+        || asset_success_block.contains("match asset.csp_header")
+        || asset_success_block.contains("asset.csp_header.map")
+        || asset_success_block.contains("asset.csp_header.is_some")
+        || asset_success_block.contains("asset.csp_header.is_some_and");
 
     assert!(
         csp_is_conditional,
         "expected the `Content-Security-Policy` header to be set conditionally based on `asset.csp_header` (so we don't emit an empty/malformed CSP when absent).\n\
-         Searched within the asset resolver block of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
-         {asset_resolver_block}"
+         Searched within the AssetResolver success path of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
+         {asset_success_block}"
     );
 }
