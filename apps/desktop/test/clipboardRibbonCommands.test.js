@@ -79,7 +79,7 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 

@@ -53,7 +53,7 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   );
 
   // Ribbon command activation should execute registered commands via the CommandRegistry
-  // bridge (createRibbonActionsFromCommands). Avoid bespoke `handleRibbonCommand` routing for
+  // bridge (via the ribbon command router). Avoid bespoke `handleRibbonCommand` routing for
   // comments.* ids so command palette recents + keybindings share the same path.
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);

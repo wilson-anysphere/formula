@@ -55,7 +55,7 @@ test("Insert → Pictures ribbon commands are registered in CommandRegistry and 
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 
@@ -75,7 +75,8 @@ test("Insert → Pictures ribbon commands are registered in CommandRegistry and 
     assert.match(snippet, /\bwhen:\s*["']false["']/, `Expected ${id} to be hidden via when: "false"`);
   }
 
-  // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
+  // Sanity check: main.ts should mount the ribbon through the shared router.
   assert.match(main, /\bcreateRibbonActions\(/);
+  // And the router should delegate registered commands to the CommandRegistry bridge.
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

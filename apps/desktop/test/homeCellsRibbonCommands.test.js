@@ -58,7 +58,7 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
     assert.doesNotMatch(
       disabling,
@@ -87,7 +87,7 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
 
     // Insert/Delete Cells are structural edits and should respect `registerDesktopCommands`'s
@@ -116,12 +116,13 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 
-  // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
+  // Sanity check: main.ts should mount the ribbon through the shared router.
   assert.match(main, /\bcreateRibbonActions\(/);
+  // And the router should delegate registered commands to the CommandRegistry bridge.
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   assert.match(
     main,

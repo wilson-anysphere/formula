@@ -35,6 +35,9 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
+
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
@@ -43,8 +46,6 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
   const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
-  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
-  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   // Ensure the desktop command catalog wires in the Home Styles registrations.
   assert.match(desktopCommands, /\bregisterHomeStylesCommands\(/, "Expected registerDesktopCommands.ts to invoke registerHomeStylesCommands");
@@ -69,7 +70,7 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 

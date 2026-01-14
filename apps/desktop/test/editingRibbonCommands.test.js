@@ -64,7 +64,7 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   // Canonical editing ids should be registered as builtin commands so ribbon, command palette,
-  // and keybindings share the same execution path (via createRibbonActionsFromCommands).
+  // and keybindings share the same execution path (via the ribbon command router).
   const expects = [
     "edit.autoSum",
     "edit.fillDown",
@@ -86,7 +86,7 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 
@@ -110,7 +110,7 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
   assert.doesNotMatch(
     main,
     /\bcase\s+["']home\.editing\.fill\.series["']:/,
-    "Expected main.ts to not handle home.editing.fill.series via switch case (should be dispatched by createRibbonActionsFromCommands)",
+    "Expected main.ts to not handle home.editing.fill.series via switch case (should be routed via the ribbon command router)",
   );
 
   // Ensure the old ribbon-only ids are no longer mapped in main.ts.
@@ -130,7 +130,8 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
     );
   }
 
-  // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
+  // Sanity check: main.ts should mount the ribbon through the shared router.
   assert.match(main, /\bcreateRibbonActions\(/);
+  // And the router should delegate registered commands to the CommandRegistry bridge.
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

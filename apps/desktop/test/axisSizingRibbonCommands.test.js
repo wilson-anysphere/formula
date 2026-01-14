@@ -40,7 +40,7 @@ test("Axis sizing ribbon commands are registered in CommandRegistry and not hand
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+[\"']${escapeRegExp(id)}[\"']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 
@@ -48,7 +48,8 @@ test("Axis sizing ribbon commands are registered in CommandRegistry and not hand
   assert.match(axisCommands, /\bregisterBuiltinCommand\(\s*AXIS_SIZING_COMMAND_IDS\.rowHeight/);
   assert.match(axisCommands, /\bregisterBuiltinCommand\(\s*AXIS_SIZING_COMMAND_IDS\.columnWidth/);
 
-  // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
+  // Sanity check: main.ts should mount the ribbon through the shared router.
   assert.match(main, /\bcreateRibbonActions\(/);
+  // And the router should delegate registered commands to the CommandRegistry bridge.
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });
