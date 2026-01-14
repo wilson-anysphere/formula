@@ -47,16 +47,28 @@ jobs:
             const repo = context.repo.repo;
 
             async function findLatestRun(workflowFile) {
-              const resp = await github.rest.actions.listWorkflowRunsForWorkflow({
-                owner,
-                repo,
-                workflow_id: workflowFile,
-                per_page: 50,
-              });
-
-              for (const run of resp.data.workflow_runs) {
-                if (run.head_sha !== sha) continue;
-                return run;
+              // Scan recent runs for this workflow until we find a matching head SHA.
+              //
+              // For workflow_run triggers the matching run is almost always in the first page, but
+              // for manual backfills (workflow_dispatch with an older sha) we may need to paginate.
+              const perPage = 100;
+              const maxPages = 10; // cap to avoid excessive API calls
+              for (let page = 1; page <= maxPages; page++) {
+                const resp = await github.rest.actions.listWorkflowRunsForWorkflow({
+                  owner,
+                  repo,
+                  workflow_id: workflowFile,
+                  per_page: perPage,
+                  page,
+                });
+                const runs = resp.data.workflow_runs || [];
+                for (const run of runs) {
+                  if (run.head_sha !== sha) continue;
+                  return run;
+                }
+                if (runs.length < perPage) {
+                  break;
+                }
               }
               return null;
             }
