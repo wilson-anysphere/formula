@@ -952,6 +952,23 @@ pub fn open_workbook_model_with_password(
     use std::io::BufReader;
 
     let path = path.as_ref();
+    #[cfg(feature = "encrypted-workbooks")]
+    {
+        if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+            if zip_contains_workbook_bin(&bytes) {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
+            return xlsx::read_workbook_from_reader(std::io::Cursor::new(bytes)).map_err(
+                |source| Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                },
+            );
+        }
+    }
+
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
@@ -1054,6 +1071,22 @@ pub fn open_workbook_with_password(
     password: Option<&str>,
 ) -> Result<Workbook, Error> {
     let path = path.as_ref();
+    #[cfg(feature = "encrypted-workbooks")]
+    {
+        if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+            if zip_contains_workbook_bin(&bytes) {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
+            let package = xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            return Ok(Workbook::Xlsx(package));
+        }
+    }
+
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
@@ -1233,6 +1266,207 @@ fn read_ole_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek
     }
 
     Ok(None)
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn open_stream_case_insensitive<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> std::io::Result<cfb::Stream<R>> {
+    // Fast path: try exact name + leading slash variants.
+    if let Ok(stream) = ole.open_stream(name) {
+        return Ok(stream);
+    }
+    let stripped = name.strip_prefix('/').unwrap_or(name);
+    if let Ok(stream) = ole.open_stream(stripped) {
+        return Ok(stream);
+    }
+    let with_slash = format!("/{stripped}");
+    if let Ok(stream) = ole.open_stream(&with_slash) {
+        return Ok(stream);
+    }
+
+    // Slow path: case-insensitive scan over available streams.
+    let mut found: Option<std::path::PathBuf> = None;
+    for entry in ole.walk() {
+        if !entry.is_stream() {
+            continue;
+        }
+        let path = entry.path().to_string_lossy();
+        let path = path.as_ref();
+        let normalized = path.strip_prefix('/').unwrap_or(path);
+        if normalized.eq_ignore_ascii_case(stripped) {
+            found = Some(entry.path().to_path_buf());
+            break;
+        }
+    }
+
+    match found {
+        Some(path) => ole.open_stream(path),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("stream not found: {name}"),
+        )),
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn read_stream_bytes_case_insensitive<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut stream = open_stream_case_insensitive(ole, name)?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn try_decrypt_ooxml_encrypted_package_from_path(
+    path: &Path,
+    password: Option<&str>,
+) -> Result<Option<Vec<u8>>, Error> {
+    use std::io::{Read as _, Seek as _};
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.rewind().map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; fall back to non-encrypted open paths.
+        return Ok(None);
+    };
+
+    // Attempt to read both required streams (best-effort + case-insensitive lookup).
+    let encryption_info = match read_stream_bytes_case_insensitive(&mut ole, "EncryptionInfo") {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })
+        }
+    };
+    let encrypted_package = match read_stream_bytes_case_insensitive(&mut ole, "EncryptedPackage") {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })
+        }
+    };
+
+    if encryption_info.len() < 4 {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
+        });
+    }
+    let version_major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
+    let version_minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
+
+    // Only Agile encryption is supported today.
+    if version_major != 4 || version_minor != 4 {
+        // Preserve historical "password required / invalid password" semantics for Standard
+        // encryption versions until Standard decryption is implemented.
+        let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
+        if is_standard {
+            if password.is_none() {
+                return Err(Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                });
+            }
+            return Err(Error::InvalidPassword {
+                path: path.to_path_buf(),
+            });
+        }
+
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
+
+    let Some(password) = password else {
+        return Err(Error::PasswordRequired {
+            path: path.to_path_buf(),
+        });
+    };
+
+    let decrypted = match xlsx::decrypt_agile_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+    ) {
+        Ok(bytes) => bytes,
+        Err(err) => match err {
+            xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })
+            }
+            xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                return Err(Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major: major,
+                    version_minor: minor,
+                })
+            }
+            _ => {
+                return Err(Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major,
+                    version_minor,
+                })
+            }
+        },
+    };
+
+    Ok(Some(decrypted))
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn zip_contains_workbook_bin(bytes: &[u8]) -> bool {
+    use std::io::Cursor;
+
+    let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
+        return false;
+    };
+    for name in zip.file_names() {
+        let mut normalized = name.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+        if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Returns an OOXML-encryption related error when the given OLE compound file is an encrypted
