@@ -8454,13 +8454,7 @@ function reapplyRibbonAutoFiltersForActiveSheet(): void {
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
-  onUnknownToggle: (commandId, pressed) => {
-    if (handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed)) return;
-    // `createRibbonActionsFromCommands` suppresses the follow-up `onCommand` callback whenever
-    // `onUnknownToggle` is provided, so forward unhandled toggle ids to the normal command
-    // dispatch path to preserve existing behavior (toasts + `main.ts` fallbacks).
-    handleRibbonCommand(commandId);
-  },
+  onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
   commandOverrides: {
     // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
     // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,

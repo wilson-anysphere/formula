@@ -85,6 +85,41 @@ describe("createRibbonActionsFromCommands", () => {
     expect(run).toHaveBeenCalledWith(true);
   });
 
+  it("allows unknown toggles to fall through to onUnknownCommand when onUnknownToggle returns false", async () => {
+    const registry = new CommandRegistry();
+    const onUnknownCommand = vi.fn();
+
+    const actions = createRibbonActionsFromCommands({
+      commandRegistry: registry,
+      onUnknownCommand,
+      onUnknownToggle: () => false,
+    });
+
+    actions.onToggle?.("ribbon.toggle.unknown", true);
+    actions.onCommand?.("ribbon.toggle.unknown");
+    await flushMicrotasks();
+
+    expect(onUnknownCommand).toHaveBeenCalledTimes(1);
+    expect(onUnknownCommand).toHaveBeenCalledWith("ribbon.toggle.unknown");
+  });
+
+  it("suppresses the follow-up onCommand for unknown toggles when onUnknownToggle returns true", async () => {
+    const registry = new CommandRegistry();
+    const onUnknownCommand = vi.fn();
+
+    const actions = createRibbonActionsFromCommands({
+      commandRegistry: registry,
+      onUnknownCommand,
+      onUnknownToggle: () => true,
+    });
+
+    actions.onToggle?.("ribbon.toggle.unknown", true);
+    actions.onCommand?.("ribbon.toggle.unknown");
+    await flushMicrotasks();
+
+    expect(onUnknownCommand).not.toHaveBeenCalled();
+  });
+
   it("uses overrides when provided (even if the command is not registered)", async () => {
     const registry = new CommandRegistry();
     const override = vi.fn();

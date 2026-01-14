@@ -4,6 +4,7 @@ import type { RibbonActions, RibbonFileActions } from "./ribbonSchema.js";
 
 type RibbonCommandOverride = () => void | Promise<void>;
 type RibbonToggleOverride = (pressed: boolean) => void | Promise<void>;
+type RibbonUnknownToggleResult = boolean | void | Promise<boolean | void>;
 
 export function createRibbonActionsFromCommands(params: {
   commandRegistry: CommandRegistry;
@@ -31,11 +32,15 @@ export function createRibbonActionsFromCommands(params: {
   /**
    * Fallback handler for unregistered toggle commands.
    *
-   * NOTE: Ribbon toggles invoke both `onToggle` and `onCommand`. When provided,
-   * this handler is treated as "handled" and the subsequent `onCommand` call
-   * will be suppressed.
+   * NOTE: Ribbon toggles invoke both `onToggle` and `onCommand`. When this
+   * handler returns anything other than `false`, the subsequent `onCommand`
+   * callback will be suppressed to avoid double-executing toggle actions.
+   *
+   * To opt into the normal `onCommand` fallback behavior for unknown toggles
+   * (e.g. show the default toast / call `onUnknownCommand`), return `false`
+   * synchronously.
    */
-  onUnknownToggle?: (commandId: string, pressed: boolean) => void | Promise<void>;
+  onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
   const {
     commandRegistry,
@@ -145,8 +150,13 @@ export function createRibbonActionsFromCommands(params: {
         }
 
         if (onUnknownToggle) {
-          markToggleHandled(commandId);
-          await onUnknownToggle(commandId, pressed);
+          const handled = onUnknownToggle(commandId, pressed);
+          // `Ribbon` calls `onCommand` immediately after `onToggle`, so we must decide
+          // whether to suppress synchronously. Returning `false` opts out of suppression.
+          if (handled !== false) {
+            markToggleHandled(commandId);
+          }
+          await handled;
         }
         // If there's no handler for this toggle, intentionally do nothing: Ribbon toggles
         // also invoke `onCommand`, which will fall back to `onUnknownCommand` and/or show
