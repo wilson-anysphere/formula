@@ -2842,7 +2842,7 @@ export class SpreadsheetApp {
           : Array.isArray(payload?.imagesDeltas)
             ? payload.imagesDeltas
             : [];
-        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId);
+        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId) ?? null;
         let activeBackgroundNeedsReload = false;
 
         for (const delta of imageDeltas) {
@@ -17332,7 +17332,15 @@ export class SpreadsheetApp {
 
           // Only rewrite if we found a matching closing bracket.
           if (depth === 0 && j > start) {
-            out += tableName + input.slice(start, j);
+            const segment = input.slice(start, j);
+            // Column names containing spaces are written in the implicit-this-row shorthand
+            // using a nested bracket group: `[@[Total Amount]]`.
+            if (segment.startsWith("[@[") && segment.endsWith("]]") && segment.length > 5) {
+              const columnText = segment.slice(3, -2);
+              out += `${tableName}[[#This Row],[${columnText}]]`;
+            } else {
+              out += tableName + segment;
+            }
             changed = true;
             i = j;
             continue;

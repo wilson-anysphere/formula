@@ -297,11 +297,15 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     const app = new SpreadsheetApp(root, status, { formulaBar: formulaBarHost });
 
     const doc = app.getDocument();
-    // Table range includes header row at A1 and data rows at A2:A4.
+    // Table range includes header row at A1:B1 and data rows at A2:B4.
     doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Total Amount");
     doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
     doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
     doc.setCellValue("Sheet1", { row: 3, col: 0 }, 30);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 100);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 200);
+    doc.setCellValue("Sheet1", { row: 3, col: 1 }, 300);
 
     app.getSearchWorkbook().addTable({
       name: "TableThisRow",
@@ -309,8 +313,8 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
       startRow: 0,
       startCol: 0,
       endRow: 3,
-      endCol: 0,
-      columns: ["Amount"],
+      endCol: 1,
+      columns: ["Amount", "Total Amount"],
     });
 
     // Pretend we're editing the formula in row 3 (0-based row 2), inside the table.
@@ -324,6 +328,9 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     expect(evalPreview("[@Amount]")).toBe(20);
     expect(evalPreview("SUM(TableThisRow[[#This Row],[Amount]], 5)")).toBe(25);
     expect(evalPreview("SUM([@Amount], 5)")).toBe(25);
+    // Column names with spaces use nested bracket shorthand: `[@[Total Amount]]`.
+    expect(evalPreview("[@[Total Amount]]")).toBe(200);
+    expect(evalPreview("SUM([@[Total Amount]], 5)")).toBe(205);
 
     app.destroy();
     root.remove();
