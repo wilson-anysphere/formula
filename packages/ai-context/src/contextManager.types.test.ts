@@ -33,6 +33,8 @@ import {
   type SpreadsheetApiWithNonEmptyCells,
   type WorkbookRagVectorStore,
   type WorkbookRagWorkbook,
+  type VectorStoreItem,
+  type VectorStoreSearchResult,
 } from "./index.js";
 import type { SheetSchema } from "./schema.js";
 
@@ -78,6 +80,8 @@ type _VectorStoreListContentHashesShape = Assert<
     ? true
     : false
 >;
+type _SheetVectorStoreItemMetadataNotAny = Assert<IsAny<VectorStoreItem["metadata"]> extends false ? true : false>;
+type _SheetVectorStoreSearchResultItemNotAny = Assert<IsAny<VectorStoreSearchResult["item"]> extends false ? true : false>;
 type _ClearCacheOptionsNotAny = Assert<
   IsAny<Parameters<ContextManager["clearSheetIndexCache"]>[0]> extends false ? true : false
 >;

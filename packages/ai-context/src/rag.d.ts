@@ -56,14 +56,14 @@ export interface Embedder {
   embed(text: string, options?: { signal?: AbortSignal }): Promise<number[]>;
 }
 
-export interface VectorStoreItem<TMetadata = any> {
+export interface VectorStoreItem<TMetadata = unknown> {
   id: string;
   embedding: number[];
   metadata: TMetadata;
   text: string;
 }
 
-export interface VectorStoreSearchResult<TItem = any> {
+export interface VectorStoreSearchResult<TItem = VectorStoreItem> {
   item: TItem;
   score: number;
 }
@@ -91,7 +91,7 @@ export class HashEmbedder implements Embedder {
   embed(text: string, options?: { signal?: AbortSignal }): Promise<number[]>;
 }
 
-export class InMemoryVectorStore<TMetadata = any> implements VectorStore<VectorStoreItem<TMetadata>> {
+export class InMemoryVectorStore<TMetadata = unknown> implements VectorStore<VectorStoreItem<TMetadata>> {
   items: Map<string, VectorStoreItem<TMetadata>>;
   constructor();
   add(items: Array<VectorStoreItem<TMetadata>>, options?: { signal?: AbortSignal }): Promise<void>;
