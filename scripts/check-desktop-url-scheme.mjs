@@ -26,6 +26,14 @@ const infoPlistPath = resolvePath(
   process.env.FORMULA_INFO_PLIST_PATH,
   path.join(repoRoot, "apps", "desktop", "src-tauri", "Info.plist"),
 );
+const parquetMimeDefinitionPath = path.join(
+  repoRoot,
+  "apps",
+  "desktop",
+  "src-tauri",
+  "mime",
+  "app.formula.desktop.xml",
+);
 
 const REQUIRED_SCHEME = "formula";
 const REQUIRED_FILE_EXT = "xlsx";
@@ -64,6 +72,90 @@ function extractDeepLinkSchemes(pluginConfig) {
     return Array.isArray(desktop.schemes) ? desktop.schemes.filter(Boolean) : [];
   }
   return [];
+}
+
+/**
+ * @param {any} config
+ */
+function isParquetAssociationConfigured(config) {
+  const fileAssociations = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+  return fileAssociations.some((assoc) => {
+    const rawExt = /** @type {any} */ (assoc)?.ext;
+    const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
+    return exts.some((e) => String(e).trim().toLowerCase().replace(/^\./, "") === "parquet");
+  });
+}
+
+/**
+ * Parquet is not consistently defined in distros' shared-mime-info DB.
+ *
+ * If we advertise Parquet (`application/vnd.apache.parquet`) in `.desktop` MimeType=
+ * we should also ship a shared-mime-info definition file inside Linux bundles so
+ * `*.parquet` resolves to that MIME type after install (via update-mime-database).
+ *
+ * @param {any} config
+ */
+function validateParquetMimeDefinition(config) {
+  if (!isParquetAssociationConfigured(config)) return;
+
+  const linux = config?.bundle?.linux;
+  if (!linux || typeof linux !== "object") {
+    errBlock("Parquet file association configured, but bundle.linux is missing (tauri.conf.json)", [
+      "Expected bundle.linux.{deb,rpm,appimage} to be configured so we can ship a shared-mime-info definition for Parquet.",
+    ]);
+    return;
+  }
+
+  const expectedDest = "usr/share/mime/packages/app.formula.desktop.xml";
+  const expectedSrc = "mime/app.formula.desktop.xml";
+
+  for (const target of ["deb", "rpm", "appimage"]) {
+    const files = linux?.[target]?.files;
+    if (!files || typeof files !== "object") {
+      errBlock("Parquet file association configured, but Linux bundle file mappings are missing", [
+        `Expected bundle.linux.${target}.files to map:`,
+        `  - ${expectedDest} -> ${expectedSrc}`,
+      ]);
+      continue;
+    }
+    if (files[expectedDest] !== expectedSrc) {
+      errBlock("Parquet shared-mime-info mapping mismatch (tauri.conf.json)", [
+        `Expected bundle.linux.${target}.files["${expectedDest}"] = "${expectedSrc}"`,
+        `Found: ${JSON.stringify(files[expectedDest] ?? null)}`,
+      ]);
+    }
+  }
+
+  // Ensure update-mime-database triggers exist at install time.
+  const debDepends = linux?.deb?.depends;
+  if (!Array.isArray(debDepends) || !debDepends.includes("shared-mime-info")) {
+    errBlock("Parquet file association configured, but shared-mime-info is not declared as a DEB dependency", [
+      'Expected bundle.linux.deb.depends to include "shared-mime-info" so update-mime-database triggers run.',
+    ]);
+  }
+  const rpmDepends = linux?.rpm?.depends;
+  if (!Array.isArray(rpmDepends) || !rpmDepends.includes("shared-mime-info")) {
+    errBlock("Parquet file association configured, but shared-mime-info is not declared as an RPM dependency", [
+      'Expected bundle.linux.rpm.depends to include "shared-mime-info" so update-mime-database triggers run.',
+    ]);
+  }
+
+  try {
+    const xml = readFileSync(parquetMimeDefinitionPath, "utf8");
+    if (!xml.includes('mime-type type="application/vnd.apache.parquet"') || !xml.includes('glob pattern="*.parquet"')) {
+      errBlock("Parquet shared-mime-info definition file is missing expected content", [
+        `File: ${parquetMimeDefinitionPath}`,
+        'Expected to find: mime-type type="application/vnd.apache.parquet"',
+        'Expected to find: glob pattern="*.parquet"',
+      ]);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    errBlock("Parquet file association configured, but shared-mime-info definition file is missing", [
+      `Expected file to exist: ${parquetMimeDefinitionPath}`,
+      `Error: ${msg}`,
+    ]);
+  }
 }
 
 function main() {
@@ -149,6 +241,8 @@ function main() {
       ]);
     }
   }
+
+  validateParquetMimeDefinition(config);
 
   if (process.exitCode) {
     err("\nDesktop URL scheme preflight failed. Fix the errors above before tagging a release.\n");
