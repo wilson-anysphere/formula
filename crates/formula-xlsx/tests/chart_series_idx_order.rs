@@ -80,3 +80,34 @@ fn parses_series_idx_and_order_from_chart_ex() {
     assert_eq!(model.series[0].order, Some(5));
 }
 
+#[test]
+fn chart_ex_missing_idx_order_defaults_to_position() {
+    let xml = br#"
+        <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+          <cx:chart>
+            <cx:plotArea>
+              <cx:regionMapChart>
+                <cx:series>
+                  <cx:dataId val="0"/>
+                </cx:series>
+              </cx:regionMapChart>
+            </cx:plotArea>
+          </cx:chart>
+          <cx:chartData>
+            <cx:data id="0">
+              <cx:strDim type="cat">
+                <cx:f>Sheet1!$A$2:$A$5</cx:f>
+              </cx:strDim>
+              <cx:numDim type="val">
+                <cx:f>Sheet1!$B$2:$B$5</cx:f>
+              </cx:numDim>
+            </cx:data>
+          </cx:chartData>
+        </cx:chartSpace>
+    "#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 1);
+    assert_eq!(model.series[0].idx, Some(0));
+    assert_eq!(model.series[0].order, Some(0));
+}

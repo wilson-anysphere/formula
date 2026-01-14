@@ -123,7 +123,7 @@ pub fn parse_chart_ex(
 
     // Keep the in-memory model aligned with the serde round-trip behavior in
     // `formula_model::charts::ChartModel`: if a series lacks explicit `idx`/`order`,
-    // Excel treats the series' position in the document as the implied values.
+    // Excel implies a default matching the series' position.
     for (pos, ser) in series.iter_mut().enumerate() {
         let pos_u32 = pos as u32;
         if ser.idx.is_none() {
