@@ -1878,6 +1878,16 @@ export class SpreadsheetApp {
       // cached ChartModel. Data refreshes happen only for charts marked dirty by cell/computed
       // changes (see `dirtyChartIds`).
       onChange: () => {
+        // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
+        // (Without this, deleting many charts over a long session can leave their cached models alive
+        // indefinitely because the adapter is only queried for charts that are still rendered.)
+        try {
+          const keep = new Set(this.chartStore.listCharts().map((chart) => chart.id));
+          this.chartCanvasStoreAdapter.pruneEntries(keep);
+        } catch {
+          // Best-effort: ignore pruning failures.
+        }
+
         if (this.useCanvasCharts) this.renderDrawings();
         else this.renderCharts(false);
       }

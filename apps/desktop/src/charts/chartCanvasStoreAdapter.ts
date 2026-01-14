@@ -75,6 +75,24 @@ export class ChartCanvasStoreAdapter implements ChartRendererStore {
 
   constructor(private readonly options: ChartCanvasStoreAdapterOptions) {}
 
+  /**
+   * Drop cached chart models for ids that are no longer needed.
+   *
+   * This is used by `SpreadsheetApp` to ensure the adapter does not retain models for charts
+   * that were deleted (or otherwise removed from the backing `ChartStore`) after they have
+   * fallen out of the render path.
+   */
+  pruneEntries(keep: ReadonlySet<string>): void {
+    if (!keep || keep.size === 0) {
+      this.entries.clear();
+      return;
+    }
+    for (const id of this.entries.keys()) {
+      if (keep.has(id)) continue;
+      this.entries.delete(id);
+    }
+  }
+
   invalidate(chartId: string): void {
     const entry = this.entries.get(chartId);
     if (!entry) return;
