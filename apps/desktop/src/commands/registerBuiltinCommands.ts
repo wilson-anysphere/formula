@@ -284,6 +284,16 @@ export function registerBuiltinCommands(params: {
       return;
     }
 
+    const isReadOnly = typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
+    if (isReadOnly && !decision.allRangesBand) {
+      try {
+        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return;
+    }
+
     const ranges = selectionRangesForFormatting();
     const shouldBatch = Boolean(options.forceBatch) || ranges.length > 1;
 
