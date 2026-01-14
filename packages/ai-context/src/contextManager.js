@@ -2312,7 +2312,21 @@ export class ContextManager {
     const mergeHeuristics = (a, b) => {
       const aa = a && typeof a === "object" ? a : { level: "public", findings: [] };
       const bb = b && typeof b === "object" ? b : { level: "public", findings: [] };
-      const findings = new Set([...(aa.findings ?? []), ...(bb.findings ?? [])].map((f) => String(f)));
+      // Findings should always be a list of stable detector identifiers (strings). Vector stores
+      // can be untrusted; avoid coercing arbitrary objects via `String()`/template literals
+      // because custom `toString()` implementations can leak non-heuristic secrets even when
+      // ContextManager.redactor is a no-op.
+      const toSafeFinding = (f) => {
+        if (typeof f === "string") return f;
+        // Allow primitives (shouldn't happen today, but keep output stable).
+        if (typeof f === "number" || typeof f === "boolean" || typeof f === "bigint") return String(f);
+        return null;
+      };
+      const findings = new Set(
+        [...(Array.isArray(aa.findings) ? aa.findings : []), ...(Array.isArray(bb.findings) ? bb.findings : [])]
+          .map(toSafeFinding)
+          .filter((v) => typeof v === "string" && v !== ""),
+      );
       const level = aa.level === "sensitive" || bb.level === "sensitive" ? "sensitive" : "public";
       return { level, findings: [...findings] };
     };
