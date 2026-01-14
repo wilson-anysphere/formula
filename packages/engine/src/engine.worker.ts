@@ -47,6 +47,9 @@ type WasmWorkbookInstance = {
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
   setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
+  setRowStyleId?: (sheet: string, row: number, styleId: number | null) => void;
+  setColStyleId?: (sheet: string, col: number, styleId: number | null) => void;
+  setSheetDefaultStyleId?: (sheet: string, styleId: number | null) => void;
   toJson(): string;
 };
 
@@ -572,6 +575,27 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColWidthChars: not available in this WASM build");
               }
               (wb as any).setColWidthChars(params.sheet, params.col, params.widthChars);
+              result = null;
+              break;
+            case "setRowStyleId":
+              if (typeof (wb as any).setRowStyleId !== "function") {
+                throw new Error("setRowStyleId: not available in this WASM build");
+              }
+              (wb as any).setRowStyleId(params.sheet, params.row, params.styleId === null ? undefined : params.styleId);
+              result = null;
+              break;
+            case "setColStyleId":
+              if (typeof (wb as any).setColStyleId !== "function") {
+                throw new Error("setColStyleId: not available in this WASM build");
+              }
+              (wb as any).setColStyleId(params.sheet, params.col, params.styleId === null ? undefined : params.styleId);
+              result = null;
+              break;
+            case "setSheetDefaultStyleId":
+              if (typeof (wb as any).setSheetDefaultStyleId !== "function") {
+                throw new Error("setSheetDefaultStyleId: not available in this WASM build");
+              }
+              (wb as any).setSheetDefaultStyleId(params.sheet, params.styleId === null ? undefined : params.styleId);
               result = null;
               break;
             case "setCells":

@@ -642,6 +642,21 @@ export class EngineWorker {
     await this.invoke("setColWidthChars", { sheet, col, widthChars }, options);
   }
 
+  async setRowStyleId(sheet: string, row: number, styleId: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setRowStyleId", { sheet, row, styleId }, options);
+  }
+
+  async setColStyleId(sheet: string, col: number, styleId: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setColStyleId", { sheet, col, styleId }, options);
+  }
+
+  async setSheetDefaultStyleId(sheet: string, styleId: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setSheetDefaultStyleId", { sheet, styleId }, options);
+  }
+
   private async scheduleFlush(): Promise<void> {
     if (this.flushPromise) {
       return this.flushPromise;

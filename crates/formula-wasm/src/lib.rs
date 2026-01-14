@@ -3475,6 +3475,10 @@ impl WasmWorkbook {
             DateSystem::Excel1904 => formula_engine::date::ExcelDateSystem::Excel1904,
         });
 
+        // Import the workbook style table so style ids used by row/column formatting layers can be
+        // resolved by worksheet information functions like `CELL("protect")`.
+        wb.engine.set_style_table(model.styles.clone());
+
         // Create all sheets up-front so formulas can resolve cross-sheet references.
         for sheet in &model.sheets {
             wb.ensure_sheet(&sheet.name);
@@ -3554,6 +3558,26 @@ impl WasmWorkbook {
                 .to_string();
             wb.engine
                 .set_sheet_tables(&sheet_name, sheet.tables.clone());
+        }
+
+        // Import row/column style layers (layered formatting).
+        for sheet in &model.sheets {
+            let sheet_name = wb
+                .resolve_sheet(&sheet.name)
+                .expect("sheet just ensured must resolve")
+                .to_string();
+            for (row, props) in &sheet.row_properties {
+                if let Some(style_id) = props.style_id {
+                    wb.engine
+                        .set_row_style_id(&sheet_name, *row, Some(style_id));
+                }
+            }
+            for (col, props) in &sheet.col_properties {
+                if let Some(style_id) = props.style_id {
+                    wb.engine
+                        .set_col_style_id(&sheet_name, *col, Some(style_id));
+                }
+            }
         }
 
         // Best-effort defined names.
@@ -3693,7 +3717,6 @@ impl WasmWorkbook {
     pub fn rename_sheet(&mut self, old_name: String, new_name: String) -> bool {
         self.inner.rename_sheet_internal(&old_name, &new_name)
     }
-
     /// Set (or clear) a per-column width override for a sheet.
     ///
     /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
@@ -3798,6 +3821,24 @@ impl WasmWorkbook {
             .engine
             .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "setRowStyleId")]
+    pub fn set_row_style_id(&mut self, sheet_name: String, row: u32, style_id: Option<u32>) {
+        let sheet = self.inner.ensure_sheet(&sheet_name);
+        self.inner.engine.set_row_style_id(&sheet, row, style_id);
+    }
+
+    #[wasm_bindgen(js_name = "setColStyleId")]
+    pub fn set_col_style_id(&mut self, sheet_name: String, col: u32, style_id: Option<u32>) {
+        let sheet = self.inner.ensure_sheet(&sheet_name);
+        self.inner.engine.set_col_style_id(&sheet, col, style_id);
+    }
+
+    #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
+    pub fn set_sheet_default_style_id(&mut self, sheet_name: String, style_id: Option<u32>) {
+        let sheet = self.inner.ensure_sheet(&sheet_name);
+        self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
 
     #[wasm_bindgen(js_name = "toJson")]

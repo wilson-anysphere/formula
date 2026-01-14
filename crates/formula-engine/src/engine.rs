@@ -1050,83 +1050,6 @@ impl Engine {
         }
     }
 
-    /// Set the default style id for a row.
-    pub fn set_row_style_id(&mut self, sheet: &str, row_0based: u32, style_id: Option<u32>) {
-        let sheet_id = self.workbook.ensure_sheet(sheet);
-        if self.workbook.grow_sheet_dimensions(
-            sheet_id,
-            CellAddr {
-                row: row_0based,
-                col: 0,
-            },
-        ) {
-            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
-            self.mark_all_compiled_cells_dirty();
-        }
-
-        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
-            return;
-        };
-        sheet
-            .row_properties
-            .entry(row_0based)
-            .and_modify(|p| p.style_id = style_id)
-            .or_insert_with(|| RowProperties {
-                height: None,
-                hidden: false,
-                style_id,
-            });
-
-        if let Some(props) = sheet.row_properties.get(&row_0based) {
-            if props.height.is_none() && !props.hidden && props.style_id.is_none() {
-                sheet.row_properties.remove(&row_0based);
-            }
-        }
-    }
-
-    /// Set the default style id for a column.
-    pub fn set_col_style_id(&mut self, sheet: &str, col_0based: u32, style_id: Option<u32>) {
-        let sheet_id = self.workbook.ensure_sheet(sheet);
-        if self.workbook.grow_sheet_dimensions(
-            sheet_id,
-            CellAddr {
-                row: 0,
-                col: col_0based,
-            },
-        ) {
-            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
-            self.mark_all_compiled_cells_dirty();
-        }
-
-        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
-            return;
-        };
-        sheet
-            .col_properties
-            .entry(col_0based)
-            .and_modify(|p| p.style_id = style_id)
-            .or_insert_with(|| ColProperties {
-                width: None,
-                hidden: false,
-                style_id,
-            });
-
-        if let Some(props) = sheet.col_properties.get(&col_0based) {
-            if props.width.is_none() && !props.hidden && props.style_id.is_none() {
-                sheet.col_properties.remove(&col_0based);
-            }
-        }
-    }
-
-    /// Set the default style id for an entire worksheet.
-    pub fn set_sheet_default_style_id(&mut self, sheet: &str, style_id: Option<u32>) {
-        let sheet_id = self.workbook.ensure_sheet(sheet);
-        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
-            return;
-        };
-        sheet_state.default_style_id = style_id;
-    }
-
     /// Set workbook file metadata (directory + filename).
     ///
     /// This is used by worksheet/workbook information functions like `CELL("filename")` and
@@ -1564,6 +1487,188 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    /// Return the workbook style table (interned style objects).
+    pub fn style_table(&self) -> &StyleTable {
+        &self.workbook.styles
+    }
+
+    /// Replace the workbook style table.
+    ///
+    /// This is primarily intended for workbook load flows (XLSX import, persistence hydrate) so
+    /// style ids referenced by cells/rows/cols resolve consistently during formula evaluation (e.g.
+    /// `CELL("protect")`).
+    pub fn set_style_table(&mut self, styles: StyleTable) {
+        self.workbook.styles = styles;
+
+        // Style table changes can affect worksheet information functions that consult formatting,
+        // so conservatively refresh all compiled formulas.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the worksheet default style id (layered formatting base) for `sheet`.
+    ///
+    /// `None` (or `Some(0)`) resets the default style to `0`.
+    pub fn set_sheet_default_style_id(&mut self, sheet: &str, style_id: Option<u32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let style_id = style_id.filter(|id| *id != 0);
+
+        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        if sheet_state.default_style_id == style_id {
+            return;
+        }
+        sheet_state.default_style_id = style_id;
+
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set a row formatting style layer for `sheet` at 0-based `row0`.
+    ///
+    /// `None` (or `Some(0)`) clears the row style.
+    pub fn set_row_style_id(&mut self, sheet: &str, row0: u32, style_id: Option<u32>) {
+        // Keep row indices within the engine's supported coordinate space.
+        if row0 >= i32::MAX as u32 {
+            return;
+        }
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let style_id = style_id.filter(|id| *id != 0);
+        let dims_changed = style_id
+            .map(|_| {
+                self.workbook.grow_sheet_dimensions(
+                    sheet_id,
+                    CellAddr {
+                        row: row0,
+                        col: 0,
+                    },
+                )
+            })
+            .unwrap_or(false);
+
+        if dims_changed {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+        }
+
+        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+
+        let prev = sheet_state
+            .row_properties
+            .get(&row0)
+            .and_then(|p| p.style_id)
+            .filter(|id| *id != 0);
+        if prev == style_id && !dims_changed {
+            return;
+        }
+
+        if prev != style_id {
+            match style_id {
+                Some(id) => {
+                    sheet_state
+                        .row_properties
+                        .entry(row0)
+                        .or_default()
+                        .style_id = Some(id);
+                }
+                None => {
+                    if let Some(props) = sheet_state.row_properties.get_mut(&row0) {
+                        props.style_id = None;
+                    }
+                }
+            }
+        }
+
+        // Keep the map sparse when no other per-row properties are set.
+        if let Some(props) = sheet_state.row_properties.get(&row0) {
+            if *props == RowProperties::default() {
+                sheet_state.row_properties.remove(&row0);
+            }
+        }
+
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set a column formatting style layer for `sheet` at 0-based `col0`.
+    ///
+    /// `None` (or `Some(0)`) clears the column style.
+    pub fn set_col_style_id(&mut self, sheet: &str, col0: u32, style_id: Option<u32>) {
+        // The engine enforces Excel's fixed 16,384-column grid.
+        if col0 >= EXCEL_MAX_COLS {
+            return;
+        }
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let style_id = style_id.filter(|id| *id != 0);
+        let dims_changed = style_id
+            .map(|_| {
+                self.workbook.grow_sheet_dimensions(
+                    sheet_id,
+                    CellAddr {
+                        row: 0,
+                        col: col0,
+                    },
+                )
+            })
+            .unwrap_or(false);
+
+        if dims_changed {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+        }
+
+        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+
+        let prev = sheet_state
+            .col_properties
+            .get(&col0)
+            .and_then(|p| p.style_id)
+            .filter(|id| *id != 0);
+        if prev == style_id && !dims_changed {
+            return;
+        }
+
+        if prev != style_id {
+            match style_id {
+                Some(id) => {
+                    sheet_state
+                        .col_properties
+                        .entry(col0)
+                        .or_default()
+                        .style_id = Some(id);
+                }
+                None => {
+                    if let Some(props) = sheet_state.col_properties.get_mut(&col0) {
+                        props.style_id = None;
+                    }
+                }
+            }
+        }
+
+        // Keep the map sparse when no other per-column properties are set.
+        if let Some(props) = sheet_state.col_properties.get(&col0) {
+            if *props == ColProperties::default() {
+                sheet_state.col_properties.remove(&col0);
+            }
+        }
+
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     pub fn set_calc_settings(&mut self, settings: CalcSettings) {
@@ -7550,24 +7655,24 @@ fn shift_rows(sheet: &mut Sheet, row: u32, count: u32, insert: bool) {
     sheet.cells = new_cells;
 
     // Shift row-level metadata alongside the cells for full-row edits.
-    let mut new_rows = BTreeMap::new();
+    let mut new_props = BTreeMap::new();
     for (r, props) in std::mem::take(&mut sheet.row_properties) {
         if insert {
             if r >= row {
-                new_rows.insert(r.saturating_add(count), props);
+                new_props.insert(r.saturating_add(count), props);
             } else {
-                new_rows.insert(r, props);
+                new_props.insert(r, props);
             }
             continue;
         }
 
         if r < row {
-            new_rows.insert(r, props);
+            new_props.insert(r, props);
         } else if r > del_end {
-            new_rows.insert(r.saturating_sub(count), props);
+            new_props.insert(r.saturating_sub(count), props);
         }
     }
-    sheet.row_properties = new_rows;
+    sheet.row_properties = new_props;
 }
 
 fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
@@ -7604,24 +7709,24 @@ fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
     sheet.cells = new_cells;
 
     // Shift column-level metadata alongside the cells for full-column edits.
-    let mut new_cols = BTreeMap::new();
+    let mut new_props = BTreeMap::new();
     for (c, props) in std::mem::take(&mut sheet.col_properties) {
         if insert {
             if c >= col {
-                new_cols.insert(c.saturating_add(count), props);
+                new_props.insert(c.saturating_add(count), props);
             } else {
-                new_cols.insert(c, props);
+                new_props.insert(c, props);
             }
             continue;
         }
 
         if c < col {
-            new_cols.insert(c, props);
+            new_props.insert(c, props);
         } else if c > del_end {
-            new_cols.insert(c.saturating_sub(count), props);
+            new_props.insert(c.saturating_sub(count), props);
         }
     }
-    sheet.col_properties = new_cols;
+    sheet.col_properties = new_props;
 }
 
 fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
@@ -9040,9 +9145,9 @@ struct Snapshot {
     tables: Vec<Vec<Table>>,
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
+    styles: StyleTable,
     row_properties: Vec<BTreeMap<u32, RowProperties>>,
     col_properties: Vec<BTreeMap<u32, ColProperties>>,
-    styles: StyleTable,
     workbook_directory: Option<String>,
     workbook_filename: Option<String>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,

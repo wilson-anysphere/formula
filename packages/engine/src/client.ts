@@ -212,6 +212,24 @@ export interface EngineClient {
    * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
    */
   setColWidthChars(sheet: string, col: number, widthChars: number | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set a row-level formatting style id (layered formatting).
+   *
+   * `null` clears the row style.
+   */
+  setRowStyleId(sheet: string, row: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set a column-level formatting style id (layered formatting).
+   *
+   * `null` clears the column style.
+   */
+  setColStyleId(sheet: string, col: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set the sheet default style id (layered formatting base).
+   *
+   * `null` resets to the default style (0).
+   */
+  setSheetDefaultStyleId(sheet: string, styleId: number | null, options?: RpcOptions): Promise<void>;
 
   /**
    * Apply an Excel-like structural edit operation (insert/delete rows/cols, move/copy/fill).
@@ -436,6 +454,12 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.renameSheet(oldName, newName, rpcOptions)),
     setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>
       await withEngine((connected) => connected.setColWidthChars(sheet, col, widthChars, rpcOptions)),
+    setRowStyleId: async (sheet, row, styleId, rpcOptions) =>
+      await withEngine((connected) => connected.setRowStyleId(sheet, row, styleId, rpcOptions)),
+    setColStyleId: async (sheet, col, styleId, rpcOptions) =>
+      await withEngine((connected) => connected.setColStyleId(sheet, col, styleId, rpcOptions)),
+    setSheetDefaultStyleId: async (sheet, styleId, rpcOptions) =>
+      await withEngine((connected) => connected.setSheetDefaultStyleId(sheet, styleId, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     rewriteFormulasForCopyDelta: async (requests, rpcOptions) =>
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),

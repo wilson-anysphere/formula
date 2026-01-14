@@ -828,6 +828,69 @@ fn info_directory_returns_directory_when_metadata_is_set() {
 }
 
 #[test]
+fn cell_protect_and_prefix_observe_row_col_style_layers() {
+    use formula_engine::Engine;
+    use formula_model::{Alignment, HorizontalAlignment, Protection, Style};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+
+    let unlocked_style_id = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+    let col_right_style_id = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Right),
+            ..Alignment::default()
+        }),
+        ..Style::default()
+    });
+    let row_left_style_id = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Left),
+            ..Alignment::default()
+        }),
+        ..Style::default()
+    });
+
+    // Row style layer affects CELL("protect").
+    engine.set_row_style_id("Sheet1", 0, Some(unlocked_style_id));
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"protect\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+
+    // Clearing the row style should revert to Excel's default locked behavior.
+    engine.set_row_style_id("Sheet1", 0, None);
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+
+    // Column style layer affects CELL("prefix") for label/text values.
+    engine.set_col_style_id("Sheet1", 0, Some(col_right_style_id));
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"prefix\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("\"".to_string())
+    );
+
+    // Row style overrides column style when both specify alignment (sheet < col < row < cell).
+    engine.set_row_style_id("Sheet1", 0, Some(row_left_style_id));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("'".to_string())
+    );
+}
+
+#[test]
 fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
     let mut sheet = TestSheet::new();
 

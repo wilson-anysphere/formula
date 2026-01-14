@@ -3,6 +3,7 @@ use crate::eval::{parse_a1, CellAddr};
 use crate::functions::{FunctionContext, Reference, SheetId};
 use crate::{ErrorKind, Value};
 use formula_format::cell_format_code;
+use formula_model::HorizontalAlignment;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InfoType {
@@ -168,28 +169,78 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
     }
 }
 
-fn effective_style_id(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> u32 {
-    let style_id = ctx.cell_style_id(sheet_id, addr);
-    if style_id != 0 {
-        return style_id;
-    }
+fn style_layer_ids(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> [u32; 4] {
+    let col_style_id = ctx
+        .col_properties(sheet_id, addr.col)
+        .and_then(|props| props.style_id)
+        .unwrap_or(0);
 
-    // If no cell-level style is present, fall back to row then column defaults (matching Excel
-    // style precedence).
-    if let Some(style_id) = ctx.row_style_id(sheet_id, addr.row) {
-        return style_id;
-    }
-    if let Some(props) = ctx.col_properties(sheet_id, addr.col) {
-        if let Some(style_id) = props.style_id {
-            return style_id;
+    // Style precedence matches the DocumentController layering:
+    //   sheet < col < row < cell
+    [
+        ctx.cell_style_id(sheet_id, addr),
+        ctx.row_style_id(sheet_id, addr.row).unwrap_or(0),
+        col_style_id,
+        ctx.sheet_default_style_id(sheet_id).unwrap_or(0),
+    ]
+}
+
+fn resolve_locked(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> bool {
+    let Some(styles) = ctx.style_table() else {
+        // Excel defaults to locked cells.
+        return true;
+    };
+
+    for style_id in style_layer_ids(ctx, sheet_id, addr) {
+        if let Some(style) = styles.get(style_id) {
+            if let Some(protection) = &style.protection {
+                return protection.locked;
+            }
         }
     }
 
-    if let Some(style_id) = ctx.sheet_default_style_id(sheet_id) {
-        return style_id;
+    // Excel defaults to locked cells.
+    true
+}
+
+fn resolve_horizontal_alignment(
+    ctx: &dyn FunctionContext,
+    sheet_id: &SheetId,
+    addr: CellAddr,
+) -> HorizontalAlignment {
+    let Some(styles) = ctx.style_table() else {
+        return HorizontalAlignment::General;
+    };
+
+    for style_id in style_layer_ids(ctx, sheet_id, addr) {
+        if let Some(style) = styles.get(style_id) {
+            if let Some(alignment) = &style.alignment {
+                if let Some(horizontal) = alignment.horizontal {
+                    return horizontal;
+                }
+            }
+        }
     }
 
-    0
+    HorizontalAlignment::General
+}
+
+fn resolve_number_format<'a>(
+    ctx: &'a dyn FunctionContext,
+    sheet_id: &SheetId,
+    addr: CellAddr,
+) -> Option<&'a str> {
+    let styles = ctx.style_table()?;
+
+    for style_id in style_layer_ids(ctx, sheet_id, addr) {
+        if let Some(style) = styles.get(style_id) {
+            if let Some(fmt) = style.number_format.as_deref() {
+                return Some(fmt);
+            }
+        }
+    }
+
+    None
 }
 
 fn is_ident_cont_char(c: char) -> bool {
@@ -230,10 +281,7 @@ fn cell_number_format<'a>(
     sheet_id: &SheetId,
     addr: CellAddr,
 ) -> Option<&'a str> {
-    let style_id = effective_style_id(ctx, sheet_id, addr);
-    ctx.style_table()
-        .and_then(|styles| styles.get(style_id))
-        .and_then(|style| style.number_format.as_deref())
+    resolve_number_format(ctx, sheet_id, addr)
 }
 
 fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {
@@ -394,32 +442,21 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
 
-            // Excel returns 1 for locked cells, 0 for unlocked.
-            let locked = ctx
-                .style_table()
-                .and_then(|styles| styles.get(effective_style_id(ctx, &cell_ref.sheet_id, addr)))
-                .and_then(|style| style.protection.as_ref())
-                .map(|protection| protection.locked)
-                .unwrap_or(true);
+            let locked = resolve_locked(ctx, &cell_ref.sheet_id, addr);
             Value::Number(if locked { 1.0 } else { 0.0 })
         }
         CellInfoType::Prefix => {
             // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
-            let style = ctx
-                .style_table()
-                .and_then(|styles| styles.get(effective_style_id(ctx, &cell_ref.sheet_id, addr)));
 
-            let prefix = match style
-                .and_then(|style| style.alignment.as_ref())
-                .and_then(|align| align.horizontal)
-            {
-                Some(formula_model::HorizontalAlignment::Left) => "'",
-                Some(formula_model::HorizontalAlignment::Center) => "^",
-                Some(formula_model::HorizontalAlignment::Right) => "\"",
-                Some(formula_model::HorizontalAlignment::Fill) => "\\",
-                _ => "",
+            let horizontal = resolve_horizontal_alignment(ctx, &cell_ref.sheet_id, addr);
+            let prefix = match horizontal {
+                HorizontalAlignment::Left => "'",
+                HorizontalAlignment::Center => "^",
+                HorizontalAlignment::Right => "\"",
+                HorizontalAlignment::Fill => "\\",
+                HorizontalAlignment::General | HorizontalAlignment::Justify => "",
             };
             Value::Text(prefix.to_string())
         }
