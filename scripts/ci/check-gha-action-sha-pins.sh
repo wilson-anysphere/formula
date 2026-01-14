@@ -167,20 +167,8 @@ while IFS= read -r match; do
     if [ -z "$comment" ]; then
       echo "error: ${file}:${line_no} pins an action to a SHA but is missing a trailing version comment:" >&2
       echo "  Found: uses: ${value}" >&2
-      echo "  Fix: add a trailing comment with the original upstream ref (e.g. # v4)." >&2
+      echo "  Fix: add a trailing comment with the original upstream ref (e.g. # v4.3.1 or # master)." >&2
       fail=1
-    else
-      # Dependabot relies on the trailing comment to know which version channel/tag you intend to
-      # track when the action itself is pinned to a commit SHA.
-      #
-      # Require the comment to start with a semver-ish token (e.g. v4, v4.3.1, 1.92.0).
-      tag="${comment%%[[:space:]]*}"
-      if ! [[ "$tag" =~ ^v?[0-9]+(\.[0-9]+){0,2}$ ]]; then
-        echo "error: ${file}:${line_no} action pin comment should start with a version tag:" >&2
-        echo "  Found: uses: ${value} # ${comment}" >&2
-        echo "  Fix: ensure the comment begins with the upstream version tag (e.g. # v4.3.1)." >&2
-        fail=1
-      fi
     fi
   fi
 done <<<"$(extract_uses_lines "$workflow" || true)"

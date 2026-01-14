@@ -83,16 +83,15 @@ jobs:
   assert.match(proc.stderr, /missing.*comment/i);
 });
 
-test("fails when version comment does not start with a semver-ish tag", { skip: !hasBash }, () => {
+test("allows non-semver ref comments (e.g. # master)", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # latest
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # master
 `);
-  assert.notEqual(proc.status, 0);
-  assert.match(proc.stderr, /comment should start with a version tag/i);
+  assert.equal(proc.status, 0, proc.stderr);
 });
 
 test("ignores uses: strings inside YAML block scalars", { skip: !hasBash }, () => {
