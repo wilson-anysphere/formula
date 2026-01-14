@@ -2582,7 +2582,15 @@ export class SpreadsheetApp {
             // Note: DesktopSharedGrid will still expand the selection to the dragged target range
             // after this callback runs. Revert the selection on the next microtask so the UI
             // reflects that no fill occurred.
-            if (this.isReadOnly() || this.isEditing()) {
+            const isReadOnly = this.isReadOnly();
+            const isEditing = this.isEditing();
+            if (isReadOnly || isEditing) {
+              if (isReadOnly) {
+                const cell = this.selection.active;
+                showCollabEditRejectedToast([
+                  { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+                ]);
+              }
               const selectionSnapshot = {
                 ranges: this.selection.ranges.map((r) => ({ ...r })),
                 active: { ...this.selection.active },
@@ -8026,7 +8034,14 @@ export class SpreadsheetApp {
   }
 
   deleteDrawingById(id: DrawingObjectId): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      try {
+        showToast("Read-only: you don't have permission to edit drawings.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; some test-only contexts don't include it.
+      }
+      return;
+    }
     if (this.isEditing()) return;
 
     const prevSelected = this.getSelectedDrawingId();
@@ -8822,7 +8837,6 @@ export class SpreadsheetApp {
    * Hide or unhide rows (0-based indices).
    */
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     if (!Array.isArray(rows) || rows.length === 0) return;
 
@@ -8847,7 +8861,6 @@ export class SpreadsheetApp {
    * Hide or unhide columns (0-based indices).
    */
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
-    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     if (!Array.isArray(cols) || cols.length === 0) return;
 
@@ -9636,7 +9649,15 @@ export class SpreadsheetApp {
 
     // Interactions should never mutate the document while editing text (cell editor / formula bar /
     // inline edit) or while in read-only mode.
-    if (this.isReadOnly() || this.isEditing()) {
+    const isReadOnly = this.isReadOnly();
+    if (isReadOnly || this.isEditing()) {
+      if (isReadOnly) {
+        try {
+          showToast("Read-only: you don't have permission to edit drawings.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; some test-only contexts don't include it.
+        }
+      }
       // Revert any live preview state to the persisted document snapshot.
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
@@ -10895,13 +10916,21 @@ export class SpreadsheetApp {
   }
 
   private async insertImageFromPickedFile(file: File): Promise<void> {
-    if (this.isReadOnly()) return;
     const sheetId = this.sheetId;
     const focusIfStillOnSheet = () => {
       if (this.sheetId === sheetId) {
         this.focus();
       }
     };
+    if (this.isReadOnly()) {
+      try {
+        showToast("Read-only: you don't have permission to insert pictures.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; some test-only contexts don't include it.
+      }
+      focusIfStillOnSheet();
+      return;
+    }
     const size = typeof (file as any)?.size === "number" ? (file as any).size : null;
     if (size == null || size > MAX_INSERT_IMAGE_BYTES) {
       const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
@@ -16727,7 +16756,14 @@ export class SpreadsheetApp {
       typeof (this.document as any).setSheetDrawings === "function" ? ((this.document as any).setSheetDrawings as Function) : null;
     // If drawings are backed by the document, respect read-only mode and avoid making any
     // in-memory moves that would diverge from the persisted state.
-    if (setSheetDrawings && this.isReadOnly()) return;
+    if (setSheetDrawings && this.isReadOnly()) {
+      try {
+        showToast("Read-only: you don't have permission to edit drawings.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; some test-only contexts don't include it.
+      }
+      return;
+    }
 
     const objects = this.listDrawingObjectsForSheet();
     if (objects.length === 0) return;
