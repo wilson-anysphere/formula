@@ -5554,20 +5554,18 @@ export class SpreadsheetApp {
 
   undo(): boolean {
     if (this.isReadOnly()) return false;
-    if (this.editor.isOpen()) return false;
-    if (this.formulaBar?.isEditing()) return false;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     return this.applyUndoRedo("undo");
   }
 
   redo(): boolean {
     if (this.isReadOnly()) return false;
-    if (this.editor.isOpen()) return false;
-    if (this.formulaBar?.isEditing()) return false;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     return this.applyUndoRedo("redo");
   }
 
   getUndoRedoState(): UndoRedoState {
-    const editing = this.isEditing();
+    const editing = this.isSpreadsheetEditingIncludingSecondary();
     const allowUndoRedo = !editing && !this.isReadOnly();
     if (this.collabUndoService) {
       return {
@@ -12857,7 +12855,7 @@ export class SpreadsheetApp {
     return this.commentsPanelVisible;
   }
 
-  private isSpreadsheetEditingForCommentsUi(): boolean {
+  private isSpreadsheetEditingIncludingSecondary(): boolean {
     const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
     // `__formulaSpreadsheetIsEditing` is owned by the desktop shell (`main.ts`) and includes
     // split-view secondary editor state. Fall back to SpreadsheetApp's primary edit-state
@@ -12892,7 +12890,7 @@ export class SpreadsheetApp {
     // into disabled composer UI.
     if (!this.canUserComment()) return;
     // Excel-style: avoid routing focus into comment mutation controls while a cell/formula edit is active.
-    if (this.isSpreadsheetEditingForCommentsUi()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     try {
       const input =
         this.root.querySelector<HTMLInputElement>('[data-testid="new-comment-input"]') ??
@@ -13760,7 +13758,7 @@ export class SpreadsheetApp {
 
   private renderCommentThread(comment: Comment): HTMLElement {
     const canComment = this.canUserComment();
-    const mutationsDisabled = !canComment || this.isSpreadsheetEditingForCommentsUi();
+    const mutationsDisabled = !canComment || this.isSpreadsheetEditingIncludingSecondary();
     const container = document.createElement("div");
     container.dataset.testid = "comment-thread";
     container.dataset.commentId = comment.id;
@@ -13782,7 +13780,7 @@ export class SpreadsheetApp {
     resolve.disabled = mutationsDisabled;
     resolve.addEventListener("click", () => {
       if (!this.canUserComment()) return;
-      if (this.isSpreadsheetEditingForCommentsUi()) return;
+      if (this.isSpreadsheetEditingIncludingSecondary()) return;
       this.commentManager.setResolved({
         commentId: comment.id,
         resolved: !comment.resolved,
@@ -13834,7 +13832,7 @@ export class SpreadsheetApp {
     submitReply.disabled = mutationsDisabled;
     submitReply.addEventListener("click", () => {
       if (!this.canUserComment()) return;
-      if (this.isSpreadsheetEditingForCommentsUi()) return;
+      if (this.isSpreadsheetEditingIncludingSecondary()) return;
       const content = replyInput.value.trim();
       if (!content) return;
       this.commentManager.addReply({
@@ -13855,7 +13853,7 @@ export class SpreadsheetApp {
 
   private submitNewComment(): void {
     if (!this.canUserComment()) return;
-    if (this.isSpreadsheetEditingForCommentsUi()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const content = this.newCommentInput.value.trim();
     if (!content) return;
     const cellRef = this.commentCellRef(this.selection.active);
@@ -13895,7 +13893,7 @@ export class SpreadsheetApp {
     // without running the constructor.
     if (!this.newCommentInput || !this.newCommentSubmitButton || !this.commentsPanelReadOnlyHint) return;
     const canComment = this.canUserComment();
-    const editing = this.isSpreadsheetEditingForCommentsUi();
+    const editing = this.isSpreadsheetEditingIncludingSecondary();
     const mutationsDisabled = !canComment || editing;
 
     this.newCommentInput.disabled = mutationsDisabled;
