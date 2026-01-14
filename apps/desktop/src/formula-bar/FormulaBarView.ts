@@ -617,8 +617,24 @@ class FormulaBarFunctionAutocompleteController {
   #selectedIndex = 0;
   #activeDescendantId: string | null = null;
   #isComposing = false;
+  #signatureCatalogRefreshPromise: Promise<void> | null = null;
 
   readonly #unsubscribe: Array<() => void> = [];
+
+  #scheduleSignatureCatalogRefresh(): void {
+    if (this.#signatureCatalogRefreshPromise) return;
+
+    this.#signatureCatalogRefreshPromise = preloadFunctionSignatureCatalog()
+      .then(() => {
+        if (!isFunctionSignatureCatalogReady()) return;
+        // Don't auto-open the dropdown; only refresh if it's already visible.
+        if (!this.isOpen()) return;
+        this.update();
+      })
+      .finally(() => {
+        this.#signatureCatalogRefreshPromise = null;
+      });
+  }
 
   constructor(opts: FormulaBarFunctionAutocompleteControllerOptions) {
     this.#formulaBar = opts.formulaBar;
@@ -750,6 +766,11 @@ class FormulaBarFunctionAutocompleteController {
     if (suggestions.length === 0) {
       this.close();
       return;
+    }
+    // If we're showing placeholder signatures, lazily load the function catalog metadata and
+    // refresh the dropdown when it becomes available.
+    if (!isFunctionSignatureCatalogReady() && suggestions.some((s) => s.signature === "(…)")) {
+      this.#scheduleSignatureCatalogRefresh();
     }
 
     // Preserve selection when possible.
