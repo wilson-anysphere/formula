@@ -193,7 +193,12 @@ export class DrawingInteractionController {
   dispose(): void {
     // If the app/view is torn down mid-gesture (e.g. hot reload, workbook switch),
     // ensure we release pointer capture and close any pending undo batch.
-    this.cancelActiveGesture();
+    try {
+      this.cancelActiveGesture();
+    } catch {
+      // Best-effort: teardown should still remove listeners even if the integration
+      // callbacks throw (e.g. partially-initialized test harnesses).
+    }
     this.element.removeEventListener("pointerdown", this.onPointerDown, this.listenerOptions);
     this.element.removeEventListener("pointermove", this.onPointerMove, this.listenerOptions);
     this.element.removeEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
@@ -229,7 +234,11 @@ export class DrawingInteractionController {
   reset(options?: { clearSelection?: boolean }): void {
     // Best-effort: if an interaction is in progress, cancel it and release any
     // pointer capture so sheet switches / teardown do not leave stale state.
-    this.cancelActiveGesture();
+    try {
+      this.cancelActiveGesture();
+    } catch {
+      // ignore
+    }
     if (options?.clearSelection) {
       this.selectedId = null;
     }
@@ -732,8 +741,11 @@ export class DrawingInteractionController {
     this.tryReleasePointerCapture(pointerId);
 
     // Revert the live in-memory state and cancel the undo batch.
-    this.callbacks.setObjects(startObjects);
-    this.callbacks.cancelBatch?.();
+    try {
+      this.callbacks.setObjects(startObjects);
+    } finally {
+      this.callbacks.cancelBatch?.();
+    }
 
     if (emitCommit && startObj) {
       try {
