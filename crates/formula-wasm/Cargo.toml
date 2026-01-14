@@ -40,9 +40,3 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
-
-[package.metadata.wasm-pack.profile.release]
-# wasm-pack runs wasm-opt (Binaryen) in release builds. Recent Rust toolchains emit post-MVP
-# WebAssembly instructions (e.g. `memory.copy`/`memory.fill`, `i32.trunc_sat_*`) that require
-# enabling the corresponding feature flags or wasm-opt will fail validation.
-wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
