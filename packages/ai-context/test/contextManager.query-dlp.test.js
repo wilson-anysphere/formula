@@ -110,7 +110,10 @@ test("buildContext: structured DLP also redacts non-heuristic table/namedRange t
   await cm.buildContext({
     sheet: {
       name: "Sheet1",
-      values: [["Hello"]],
+      values: [
+        ["Hello", "World"],
+        ["a", "b"],
+      ],
       tables: [{ name: "TopSecretTable", range: "Sheet1!A1:A1" }],
       namedRanges: [{ name: "TopSecretRange", range: "Sheet1!A1:A1" }],
     },
@@ -135,7 +138,9 @@ test("buildContext: structured DLP also redacts non-heuristic table/namedRange t
             scope: "range",
             documentId: "doc-1",
             sheetId: "Sheet1",
-            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+            // Structured redaction is triggered by a disallowed cell elsewhere in the window;
+            // table/namedRange identifiers should still be treated as disallowed metadata tokens.
+            range: { start: { row: 1, col: 1 }, end: { row: 1, col: 1 } }, // B2
           },
           classification: { level: "Restricted", labels: [] },
         },

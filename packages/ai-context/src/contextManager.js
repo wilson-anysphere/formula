@@ -1075,51 +1075,17 @@ export class ContextManager {
           redactQueryToken(sheetNameToken);
         }
 
-        const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
-
-        /**
-         * Structured DLP decision helper for an A1 range string (table/namedRange).
-         * @param {unknown} rangeA1
-         */
-        const recordDecisionForA1Range = (rangeA1) => {
-          const raw = String(rangeA1 ?? "");
-          if (!raw) return null;
-          let parsed;
-          try {
-            parsed = parseA1Range(raw);
-          } catch {
-            // If we cannot parse the range, be conservative and treat it as disallowed.
-            return { decision: DLP_DECISION.REDACT };
-          }
-          const rangeRef = {
-            documentId: dlpAuditDocumentId ?? dlp.documentId,
-            sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
-            range: {
-              start: { row: parsed.startRow, col: parsed.startCol },
-              end: { row: parsed.endRow, col: parsed.endCol },
-            },
-          };
-          const classification = effectiveRangeClassification(rangeRef, dlpClassificationRecords);
-          return evaluatePolicy({
-            action: DLP_ACTION.AI_CLOUD_PROCESSING,
-            classification,
-            policy: dlp.policy,
-            options: { includeRestrictedContent },
-          });
-        };
-
         // Table/namedRange names can also contain non-heuristic sensitive identifiers.
-        // When the underlying range is disallowed, redact the name token before embedding.
+        // Under structured DLP redaction, treat them as disallowed metadata tokens too. They can
+        // contain non-heuristic secrets that a no-op redactor cannot detect, and should never be
+        // sent to a future cloud embedder.
         if (Array.isArray(rawSheet?.tables)) {
           for (const t of rawSheet.tables) {
             throwIfAborted(signal);
             const name = String(t?.name ?? "");
             if (!name) continue;
             if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
-            const decision = recordDecisionForA1Range(t?.range);
-            if (decision && decision.decision !== DLP_DECISION.ALLOW) {
-              redactQueryToken(name);
-            }
+            redactQueryToken(name);
           }
         }
         if (Array.isArray(rawSheet?.namedRanges)) {
@@ -1128,10 +1094,7 @@ export class ContextManager {
             const name = String(r?.name ?? "");
             if (!name) continue;
             if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
-            const decision = recordDecisionForA1Range(r?.range);
-            if (decision && decision.decision !== DLP_DECISION.ALLOW) {
-              redactQueryToken(name);
-            }
+            redactQueryToken(name);
           }
         }
 
@@ -1171,6 +1134,26 @@ export class ContextManager {
       throwIfAborted(signal);
       const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
       const redactedSheetName = shouldRedactStructuredSheetNameToken ? "[REDACTED]" : null;
+      const redactAllExplicitSchemaNames = true;
+
+      /** @type {Set<string>} */
+      const explicitTableRanges = new Set();
+      if (Array.isArray(rawSheet?.tables)) {
+        for (const t of rawSheet.tables) {
+          throwIfAborted(signal);
+          const rawRange = typeof t?.range === "string" ? t.range : "";
+          if (!rawRange) continue;
+          let parsed;
+          try {
+            parsed = parseA1Range(rawRange);
+          } catch {
+            continue;
+          }
+          // Canonicalize to match `extractSheetSchema` output.
+          const canonical = rangeToA1({ ...parsed, sheetName: rawSheet.name });
+          if (canonical) explicitTableRanges.add(canonical);
+        }
+      }
 
       /**
        * Redact the sheet-name component of an A1 range under structured sheet-level DLP.
@@ -1223,8 +1206,10 @@ export class ContextManager {
         ? schema.tables.map((t) => {
             const decision = recordDecisionForA1Range(t?.range);
             const safeRange = redactA1SheetName(t?.range);
-            if (!decision || decision.decision === DLP_DECISION.ALLOW) return { ...t, range: safeRange };
-            return { ...t, name: "[REDACTED]", range: safeRange };
+            const isExplicit = explicitTableRanges.has(String(t?.range ?? ""));
+            if (decision && decision.decision !== DLP_DECISION.ALLOW) return { ...t, name: "[REDACTED]", range: safeRange };
+            if (redactAllExplicitSchemaNames && isExplicit) return { ...t, name: "[REDACTED]", range: safeRange };
+            return { ...t, range: safeRange };
           })
         : schema?.tables;
 
@@ -1232,8 +1217,9 @@ export class ContextManager {
         ? schema.namedRanges.map((r) => {
             const decision = recordDecisionForA1Range(r?.range);
             const safeRange = redactA1SheetName(r?.range);
-            if (!decision || decision.decision === DLP_DECISION.ALLOW) return { ...r, range: safeRange };
-            return { ...r, name: "[REDACTED]", range: safeRange };
+            if (decision && decision.decision !== DLP_DECISION.ALLOW) return { ...r, name: "[REDACTED]", range: safeRange };
+            if (redactAllExplicitSchemaNames) return { ...r, name: "[REDACTED]", range: safeRange };
+            return { ...r, range: safeRange };
           })
         : schema?.namedRanges;
 

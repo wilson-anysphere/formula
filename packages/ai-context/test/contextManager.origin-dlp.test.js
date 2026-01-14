@@ -225,6 +225,50 @@ test("buildContext: structured DLP REDACT also redacts non-heuristic table/named
   assert.doesNotMatch(JSON.stringify(out.schema), /TopSecret/);
 });
 
+test("buildContext: structured DLP REDACT treats table/namedRange names as disallowed metadata even when their ranges are allowed (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [
+        ["a", "b"],
+        ["c", "d"],
+      ],
+      // Explicit schema metadata may contain non-heuristic sensitive identifiers.
+      tables: [{ name: "TopSecretTable", range: "Sheet1!A1:A1" }],
+      namedRanges: [{ name: "TopSecretRange", range: "Sheet1!A1:A1" }],
+    },
+    query: "hello",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "cell",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            row: 1,
+            col: 1, // B2 (does not intersect A1)
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecretTable/);
+  assert.doesNotMatch(out.promptContext, /TopSecretRange/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /TopSecretTable/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /TopSecretRange/);
+});
+
 test("buildContext: structured DLP REDACT also redacts non-heuristic sheet names when the sheet is classified (no-op redactor)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
