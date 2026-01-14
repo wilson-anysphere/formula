@@ -11,6 +11,7 @@ const tauriConfig = JSON.parse(
   readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"),
 );
 const expectedVersion = String(tauriConfig?.version ?? "").trim();
+const expectedMainBinaryName = String(tauriConfig?.mainBinaryName ?? "").trim() || "formula-desktop";
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -31,7 +32,7 @@ function writeFakeAppImage(
     withDesktopFile = true,
     withXlsxMime = true,
     withMimeTypeEntry = true,
-    execLine = "formula-desktop %U",
+    execLine = `${expectedMainBinaryName} %U`,
     appImageVersion = expectedVersion,
     desktopEntryVersion = "",
   } = {},
@@ -59,7 +60,7 @@ set -euo pipefail
 
 if [[ "\${1:-}" == "--appimage-extract" ]]; then
   mkdir -p squashfs-root/usr/bin
-  mkdir -p squashfs-root/usr/share/doc/formula-desktop
+  mkdir -p squashfs-root/usr/share/doc/${expectedMainBinaryName}
 
   cat > squashfs-root/AppRun <<'APPRUN'
 #!/usr/bin/env bash
@@ -67,14 +68,14 @@ echo "AppRun stub"
 APPRUN
   chmod +x squashfs-root/AppRun
 
-  cat > squashfs-root/usr/bin/formula-desktop <<'BIN'
+  cat > squashfs-root/usr/bin/${expectedMainBinaryName} <<'BIN'
 #!/usr/bin/env bash
-echo "formula-desktop stub"
+echo "${expectedMainBinaryName} stub"
 BIN
-  chmod +x squashfs-root/usr/bin/formula-desktop
+  chmod +x squashfs-root/usr/bin/${expectedMainBinaryName}
 
-  echo "LICENSE stub" > squashfs-root/usr/share/doc/formula-desktop/LICENSE
-  echo "NOTICE stub" > squashfs-root/usr/share/doc/formula-desktop/NOTICE
+  echo "LICENSE stub" > squashfs-root/usr/share/doc/${expectedMainBinaryName}/LICENSE
+  echo "NOTICE stub" > squashfs-root/usr/share/doc/${expectedMainBinaryName}/NOTICE
 
   ${desktopBlock}
   exit 0
@@ -95,11 +96,7 @@ function runValidator(appImagePath) {
     {
       cwd: repoRoot,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        // Keep tests stable even if `mainBinaryName` changes or python isn't available.
-        FORMULA_APPIMAGE_MAIN_BINARY: "formula-desktop",
-      },
+      env: { ...process.env },
     },
   );
   if (proc.error) throw proc.error;
@@ -170,7 +167,7 @@ test("validate-linux-appimage fails when X-AppImage-Version does not match tauri
 test("validate-linux-appimage fails when Exec= lacks file placeholder", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
-  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, execLine: "formula-desktop" });
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, execLine: expectedMainBinaryName });
 
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
