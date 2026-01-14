@@ -69,3 +69,23 @@ python tools/excel-oracle/compat_gate.py --include-tag odd_coupon
 - **Popups/alerts:** The harness sets `DisplayAlerts = false`, but other dialogs can still appear if Excel isn't fully configured.
 - **Locale:** The harness uses `Range.Formula2` / `Range.Formula` (English) rather than `FormulaLocal`, which is usually safer across locales.
 - **Number separators:** The harness forces US-style decimal/thousands separators (`.` / `,`) so text→number coercion cases like `"1,234"` are deterministic across runner locales.
+
+## Generating locale translation sources on a self-hosted runner (optional)
+
+The same self-hosted Windows runner can also be used to extract **locale function-name translations**
+from real Excel (useful for keeping `de-DE` / `es-ES` sources complete when new functions are added
+to `shared/functionCatalog.json`).
+
+From repo root on the runner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId de-DE `
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+
+node scripts/generate-locale-function-tsv.js
+node scripts/generate-locale-function-tsv.js --check
+```
+
+Important: the extracted spellings reflect the **active Excel UI language**. Install the relevant
+Office language pack and set Excel's display language before extracting.
