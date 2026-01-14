@@ -1,5 +1,6 @@
 use crate::eval::FormulaParseError;
 use crate::parser::{lex, Token, TokenKind};
+use crate::value::casefold;
 use crate::{ErrorKind, LocaleConfig, ParseOptions, ReferenceStyle};
 
 use super::FormulaLocale;
@@ -373,7 +374,7 @@ fn casefold_function_name_for_compare(name: &str) -> String {
     if has_prefix {
         out.push_str("_xlfn.");
     }
-    out.push_str(&casefold_ident(base));
+    out.push_str(&casefold(base));
     out
 }
 
@@ -386,16 +387,6 @@ fn split_xlfn_prefix(name: &str) -> (bool, &str) {
         (true, &name[PREFIX.len()..])
     } else {
         (false, name)
-    }
-}
-
-fn casefold_ident(ident: &str) -> String {
-    // Mirror `locale::registry::casefold_ident`: use Unicode uppercasing for non-ASCII to match
-    // Excel-style case-insensitive matching semantics.
-    if ident.is_ascii() {
-        ident.to_ascii_uppercase()
-    } else {
-        ident.chars().flat_map(|ch| ch.to_uppercase()).collect()
     }
 }
 

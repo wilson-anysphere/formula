@@ -257,7 +257,7 @@ impl FormulaLocale {
     /// Translate an input function name into canonical form.
     pub fn canonical_function_name(&self, name: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(name);
-        let folded = casefold_ident(base);
+        let folded = casefold(base);
 
         let mapped = self
             .functions
@@ -275,7 +275,7 @@ impl FormulaLocale {
     /// Translate a canonical function name into its localized display form.
     pub fn localized_function_name(&self, canonical: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(canonical);
-        let folded = casefold_ident(base);
+        let folded = casefold(base);
 
         let mapped = self
             .functions
@@ -293,7 +293,7 @@ impl FormulaLocale {
     pub fn canonical_boolean_literal(&self, ident: &str) -> Option<bool> {
         // Excel treats keywords case-insensitively across Unicode. Keep boolean keyword matching
         // consistent with function translation keys by using the same Unicode-aware case folding.
-        let folded = casefold_ident(ident);
+        let folded = casefold(ident);
         if folded == self.boolean_true {
             Some(true)
         } else if folded == self.boolean_false {
@@ -349,16 +349,6 @@ fn split_xlfn_prefix(name: &str) -> (bool, &str) {
         (true, &name[PREFIX.len()..])
     } else {
         (false, name)
-    }
-}
-
-fn casefold_ident(ident: &str) -> String {
-    // Locale translation needs case-insensitive matching that behaves like Excel.
-    // Use Unicode-aware uppercasing (`ß` -> `SS`, `ä` -> `Ä`, ...) for non-ASCII.
-    if ident.is_ascii() {
-        ident.to_ascii_uppercase()
-    } else {
-        ident.chars().flat_map(|ch| ch.to_uppercase()).collect()
     }
 }
 
