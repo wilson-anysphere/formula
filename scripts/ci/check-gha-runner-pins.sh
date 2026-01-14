@@ -23,7 +23,8 @@ if [ ! -f "$workflow" ]; then
   exit 2
 fi
 
-matches="$(grep -nE '\\b(macos|windows|ubuntu)-latest\\b' "$workflow" || true)"
+# Ignore matches that only appear in comments. (We still match `runs-on: ubuntu-latest # ...`.)
+matches="$(grep -nE '^[^#]*\\b(macos|windows|ubuntu)-latest\\b' "$workflow" || true)"
 if [ -n "$matches" ]; then
   echo "error: ${workflow} uses forbidden GitHub Actions runner '*-latest' labels." >&2
   echo "Pin runner images instead (e.g., macos-14, windows-2022, ubuntu-24.04) to avoid alias drift." >&2
@@ -32,4 +33,3 @@ if [ -n "$matches" ]; then
   echo "$matches" >&2
   exit 1
 fi
-
