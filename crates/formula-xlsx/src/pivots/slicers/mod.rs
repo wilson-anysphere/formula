@@ -908,6 +908,12 @@ fn is_end_attr_key(key: &[u8]) -> bool {
         || key.eq_ignore_ascii_case(b"selectionEndDate")
 }
 
+fn canonicalize_part_name_for_discovery(name: &str) -> String {
+    name.trim_start_matches(|c| c == '/' || c == '\\')
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
 fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, XlsxError> {
     let date_system = package
         .part("xl/workbook.xml")
@@ -918,34 +924,38 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
     // the pivot relationship graph can't be resolved.
     let pivot_graph = package.pivot_graph().ok();
 
-    let slicer_parts = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/slicers/") && name.ends_with(".xml"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let timeline_parts = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/timelines/") && name.ends_with(".xml"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let mut slicer_parts = Vec::new();
+    let mut timeline_parts = Vec::new();
+    let mut drawing_rels = Vec::new();
+    let mut worksheet_rels = Vec::new();
+    let mut chartsheet_rels = Vec::new();
+    for name in package.part_names() {
+        let canonical = canonicalize_part_name_for_discovery(name);
+        if canonical.starts_with("xl/slicers/") && canonical.ends_with(".xml") {
+            slicer_parts.push(canonical);
+        } else if canonical.starts_with("xl/timelines/") && canonical.ends_with(".xml") {
+            timeline_parts.push(canonical);
+        } else if canonical.starts_with("xl/drawings/_rels/") && canonical.ends_with(".rels") {
+            drawing_rels.push(canonical);
+        } else if canonical.starts_with("xl/worksheets/_rels/") && canonical.ends_with(".rels") {
+            worksheet_rels.push(canonical);
+        } else if canonical.starts_with("xl/chartsheets/_rels/") && canonical.ends_with(".rels") {
+            chartsheet_rels.push(canonical);
+        }
+    }
 
-    let drawing_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/drawings/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let worksheet_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/worksheets/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let chartsheet_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/chartsheets/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    // Ensure deterministic output and avoid duplicate canonical names when producers emit multiple
+    // equivalent part names (e.g. different casing or path separators).
+    slicer_parts.sort();
+    slicer_parts.dedup();
+    timeline_parts.sort();
+    timeline_parts.dedup();
+    drawing_rels.sort();
+    drawing_rels.dedup();
+    worksheet_rels.sort();
+    worksheet_rels.dedup();
+    chartsheet_rels.sort();
+    chartsheet_rels.dedup();
 
     let mut slicer_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut timeline_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -962,7 +972,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         };
         let drawing_part = drawing_part_name_from_rels(&rels_name);
         for rel in relationships {
-            let target = resolve_target(&drawing_part, &rel.target);
+            let target = canonicalize_part_name_for_discovery(&resolve_target(&drawing_part, &rel.target));
             if target.starts_with("xl/slicers/") {
                 slicer_to_drawings
                     .entry(target)
@@ -1005,7 +1015,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             if !is_drawing_relationship_type(&rel.type_uri) {
                 continue;
             }
-            let target = resolve_target(&sheet_part, &rel.target);
+            let target = canonicalize_part_name_for_discovery(&resolve_target(&sheet_part, &rel.target));
             if target.starts_with("xl/drawings/") {
                 drawing_to_sheets
                     .entry(target)
