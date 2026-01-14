@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
@@ -6,6 +6,17 @@ import { defineConfig } from "vitest/config";
 const MAX_VITEST_THREADS = 8;
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
+
+function hasPnpmDependency(pkgName: string): boolean {
+  const pnpmDir = resolve(repoRoot, "node_modules", ".pnpm");
+  if (!existsSync(pnpmDir)) return false;
+  try {
+    // pnpm virtual store directory names start with `${name}@...` when present.
+    return readdirSync(pnpmDir).some((entry) => entry.startsWith(`${pkgName}@`));
+  } catch {
+    return false;
+  }
+}
 
 // Workspace packages are normally resolved via pnpm's node_modules symlinks. Some CI/dev
 // environments can run with stale node_modules (cached installs), which causes Vite/Vitest to fail
@@ -104,9 +115,9 @@ export default defineConfig({
       // `@formula/grid`'s primary entrypoint re-exports React components (TSX). In some cached/stale
       // `node_modules` environments, React may be missing; prefer the Node-friendly entrypoint in
       // those cases so non-React desktop tests can still run.
-      ...(existsSync(reactPackageEntry)
-        ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
-        : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
+      ...((existsSync(reactPackageEntry) || hasPnpmDependency("react"))
+         ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
+         : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
       { find: /^@formula\/grid\/node$/, replacement: gridNodeEntry },
       { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
       { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
@@ -133,12 +144,16 @@ export default defineConfig({
       //
       // Prefer the real dependency when it's present; fall back to shims only when the pnpm
       // workspace/cached install is missing the package.
-      ...(!existsSync(graphemeSplitterPackageEntry)
-        ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
+      ...(!(existsSync(graphemeSplitterPackageEntry) || hasPnpmDependency("grapheme-splitter"))
+         ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
+         : []),
+      ...(!(existsSync(linebreakPackageEntry) || hasPnpmDependency("linebreak"))
+        ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }]
         : []),
-      ...(!existsSync(linebreakPackageEntry) ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }] : []),
-      ...(!existsSync(zodPackageEntry) ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
-      ...(!existsSync(yWebsocketPackageEntry) ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }] : []),
+      ...(!(existsSync(zodPackageEntry) || hasPnpmDependency("zod")) ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
+      ...(!(existsSync(yWebsocketPackageEntry) || hasPnpmDependency("y-websocket"))
+        ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }]
+        : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.
