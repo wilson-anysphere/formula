@@ -126,4 +126,35 @@ describe("ImageBitmapCache", () => {
 
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  it("honors negativeCacheMs by suppressing immediate retries after a failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const cache = new ImageBitmapCache({ negativeCacheMs: 250 });
+      const entry = makeEntry();
+
+      const err = new Error("bad bytes");
+      const bitmap = {} as ImageBitmap;
+
+      const createImageBitmapMock = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce(bitmap);
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      await expect(cache.get(entry)).rejects.toBe(err);
+      expect(cache.__testOnly_failCount).toBe(1);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      // Within the negative cache window, we should not attempt another decode.
+      await expect(cache.get(entry)).rejects.toBe(err);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      // After expiry, retry should be allowed.
+      vi.advanceTimersByTime(300);
+      vi.setSystemTime(300);
+      await expect(cache.get(entry)).resolves.toBe(bitmap);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
