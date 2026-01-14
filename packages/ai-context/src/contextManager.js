@@ -662,39 +662,52 @@ export class ContextManager {
    * Build a compact context payload for chat prompts for a single sheet.
    *
    * @param {{
-   *   sheet: { name: string, values: unknown[][], namedRanges?: any[] },
+   *   sheet: {
+   *     name: string,
+   *     values: unknown[][],
+   *     /**
+   *      * Optional coordinate origin (0-based) for the provided `values` matrix.
+   *      * When `values` is a cropped window of a larger sheet, `origin` lets schema
+   *      * extraction, retrieval ranges, and DLP selectors refer to correct absolute
+   *      * coordinates.
+   *      *\/
+   *     origin?: { row: number, col: number },
+   *     namedRanges?: any[],
+   *     tables?: any[],
+   *   },
    *   query: string,
    *   attachments?: Attachment[],
-    *   sampleRows?: number,
-    *   samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic",
-    *   stratifyByColumn?: number,
-    *   limits?: {
-    *     maxContextRows?: number,
-    *     maxContextCols?: number,
-    *     maxContextCells?: number,
-    *     maxChunkRows?: number,
-    *     /**
-    *      * Split tall regions into multiple row windows to improve retrieval quality.
-    *      *\/
-    *     splitRegions?: boolean,
-    *     /**
-    *      * Row overlap between region windows (only when splitRegions is enabled).
-    *      *\/
-    *     chunkRowOverlap?: number,
-    *     /**
-    *      * Maximum number of windows per region (only when splitRegions is enabled).
-    *      *\/
-    *     maxChunksPerRegion?: number,
-    *   },
-    *   signal?: AbortSignal,
-    *   dlp?: {
-    *     documentId: string,
-    *     sheetId?: string,
-    *     policy: any,
+   *   sampleRows?: number,
+   *   samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic",
+   *   stratifyByColumn?: number,
+   *   limits?: {
+   *     maxContextRows?: number,
+   *     maxContextCols?: number,
+   *     maxContextCells?: number,
+   *     maxChunkRows?: number,
+   *     /**
+   *      * Split tall regions into multiple row windows to improve retrieval quality.
+   *      *\/
+   *     splitRegions?: boolean,
+   *     /**
+   *      * Row overlap between region windows (only when splitRegions is enabled).
+   *      *\/
+   *     chunkRowOverlap?: number,
+   *     /**
+   *      * Maximum number of windows per region (only when splitRegions is enabled).
+   *      *\/
+   *     maxChunksPerRegion?: number,
+   *   },
+   *   signal?: AbortSignal,
+   *   dlp?: {
+   *     documentId: string,
+   *     sheetId?: string,
+   *     policy: any,
    *     classificationRecords?: Array<{ selector: any, classification: any }>,
    *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
-   *     auditLogger?: { log(event: any): void }
+   *     auditLogger?: { log(event: any): void },
+   *     sheetNameResolver?: any,
    *   }
    * }} params
    */
@@ -1144,7 +1157,8 @@ export class ContextManager {
    *     classificationRecords?: Array<{ selector: any, classification: any }>,
    *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
-   *     auditLogger?: { log(event: any): void }
+   *     auditLogger?: { log(event: any): void },
+   *     sheetNameResolver?: any,
    *   }
    * }} params
    */
@@ -1225,15 +1239,6 @@ export class ContextManager {
         return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
       }
       return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
-    }
-
-    /**
-     * @param {string} text
-     */
-    function firstLine(text) {
-      const s = String(text ?? "");
-      const idx = s.indexOf("\n");
-      return idx === -1 ? s : s.slice(0, idx);
     }
 
     /**
@@ -2079,7 +2084,8 @@ export class ContextManager {
    *     classificationRecords?: Array<{ selector: any, classification: any }>,
    *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
-   *     auditLogger?: { log(event: any): void }
+   *     auditLogger?: { log(event: any): void },
+   *     sheetNameResolver?: any,
    *   }
    * }} params
    */
@@ -2209,24 +2215,24 @@ function classifyTextForDlp(text) {
 }
 
 /**
- * @param {unknown[][]} values
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {ReturnType<typeof classifyText>}
- */
+  * @param {unknown[][]} values
+  * @param {{ signal?: AbortSignal }} [options]
+  * @returns {ReturnType<typeof classifyText>}
+  */
 function classifyValuesForDlp(values, options = {}) {
   const signal = options.signal;
   /** @type {Set<string>} */
   const findings = new Set();
   for (const row of values || []) {
+    throwIfAborted(signal);
+    for (const cell of row || []) {
       throwIfAborted(signal);
-      for (const cell of row || []) {
-        throwIfAborted(signal);
-        if (cell === null || cell === undefined) continue;
-        const heuristic = classifyTextForDlp(String(cell));
-        if (heuristic.level !== "sensitive") continue;
-        for (const f of heuristic.findings || []) findings.add(String(f));
-        // Early exit once we've found at least one sensitive pattern; policy evaluation only
-        // needs the max classification, not exhaustive findings.
+      if (cell === null || cell === undefined) continue;
+      const heuristic = classifyTextForDlp(String(cell));
+      if (heuristic.level !== "sensitive") continue;
+      for (const f of heuristic.findings || []) findings.add(String(f));
+      // Early exit once we've found at least one sensitive pattern; policy evaluation only
+      // needs the max classification, not exhaustive findings.
       if (findings.size > 0) {
         return { level: "sensitive", findings: [...findings] };
       }
