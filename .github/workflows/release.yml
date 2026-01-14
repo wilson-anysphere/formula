@@ -516,6 +516,7 @@ jobs:
 
       - name: Ensure MSVC ARM64 build tools are installed (Windows ARM64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        id: windows_arm64_toolchain
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -642,6 +643,14 @@ jobs:
           $sdkVersionDir = $sdkInfo.VersionDir
           $sdkUmArm64 = $sdkInfo.Um
           $sdkUcrtArm64 = $sdkInfo.Ucrt
+
+          # Ensure downstream MSVC environment setup uses a Windows SDK version that actually
+          # includes ARM64 libraries. Some runner images can have multiple SDK versions installed,
+          # and the newest one may be missing the arm64 lib subset. We pin `ilammy/msvc-dev-cmd`
+          # to the discovered version so `LIB`/`INCLUDE` resolve correctly during cross-compiles.
+          if ($env:GITHUB_OUTPUT) {
+            "sdk_version=$($sdkVersionDir.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
           Write-Host "windows-arm64-toolchain: OK"
           Write-Host " - MSVC: $($msvcVersionDir.FullName)"
@@ -1281,6 +1290,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
         with:
           arch: amd64_arm64
+          sdk: ${{ steps.windows_arm64_toolchain.outputs.sdk_version }}
 
       - name: Configure Cargo release debug symbols (Windows)
         if: runner.os == 'Windows'
