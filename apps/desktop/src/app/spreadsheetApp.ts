@@ -24631,7 +24631,10 @@ export class SpreadsheetApp {
     if (!trimmed) return null;
 
     const resolved = this.sheetNameResolver?.getSheetIdByName(trimmed);
-    if (resolved) return resolved;
+    if (typeof resolved === "string") {
+      const sheetId = resolved.trim();
+      if (sheetId) return sheetId;
+    }
 
     // Allow stable sheet ids to pass through when they are known to the resolver.
     // This avoids treating real (but currently empty/unmaterialized) sheets as

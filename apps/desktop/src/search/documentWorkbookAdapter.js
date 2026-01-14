@@ -150,7 +150,10 @@ export class DocumentWorkbookAdapter {
     if (!trimmed) return null;
 
     const resolved = this.sheetNameResolver?.getSheetIdByName?.(trimmed);
-    if (typeof resolved === "string" && resolved.trim()) return resolved;
+    if (typeof resolved === "string") {
+      const id = resolved.trim();
+      if (id) return id;
+    }
 
     // Pass through stable ids when the resolver recognizes them (even if the sheet
     // hasn't been created in the DocumentController yet).

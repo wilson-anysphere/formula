@@ -103,6 +103,27 @@ test("DocumentWorkbookAdapter uses stable sheetId for cell access when sheets ar
   assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
 });
 
+test("DocumentWorkbookAdapter trims sheet ids returned by sheetNameResolver", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("sheet-1", "A1", "hello");
+
+  const sheetNameResolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    // Some integration layers may accidentally include whitespace around ids.
+    getSheetIdByName: (name) => (String(name ?? "").trim().toLowerCase() === "budget" ? "  sheet-1  " : null),
+  };
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver });
+  const sheet = workbook.getSheet("Budget");
+  assert.equal(sheet.sheetId, "sheet-1");
+
+  const cell = sheet.getCell(0, 0);
+  assert.ok(cell);
+  assert.equal(cell.value, "hello");
+  // Ensure we did not create a phantom sheet keyed by the untrimmed id.
+  assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
+});
+
 test("DocumentWorkbookAdapter does not create phantom sheets when name resolution fails", () => {
   const doc = new DocumentController();
   doc.setCellValue("sheet-1", "A1", "hello");

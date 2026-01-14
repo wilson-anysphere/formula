@@ -148,6 +148,26 @@ describe("SpreadsheetApp computed-value cache sheet name mapping", () => {
     root.remove();
   });
 
+  it("trims sheet ids returned by sheetNameResolver.getSheetIdByName", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetNameResolver = {
+      getSheetNameById: (id: string) => (id === "Sheet1" ? "Budget" : null),
+      getSheetIdByName: (name: string) => (name.trim().toLowerCase() === "budget" ? "  Sheet1  " : null),
+    };
+
+    const app = new SpreadsheetApp(root, status, { sheetNameResolver: sheetNameResolver as any });
+    expect(app.getSheetIdByName("Budget")).toBe("Sheet1");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("resolves DocumentController sheet meta display names even when sheetNameResolver is absent", async () => {
     const root = createRoot();
     const status = {
