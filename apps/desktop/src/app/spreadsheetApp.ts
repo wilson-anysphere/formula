@@ -4337,7 +4337,7 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Best-effort helper to await any pending DocumentController ↔︎ Yjs binder work.
+   * Best-effort helper to await any pending DocumentController → Yjs binder work.
    *
    * This is primarily used during teardown/quit flows to reduce the chance of
    * flushing local persistence before queued binder writes have been applied to
