@@ -383,6 +383,22 @@ export class SecondaryGridView {
         }
       }
 
+      // `sheetViewDeltas` can affect both drawings metadata (stored in sheet view state) and the
+      // grid geometry that drawings are anchored to (frozen panes, row/col sizes).
+      //
+      // `syncSheetViewFromDocument()` already handles these deltas by applying view state into the
+      // renderer, invalidating the drawing spatial index, and scheduling a re-render. Avoid
+      // triggering a drawings render *before* that sync happens (this handler is registered before
+      // the dedicated sheetView listener), otherwise the overlay can briefly render with stale
+      // geometry (and unit tests can observe the stale pass).
+      const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+      if (sheetViewDeltas.length > 0) {
+        const sheetId = this.getSheetId();
+        if (sheetViewDeltas.some((delta: any) => String(delta?.sheetId ?? "") === sheetId)) {
+          return;
+        }
+      }
+
       if (this.documentChangeAffectsDrawings(payload)) {
         void this.renderDrawings();
       }
