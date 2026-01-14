@@ -46,8 +46,14 @@ struct RunArgs {
     /// Password for encrypted (OLE `EncryptedPackage`) XLSM inputs.
     ///
     /// If the input workbook is encrypted, `--password` is required.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "password_file")]
     password: Option<String>,
+
+    /// Read password for encrypted XLSM inputs from a file (first line).
+    ///
+    /// This is useful when the password contains shell-sensitive characters.
+    #[arg(long = "password-file", conflicts_with = "password")]
+    password_file: Option<PathBuf>,
 
     /// Macro arguments as a JSON array (e.g. `[1, \"foo\"]`).
     #[arg(long)]
@@ -67,8 +73,14 @@ struct ExtractArgs {
     /// Password for encrypted (OLE `EncryptedPackage`) XLSM inputs.
     ///
     /// If the input workbook is encrypted, `--password` is required.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "password_file")]
     password: Option<String>,
+
+    /// Read password for encrypted XLSM inputs from a file (first line).
+    ///
+    /// This is useful when the password contains shell-sensitive characters.
+    #[arg(long = "password-file", conflicts_with = "password")]
+    password_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -692,11 +704,34 @@ fn maybe_decrypt_encrypted_xlsm<'a>(
         return Ok(Cow::Borrowed(bytes));
     }
 
-    let password =
-        password.ok_or_else(|| "password required for encrypted workbook".to_string())?;
+    let password = password.ok_or_else(|| {
+        "password required for encrypted workbook (use --password or --password-file)".to_string()
+    })?;
     decrypt_encrypted_package_ole(bytes, password)
         .map(Cow::Owned)
         .map_err(|e| format!("Failed to decrypt workbook: {e}"))
+}
+
+fn resolve_password(
+    password: &Option<String>,
+    password_file: &Option<PathBuf>,
+) -> Result<Option<String>, String> {
+    if let Some(value) = password.clone() {
+        return Ok(Some(value));
+    }
+    let Some(path) = password_file else {
+        return Ok(None);
+    };
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read password file {}: {e}", path.display()))?;
+    let pw = contents.lines().next().unwrap_or("").trim().to_string();
+    if pw.is_empty() {
+        return Err(format!(
+            "Password file {} is empty (expected password on first line)",
+            path.display()
+        ));
+    }
+    Ok(Some(pw))
 }
 
 fn detect_format(bytes: &[u8], hint: &str) -> Result<InputFormat, String> {
@@ -1118,29 +1153,51 @@ fn main() {
                     }
                 },
                 InputFormat::Xlsm => {
-                    let decrypted =
-                        match maybe_decrypt_encrypted_xlsm(&bytes, args.password.as_deref()) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                let report = RunReport {
-                                    ok: false,
-                                    macro_name: args.macro_name,
-                                    logs: Vec::new(),
-                                    warnings: Vec::new(),
-                                    error: Some(e),
-                                    exit_status: 1,
-                                    cell_diffs: BTreeMap::new(),
-                                    workbook_after: OracleWorkbook {
-                                        schema_version: 1,
-                                        active_sheet: None,
-                                        sheets: Vec::new(),
-                                        vba_modules: Vec::new(),
-                                    },
-                                };
-                                println!("{}", serde_json::to_string(&report).unwrap());
-                                std::process::exit(1);
-                            }
-                        };
+                    let password = match resolve_password(&args.password, &args.password_file) {
+                        Ok(pw) => pw,
+                        Err(e) => {
+                            let report = RunReport {
+                                ok: false,
+                                macro_name: args.macro_name,
+                                logs: Vec::new(),
+                                warnings: Vec::new(),
+                                error: Some(e),
+                                exit_status: 1,
+                                cell_diffs: BTreeMap::new(),
+                                workbook_after: OracleWorkbook {
+                                    schema_version: 1,
+                                    active_sheet: None,
+                                    sheets: Vec::new(),
+                                    vba_modules: Vec::new(),
+                                },
+                            };
+                            println!("{}", serde_json::to_string(&report).unwrap());
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let decrypted = match maybe_decrypt_encrypted_xlsm(&bytes, password.as_deref()) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let report = RunReport {
+                                ok: false,
+                                macro_name: args.macro_name,
+                                logs: Vec::new(),
+                                warnings: Vec::new(),
+                                error: Some(e),
+                                exit_status: 1,
+                                cell_diffs: BTreeMap::new(),
+                                workbook_after: OracleWorkbook {
+                                    schema_version: 1,
+                                    active_sheet: None,
+                                    sheets: Vec::new(),
+                                    vba_modules: Vec::new(),
+                                },
+                            };
+                            println!("{}", serde_json::to_string(&report).unwrap());
+                            std::process::exit(1);
+                        }
+                    };
 
                     match extract_from_xlsm(decrypted.as_ref()) {
                         Ok((wb, procs)) => (wb, procs),
@@ -1268,26 +1325,41 @@ fn main() {
                     },
                 },
                 InputFormat::Xlsm => {
-                    match maybe_decrypt_encrypted_xlsm(&bytes, args.password.as_deref()) {
-                        Ok(decrypted) => match extract_from_xlsm(decrypted.as_ref()) {
-                            Ok((workbook, procedures)) => ExtractReport {
-                                ok: true,
-                                error: None,
-                                workbook,
-                                procedures,
-                            },
-                            Err(e) => ExtractReport {
-                                ok: false,
-                                error: Some(e),
-                                workbook: OracleWorkbook {
-                                    schema_version: 1,
-                                    active_sheet: None,
-                                    sheets: Vec::new(),
-                                    vba_modules: Vec::new(),
+                    match resolve_password(&args.password, &args.password_file) {
+                        Ok(password) => {
+                            match maybe_decrypt_encrypted_xlsm(&bytes, password.as_deref()) {
+                                Ok(decrypted) => match extract_from_xlsm(decrypted.as_ref()) {
+                                    Ok((workbook, procedures)) => ExtractReport {
+                                        ok: true,
+                                        error: None,
+                                        workbook,
+                                        procedures,
+                                    },
+                                    Err(e) => ExtractReport {
+                                        ok: false,
+                                        error: Some(e),
+                                        workbook: OracleWorkbook {
+                                            schema_version: 1,
+                                            active_sheet: None,
+                                            sheets: Vec::new(),
+                                            vba_modules: Vec::new(),
+                                        },
+                                        procedures: Vec::new(),
+                                    },
                                 },
-                                procedures: Vec::new(),
-                            },
-                        },
+                                Err(e) => ExtractReport {
+                                    ok: false,
+                                    error: Some(e),
+                                    workbook: OracleWorkbook {
+                                        schema_version: 1,
+                                        active_sheet: None,
+                                        sheets: Vec::new(),
+                                        vba_modules: Vec::new(),
+                                    },
+                                    procedures: Vec::new(),
+                                },
+                            }
+                        }
                         Err(e) => ExtractReport {
                             ok: false,
                             error: Some(e),

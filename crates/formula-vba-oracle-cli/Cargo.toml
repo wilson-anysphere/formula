@@ -17,3 +17,4 @@ formula-vba-runtime = { path = "../formula-vba-runtime" }
 [dev-dependencies]
 ms-offcrypto-writer = "1"
 rand = "0.9"
+assert_cmd = "2.1.2"
