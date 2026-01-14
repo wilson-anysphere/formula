@@ -44,6 +44,8 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
   });
   /** @type {string[]} */
   const violations = [];
+  /** @type {Set<string>} */
+  const globalBorderRadiusVarRefs = new Set();
 
   const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
   const borderRadiusProp = /^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/i;
@@ -71,6 +73,7 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
       let varMatch;
       while ((varMatch = cssVarRef.exec(value))) {
         borderRadiusVarRefs.add(varMatch[1]);
+        globalBorderRadiusVarRefs.add(varMatch[1]);
       }
       cssVarRef.lastIndex = 0;
 
@@ -115,6 +118,45 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
         const line = getLineNumber(stripped, absIndex);
         violations.push(
           `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${numeric}${unit}`,
+        );
+      }
+
+      unitRegex.lastIndex = 0;
+    }
+
+    cssDeclaration.lastIndex = 0;
+  }
+
+  // Finally, ensure that any border-radius variables sourced from design tokens do not hide
+  // hardcoded unit lengths (except the canonical `--radius*` tokens themselves).
+  const tokensCssPath = path.join(srcRoot, "styles", "tokens.css");
+  if (fs.existsSync(tokensCssPath)) {
+    const css = fs.readFileSync(tokensCssPath, "utf8");
+    const stripped = stripCssNonSemanticText(css);
+
+    let decl;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = decl?.groups?.prop ?? "";
+      if (!prop.startsWith("--")) continue;
+      if (!globalBorderRadiusVarRefs.has(prop)) continue;
+      if (prop.startsWith("--radius")) continue;
+
+      const value = decl?.groups?.value ?? "";
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+      let unitMatch;
+      while ((unitMatch = unitRegex.exec(value))) {
+        const numeric = unitMatch[1];
+        const unit = unitMatch[2] ?? "";
+        const n = Number(numeric);
+        if (!Number.isFinite(n)) continue;
+        if (n === 0) continue;
+
+        const absIndex = valueStart + unitMatch.index;
+        const line = getLineNumber(stripped, absIndex);
+        const rawUnit = unitMatch[0] ?? `${numeric}${unit}`;
+        violations.push(
+          `${path.relative(desktopRoot, tokensCssPath).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()} (found ${rawUnit})`,
         );
       }
 
