@@ -107,10 +107,18 @@ class TriagePrivacyModeTests(unittest.TestCase):
 
         original_run_rust_triage = triage_mod._run_rust_triage
         try:
-            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
-                "steps": {},
-                "result": {"open_ok": True, "round_trip_ok": True},
-            }
+            observed: dict[str, str] = {}
+
+            def _fake_run_rust_triage(*_args, **kwargs):  # type: ignore[no-untyped-def]
+                name = kwargs.get("workbook_name")
+                if isinstance(name, str):
+                    observed["workbook_name"] = name
+                return {
+                    "steps": {},
+                    "result": {"open_ok": True, "round_trip_ok": True},
+                }
+
+            triage_mod._run_rust_triage = _fake_run_rust_triage  # type: ignore[assignment]
 
             data = _make_xlsx_with_custom_relationship_uris()
             wb = WorkbookInput(display_name="sensitive-filename.xlsx", data=data)
@@ -128,6 +136,7 @@ class TriagePrivacyModeTests(unittest.TestCase):
 
         expected_sha = sha256_hex(data)
         self.assertEqual(report["display_name"], f"workbook-{expected_sha[:16]}.xlsx")
+        self.assertEqual(observed.get("workbook_name"), report["display_name"])
 
         cell_images = report["cell_images"]
 
@@ -156,10 +165,18 @@ class TriagePrivacyModeTests(unittest.TestCase):
 
         original_run_rust_triage = triage_mod._run_rust_triage
         try:
-            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
-                "steps": {},
-                "result": {"open_ok": True, "round_trip_ok": True},
-            }
+            observed: dict[str, str] = {}
+
+            def _fake_run_rust_triage(*_args, **kwargs):  # type: ignore[no-untyped-def]
+                name = kwargs.get("workbook_name")
+                if isinstance(name, str):
+                    observed["workbook_name"] = name
+                return {
+                    "steps": {},
+                    "result": {"open_ok": True, "round_trip_ok": True},
+                }
+
+            triage_mod._run_rust_triage = _fake_run_rust_triage  # type: ignore[assignment]
 
             # A minimal ZIP is enough for the feature scan path; Rust triage is mocked.
             buf = io.BytesIO()
@@ -182,6 +199,7 @@ class TriagePrivacyModeTests(unittest.TestCase):
 
         expected_sha = sha256_hex(data)
         self.assertEqual(report["display_name"], f"workbook-{expected_sha[:16]}.xlsb")
+        self.assertEqual(observed.get("workbook_name"), report["display_name"])
 
     def test_triage_workbook_private_mode_redacts_custom_namespaces_in_diff_paths(self) -> None:
         import tools.corpus.triage as triage_mod
