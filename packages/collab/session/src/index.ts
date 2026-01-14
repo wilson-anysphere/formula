@@ -33,7 +33,7 @@ import {
   type CellEncryptionKey,
   type CellPlaintext,
 } from "@formula/collab-encryption";
-import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
+import type { CollabPersistence, CollabPersistenceBinding, CollabPersistenceFlushOptions } from "@formula/collab-persistence";
 
 import {
   assertValidRole,
@@ -1671,7 +1671,7 @@ export class CollabSession {
     return this.localPersistenceLoaded;
   }
 
-  async flushLocalPersistence(): Promise<void> {
+  async flushLocalPersistence(opts?: CollabPersistenceFlushOptions): Promise<void> {
     this.startLocalPersistence();
     const docId = this.persistenceDocId;
     if (!docId) return;
@@ -1681,7 +1681,7 @@ export class CollabSession {
     });
     const persistence = this.persistence;
     if (!persistence || typeof persistence.flush !== "function") return;
-    await persistence.flush(docId);
+    await persistence.flush(docId, opts);
     this.lastLocalPersistenceFlushAt = Date.now();
   }
 
