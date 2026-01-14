@@ -130,9 +130,8 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".dmg") || lowerFilename.endsWith(".pkg")) {
       return "macOS updater entries must not reference .dmg/.pkg installers.";
     }
-    // Guard against accidentally pointing macOS updater keys at Linux AppImage tarballs.
     if (lowerFilename.endsWith(".appimage.tar.gz") || lowerFilename.endsWith(".appimage.tgz")) {
-      return "macOS updater entries must not reference Linux AppImage tarballs.";
+      return "macOS updater entries must not reference a Linux AppImage tarball.";
     }
     if (!(lowerFilename.endsWith(".tar.gz") || lowerFilename.endsWith(".tgz"))) {
       return "macOS updater entries must reference a tarball updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz).";

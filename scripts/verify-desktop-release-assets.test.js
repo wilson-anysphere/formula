@@ -318,6 +318,31 @@ test("validateLatestJson rejects macOS .dmg updater URLs (even if asset exists)"
   );
 });
 
+test("validateLatestJson accepts a macOS updater archive ending with .tgz", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      // macOS universal builds may be published as .tgz; the updater keys still reference that tarball.
+      "darwin-x86_64": { url: "https://example.com/Formula_universal.tgz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula_universal.tgz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula_universal.tgz",
+  ]);
+
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
+});
+
 test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exists)", () => {
   const manifest = {
     version: "0.1.0",
