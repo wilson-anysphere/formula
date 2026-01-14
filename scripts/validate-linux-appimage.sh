@@ -278,28 +278,57 @@ expected_file_arch_substring() {
   arch="$(uname -m)"
   case "$arch" in
     x86_64) echo "x86-64" ;;
-    aarch64) echo "aarch64" ;;
+    aarch64|arm64) echo "aarch64" ;;
     armv7l) echo "ARM" ;;
     *) echo "" ;;
   esac
 }
 
-# When auto-discovering, try to ignore stale/cross-arch AppImages so CI doesn't
-# trip over cached artifacts.
-if [ "$AUTO_DISCOVERED" -eq 1 ] && [ "${#APPIMAGES[@]}" -gt 1 ] && command -v file >/dev/null 2>&1; then
-  expected_arch_substring="$(expected_file_arch_substring)"
-  if [ -n "$expected_arch_substring" ]; then
+expected_arch_substring="$(expected_file_arch_substring)"
+
+# Best-effort architecture sanity check using `file(1)`.
+#
+# This helps avoid trying to execute a cached AppImage for the wrong architecture, which
+# otherwise fails later with a confusing "Exec format error".
+if command -v file >/dev/null 2>&1 && [ -n "$expected_arch_substring" ]; then
+  if [ "$AUTO_DISCOVERED" -eq 1 ]; then
     declare -a filtered=()
+    declare -a mismatched=()
+
     for appimage in "${APPIMAGES[@]}"; do
       file_out="$(file -b "$appimage" 2>/dev/null || true)"
-      if grep -qiF "$expected_arch_substring" <<<"$file_out"; then
-        filtered+=("$appimage")
+      if grep -qi "ELF" <<<"$file_out"; then
+        if grep -qiF "$expected_arch_substring" <<<"$file_out"; then
+          filtered+=("$appimage")
+        else
+          mismatched+=("$appimage (file: $file_out)")
+          info "Skipping AppImage with mismatched architecture: $appimage (file: $file_out)"
+        fi
       else
-        info "Skipping AppImage with mismatched architecture: $appimage (file: $file_out)"
+        # If the file isn't an ELF, don't apply arch filtering here; later extraction will
+        # fail and provide a clearer error message. (Also keeps unit tests using a fake
+        # shell-script "AppImage" working.)
+        filtered+=("$appimage")
       fi
     done
-    if [ "${#filtered[@]}" -gt 0 ]; then
-      APPIMAGES=("${filtered[@]}")
+
+    if [ "${#filtered[@]}" -eq 0 ]; then
+      echo "${SCRIPT_NAME}: error: Found AppImage artifacts, but none match the host architecture (uname -m=$(uname -m))." >&2
+      echo "${SCRIPT_NAME}: error: Expected to find architecture substring: ${expected_arch_substring}" >&2
+      echo "${SCRIPT_NAME}: error: Mismatched AppImages:" >&2
+      for line in "${mismatched[@]}"; do
+        echo "  - $line" >&2
+      done
+      die "No AppImages matched expected architecture"
+    fi
+
+    APPIMAGES=("${filtered[@]}")
+  else
+    # User provided an explicit AppImage. If it's an ELF but doesn't match the host arch,
+    # fail early with a clear message.
+    file_out="$(file -b "${APPIMAGES[0]}" 2>/dev/null || true)"
+    if grep -qi "ELF" <<<"$file_out" && ! grep -qiF "$expected_arch_substring" <<<"$file_out"; then
+      die "Wrong AppImage architecture: expected '${expected_arch_substring}' for host $(uname -m), got: ${file_out}"
     fi
   fi
 fi
