@@ -129,6 +129,26 @@ test("parseGoTo supports structured table column references (Table1[Col2])", () 
   assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
 });
 
+test("parseGoTo supports escaped closing brackets in structured table column names (e.g. Table1[A]]B])", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["A]B", "Col2"],
+  });
+
+  const parsed = parseGoTo("Table1[A]]B]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  assert.equal(parsed.sheetName, "Sheet1");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 0 });
+});
+
 test("parseGoTo supports selector-qualified structured table column references", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");

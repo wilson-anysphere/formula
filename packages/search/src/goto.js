@@ -191,9 +191,11 @@ function parseStructuredRef(input) {
     };
   }
 
-  const simpleMatch = suffix.match(/^\[\s*([^\[\]]+?)\s*\]$/);
+  const simpleMatch = suffix.match(/^\[[ \t\n\r]*((?:[^\]]|]])+)[ \t\n\r]*\]$/);
   if (simpleMatch) {
-    return { tableName, selector: null, columnName: simpleMatch[1], columns: null, columnMode: null };
+    // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
+    const columnName = simpleMatch[1].replaceAll("]]", "]");
+    return { tableName, selector: null, columnName, columns: null, columnMode: null };
   }
 
   return null;
