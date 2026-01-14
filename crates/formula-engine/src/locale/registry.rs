@@ -282,9 +282,12 @@ impl FormulaLocale {
     }
 
     pub fn canonical_boolean_literal(&self, ident: &str) -> Option<bool> {
-        if ident.eq_ignore_ascii_case(self.boolean_true) {
+        // Excel treats keywords case-insensitively across Unicode. Keep boolean keyword matching
+        // consistent with function translation keys by using the same Unicode-aware case folding.
+        let folded = casefold_ident(ident);
+        if folded == self.boolean_true {
             Some(true)
-        } else if ident.eq_ignore_ascii_case(self.boolean_false) {
+        } else if folded == self.boolean_false {
             Some(false)
         } else {
             None
@@ -552,5 +555,26 @@ AVERAGE\tSOMME
         assert!(msg.contains("line 2"));
         assert!(msg.contains("#VALUE!\\t#WERT!"));
         assert!(msg.contains("#REF!\\t#WERT!"));
+    }
+
+    #[test]
+    fn canonical_boolean_literal_uses_unicode_case_folding() {
+        // Function translation keys use Unicode-aware uppercasing for case-insensitive matching.
+        // Boolean keyword translation should behave the same so locales with non-ASCII spellings
+        // still accept mixed-case input.
+        let test_locale = FormulaLocale {
+            id: "test",
+            config: LocaleConfig::en_us(),
+            is_rtl: false,
+            boolean_true: "ÄPFEL",
+            boolean_false: "ÖL",
+            errors: &EMPTY_ERRORS,
+            functions: &EMPTY_FUNCTIONS,
+        };
+
+        assert_eq!(test_locale.canonical_boolean_literal("äpfel"), Some(true));
+        assert_eq!(test_locale.canonical_boolean_literal("Äpfel"), Some(true));
+        assert_eq!(test_locale.canonical_boolean_literal("öl"), Some(false));
+        assert_eq!(test_locale.canonical_boolean_literal("apfel"), None);
     }
 }
