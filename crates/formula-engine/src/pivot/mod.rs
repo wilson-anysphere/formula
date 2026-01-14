@@ -5440,7 +5440,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                source_field: cache_field("Sales"),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -5519,7 +5519,7 @@ mod tests {
             row_fields: vec![PivotField::new("Cat")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
+                source_field: cache_field("Amount"),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
