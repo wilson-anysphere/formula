@@ -19539,15 +19539,24 @@ export class SpreadsheetApp {
     const batchLabel = (() => {
       switch (action.kind) {
         case "bold":
-          return "Bold";
+          return t("command.format.toggleBold");
         case "italic":
-          return "Italic";
+          return t("command.format.toggleItalic");
         case "underline":
-          return "Underline";
+          return t("command.format.toggleUnderline");
         case "strikethrough":
-          return "Strikethrough";
+          return t("command.format.toggleStrikethrough");
         case "numberFormat":
-          return "Number format";
+          switch (action.preset) {
+            case "currency":
+              return t("command.format.numberFormat.currency");
+            case "percent":
+              return t("command.format.numberFormat.percent");
+            case "date":
+              return t("command.format.numberFormat.date");
+          }
+          // Defensive fallback (should be unreachable).
+          return t("quickPick.numberFormat.placeholder");
       }
     })();
 
