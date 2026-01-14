@@ -87,6 +87,9 @@ function buildBannedResForTauriAlias(root: string): RegExp[] {
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*event\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*window\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*dialog\\b`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`),
 
     // Plugin container variants.
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*plugin\\s*(?:\\?\\.|\\.)\\s*event\\b`),
@@ -95,6 +98,18 @@ function buildBannedResForTauriAlias(root: string): RegExp[] {
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*plugins\\s*(?:\\?\\.|\\.)\\s*event\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*plugins\\s*(?:\\?\\.|\\.)\\s*window\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*plugins\\s*(?:\\?\\.|\\.)\\s*dialog\\b`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugin['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugin['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugin['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`),
+    new RegExp(
+      `\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugins['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`,
+    ),
+    new RegExp(
+      `\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugins['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`,
+    ),
+    new RegExp(
+      `\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugins['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`,
+    ),
   ];
 }
 
@@ -104,6 +119,9 @@ function buildBannedResForTauriPluginAlias(root: string): RegExp[] {
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*event\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*window\\b`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*dialog\\b`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`),
   ];
 }
 
