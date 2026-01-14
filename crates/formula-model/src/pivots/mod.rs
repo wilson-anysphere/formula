@@ -386,6 +386,80 @@ pub struct ValueField {
     pub base_item: Option<String>,
 }
 
+/// PivotTable layout style (Excel display options).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    Tabular,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout::Tabular
+    }
+}
+
+/// Where subtotals are placed within a pivot table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    None,
+}
+
+impl Default for SubtotalPosition {
+    fn default() -> Self {
+        SubtotalPosition::None
+    }
+}
+
+/// Whether grand totals are shown for row/column axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Report filter ("Filters" area) configuration for a pivot table.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed set of item values. `None` (or missing) means "(All)" / no filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical (serde-friendly) pivot configuration used by the engine + workbook model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PivotConfig {
+    pub row_fields: Vec<PivotField>,
+    pub column_fields: Vec<PivotField>,
+    pub value_fields: Vec<ValueField>,
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_items: Vec<CalculatedItem>,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())
