@@ -8,7 +8,7 @@
 //! This test is a canary to ensure fixture regeneration does not silently drift to a different
 //! mode.
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 use std::path::PathBuf;
 
 use sha1::Digest as _;
@@ -28,19 +28,28 @@ fn fixture(path: &str) -> PathBuf {
         .join(path)
 }
 
-fn read_ole_stream(raw_ole: &[u8], name: &str) -> Vec<u8> {
-    // Avoid copying the whole OLE container for stream extraction.
-    let cursor = Cursor::new(raw_ole);
-    let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
+fn read_ole_stream<R: Read + Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> Vec<u8> {
     let mut stream = ole
         .open_stream(name)
-        .or_else(|_| ole.open_stream(&format!("/{name}")))
+        .or_else(|_| {
+            let with_slash = format!("/{name}");
+            ole.open_stream(&with_slash)
+        })
         .unwrap_or_else(|err| panic!("open OLE stream {name:?}: {err}"));
     let mut buf = Vec::new();
     stream
         .read_to_end(&mut buf)
         .unwrap_or_else(|err| panic!("read OLE stream {name:?}: {err}"));
     buf
+}
+
+fn read_standard_streams(raw_ole: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    // Avoid copying the whole OLE container for stream extraction.
+    let cursor = Cursor::new(raw_ole);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
+    let encryption_info = read_ole_stream(&mut ole, "EncryptionInfo");
+    let encrypted_package = read_ole_stream(&mut ole, "EncryptedPackage");
+    (encryption_info, encrypted_package)
 }
 
 /// Assert that a committed Standard (CryptoAPI) **AES** fixture uses the baseline **ECB**
@@ -70,8 +79,7 @@ fn assert_fixture_is_ecb(
     }
 
     // 2) Regression: confirm the fixture `EncryptedPackage` specifically uses ECB mode.
-    let encryption_info_bytes = read_ole_stream(&encrypted, "EncryptionInfo");
-    let encrypted_package_bytes = read_ole_stream(&encrypted, "EncryptedPackage");
+    let (encryption_info_bytes, encrypted_package_bytes) = read_standard_streams(&encrypted);
     let info =
         match parse_encryption_info(&encryption_info_bytes).expect("parse EncryptionInfo") {
             EncryptionInfo::Standard { header, verifier, .. } => StandardEncryptionInfo { header, verifier },
