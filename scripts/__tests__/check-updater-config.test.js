@@ -3,8 +3,8 @@ import test from "node:test";
 
 import { checkUpdaterConfig } from "../check-updater-config.mjs";
 
-// Minimal value that satisfies `looksLikeMinisignPublicKey()` in `check-updater-config.mjs`.
-// This is base64 for 42 bytes: "Ed" + 40 null bytes.
+// Minimal value that parses as a minisign public key in `check-updater-config.mjs`.
+// This is base64 for 42 bytes: "Ed" + keyId(8) + pubkey(32).
 const VALID_MINISIGN_PUBKEY = "RWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 function formatBlocks(blocks) {
