@@ -465,6 +465,11 @@ Notable keys:
   (e.g. `(webkit2gtk4.1 or libwebkit2gtk-4_1-0)`, `(gtk3 or libgtk-3-0)`,
   `((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))`,
   `(librsvg2 or librsvg-2-2)`, `(openssl-libs or libopenssl3)`).
+  - Validation: after building a `.rpm`, inspect the generated `Requires:` list:
+    ```bash
+    rpm -qpR path/to/formula-desktop-*.rpm
+    ```
+    CI also runs `bash scripts/ci/verify-linux-package-deps.sh` (and `bash scripts/validate-linux-rpm.sh`) to guardrail these runtime deps.
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
   - `bundle.macOS.entitlements` points at `apps/desktop/src-tauri/entitlements.plist`.
     - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.
