@@ -24,6 +24,12 @@ import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
 const DEMO_SHEETS = ["Sheet1", "Sheet2"] as const;
 
+function readRootCssVar(name: string, fallback: string): string {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 export function App() {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const perfMode = params?.has("perf") ?? false;
@@ -104,6 +110,8 @@ function EngineDemoApp() {
   const activeAddress = gridCellToA1Address(activeCell);
 
   const [activeValue, setActiveValue] = useState<CellScalar>(null);
+  const defaultCellFontFamily = useMemo(() => readRootCssVar("--font-mono", "ui-monospace, monospace"), []);
+  const defaultHeaderFontFamily = useMemo(() => readRootCssVar("--font-sans", "system-ui"), []);
 
   const focusGrid = () => {
     const host = gridContainerRef.current;
@@ -1612,6 +1620,8 @@ function EngineDemoApp() {
                 headerCols={headerColOffset}
                 frozenRows={frozenRows}
                 frozenCols={frozenCols}
+                defaultCellFontFamily={defaultCellFontFamily}
+                defaultHeaderFontFamily={defaultHeaderFontFamily}
                 enableResize
                 onAxisSizeChange={onAxisSizeChange}
                 onZoomChange={setZoom}
@@ -1765,6 +1775,8 @@ function PerfGridApp(): React.ReactElement {
 
   const apiRef = useRef<GridApi | null>(null);
   const provider = useMemo(() => new MockCellProvider({ rowCount, colCount }), [rowCount, colCount]);
+  const defaultCellFontFamily = useMemo(() => readRootCssVar("--font-mono", "ui-monospace, monospace"), []);
+  const defaultHeaderFontFamily = useMemo(() => readRootCssVar("--font-sans", "system-ui"), []);
 
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
@@ -1780,6 +1792,8 @@ function PerfGridApp(): React.ReactElement {
           colCount={colCount}
           frozenRows={frozenRows}
           frozenCols={frozenCols}
+          defaultCellFontFamily={defaultCellFontFamily}
+          defaultHeaderFontFamily={defaultHeaderFontFamily}
           enableResize
           apiRef={(api) => {
             apiRef.current = api;
