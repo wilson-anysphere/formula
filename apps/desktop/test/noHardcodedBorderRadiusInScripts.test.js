@@ -80,17 +80,17 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
         kind: "border*Radius",
       },
       // DOM style assignment (e.g. `el.style.borderRadius = 4`)
-      { re: /\.style\.borderRadius\s*=\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi, kind: "style.borderRadius-number" },
+      { re: /\.style\.borderRadius\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi, kind: "style.borderRadius-number" },
       // DOM style assignment for longhand border radii (numeric => px).
       {
-        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "style.border*Radius-number",
       },
       // DOM style assignment (e.g. `el.style.borderRadius = "4px"`, `"calc(4px)"`)
-      { re: /\.style\.borderRadius\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.borderRadius" },
+      { re: /\.style\.borderRadius\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.borderRadius" },
       // DOM style assignment for longhand border radii (string => px).
       {
-        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
         kind: "style.border*Radius",
       },
       // setProperty("border-radius", 4)
