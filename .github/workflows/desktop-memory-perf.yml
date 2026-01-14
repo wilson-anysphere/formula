@@ -266,10 +266,18 @@ jobs:
           }
           fs.writeFileSync(outputPath, JSON.stringify(results, null, 2), "utf8");
           
+          const numericTarget = typeof target === "number" && Number.isFinite(target) ? target : null;
+          const status =
+            numericTarget != null && typeof p95 === "number" && Number.isFinite(p95) ? (p95 <= numericTarget ? "PASS" : "FAIL") : "n/a";
+          const delta =
+            numericTarget != null && typeof p95 === "number" && Number.isFinite(p95) ? p95 - numericTarget : null;
+
           appendSummary([
             "## Desktop idle memory (Linux)",
             "",
-            `Runs: \`${runs ?? "n/a"}\`  Measurement: \`${measurement}\``,
+            `Runs: \`${runs ?? "n/a"}\`  Measurement: \`${measurement}\`  Status: \`${status}\`${
+              delta != null && Number.isFinite(delta) ? ` (Δ=${delta >= 0 ? "+" : ""}${delta.toFixed(1)}MB)` : ""
+            }`,
             "",
             "| Metric | p50 (MB) | p95 (MB) | Target (MB) |",
             "|---|---:|---:|---:|",
