@@ -576,7 +576,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                     )))
                 });
             Some(ValueField {
-                source_field: source_field_name.into(),
+                source_field: cache_field_ref(cache_def, source_field_name.clone()),
                 name,
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
@@ -924,6 +924,11 @@ mod tests {
         assert_eq!(cfg.row_fields.len(), 1);
         assert_eq!(
             cfg.row_fields[0].source_field.as_cache_field_name(),
+            Some("Table[Column]")
+        );
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(
+            cfg.value_fields[0].source_field.as_cache_field_name(),
             Some("Table[Column]")
         );
     }
