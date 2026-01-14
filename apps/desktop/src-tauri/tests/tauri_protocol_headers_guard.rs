@@ -27,17 +27,27 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
 
     let rest = &main_rs_src[start..];
 
-    // The `tauri://` protocol handler is registered in the `tauri::Builder` chain and is
-    // immediately followed by a `.plugin(...)` call in current production builds.
+    // Extract the closure body for the `tauri://` handler.
     //
-    // We intentionally avoid brittle brace/paren matching and instead slice the builder chain at
-    // the next method call boundary.
-    let end = rest
-        .find(".plugin(")
-        .or_else(|| rest.find(".build("))
-        .unwrap_or(rest.len());
+    // Historically this guard test sliced the builder chain at the next `.plugin(...)`, but that
+    // is brittle if `.plugin(` ever appears in a string literal inside the handler.
+    let first_pipe = rest
+        .find('|')
+        .unwrap_or_else(|| panic!("failed to find closure `|` in the `tauri://` handler block"));
+    let second_pipe = rest[first_pipe + 1..]
+        .find('|')
+        .map(|idx| first_pipe + 1 + idx)
+        .unwrap_or_else(|| {
+            panic!("failed to find closing closure `|` in the `tauri://` handler block")
+        });
+    let open_brace = rest[second_pipe + 1..]
+        .find('{')
+        .map(|idx| second_pipe + 1 + idx)
+        .unwrap_or_else(|| {
+            panic!("failed to find `{{` after closure args in the `tauri://` handler block")
+        });
 
-    &rest[..end]
+    extract_brace_block(rest, open_brace)
 }
 
 fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
@@ -247,6 +257,38 @@ fn extract_tauri_scheme_protocol_asset_success_block<'a>(handler_block: &'a str)
         "failed to find the `AssetResolver` success path (`if let Some(asset)` or `Some(asset) =>`) in the `tauri://` handler block.\n\
          Searched within:\n\
          {handler_block}"
+    );
+}
+
+#[test]
+fn extract_brace_block_ignores_braces_in_strings_and_comments() {
+    // Keep the outer raw string delimiter longer than the inner raw string so the inner `"#`
+    // doesn't prematurely terminate the test source string.
+    let src = r##"
+{
+  // { braces in comment }
+  let _a = "{ braces in string }";
+  let _b = r#"raw { braces }"#;
+  let _c = br#"raw bytes { braces }"#;
+  /* nested { block { comment } } */
+  if true { let _d = 1; }
+}
+"##;
+
+    let open = src.find('{').expect("test src should contain `{`");
+    let block = extract_brace_block(src, open);
+
+    assert!(block.contains(r#"let _a = "{ braces in string }";"#));
+    assert!(block.contains("let _b = r#\"raw { braces }\"#;"));
+    assert!(block.contains("let _c = br#\"raw bytes { braces }\"#;"));
+    assert!(block.contains(r#"/* nested { block { comment } } */"#));
+    assert!(
+        block.contains("if true { let _d = 1; }"),
+        "expected nested code braces to still be counted"
+    );
+    assert!(
+        block.trim_end().ends_with('}'),
+        "expected brace matcher to include the final outer `}}`, got:\n{block}"
     );
 }
 
