@@ -243,7 +243,6 @@ describe("SpreadsheetApp edit rejection toasts", () => {
 
     // Select A1:A2 so Ctrl+D style fill will target A2.
     app.selectRange({ sheetId: "Sheet1", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } }, { focus: false });
-    const beforeTargetCell = doc.getCell("Sheet1", { row: 1, col: 0 });
 
     // Simulate a permissions guard installed by collab mode (read-only/protected range).
     (app as any).document.canEditCell = () => false;
