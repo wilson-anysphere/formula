@@ -99,7 +99,7 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
     {
       "data-testid": "ai-audit-verification",
       style:
-        "font-size: 12px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--warning-bg);",
+        "font-size: 12px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--warning-bg);",
     },
     children,
   );
@@ -265,7 +265,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       "div",
       {
         "data-testid": "ai-audit-entry",
-        style: "border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: var(--text-primary);",
+        style: "border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; color: var(--text-primary);",
       },
       [
         el("div", { style: "font-size: 12px; opacity: 0.75; margin-bottom: 4px;" }, [
