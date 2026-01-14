@@ -31,7 +31,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` `minor=2` (major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; stricter alg gating), `docs/offcrypto-standard-encryptedpackage.md` |
-| Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
+| Legacy `.xls` (BIFF5/BIFF8) | **BIFF `FILEPASS`** (XOR / RC4 / RC4 CryptoAPI) | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors so
 callers can decide whether to prompt for a password vs report “unsupported encryption”.
@@ -51,8 +51,8 @@ callers can decide whether to prompt for a password vs report “unsupported enc
 - For legacy `.xls` BIFF `FILEPASS`:
   - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::EncryptedWorkbook`
   - `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` surface
-    `PasswordRequired` / `InvalidPassword` (and attempt BIFF8 RC4 CryptoAPI decryption when a
-    password is provided).
+    `PasswordRequired` / `InvalidPassword` (and attempt legacy `.xls` `FILEPASS` decryption when a
+    password is provided: XOR / RC4 “standard” / RC4 CryptoAPI).
 
 ## Supported schemes / parameter subsets
 
@@ -104,19 +104,22 @@ Note on version gating in helper APIs:
 - For best compatibility across Standard variants (non-default hashes/algorithms), prefer
   `crates/formula-office-crypto`’s decryptor.
 
-### Legacy `.xls`: BIFF8 `FILEPASS` RC4 CryptoAPI
+### Legacy `.xls`: BIFF `FILEPASS` (BIFF5/BIFF8)
 Currently supported in `formula-xls`:
 
-- BIFF8 `FILEPASS` with `wEncryptionType=0x0001` (RC4) and `wEncryptionSubType=0x0002` (CryptoAPI)
-- RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi))
-- RC4 `KeySizeBits` values: `40`, `56`, `128`
-  - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
-    (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
+- **BIFF8 XOR obfuscation** (`wEncryptionType=0x0000`)
+- **BIFF8 RC4 “standard”** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
+  - Note: this scheme uses only the first 15 UTF-16 code units of the password (Excel truncation).
+- **BIFF8 RC4 CryptoAPI** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
+  - RC4 with SHA-1 and 50,000 password-hash iterations.
+  - RC4 `KeySizeBits` values: `40`, `56`, `128`
+    - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
+      (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
+- (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
 Not implemented:
 
-- XOR obfuscation
-- other BIFF encryption variants (including AES CryptoAPI for BIFF)
+- other BIFF encryption variants (including CryptoAPI AES for BIFF)
 
 ## Container format details (what’s inside the OLE file)
 
