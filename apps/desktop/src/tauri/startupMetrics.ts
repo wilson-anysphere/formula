@@ -208,7 +208,7 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
     const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
     if (!shouldRetry) return { ...store };
 
-    const deadlineMs = Date.now() + 2_000;
+    const deadlineMs = Date.now() + 10_000;
     let delayMs = 1;
     while (!invoke && Date.now() < deadlineMs) {
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
