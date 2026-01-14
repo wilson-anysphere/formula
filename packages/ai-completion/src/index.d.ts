@@ -124,6 +124,12 @@ export class FunctionRegistry {
 export interface PartialFormulaContext {
   isFormula: boolean;
   inFunctionCall: boolean;
+  /**
+   * Index of the `(` that opened the current function call, when {@link inFunctionCall} is true.
+   *
+   * This is a 0-based index into the input formula string.
+   */
+  openParenIndex?: number;
   functionName?: string;
   argIndex?: number;
   expectingRange?: boolean;

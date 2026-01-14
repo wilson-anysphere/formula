@@ -15,7 +15,11 @@ suggestRanges({
 // Ensure TypeScript consumers can provide an async parsePartialFormula implementation.
 const completion = new TabCompletionEngine({
   parsePartialFormula: async (_input, _cursorPosition, _registry): Promise<PartialFormulaContext> => {
-    return { isFormula: false, inFunctionCall: false };
+    const ctx: PartialFormulaContext = { isFormula: false, inFunctionCall: false };
+    // `openParenIndex` is optional but should be part of the public type for consumers that
+    // want to highlight the active function call.
+    void ctx.openParenIndex;
+    return ctx;
   },
 });
 

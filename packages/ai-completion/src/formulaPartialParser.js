@@ -4,6 +4,7 @@ import { findMatchingBracketEnd } from "./bracketMatcher.js";
  * @typedef {{
  *   isFormula: boolean,
  *   inFunctionCall: boolean,
+ *   openParenIndex?: number,
  *   functionName?: string,
  *   argIndex?: number,
  *   expectingRange?: boolean,
@@ -162,6 +163,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   return {
     isFormula: true,
     inFunctionCall: true,
+    openParenIndex,
     functionName: fnName,
     argIndex: argContext.argIndex,
     currentArg: argContext.currentArg,

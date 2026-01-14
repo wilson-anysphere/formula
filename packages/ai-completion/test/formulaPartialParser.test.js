@@ -10,6 +10,7 @@ test("parsePartialFormula treats ';' as an argument separator", () => {
   const parsed = parsePartialFormula(input, input.length, registry);
 
   assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.openParenIndex, 4);
   assert.equal(parsed.currentArg?.start, input.length);
   assert.equal(parsed.currentArg?.end, input.length);
   assert.equal(parsed.currentArg?.text, "");
@@ -131,6 +132,20 @@ test("parsePartialFormula ignores ';' inside nested function calls (depth > base
   assert.equal(parsed.currentArg?.text, "A");
 });
 
+test("parsePartialFormula returns openParenIndex for the active (innermost) function call", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM(IF(A1>0;";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "IF");
+  // =SUM(IF(...
+  assert.equal(parsed.openParenIndex, 7);
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "");
+});
+
 test("parsePartialFormula supports non-ASCII function names (localized identifiers)", () => {
   const registry = new FunctionRegistry();
   const input = "=zählenwenn(A1;"; // COUNTIF in German Excel.
@@ -172,6 +187,7 @@ test("parsePartialFormula stays in the outer function call when grouping parens 
   assert.equal(parsed.isFormula, true);
   assert.equal(parsed.inFunctionCall, true);
   assert.equal(parsed.functionName, "SUM");
+  assert.equal(parsed.openParenIndex, 4);
   assert.equal(parsed.argIndex, 0);
   assert.equal(parsed.currentArg?.text, "(A1");
   assert.equal(parsed.expectingRange, true);
