@@ -83,4 +83,44 @@ describe("DrawingOverlay perf guards", () => {
 
     expect(getComputedStyleSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("does not sort objects on render() when already zOrder-sorted", async () => {
+    const getPropertyValue = vi.fn(() => "");
+    const getComputedStyleSpy = vi.fn(() => ({ getPropertyValue }) as any);
+
+    vi.stubGlobal("document", { documentElement: {} } as any);
+    vi.stubGlobal("getComputedStyle", getComputedStyleSpy as any);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const objects = [
+      {
+        id: 1,
+        kind: { type: "shape" as const },
+        anchor: {
+          type: "absolute" as const,
+          pos: { xEmu: 0, yEmu: 0 },
+          size: { cx: 0, cy: 0 },
+        },
+        zOrder: 0,
+      },
+      {
+        id: 2,
+        kind: { type: "shape" as const },
+        anchor: {
+          type: "absolute" as const,
+          pos: { xEmu: 0, yEmu: 0 },
+          size: { cx: 0, cy: 0 },
+        },
+        zOrder: 1,
+      },
+    ];
+
+    const sortSpy = vi.spyOn(Array.prototype, "sort");
+    await overlay.render(objects as any, viewport, { drawObjects: false });
+    await overlay.render(objects.slice() as any, viewport, { drawObjects: false });
+    expect(sortSpy).toHaveBeenCalledTimes(0);
+  });
 });
