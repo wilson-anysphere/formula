@@ -235,7 +235,6 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     let Some(first) = chars.next() else {
         return true;
     };
-
     // DAX allows unquoted identifiers in a conservative "C identifier" form. If the identifier
     // contains anything other than ASCII alphanumerics/underscore, or starts with a non-letter /
     // underscore, quote it.

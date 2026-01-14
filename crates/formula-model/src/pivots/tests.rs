@@ -211,6 +211,43 @@ fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields()
 }
 
 #[test]
+fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() {
+    let simple_table = PivotFieldRef::DataModelColumn {
+        table: "Orders".to_string(),
+        column: "Order ID".to_string(),
+    };
+    assert_eq!(simple_table.to_string(), "Orders[Order ID]");
+
+    // `Display` uses DAX quoting rules for table names, while `canonical_name` and
+    // `display_string` intentionally keep table names unquoted for friendlier UI labels and
+    // cache-field matching.
+    let spaced_table = PivotFieldRef::DataModelColumn {
+        table: "Sales Table".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(spaced_table.to_string(), "'Sales Table'[Amount]");
+    assert_eq!(spaced_table.canonical_name().as_ref(), "Sales Table[Amount]");
+    assert_eq!(spaced_table.display_string(), "Sales Table[Amount]");
+
+    // Table names that are not valid "C identifiers" need quoting.
+    let leading_digit_table = PivotFieldRef::DataModelColumn {
+        table: "2024Orders".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(leading_digit_table.to_string(), "'2024Orders'[Amount]");
+
+    // Column and measure names escape `]` as `]]` inside DAX brackets.
+    let bracketed_column = PivotFieldRef::DataModelColumn {
+        table: "Orders".to_string(),
+        column: "Gross]Margin".to_string(),
+    };
+    assert_eq!(bracketed_column.to_string(), "Orders[Gross]]Margin]");
+
+    let bracketed_measure = PivotFieldRef::DataModelMeasure("My]Measure".to_string());
+    assert_eq!(bracketed_measure.to_string(), "[My]]Measure]");
+}
+
+#[test]
 fn pivot_value_to_key_part_canonicalizes_numbers() {
     assert_eq!(
         PivotValue::Number(0.0).to_key_part(),
