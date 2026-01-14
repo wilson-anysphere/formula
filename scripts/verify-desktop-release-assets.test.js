@@ -70,6 +70,35 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
   assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
 });
 
+test("validateLatestJson allows installer-specific platform keys to reference installer artifacts", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      // Some Tauri versions may emit additional `{os}-{arch}-{bundle}` keys. These should still
+      // reference existing assets, but are not the runtime updater targets and may legitimately point
+      // at installer bundles like `.deb`/`.rpm`/`.dmg`.
+      "linux-x86_64-deb": { url: "https://example.com/Formula.deb", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.app.tar.gz",
+    "Formula.deb",
+  ]);
+
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
+});
+
 test("validateLatestJson finds a nested platforms map", () => {
   const manifest = {
     version: "0.1.0",
