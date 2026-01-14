@@ -691,6 +691,7 @@ fn open_workbook_with_options_decrypts_agile_and_standard_fixtures() {
             &path,
             OpenOptions {
                 password: Some(password.to_string()),
+                ..Default::default()
             },
         )
         .unwrap_or_else(|err| panic!("open_workbook_with_options({fixture}) failed: {err:?}"));

@@ -20,6 +20,7 @@ fn open_workbook_model_with_options_decrypts_standard_rc4_fixture() {
         &path,
         OpenOptions {
             password: Some("password".to_string()),
+            ..Default::default()
         },
     )
     .expect("decrypt + open standard-rc4.xlsx as model");
@@ -39,7 +40,13 @@ fn open_workbook_model_with_options_decrypts_standard_rc4_fixture() {
 fn open_workbook_model_with_options_standard_rc4_missing_password_is_password_required() {
     let path = fixture_path("standard-rc4.xlsx");
 
-    let err = open_workbook_model_with_options(&path, OpenOptions { password: None })
+    let err = open_workbook_model_with_options(
+        &path,
+        OpenOptions {
+            password: None,
+            ..Default::default()
+        },
+    )
         .expect_err("expected password required");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
@@ -55,6 +62,7 @@ fn open_workbook_model_with_options_standard_rc4_wrong_password_is_invalid_passw
         &path,
         OpenOptions {
             password: Some("wrong-password".to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected invalid password");
@@ -63,4 +71,3 @@ fn open_workbook_model_with_options_standard_rc4_wrong_password_is_invalid_passw
         "expected Error::InvalidPassword, got {err:?}"
     );
 }
-

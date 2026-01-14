@@ -45,6 +45,7 @@ fn decrypts_standard_fixture_via_open_workbook_with_options() {
         &standard_path,
         OpenOptions {
             password: Some("password".to_string()),
+            ..Default::default()
         },
     )
     .expect("open standard.xlsx with password");

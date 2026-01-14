@@ -6,9 +6,9 @@ const PASSWORD: &str = "hunter2";
 fn open_options_debug_does_not_leak_password() {
     let opts = OpenOptions {
         password: Some(PASSWORD.to_string()),
+        ..Default::default()
     };
 
     let debug = format!("{opts:?}");
     assert!(!debug.contains(PASSWORD));
 }
-

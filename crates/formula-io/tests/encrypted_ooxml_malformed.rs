@@ -78,6 +78,7 @@ fn standard_streaming_open_rejects_invalid_encrypted_package_size_prefix() {
         &path,
         OpenOptions {
             password: Some("password".to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected corrupt encrypted workbook to error");

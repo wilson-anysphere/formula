@@ -8880,7 +8880,7 @@ impl Engine {
     }
     fn rebuild_graph(&mut self) -> Result<(), EngineError> {
         let sheet_names = sheet_names_by_id(&self.workbook);
-        let mut formulas: Vec<(SheetId, String, CellAddr, Arc<str>, Option<String>)> = Vec::new();
+        let mut formulas: Vec<(SheetId, String, CellAddr, String, Option<String>)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             let Some(sheet_name) = sheet_names.get(&sheet_id).cloned() else {
                 continue;
