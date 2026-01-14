@@ -30,7 +30,7 @@ export function emuToPx(emu: number, zoom?: number): number {
 
 export function pxToEmu(px: number, zoom?: number): number {
   const z = resolveZoom(zoom);
-  return (px * EMU_PER_PX) / z;
+  return Math.round((px * EMU_PER_PX) / z);
 }
 
 type CssVarStyle = Pick<CSSStyleDeclaration, "getPropertyValue">;

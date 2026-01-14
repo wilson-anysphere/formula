@@ -3724,7 +3724,7 @@ impl DaxEngine {
                                         })
                                         .collect()
                                 }
-                            };
+                             };
 
                             column_filters.push((key, values));
                             Ok(())
