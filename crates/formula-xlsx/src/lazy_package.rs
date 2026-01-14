@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
@@ -6,10 +6,14 @@ use zip::ZipArchive;
 
 use crate::package::{MacroPresence, WorkbookKind, XlsxError};
 use crate::streaming::PartOverride;
-use crate::WorkbookCellPatches;
 
 #[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WorkbookCellPatches;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::streaming::strip_vba_project_streaming_with_kind;
@@ -319,18 +323,7 @@ impl XlsxLazyPackage {
         Ok(out)
     }
 
-    #[cfg(target_arch = "wasm32")]
-    fn build_part_overrides(
-        &self,
-        _kind_already_handled: bool,
-    ) -> Result<HashMap<String, PartOverride>, XlsxError> {
-        Ok(self
-            .overrides
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect())
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn patched_content_types_for_kind(&self, kind: WorkbookKind) -> Result<Option<Vec<u8>>, XlsxError> {
         let ct_name = "[Content_Types].xml";
         match self.overrides.get(ct_name) {
