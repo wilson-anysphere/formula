@@ -147,3 +147,26 @@ test("deleting a persisted image clears any cached fallback bytes for the same i
   doc.deleteImage("img1");
   assert.equal(doc.getImage("img1"), null);
 });
+
+test("cache deltas do not break mergeKey-based undo merging for user edits", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", { row: 0, col: 0 }, "A", { mergeKey: "typing" });
+  assert.deepEqual(doc.getStackDepths(), { undo: 1, redo: 0 });
+
+  // Collab image hydration should not disrupt mergeKey semantics.
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { bytes: new Uint8Array([1]), mimeType: "image/png" },
+      },
+    ],
+    { source: "collab" },
+  );
+
+  doc.setCellValue("Sheet1", { row: 0, col: 0 }, "B", { mergeKey: "typing" });
+  // Should still be merged into the first undo entry.
+  assert.deepEqual(doc.getStackDepths(), { undo: 1, redo: 0 });
+});

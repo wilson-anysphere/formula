@@ -6591,10 +6591,6 @@ export class DocumentController {
 
     if (filtered.length === 0) return;
 
-    // External updates should never merge with user edits.
-    this.lastMergeKey = null;
-    this.lastMergeTime = 0;
-
     for (const delta of filtered) {
       if (!delta) continue;
       const imageId = delta.imageId;
@@ -6644,8 +6640,7 @@ export class DocumentController {
 
     // Cache updates should not participate in dirty tracking by default. Callers can opt in.
     if (options.markDirty === true) {
-      this.savedCursor = null;
-      this.#emitDirty();
+      this.markDirty();
     }
   }
 
