@@ -4,8 +4,9 @@ set -euo pipefail
 # Guard against a subtle YAML footgun:
 #
 # In YAML, an unquoted colon (`:`) can be interpreted as a mapping key/value separator. This means
-# workflow steps like:
+# workflow name fields like:
 #
+#   name: Guard: Something
 #   - name: Guard: Something
 #
 # are not valid YAML and will fail to parse / run in GitHub Actions. We prefer quoting any step
@@ -55,7 +56,7 @@ if [ "$status" -eq 2 ]; then
 fi
 
 if [ -n "$matches" ]; then
-  echo "Found workflow step names containing an unquoted ':' (invalid YAML):" >&2
+  echo "Found workflow `name:` fields containing an unquoted ':' (invalid YAML):" >&2
   echo "$matches" >&2
   echo >&2
   echo "Fix: quote the full name string, e.g.:" >&2
@@ -67,4 +68,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "Workflow step name colon guard: OK"
+echo "Workflow name field colon guard: OK"
