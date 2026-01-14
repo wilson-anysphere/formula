@@ -10554,6 +10554,9 @@ export class SpreadsheetApp {
 
     ctx.restore();
 
+    // Drop cached offscreen surfaces for charts that no longer exist on the active sheet.
+    this.chartRenderer.pruneSurfaces(keep);
+
     for (const id of this.chartModels.keys()) {
       if (keep.has(id)) continue;
       this.chartModels.delete(id);

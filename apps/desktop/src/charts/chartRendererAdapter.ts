@@ -160,6 +160,23 @@ export class ChartRendererAdapter implements ChartRenderer {
     ctx.drawImage(surface.canvas as any, rect.x, rect.y, rect.width, rect.height);
   }
 
+  /**
+   * Drop cached offscreen surfaces for charts that are no longer needed.
+   *
+   * SpreadsheetApp uses this to avoid retaining surfaces for charts on other sheets (or
+   * deleted charts) after a sheet switch / chart removal.
+   */
+  pruneSurfaces(keep: ReadonlySet<string>): void {
+    if (!keep || keep.size === 0) {
+      this.surfaces.clear();
+      return;
+    }
+    for (const id of this.surfaces.keys()) {
+      if (keep.has(id)) continue;
+      this.surfaces.delete(id);
+    }
+  }
+
   destroy(): void {
     // Drop references to offscreen surfaces so their backing buffers can be GC'd.
     this.surfaces.clear();
