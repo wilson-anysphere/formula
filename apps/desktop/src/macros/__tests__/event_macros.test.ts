@@ -252,6 +252,48 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("does not resurrect deleted sheets when applying Workbook_BeforeClose updates", async () => {
+    const doc = new DocumentController();
+    // Ensure Sheet1 exists so we can delete Sheet2 without tripping the last-sheet guard.
+    doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+    expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    const app = new FakeApp(doc);
+
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_before_close") {
+        return {
+          ok: true,
+          output: [],
+          updates: [{ sheet_id: "Sheet2", row: 0, col: 0, value: "stale", formula: null, display_value: "stale" }],
+        };
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    await fireWorkbookBeforeCloseBestEffort({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+  });
+
   it("uses the UI context captured at edit time when firing Worksheet_Change", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 

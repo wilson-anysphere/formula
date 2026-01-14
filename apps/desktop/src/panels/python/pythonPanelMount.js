@@ -451,12 +451,24 @@ export function mountPythonPanel({
         if (updates.length > 0) {
           const deltas = [];
           for (const update of updates) {
-            const before = doc.getCell(update.sheetId, { row: update.row, col: update.col });
+            // Avoid resurrecting deleted sheets: only apply updates when the sheet still exists.
+            const sheetId = String(update.sheetId ?? "").trim();
+            if (!sheetId) continue;
+            const meta = typeof doc.getSheetMeta === "function" ? doc.getSheetMeta(sheetId) : null;
+            if (!meta) {
+              const ids = typeof doc.getSheetIds === "function" ? doc.getSheetIds() : [];
+              if (Array.isArray(ids) && ids.length > 0) continue;
+            }
+
+            const before =
+              typeof doc.peekCell === "function"
+                ? doc.peekCell(sheetId, { row: update.row, col: update.col })
+                : doc.getCell(sheetId, { row: update.row, col: update.col });
             const formula = normalizeFormulaText(update.formula);
             const value = formula ? null : (update.value ?? null);
             const after = { value, formula, styleId: before.styleId ?? 0 };
             if (inputEquals(before, after)) continue;
-            deltas.push({ sheetId: update.sheetId, row: update.row, col: update.col, before, after });
+            deltas.push({ sheetId, row: update.row, col: update.col, before, after });
           }
           if (deltas.length > 0) {
             // Native Python scripts mutate the backend workbook directly and return

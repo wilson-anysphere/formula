@@ -279,7 +279,15 @@ async function applyMacroUpdatesToDocument(
       if (!Number.isInteger(row) || row < 0) continue;
       if (!Number.isInteger(col) || col < 0) continue;
 
-      const before = doc.getCell(sheetId, { row, col });
+      // Avoid resurrecting deleted sheets: only apply backend macro updates when the sheet exists.
+      const docAny: any = doc as any;
+      const sheetMeta = typeof docAny.getSheetMeta === "function" ? docAny.getSheetMeta(sheetId) : null;
+      if (!sheetMeta) {
+        const ids = typeof docAny.getSheetIds === "function" ? docAny.getSheetIds() : [];
+        if (Array.isArray(ids) && ids.length > 0) continue;
+      }
+
+      const before = typeof docAny.peekCell === "function" ? docAny.peekCell(sheetId, { row, col }) : doc.getCell(sheetId, { row, col });
       const formula = normalizeFormulaText(update.formula);
       const value = formula ? null : (update.value ?? null);
       const after = { value, formula, styleId: before?.styleId ?? 0 };

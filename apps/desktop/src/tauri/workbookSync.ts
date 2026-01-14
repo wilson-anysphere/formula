@@ -340,10 +340,11 @@ function isFullRectangle(edits: PendingEdit[]): { startRow: number; startCol: nu
   return { startRow, startCol, endRow, endCol };
 }
 
-function applyBackendUpdates(document: DocumentControllerLike, raw: unknown): void {
+function applyBackendUpdates(document: DocumentControllerLike, raw: unknown, opts?: { skipSheetIds?: Set<string> }): void {
   if (typeof document.getCell !== "function" || typeof document.applyExternalDeltas !== "function") return;
   if (!Array.isArray(raw) || raw.length === 0) return;
 
+  const skip = opts?.skipSheetIds ?? null;
   const deltas: any[] = [];
   for (const u of raw as any[]) {
     if (!u || typeof u !== "object") continue;
@@ -351,6 +352,7 @@ function applyBackendUpdates(document: DocumentControllerLike, raw: unknown): vo
     const row = Number((u as any).row);
     const col = Number((u as any).col);
     if (!sheetId) continue;
+    if (skip && skip.has(sheetId)) continue;
     if (!Number.isInteger(row) || row < 0) continue;
     if (!Number.isInteger(col) || col < 0) continue;
 
@@ -358,7 +360,8 @@ function applyBackendUpdates(document: DocumentControllerLike, raw: unknown): vo
     // We only apply input changes for non-formula cells (e.g. pivot output values).
     if (normalizeFormulaText((u as any).formula) != null) continue;
 
-    const before = document.getCell(sheetId, { row, col });
+    const docAny: any = document as any;
+    const before = typeof docAny.peekCell === "function" ? docAny.peekCell(sheetId, { row, col }) : document.getCell(sheetId, { row, col });
     const after = { value: (u as any).value ?? null, formula: null, styleId: before?.styleId ?? 0 };
     if (inputEquals(before, after)) continue;
     deltas.push({ sheetId, row, col, before, after });
@@ -684,6 +687,9 @@ export function startWorkbookSync(args: {
   const pendingRowHeights = new Map<string, RowHeightDelta>();
 
   let sheetMirror: SheetSnapshot | null = captureSheetSnapshot(args.document);
+  // Track sheet ids that have been explicitly deleted so we can ignore any stale backend updates
+  // that reference them (avoids recreating "phantom" sheets via `applyExternalDeltas`).
+  const deletedSheetIdsForBackendUpdates = new Set<string>();
 
   let stopped = false;
   let flushScheduled = false;
@@ -698,6 +704,20 @@ export function startWorkbookSync(args: {
     const hasSheetOrderDelta = Boolean(sheetOrderDelta);
 
     const backendOriginated = source === "macro" || source === "python" || source === "pivot" || source === "backend";
+
+    // Keep a best-effort set of deleted sheet ids so we can ignore late/stale backend updates
+    // that reference a sheet id the user has removed.
+    if (hasSheetMetaDeltas) {
+      for (const delta of sheetMetaDeltas ?? []) {
+        const sheetId = typeof (delta as any)?.sheetId === "string" ? String((delta as any).sheetId).trim() : "";
+        if (!sheetId) continue;
+        if ((delta as any).after == null) {
+          deletedSheetIdsForBackendUpdates.add(sheetId);
+        } else {
+          deletedSheetIdsForBackendUpdates.delete(sheetId);
+        }
+      }
+    }
 
     if (source === "applyState") {
       // `applyState` replaces the entire DocumentController snapshot (restore/sync from an external source).
@@ -1196,7 +1216,7 @@ export function startWorkbookSync(args: {
         };
 
         const updates = await sendEditsViaTauri(invokeFn, filteredCellBatch);
-        applyBackendUpdates(args.document, updates);
+        applyBackendUpdates(args.document, updates, { skipSheetIds: deletedSheetIdsForBackendUpdates });
         await sendFormattingViaTauri(invokeFn, filteredFormatBatch);
         await sendSheetViewViaTauri(invokeFn, filteredViewBatch);
       }

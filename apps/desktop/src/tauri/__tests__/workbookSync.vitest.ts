@@ -217,6 +217,46 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("ignores backend updates that reference deleted sheets (no resurrection)", async () => {
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      if (cmd === "set_range") {
+        return [
+          {
+            sheet_id: "Sheet2",
+            row: 0,
+            col: 0,
+            value: "stale",
+            formula: null,
+            display_value: "stale",
+          },
+        ];
+      }
+      return null;
+    });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const document = new DocumentController();
+    // Ensure Sheet1 exists so we can delete Sheet2 without tripping the last-sheet guard.
+    document.getCell("Sheet1", { row: 0, col: 0 });
+    document.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+    expect(document.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+    const sync = startWorkbookSync({ document: document as any });
+
+    // Delete Sheet2.
+    document.deleteSheet("Sheet2");
+    expect(document.getSheetIds()).toEqual(["Sheet1"]);
+
+    // Trigger a backend-synced edit; backend (incorrectly) returns an update for the deleted sheet id.
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, "one");
+    await flushMicrotasks();
+
+    // The stale backend update should not recreate Sheet2.
+    expect(document.getSheetIds()).toEqual(["Sheet1"]);
+
+    sync.stop();
+  });
+
   it("ignores document changes tagged as pivot updates (already applied in the backend)", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });

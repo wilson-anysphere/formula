@@ -12215,12 +12215,25 @@ try {
             if (typeof (doc as any).applyExternalDeltas === "function" && typeof (doc as any).getCell === "function") {
               const deltas: any[] = [];
               for (const update of normalized) {
-                const before = (doc as any).getCell(update.sheetId, { row: update.row, col: update.col });
+                // Avoid resurrecting deleted sheets: only apply updates when the sheet still exists.
+                const docAny: any = doc as any;
+                const sheetId = String(update.sheetId ?? "").trim();
+                if (!sheetId) continue;
+                const meta = typeof docAny.getSheetMeta === "function" ? docAny.getSheetMeta(sheetId) : null;
+                if (!meta) {
+                  const ids = typeof docAny.getSheetIds === "function" ? docAny.getSheetIds() : [];
+                  if (Array.isArray(ids) && ids.length > 0) continue;
+                }
+
+                const before =
+                  typeof docAny.peekCell === "function"
+                    ? docAny.peekCell(sheetId, { row: update.row, col: update.col })
+                    : docAny.getCell(sheetId, { row: update.row, col: update.col });
                 const formula = update.formula == null ? null : normalizeFormulaTextOpt(update.formula);
                 const value = formula ? null : (update.value ?? null);
                 const after = { value, formula, styleId: before?.styleId ?? 0 };
                 if (inputEquals(before, after)) continue;
-                deltas.push({ sheetId: update.sheetId, row: update.row, col: update.col, before, after });
+                deltas.push({ sheetId, row: update.row, col: update.col, before, after });
               }
               if (deltas.length > 0) {
                 (doc as any).applyExternalDeltas(deltas, { source: "macro" });
