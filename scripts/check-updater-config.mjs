@@ -104,7 +104,7 @@ export function checkUpdaterConfig(config, options = {}) {
       details: [
         "Expected a non-empty array because plugins.updater.active=true.",
         `Set ${configRelativePath} → plugins.updater.endpoints to one or more update JSON URLs.`,
-        `Example: ["https://updates.example.com/{{target}}/{{current_version}}"]`,
+        `Example (GitHub Releases): ["https://github.com/OWNER/REPO/releases/latest/download/latest.json"]`,
         'See docs/release.md ("Hosting updater endpoints").',
       ],
     });
