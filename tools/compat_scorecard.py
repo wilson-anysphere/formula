@@ -377,8 +377,14 @@ def main() -> int:
 
     for key in ("target_read", "target_calc", "target_round_trip"):
         value = getattr(args, key)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not (0.0 <= value <= 1.0):
-            raise SystemExit(f"--{key.replace('_', '-')} must be a float in [0, 1]. Got: {value!r}")
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not (0.0 <= float(value) <= 1.0)
+        ):
+            raise SystemExit(
+                f"--{key.replace('_', '-')} must be a float in [0, 1]. Got: {value!r}"
+            )
 
     repo_root = Path(__file__).resolve().parents[1]
 
