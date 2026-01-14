@@ -77,11 +77,19 @@ function createRoot(): HTMLElement {
 function dispatchPointerEvent(
   target: EventTarget,
   type: string,
-  opts: { clientX: number; clientY: number; pointerId?: number; button?: number },
+  opts: { clientX: number; clientY: number; pointerId?: number; button?: number; shiftKey?: boolean },
 ): void {
   const pointerId = opts.pointerId ?? 1;
   const button = opts.button ?? 0;
-  const base = { bubbles: true, cancelable: true, clientX: opts.clientX, clientY: opts.clientY, pointerId, button };
+  const base = {
+    bubbles: true,
+    cancelable: true,
+    clientX: opts.clientX,
+    clientY: opts.clientY,
+    pointerId,
+    button,
+    shiftKey: opts.shiftKey ?? false,
+  };
   const event =
     typeof (globalThis as any).PointerEvent === "function"
       ? new (globalThis as any).PointerEvent(type, base)
@@ -778,6 +786,77 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
         button: 0,
       });
       expect(selectSpy).not.toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("locks image aspect ratio when Shift is held during corner resize (shared grid interactions)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      // Avoid exercising async image rendering / bitmap decode paths in this unit test; we only
+      // care about the interaction math + in-memory anchor updates.
+      vi.spyOn((app as any).drawingOverlay, "render").mockResolvedValue();
+
+      const image: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(200), cy: pxToEmu(100) },
+        },
+        zOrder: 0,
+      };
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => [image];
+
+      const viewport = (app as any).getDrawingInteractionViewport();
+      const geom = (app as any).drawingGeom;
+      const bounds = drawingObjectToViewportRect(image, viewport, geom);
+
+      const seX = bounds.x + bounds.width;
+      const seY = bounds.y + bounds.height;
+
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+
+      // Start resizing from the south-east corner.
+      dispatchPointerEvent(selectionCanvas!, "pointerdown", {
+        clientX: seX,
+        clientY: seY,
+        pointerId: 1,
+        button: 0,
+      });
+
+      // Drag horizontally while holding Shift; height should adjust to keep 2:1 ratio.
+      dispatchPointerEvent(selectionCanvas!, "pointermove", {
+        clientX: seX + 50,
+        clientY: seY,
+        pointerId: 1,
+        button: 0,
+        shiftKey: true,
+      });
+
+      const resized = ((app as any).listDrawingObjectsForSheet() as DrawingObject[]).find((obj) => obj.id === 1);
+      expect(resized?.anchor).toMatchObject({
+        type: "absolute",
+        size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+      });
 
       app.destroy();
       root.remove();
