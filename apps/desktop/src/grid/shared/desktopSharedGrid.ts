@@ -26,6 +26,7 @@ import {
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import { shellOpen } from "../../tauri/shellOpen.js";
+import { looksLikeExternalHyperlink } from "./looksLikeExternalHyperlink.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
@@ -69,15 +70,6 @@ function rangesEqual(a: CellRange | null, b: CellRange | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   return a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
-}
-
-function looksLikeExternalHyperlink(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  // Avoid interpreting arbitrary "foo:bar" values as URLs; require either a
-  // scheme separator (`://`) or a `mailto:` prefix.
-  if (/^mailto:/i.test(trimmed)) return true;
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
 export class DesktopSharedGrid {

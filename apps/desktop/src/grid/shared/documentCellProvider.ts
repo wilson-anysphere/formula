@@ -5,6 +5,7 @@ import { applyStylePatch } from "../../formatting/styleTable.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 import { formatValueWithNumberFormat } from "../../formatting/numberFormat.ts";
 import { normalizeExcelColorToCss } from "../../shared/colors.js";
+import { looksLikeExternalHyperlink } from "./looksLikeExternalHyperlink.js";
 
 type RichTextValue = CellRichText;
 
@@ -84,15 +85,6 @@ function parseImageCellPayload(value: unknown): CellData["image"] | null {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function looksLikeExternalHyperlink(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  // Avoid interpreting arbitrary "foo:bar" values as URLs; require either a
-  // scheme separator (`://`) or a `mailto:` prefix.
-  if (/^mailto:/i.test(trimmed)) return true;
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
 export class DocumentCellProvider implements CellProvider {
