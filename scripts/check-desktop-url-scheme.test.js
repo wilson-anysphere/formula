@@ -163,6 +163,14 @@ test("passes when deep-link schemes includes 'formula://' (normalized)", () => {
   assert.match(proc.stdout, /preflight passed/i);
 });
 
+test("passes when deep-link desktop config is an array of protocol objects", () => {
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop = [{ schemes: ["formula"] }];
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /preflight passed/i);
+});
+
 test("fails when Parquet association is configured but bundle.linux is missing", () => {
   const config = baseConfig();
   delete config.bundle.linux;
