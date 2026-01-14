@@ -189,7 +189,6 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
     // MS-OFFCRYPTO Standard AES uses CryptoAPI `CryptDeriveKey` semantics for both SHA-1 and MD5,
     // and performs the ipad/opad expansion **even when the requested key length is <= the digest
     // length** (e.g. AES-128).
-
     // The MS-OFFCRYPTO Standard mode only uses MD5/SHA-1, both of which have a 64-byte block size.
     // `hash_len` is guaranteed <= 64.
     let mut buf = [0u8; 64];
