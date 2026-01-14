@@ -312,11 +312,16 @@ filter propagation and row-context navigation (`RELATED` / `RELATEDTABLE`).
 Where this matters:
 
 1. **Filter propagation (`to_table → from_table`)**  
-   When the virtual blank row is “allowed”, rows with unmatched keys stay visible even if the
-   `to_table` side is filtered.
+    When the virtual blank row is “allowed”, rows with unmatched keys stay visible even if the
+    `to_table` side is filtered.
 
 2. **`VALUES(Dim[Key])` / `DISTINCT(Dim[Key])` and `DISTINCTCOUNT(Dim[Key])`**  
-   These include `BLANK` when the virtual blank row exists and is allowed.
+    These include `BLANK` when the virtual blank row exists and is allowed.
+
+3. **Filtering to the blank member**  
+   Filtering a dimension attribute to `BLANK` (e.g. `Customers[Region] = BLANK()`) selects the
+   relationship-generated blank/unknown member when it is allowed, so measures evaluated under that
+   filter include fact rows whose foreign key is `BLANK` or unmatched.
 
 The virtual blank row is considered “allowed” when the filter context does **not** explicitly exclude it:
 
