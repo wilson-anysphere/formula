@@ -47,6 +47,9 @@ Options:
 Environment:
   DOCKER_PLATFORM
                           Optional docker --platform override (default: host architecture).
+  FORMULA_TAURI_CONF_PATH
+                          Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing).
+                          If the path is relative, it is resolved relative to the repo root.
   FORMULA_DEB_NAME_OVERRIDE
                           Override the expected Debian package name (dpkg-deb Package field) for validation purposes.
                           This affects the expected /usr/share/doc/<package>/... doc dir, but does NOT affect the
@@ -133,7 +136,10 @@ DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
 
 require_cmd dpkg-deb
 
-TAURI_CONF="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+TAURI_CONF="${FORMULA_TAURI_CONF_PATH:-$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json}"
+if [[ "${TAURI_CONF}" != /* ]]; then
+  TAURI_CONF="${REPO_ROOT}/${TAURI_CONF}"
+fi
 if [[ ! -f "$TAURI_CONF" ]]; then
   die "Missing Tauri config: $TAURI_CONF"
 fi

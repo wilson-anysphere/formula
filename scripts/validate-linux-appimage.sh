@@ -59,6 +59,9 @@ Environment:
   FORMULA_APPIMAGE_MAIN_BINARY
     Override the expected main binary name inside the AppImage AppDir (defaults to
     tauri.conf.json mainBinaryName when available).
+  FORMULA_TAURI_CONF_PATH
+    Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing).
+    If the path is relative, it is resolved relative to the repo root.
   FORMULA_VALIDATE_ALL_APPIMAGES=1
     When auto-discovering, validate all matching AppImages instead of selecting
     the most recently modified one.
@@ -76,6 +79,11 @@ AUTO_DISCOVERED=1
 VALIDATE_ALL=0
 EXEC_CHECK_ENABLED=0
 EXEC_CHECK_TIMEOUT_SECS="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
+
+TAURI_CONF_PATH="${FORMULA_TAURI_CONF_PATH:-$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json}"
+if [[ "${TAURI_CONF_PATH}" != /* ]]; then
+  TAURI_CONF_PATH="${REPO_ROOT}/${TAURI_CONF_PATH}"
+fi
 
 is_truthy() {
   # Treat common "false" values as disabled; treat any other non-empty string as enabled.
@@ -143,10 +151,9 @@ trap cleanup EXIT
 # apps/desktop/src-tauri/tauri.conf.json `mainBinaryName` (and the Rust `[[bin]]`).
 EXPECTED_MAIN_BINARY="${FORMULA_APPIMAGE_MAIN_BINARY:-}"
 if [ -z "$EXPECTED_MAIN_BINARY" ]; then
-  tauri_conf_path="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
-  if [ -f "$tauri_conf_path" ] && command -v python3 >/dev/null 2>&1; then
+  if [ -f "$TAURI_CONF_PATH" ] && command -v python3 >/dev/null 2>&1; then
     EXPECTED_MAIN_BINARY="$(
-      python3 - "$tauri_conf_path" <<'PY' 2>/dev/null || true
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
@@ -154,9 +161,9 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 print(conf.get("mainBinaryName", ""))
 PY
     )"
-  elif [ -f "$tauri_conf_path" ] && command -v node >/dev/null 2>&1; then
+  elif [ -f "$TAURI_CONF_PATH" ] && command -v node >/dev/null 2>&1; then
     EXPECTED_MAIN_BINARY="$(
-      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); conf.mainBinaryName ?? ""' "$tauri_conf_path" 2>/dev/null || true
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); conf.mainBinaryName ?? ""' "$TAURI_CONF_PATH" 2>/dev/null || true
     )"
   fi
   : "${EXPECTED_MAIN_BINARY:=formula-desktop}"
@@ -164,7 +171,6 @@ fi
 
 # Expected desktop app version (from tauri.conf.json).
 EXPECTED_VERSION=""
-TAURI_CONF_PATH="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
 if [ -f "$TAURI_CONF_PATH" ]; then
   if command -v python3 >/dev/null 2>&1; then
     EXPECTED_VERSION="$(

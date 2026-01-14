@@ -250,6 +250,7 @@ test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash
   if (proc.error) throw proc.error;
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /Usage:/);
+  assert.match(proc.stdout, /FORMULA_TAURI_CONF_PATH/);
   assert.doesNotMatch(proc.stderr, /command not found/i);
 });
 

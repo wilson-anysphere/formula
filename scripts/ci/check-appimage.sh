@@ -5,6 +5,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+TAURI_CONF_PATH="${FORMULA_TAURI_CONF_PATH:-apps/desktop/src-tauri/tauri.conf.json}"
+if [[ "${TAURI_CONF_PATH}" != /* ]]; then
+  TAURI_CONF_PATH="${repo_root}/${TAURI_CONF_PATH}"
+fi
+
 usage() {
   cat <<'EOF'
  usage: scripts/ci/check-appimage.sh [AppImage...]
@@ -25,8 +30,12 @@ Cargo/Tauri output directories (e.g. <target>/release/bundle/appimage/*.AppImage
      Expected basename of the main binary under squashfs-root/usr/bin/.
      Defaults to `apps/desktop/src-tauri/tauri.conf.json` mainBinaryName when available.
 
-  FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING
-    Expected substring from `readelf -h` "Machine:" line (defaults based on uname -m).
+  FORMULA_TAURI_CONF_PATH
+    Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing).
+    If the path is relative, it is resolved relative to the repo root.
+
+   FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING
+     Expected substring from `readelf -h` "Machine:" line (defaults based on uname -m).
 
   FORMULA_CHECK_APPIMAGE_USE_HOST_LD_LIBRARY_PATH=1
     By default the script ignores any existing host LD_LIBRARY_PATH when running `ldd`
@@ -47,11 +56,12 @@ fi
 if [ -z "${FORMULA_APPIMAGE_MAIN_BINARY:-}" ]; then
   # Keep this in sync with apps/desktop/src-tauri/tauri.conf.json `mainBinaryName`.
   # Prefer reading it dynamically so the smoke test doesn't silently drift if the binary is renamed.
-  if [ -f "apps/desktop/src-tauri/tauri.conf.json" ] && command -v python3 >/dev/null 2>&1; then
+  if [ -f "${TAURI_CONF_PATH}" ] && command -v python3 >/dev/null 2>&1; then
     FORMULA_APPIMAGE_MAIN_BINARY="$(
-      python3 - <<'PY' 2>/dev/null || true
+      python3 - "${TAURI_CONF_PATH}" <<'PY' 2>/dev/null || true
 import json
-with open("apps/desktop/src-tauri/tauri.conf.json", "r", encoding="utf-8") as f:
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
     conf = json.load(f)
 print(conf.get("mainBinaryName", ""))
 PY
@@ -442,6 +452,7 @@ main() {
       echo "::group::check-appimage: desktop integration (.desktop MimeType/Exec)"
       python3 scripts/ci/verify_linux_desktop_integration.py \
         --package-root "$squashfs_root" \
+        --tauri-config "$TAURI_CONF_PATH" \
         --expected-main-binary "$FORMULA_APPIMAGE_MAIN_BINARY" \
         --doc-package-name "$FORMULA_APPIMAGE_MAIN_BINARY"
       echo "::endgroup::"

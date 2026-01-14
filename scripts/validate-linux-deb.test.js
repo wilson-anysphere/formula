@@ -105,6 +105,7 @@ test("validate-linux-deb --help prints usage and mentions key env vars", { skip:
   assert.match(proc.stdout, /validate-linux-deb\.sh/i);
   assert.match(proc.stdout, /--no-container/);
   assert.match(proc.stdout, /DOCKER_PLATFORM/);
+  assert.match(proc.stdout, /FORMULA_TAURI_CONF_PATH/);
   assert.match(proc.stdout, /FORMULA_DEB_NAME_OVERRIDE/);
 });
 
