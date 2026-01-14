@@ -2346,6 +2346,44 @@ fn rich_values_reject_invalid_payloads() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_imports_style_and_column_metadata() {
+    let bytes = include_bytes!("../../../fixtures/xlsx/metadata/style-only-cell.xlsx");
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Recalculate to evaluate the workbook's formulas.
+    wb.recalculate(None).unwrap();
+
+    // A1 is a style-only cell (no value/formula) with "locked=false". If style-only cells are
+    // dropped during import, this will incorrectly evaluate to 1 (locked).
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 0.0);
+
+    // The fixture also sets a column width + hidden flag for column A. Ensure that metadata is
+    // imported into the engine so CELL("width") sees it.
+    wb.set_cell(
+        "C1".to_string(),
+        JsValue::from_str(r#"=CELL("width",A1)"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+    let c1_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let c1: CellData = serde_wasm_bindgen::from_value(c1_js).unwrap();
+
+    // Hidden columns report a width of 0.
+    assert_json_number(&c1.value, 0.0);
+
+    // Unhide the column; CELL("width") should now report the stored width with the Excel
+    // fractional marker for an explicit width override (`+0.1`).
+    wb.set_col_hidden(DEFAULT_SHEET.to_string(), 0, false).unwrap();
+    wb.recalculate(None).unwrap();
+    let c1_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let c1: CellData = serde_wasm_bindgen::from_value(c1_js).unwrap();
+    assert_json_number(&c1.value, 20.1);
+}
+
+#[wasm_bindgen_test]
 fn goal_seek_solves_quadratic_and_updates_workbook_state() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
