@@ -14,7 +14,7 @@ type DrawingContextMenuApp = Pick<
   | "selectDrawingById"
   | "cut"
   | "copy"
-  | "deleteSelectedDrawing"
+  | "deleteDrawingById"
   | "bringSelectedDrawingForward"
   | "sendSelectedDrawingBackward"
   | "focus"
@@ -31,10 +31,11 @@ export function buildDrawingContextMenuItems(params: {
   const clipboardEnabled = enabled && app.isSelectedDrawingImage();
 
   const { canBringForward, canSendBackward } = (() => {
-    if (!enabled) return { canBringForward: false, canSendBackward: false };
+    // Canvas charts use negative ids (stable hash namespace) and are not currently reorderable.
+    if (!enabled || selectedId == null || selectedId < 0) return { canBringForward: false, canSendBackward: false };
     // `listDrawingsForSheet` returns topmost-first ordering.
     const drawings = app.listDrawingsForSheet();
-    if (!Array.isArray(drawings) || drawings.length < 2 || selectedId == null) {
+    if (!Array.isArray(drawings) || drawings.length < 2) {
       return { canBringForward: false, canSendBackward: false };
     }
     const idx = drawings.findIndex((d) => d?.id === selectedId);
@@ -74,7 +75,9 @@ export function buildDrawingContextMenuItems(params: {
       label: "Delete",
       enabled,
       onSelect: () => {
-        app.deleteSelectedDrawing();
+        if (selectedId != null) {
+          app.deleteDrawingById(selectedId);
+        }
         app.focus();
       },
     },

@@ -8498,7 +8498,11 @@ export class SpreadsheetApp {
   hitTestDrawingAtClientPoint(clientX: number, clientY: number): { id: DrawingObjectId } | null {
     // Prefer the cached list (kept up to date by `renderDrawings`), but fall back to a fresh
     // list if the cache hasn't been populated yet.
-    const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    const baseObjects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    // In `?canvasCharts=1` mode, ChartStore charts are rendered as drawing objects on the drawings
+    // overlay canvas. Include them in hit testing so right-click menus and other selection helpers
+    // behave consistently.
+    const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
     if (objects.length === 0) return null;
     const scratchBounds = this.drawingHitTestScratchRect;
     const selectedId = this.getSelectedDrawingId();

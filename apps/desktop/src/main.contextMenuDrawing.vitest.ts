@@ -25,10 +25,9 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
-      deleteSelectedDrawing: vi.fn(() => {
-        if (selectedId == null) return;
-        drawings = drawings.filter((d) => d.id !== selectedId);
-        selectedId = null;
+      deleteDrawingById: vi.fn((id: number) => {
+        drawings = drawings.filter((d) => d.id !== id);
+        if (selectedId === id) selectedId = null;
       }),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
@@ -68,7 +67,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       expect(deleteBtn).toBeTruthy();
       deleteBtn!.click();
 
-      expect(app.deleteSelectedDrawing).toHaveBeenCalledTimes(1);
+      expect(app.deleteDrawingById).toHaveBeenCalledTimes(1);
       expect(drawings).toEqual([]);
     } finally {
       contextMenu.close();
@@ -90,7 +89,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
-      deleteSelectedDrawing: vi.fn(),
+      deleteDrawingById: vi.fn(),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
       focus: vi.fn(),
@@ -130,7 +129,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
-      deleteSelectedDrawing: vi.fn(),
+      deleteDrawingById: vi.fn(),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
       focus: vi.fn(),
@@ -175,7 +174,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
-      deleteSelectedDrawing: vi.fn(),
+      deleteDrawingById: vi.fn(),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
       focus: vi.fn(),
@@ -200,6 +199,48 @@ describe("Drawing context menu (main wiring helper)", () => {
     } finally {
       contextMenu.close();
       document.querySelector('[data-testid="context-menu-drawing-z-order"]')?.remove();
+    }
+  });
+
+  it("disables z-order actions for canvas chart ids (negative drawing ids)", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-chart" });
+    let selectedId: number | null = -123;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: -123 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      listDrawingsForSheet: vi.fn(() => [{ id: -123 }, { id: 1 }]),
+      isSelectedDrawingImage: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-chart"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(true);
+      expect(buttonByLabel("Delete")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-chart"]')?.remove();
     }
   });
 });
