@@ -16,7 +16,7 @@ export type StartupMetrics = {
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-function resolvePerfHome(): string {
+export function resolvePerfHome(): string {
   const fromEnv = process.env.FORMULA_PERF_HOME;
   if (fromEnv && fromEnv.trim() !== '') {
     // `resolve(repoRoot, ...)` safely handles both absolute and relative paths.
@@ -24,8 +24,6 @@ function resolvePerfHome(): string {
   }
   return resolve(repoRoot, 'target', 'perf-home');
 }
-
-const perfHome = resolvePerfHome();
 
 function isSubpath(parentDir: string, maybeChild: string): boolean {
   const rel = relative(parentDir, maybeChild);
@@ -233,6 +231,7 @@ export async function runOnce({
   afterCapture,
   afterCaptureTimeoutMs,
 }: RunOnceOptions): Promise<StartupMetrics> {
+  const perfHome = resolvePerfHome();
   const profileDir = profileDirRaw ? resolve(repoRoot, profileDirRaw) : perfHome;
   const dirs = resolveProfileDirs(profileDir);
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.

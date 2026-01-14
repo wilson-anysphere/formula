@@ -32,18 +32,11 @@ import {
   percentile,
   parseStartupLine as parseStartupMetricsLine,
   repoRoot,
+  resolvePerfHome,
   shouldUseXvfb,
   terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
-
-function resolvePerfHome(): string {
-  const fromEnv = process.env.FORMULA_PERF_HOME;
-  if (fromEnv && fromEnv.trim() !== '') {
-    return resolve(repoRoot, fromEnv);
-  }
-  return resolve(repoRoot, 'target', 'perf-home');
-}
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolvePerfHome();

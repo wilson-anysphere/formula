@@ -8,6 +8,7 @@ import {
   parseStartupLine,
   percentile,
   repoRoot,
+  resolvePerfHome,
   shouldUseXvfb,
   terminateProcessTree,
   type StartupMetrics,
@@ -19,14 +20,6 @@ type Summary = {
   rssMb: { p50: number; p95: number; targetMb: number };
   enforce: boolean;
 };
-
-function resolvePerfHome(): string {
-  const fromEnv = process.env.FORMULA_PERF_HOME;
-  if (fromEnv && fromEnv.trim() !== "") {
-    return resolve(repoRoot, fromEnv);
-  }
-  return resolve(repoRoot, "target", "perf-home");
-}
 
 const perfHome = resolvePerfHome();
 const perfTmp = resolve(perfHome, "tmp");

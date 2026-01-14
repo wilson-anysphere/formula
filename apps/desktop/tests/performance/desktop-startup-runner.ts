@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import {
   defaultDesktopBinPath,
   percentile,
-  repoRoot,
+  resolvePerfHome,
   runOnce,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
@@ -330,10 +330,7 @@ async function main(): Promise<void> {
 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" };
 
-  const perfHome =
-    process.env.FORMULA_PERF_HOME && process.env.FORMULA_PERF_HOME.trim() !== ""
-      ? resolve(repoRoot, process.env.FORMULA_PERF_HOME)
-      : resolve(repoRoot, "target", "perf-home");
+  const perfHome = resolvePerfHome();
   const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
 
   // `desktopStartupUtil.runOnce()` supports resetting the selected profile dir via

@@ -56,7 +56,7 @@ import {
   mean,
   median,
   percentile,
-  repoRoot,
+  resolvePerfHome,
   runOnce,
   stdDev,
   type StartupMetrics,
@@ -368,10 +368,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   );
   const rssTargetMb = Number(process.env.FORMULA_DESKTOP_RSS_TARGET_MB ?? '100') || 100;
 
-  const perfHome =
-    process.env.FORMULA_PERF_HOME && process.env.FORMULA_PERF_HOME.trim() !== ''
-      ? resolve(repoRoot, process.env.FORMULA_PERF_HOME)
-      : resolve(repoRoot, 'target', 'perf-home');
+  const perfHome = resolvePerfHome();
 
   const profileRoot = resolve(
     perfHome,
