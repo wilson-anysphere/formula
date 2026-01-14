@@ -189,7 +189,7 @@ function applySandboxGuardrails(sandbox) {
   if (sandboxGuardrailsApplied) return;
   sandboxGuardrailsApplied = true;
 
-  // Tauri injects `__TAURI__` / `__TAURI_IPC__` globals in some contexts. If those are exposed
+  // Tauri injects `__TAURI__` / `__TAURI_IPC__` / `__TAURI_INVOKE__` globals in some contexts. If those are exposed
   // inside the extension worker, untrusted extension code could call native commands directly
   // and bypass Formula's permission model (clipboard, filesystem, etc). Best-effort lock them
   // down to `undefined` before loading any extension modules.

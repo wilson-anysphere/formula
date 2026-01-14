@@ -1,4 +1,4 @@
-const TAURI_GLOBALS = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
+const TAURI_GLOBALS = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INVOKE__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
 
 /**
  * Best-effort removal of Tauri-injected globals from an extension worker scope.
@@ -20,4 +20,3 @@ function lockDownTauriGlobals(lockDownGlobal) {
 }
 
 export { TAURI_GLOBALS, lockDownTauriGlobals };
-
