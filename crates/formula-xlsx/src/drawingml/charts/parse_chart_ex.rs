@@ -312,7 +312,6 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             }
         }
     }
-
     out
 }
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {

@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 
 use formula_model::{
     ManualPageBreaks, PageMargins, PageSetup, PaperSize, PrintTitles, Range, RowRange, Scaling,
@@ -50,6 +50,29 @@ fn exports_print_settings_from_model() -> Result<(), Box<dyn std::error::Error>>
     let bytes = buf.into_inner();
 
     let read = read_workbook_print_settings(&bytes)?;
+
+    // `fitToWidth`/`fitToHeight` need `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>` for Excel
+    // to treat them as active.
+    let mut zip = zip::ZipArchive::new(Cursor::new(&bytes))?;
+    let mut sheet_file = zip.by_name("xl/worksheets/sheet1.xml")?;
+    let mut sheet_xml = String::new();
+    sheet_file.read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let page_setup_pr_count = doc
+        .descendants()
+        .filter(|node| {
+            node.is_element()
+                && node.tag_name().name() == "pageSetUpPr"
+                && node.attribute("fitToPage") == Some("1")
+                && node
+                    .parent()
+                    .is_some_and(|parent| parent.tag_name().name() == "sheetPr")
+        })
+        .count();
+    assert_eq!(
+        page_setup_pr_count, 1,
+        "expected exactly one <pageSetUpPr fitToPage=\"1\"/> in sheetPr, got {page_setup_pr_count}\n{sheet_xml}"
+    );
 
     let expected = XlsxWorkbookPrintSettings {
         sheets: vec![XlsxSheetPrintSettings {
