@@ -603,6 +603,26 @@ function createPreviewEvaluator(params: {
         };
       };
 
+      const resolveThisRowRow = (tableName: string): FormulaReferenceRange | null => {
+        const key = String(tableName ?? "").trim().toUpperCase();
+        if (!key) return null;
+        const table = tables.get(key);
+        if (!table) return null;
+        if (!isActiveCellInTable(table)) return null;
+
+        const bounds = tableBounds(table);
+        if (!bounds) return null;
+
+        const sheet = typeof table.sheetName === "string" && table.sheetName.trim() ? table.sheetName.trim() : undefined;
+        return {
+          sheet,
+          startRow: activeCellCoord.row,
+          endRow: activeCellCoord.row,
+          startCol: bounds.startCol,
+          endCol: bounds.endCol,
+        };
+      };
+
       const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
       const qualifiedRe = new RegExp(
         `^([A-Za-z_][A-Za-z0-9_.]*)\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`,
@@ -613,6 +633,8 @@ function createPreviewEvaluator(params: {
       const atNestedImplicitRe = new RegExp(`^\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
       const atRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
       const atImplicitRe = new RegExp(`^\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
+      const atRowRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*\\]$`, "i");
+      const atRowImplicitRe = new RegExp(`^\\[\\s*@\\s*\\]$`, "i");
 
       const qualifiedMatch = qualifiedRe.exec(trimmed);
       if (qualifiedMatch) {
@@ -661,6 +683,18 @@ function createPreviewEvaluator(params: {
         const tableName = findContainingTableName();
         if (!tableName) return null;
         return resolveThisRowCell(tableName, column);
+      }
+
+      const atRowMatch = atRowRe.exec(trimmed);
+      if (atRowMatch) {
+        return resolveThisRowRow(atRowMatch[1]!);
+      }
+
+      const implicitAtRowMatch = atRowImplicitRe.exec(trimmed);
+      if (implicitAtRowMatch) {
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        return resolveThisRowRow(tableName);
       }
 
       // Multi-column `#This Row` structured refs (`Table1[[#This Row],[Col1],[Col2]]`, etc).
