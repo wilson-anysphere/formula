@@ -470,6 +470,38 @@ impl<'a> FragmentCursor<'a> {
         Ok(())
     }
 
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit for formula string tokens is
+        // `fHighByte` (unicode vs compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            n -= take;
+        }
+        Ok(out)
+    }
+
     fn read_biff8_unicode_string_no_cch(
         &mut self,
         cch: usize,
@@ -572,31 +604,29 @@ impl<'a> FragmentCursor<'a> {
                     out.push(cch as u8);
                     out.push(flags);
 
+                    let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
                     let richtext_runs = if (flags & STR_FLAG_RICH_TEXT) != 0 {
-                        let v = self.read_u16_le()?;
-                        out.extend_from_slice(&v.to_le_bytes());
-                        v as usize
+                        let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+                        out.extend_from_slice(&bytes);
+                        u16::from_le_bytes([bytes[0], bytes[1]]) as usize
                     } else {
                         0
                     };
 
                     let ext_size = if (flags & STR_FLAG_EXT) != 0 {
-                        let v = self.read_u32_le()?;
-                        out.extend_from_slice(&v.to_le_bytes());
-                        v as usize
+                        let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+                        out.extend_from_slice(&bytes);
+                        u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
                     } else {
                         0
                     };
 
-                    let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
                     let mut remaining_chars = cch;
 
                     while remaining_chars > 0 {
                         if self.remaining_in_fragment() == 0 {
-                            self.advance_fragment()?;
-                            // Continued-segment option flags byte (fHighByte).
-                            let cont_flags = self.read_u8()?;
-                            is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                            self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                             continue;
                         }
 
@@ -618,7 +648,8 @@ impl<'a> FragmentCursor<'a> {
                         .checked_mul(4)
                         .ok_or_else(|| "rich text run count overflow".to_string())?;
                     if richtext_bytes + ext_size > 0 {
-                        let extra = self.read_bytes(richtext_bytes + ext_size)?;
+                        let extra =
+                            self.read_biff8_string_bytes(richtext_bytes + ext_size, &mut is_unicode)?;
                         out.extend_from_slice(&extra);
                     }
                 }
@@ -1293,6 +1324,224 @@ mod tests {
                 RECORD_NAME,
                 &[header, name_str, first_rgce.to_vec()].concat(),
             ),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_richtext_ptgstr_split_inside_char_bytes() {
+        let name = "RichStr";
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+
+        let rgce: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT],
+            c_run.to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        // Split after "AB" inside the character bytes.
+        let first_rgce_len = 3 + 2 + 2; // header + cRun + "AB"
+        let first_rgce = &rgce[..first_rgce_len];
+        let remaining = &rgce[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_richtext_ptgstr_split_between_crun_bytes() {
+        let name = "RichCrun";
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+
+        let rgce: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT],
+            c_run.to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        // Split between the two bytes of `cRun`.
+        let first_rgce_len = 3 + 1; // header + low byte of cRun
+        let first_rgce = &rgce[..first_rgce_len];
+        let remaining = &rgce[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_ext_ptgstr_split_inside_ext_bytes() {
+        let name = "ExtStr";
+        let literal = "ABCDE";
+        let ext = [0xDE, 0xAD, 0xBE, 0xEF];
+
+        let rgce: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_EXT],
+            (ext.len() as u32).to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            ext.to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        // Split inside the ext bytes.
+        let first_rgce_len = 3 + 4 + literal.len() + 2; // header + cbExtRst + chars + first 2 ext bytes
+        let first_rgce = &rgce[..first_rgce_len];
+        let remaining = &rgce[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_richtext_and_ext_ptgstr_split_inside_rgrun_bytes() {
+        let name = "RichExt";
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+        let ext = [0x55, 0x66, 0x77, 0x88];
+
+        let rgce: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT | STR_FLAG_EXT],
+            c_run.to_le_bytes().to_vec(),
+            (ext.len() as u32).to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+            ext.to_vec(),
+        ]
+        .concat();
+
+        // Split inside `rgRun` bytes.
+        let first_rgce_len = 3 + 2 + 4 + literal.len() + 2; // header + cRun + cbExtRst + chars + first 2 rgRun bytes
+        let first_rgce = &rgce[..first_rgce_len];
+        let remaining = &rgce[first_rgce_len..];
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]

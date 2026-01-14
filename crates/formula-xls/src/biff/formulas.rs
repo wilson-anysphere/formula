@@ -1506,6 +1506,7 @@ mod tests {
             worksheet_formulas::Biff8ShrFmlaRecord {
                 range: (a1, b2),
                 rgce: Vec::new(),
+                rgcb: Vec::new(),
             },
         );
         shrfmla.insert(
@@ -1513,6 +1514,7 @@ mod tests {
             worksheet_formulas::Biff8ShrFmlaRecord {
                 range: (b1, c2),
                 rgce: Vec::new(),
+                rgcb: Vec::new(),
             },
         );
 
