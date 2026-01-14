@@ -130,8 +130,8 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cols = (reference.end.col - reference.start.col + 1) as usize;
 
     let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&reference.sheet_id);
-    let spans_all_cols = reference.start.col == 0
-        && reference.end.col == sheet_cols.saturating_sub(1);
+    let spans_all_cols =
+        reference.start.col == 0 && reference.end.col == sheet_cols.saturating_sub(1);
     let spans_all_rows =
         reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
@@ -205,8 +205,8 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cols = (reference.end.col - reference.start.col + 1) as usize;
 
     let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&reference.sheet_id);
-    let spans_all_cols = reference.start.col == 0
-        && reference.end.col == sheet_cols.saturating_sub(1);
+    let spans_all_cols =
+        reference.start.col == 0 && reference.end.col == sheet_cols.saturating_sub(1);
     let spans_all_rows =
         reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
@@ -574,10 +574,18 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         // range) before compiling it. This preserves the historical behavior of rejecting unions,
         // intersections, defined names, structured refs, etc.
         crate::eval::Expr::CellRef(_) | crate::eval::Expr::RangeRef(_) => {
-            let mut resolve_sheet = |name: &str| ctx.resolve_sheet_name(name);
-            let mut sheet_dimensions = |sheet_id: usize| {
-                ctx.sheet_dimensions(&crate::functions::SheetId::Local(sheet_id))
+            let mut resolve_sheet = |name: &str| {
+                // Excel's INDIRECT cannot resolve references into external workbooks. When the core
+                // engine is configured with an external value provider, runtime sheet-name
+                // resolution may intern bracketed external sheet keys (e.g. `"[Book.xlsx]Sheet1"`).
+                // Block those keys here so INDIRECT consistently returns `#REF!` across backends.
+                if name.starts_with('[') {
+                    return None;
+                }
+                ctx.resolve_sheet_name(name)
             };
+            let mut sheet_dimensions =
+                |sheet_id: usize| ctx.sheet_dimensions(&crate::functions::SheetId::Local(sheet_id));
             let compiled = crate::eval::compile_canonical_expr(
                 &parsed.expr,
                 ctx.current_sheet_id(),

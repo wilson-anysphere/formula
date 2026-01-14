@@ -4811,13 +4811,39 @@ impl WasmWorkbook {
         let sheet = self.inner.require_sheet(sheet)?.to_string();
         let range = WorkbookState::parse_range(&range)?;
 
+        let values = self
+            .inner
+            .engine
+            .get_range_values(&sheet, range.clone())
+            .map_err(|err| js_err(err.to_string()))?;
+
+        let sheet_cells = self.inner.sheets.get(&sheet);
+        let sheet_js = JsValue::from_str(&sheet);
+        let key_sheet = JsValue::from_str("sheet");
+        let key_address = JsValue::from_str("address");
+        let key_input = JsValue::from_str("input");
+        let key_value = JsValue::from_str("value");
+
         let outer = Array::new();
-        for row in range.start.row..=range.end.row {
+        for (r_idx, row_values) in values.into_iter().enumerate() {
             let inner = Array::new();
-            for col in range.start.col..=range.end.col {
-                let addr = CellRef::new(row, col).to_a1();
-                let cell = self.inner.get_cell_data(&sheet, &addr)?;
-                inner.push(&cell_data_to_js(&cell)?);
+            for (c_idx, value) in row_values.into_iter().enumerate() {
+                let row = range.start.row + r_idx as u32;
+                let col = range.start.col + c_idx as u32;
+                let address = CellRef::new(row, col).to_a1();
+
+                let input = sheet_cells
+                    .and_then(|cells| cells.get(&address))
+                    .cloned()
+                    .unwrap_or(JsonValue::Null);
+                let value = engine_value_to_json(value);
+
+                let obj = Object::new();
+                Reflect::set(&obj, &key_sheet, &sheet_js)?;
+                Reflect::set(&obj, &key_address, &JsValue::from_str(&address))?;
+                Reflect::set(&obj, &key_input, &json_scalar_to_js(&input))?;
+                Reflect::set(&obj, &key_value, &json_scalar_to_js(&value))?;
+                inner.push(&obj);
             }
             outer.push(&inner);
         }

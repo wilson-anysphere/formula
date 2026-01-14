@@ -76,10 +76,22 @@ fn slicer_x_indices_filter_pivot_results_via_shared_items() {
     assert_eq!(
         result_all.data,
         vec![
-            vec![PivotValue::Text("Region".to_string()), PivotValue::Text("Sum of Sales".to_string())],
-            vec![PivotValue::Text("East".to_string()), PivotValue::Number(250.0)],
-            vec![PivotValue::Text("West".to_string()), PivotValue::Number(200.0)],
-            vec![PivotValue::Text("Grand Total".to_string()), PivotValue::Number(450.0)],
+            vec![
+                PivotValue::Text("Region".to_string()),
+                PivotValue::Text("Sum of Sales".to_string())
+            ],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Number(250.0)
+            ],
+            vec![
+                PivotValue::Text("West".to_string()),
+                PivotValue::Number(200.0)
+            ],
+            vec![
+                PivotValue::Text("Grand Total".to_string()),
+                PivotValue::Number(450.0)
+            ],
         ]
     );
 
@@ -89,11 +101,12 @@ fn slicer_x_indices_filter_pivot_results_via_shared_items() {
         selected_items: Some(HashSet::from(["0".to_string()])),
     };
 
-    let slicer_filter = slicer_selection_to_engine_filter_with_resolver(
-        "Region",
-        &selection,
-        |key| key.parse::<u32>().ok().and_then(|idx| cache_def.resolve_shared_item(0, idx)),
-    );
+    let slicer_filter =
+        slicer_selection_to_engine_filter_with_resolver("Region", &selection, |key| {
+            key.parse::<u32>()
+                .ok()
+                .and_then(|idx| cache_def.resolve_shared_item(0, idx))
+        });
 
     let mut filtered_cfg = base_cfg;
     filtered_cfg.filter_fields = vec![slicer_filter];
@@ -104,9 +117,18 @@ fn slicer_x_indices_filter_pivot_results_via_shared_items() {
     assert_eq!(
         result_filtered.data,
         vec![
-            vec![PivotValue::Text("Region".to_string()), PivotValue::Text("Sum of Sales".to_string())],
-            vec![PivotValue::Text("East".to_string()), PivotValue::Number(250.0)],
-            vec![PivotValue::Text("Grand Total".to_string()), PivotValue::Number(250.0)],
+            vec![
+                PivotValue::Text("Region".to_string()),
+                PivotValue::Text("Sum of Sales".to_string())
+            ],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Number(250.0)
+            ],
+            vec![
+                PivotValue::Text("Grand Total".to_string()),
+                PivotValue::Number(250.0)
+            ],
         ]
     );
 }
