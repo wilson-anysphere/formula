@@ -734,6 +734,9 @@ mod tests {
                 min_length: Some(0),
                 max_length: Some(100),
                 gradient: Some(false),
+                negative_fill_color: None,
+                axis_color: None,
+                direction: None,
             }),
             dependencies: vec![],
         }

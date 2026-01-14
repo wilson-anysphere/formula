@@ -264,10 +264,13 @@ fn detect_chart_kind(
 }
 
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    const MAX_HINTS: usize = 12;
+
     // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
     //
-    // This is diagnostic-only, so keep output stable/deterministic for fixture tests: de-duplicate
-    // and sort the collected hints.
+    // This is diagnostic-only; keep output stable for fixture tests by:
+    // - de-duplicating
+    // - capping the total output size (so diagnostics remain readable)
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -278,6 +281,9 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             let hint = format!("layoutId={layout_id}");
             if seen.insert(hint.clone()) {
                 out.push(hint);
+                if out.len() >= MAX_HINTS {
+                    return out;
+                }
             }
         }
 
@@ -287,6 +293,9 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             let hint = format!("chartType={chart_type}");
             if seen.insert(hint.clone()) {
                 out.push(hint);
+                if out.len() >= MAX_HINTS {
+                    return out;
+                }
             }
         }
 
@@ -298,11 +307,13 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             let hint = format!("node={name}");
             if seen.insert(hint.clone()) {
                 out.push(hint);
+                if out.len() >= MAX_HINTS {
+                    return out;
+                }
             }
         }
     }
 
-    out.sort();
     out
 }
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
