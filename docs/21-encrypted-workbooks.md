@@ -48,10 +48,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
       - **Standard/CryptoAPI** (`versionMinor == 2` with `versionMajor ∈ {2,3,4}`; commonly `3.2`/`4.2`)
         encrypted `.xlsx`/`.xlsm` workbooks (wrong password surfaces as
         `formula_io::Error::InvalidPassword`).
-      - Note: encrypted `.xlsb` workbooks decrypt to an OOXML ZIP containing `xl/workbook.bin`, but
-        `formula-io` currently rejects them as `formula_io::Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
-        - Workaround: open encrypted `.xlsb` directly via `formula_io::xlsb::XlsbWorkbook::open_with_password(..)`
-          or `XlsbWorkbook::open_from_bytes_with_password(..)`.
+      - Note: encrypted `.xlsb` workbooks decrypt to an OOXML ZIP containing `xl/workbook.bin` and
+        are opened as `Workbook::Xlsb` (or converted to a model workbook via the password APIs).
 - Legacy **`.xls`** with BIFF `FILEPASS` yields:
   - `formula_io::Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (prompt
     callers to retry via the password-capable APIs).
@@ -82,7 +80,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; e.g. 3.2/4.2) | With `formula-io/encrypted-workbooks`: decrypt + open in memory via `open_workbook_with_options` / `_with_password` for `.xlsx`/`.xlsm`, surfacing `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`. Encrypted `.xlsb` currently surfaces `UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`. Without that feature: `UnsupportedEncryption` for Office-encrypted OOXML. | Expand scheme/parameter coverage; consider streaming decrypt + tighter resource limits; optionally tighten integrity verification defaults. |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; e.g. 3.2/4.2) | With `formula-io/encrypted-workbooks`: decrypt + open in memory via `open_workbook_with_options` / `_with_password` for `.xlsx`/`.xlsm`/`.xlsb`, surfacing `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`. Without that feature: `UnsupportedEncryption` for Office-encrypted OOXML. | Expand scheme/parameter coverage; consider streaming decrypt + tighter resource limits; optionally tighten integrity verification defaults. |
 | `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: `EncryptedWorkbook` when no password is provided. `open_workbook_with_options` / `_with_password` route to `formula-xls`’s decrypting importer (supports XOR, RC4 “standard”, and RC4 CryptoAPI). | Expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
@@ -255,10 +253,10 @@ At a high level, opening a password-encrypted OOXML workbook is:
    - For the exact HMAC target bytes and IV derivation rules (common source of bugs), see
      [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 6. **Hand off to the normal workbook readers**
-   - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
-     existing `.xlsx`/`.xlsm` readers as if it were an unencrypted file.
-     - Note: decrypted `.xlsb` packages contain `xl/workbook.bin`; `formula-io` currently rejects
-       encrypted `.xlsb` as `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
+    - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
+      existing `.xlsx`/`.xlsm` readers as if it were an unencrypted file.
+      - Note: decrypted `.xlsb` packages contain `xl/workbook.bin`; `formula-io` routes them through
+        the `.xlsb` open path.
 
 Security requirements for this flow:
 
@@ -370,15 +368,11 @@ Today, the `formula-io` crate:
     - `open_workbook(..)` / `open_workbook_model(..)` return `Error::PasswordRequired` when no
       password is provided (or `Error::UnsupportedOoxmlEncryption` when the `EncryptionInfo` version
       is unknown).
-      - To supply a password:
-        - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
-          convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
-          encrypted `.xlsx`/`.xlsm` workbooks into a `Workbook`.
-          - Encrypted `.xlsb` workbooks are detected but currently surface
-            `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
-          - Workaround: open encrypted `.xlsb` directly via
-            `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` or
-            `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(..)`.
+    - To supply a password:
+      - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
+        convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
+        encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks into a `Workbook` (encrypted `.xlsb` opens as
+        `Workbook::Xlsb`).
       - To open directly into a `formula_model::Workbook`, use:
         - `open_workbook_model_with_options(path, OpenOptions { password: Some(...) })`, or
         - the convenience wrapper `open_workbook_model_with_password(path, Some(password))`.
@@ -443,13 +437,11 @@ match open_workbook(path) {
              },
          ) {
             Ok(workbook) => {
-                // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
-                // Agile (4.4) and Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`
-                // when the password is correct.
-                // Note: encrypted `.xlsb` currently returns
-                // `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
-                let _ = workbook;
-            }
+                 // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
+                 // Agile (4.4) and Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb`
+                 // when the password is correct.
+                 let _ = workbook;
+             }
             Err(Error::InvalidPassword { .. }) => {
                 // Wrong password (or integrity mismatch, or unsupported encrypted format in this
                 // layer).
@@ -476,10 +468,9 @@ match open_workbook(path) {
 With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
 
 - Password-aware entrypoints (`open_workbook_with_options` / `_with_password`) will **decrypt and open**
-  Agile (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`
+  Agile (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`
   workbooks in memory. For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world
   producers omit it.
-  - Encrypted `.xlsb` workbooks currently surface `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
 
 Without that feature, encrypted OOXML containers surface as `UnsupportedEncryption` (the password-aware
 entrypoints do not decrypt them end-to-end).
@@ -555,11 +546,10 @@ Encrypted workbook handling should distinguish at least these cases:
 
 4. **Unsupported decrypted workbook kind** (decryption succeeded, but the decrypted payload is not a
    workbook type we can open in this path)
-   - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (today this is primarily
-     `"xlsb"`).
-   - UI action: explain limitation and suggest re-saving as `.xlsx`/`.xlsm` in Excel.
-   - Workaround (library callers): if the decrypted kind is `.xlsb`, open it via
-     `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` / `open_from_bytes_with_password(..)`.
+   - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (rare; indicates the decrypted
+     payload is not a supported spreadsheet package in this path).
+   - UI action: explain limitation and suggest re-saving as `.xlsx`/`.xlsm` (or another supported
+     format) in Excel.
 
 5. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
    - Surface as: a dedicated “corrupt encrypted container” error (future); today this may surface
@@ -575,8 +565,6 @@ Current behavior in `formula-io`:
   - With `formula-io/encrypted-workbooks` enabled:
     - `Error::PasswordRequired` (no password provided)
     - `Error::InvalidPassword` (wrong password/verifier mismatch *or* Agile `dataIntegrity` mismatch)
-    - `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` for encrypted `.xlsb` (Formula
-      currently supports encrypted `.xlsx`/`.xlsm` only)
   - Without that feature: `Error::UnsupportedEncryption` (encrypted OOXML decryption is not enabled in
     this build)
 - Legacy `.xls` encryption (`FILEPASS`) is surfaced as:
@@ -631,7 +619,7 @@ Unless the caller explicitly re-wraps the output workbook with a new `Encryption
 `EncryptedPackage` (OOXML) (or re-emits BIFF encryption structures for legacy `.xls`), a save
 operation will write a **decrypted** file.
 
-### Preserving OOXML encryption on save (encrypted `.xlsx`/`.xlsm`)
+### Preserving OOXML encryption on save (encrypted `.xlsx`/`.xlsm`/`.xlsb`)
 
 With the `formula-io/encrypted-workbooks` feature enabled, `formula-io` provides an opt-in API to
 round-trip Office-encrypted OOXML **OLE/CFB** containers while preserving extra OLE metadata streams:
@@ -648,7 +636,8 @@ Notes:
   - Today, `formula-io` uses `formula_office_crypto::EncryptOptions::default()` for output, which
     means the saved file is typically re-encrypted as **Agile (4.4)** (even if the input used Standard).
 - The password is required at save time because `OpenedWorkbookWithPreservedOle` does not store it.
-- Encrypted `.xlsb` is still unsupported (`Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`).
+- This path can also re-encrypt and save `.xlsb` workbooks (use an `.xlsb` output extension if you
+  want to keep the binary format).
 - Legacy `.xls` `FILEPASS` encryption is not preserved on save.
 
 ### Desktop app behavior
