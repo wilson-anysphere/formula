@@ -157,6 +157,35 @@ fn pivot_graph_tolerates_malformed_cache_definition_rels() {
     assert_eq!(table.cache_records_part, None);
 }
 
+#[test]
+fn pivot_graph_resolves_cache_parts_without_workbook_xml() {
+    // Even if `xl/workbook.xml` is missing, we should still attempt to resolve cache parts using
+    // the conventional `pivotCacheDefinition{cacheId}.xml` / `pivotCacheRecords{cacheId}.xml`
+    // naming convention.
+    let bytes = build_synthetic_pivot_package_without_workbook_xml();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let graph = pkg.pivot_graph().expect("resolve pivot graph");
+    assert_eq!(graph.pivot_tables.len(), 1);
+
+    let table = &graph.pivot_tables[0];
+    assert_eq!(table.pivot_table_part, "xl/pivotTables/pivotTable1.xml");
+    assert_eq!(
+        table.sheet_part.as_deref(),
+        Some("xl/worksheets/sheet1.xml")
+    );
+    assert_eq!(table.sheet_name, None);
+    assert_eq!(table.cache_id, Some(1));
+    assert_eq!(
+        table.cache_definition_part.as_deref(),
+        Some("xl/pivotCache/pivotCacheDefinition1.xml")
+    );
+    assert_eq!(
+        table.cache_records_part.as_deref(),
+        Some("xl/pivotCache/pivotCacheRecords1.xml")
+    );
+}
+
 fn build_synthetic_pivot_package() -> Vec<u8> {
     build_synthetic_pivot_package_with_overrides(
         VALID_WORKBOOK_RELS.as_bytes(),
@@ -191,6 +220,32 @@ fn build_synthetic_pivot_package_with_malformed_cache_definition_rels() -> Vec<u
         b"<Relationships",
         false,
     )
+}
+
+fn build_synthetic_pivot_package_without_workbook_xml() -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, bytes) in [
+        ("xl/worksheets/sheet1.xml", VALID_WORKSHEET_XML.as_bytes()),
+        (
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            VALID_WORKSHEET_RELS.as_bytes(),
+        ),
+        ("xl/pivotTables/pivotTable1.xml", VALID_PIVOT_TABLE_XML.as_bytes()),
+        (
+            "xl/pivotCache/pivotCacheDefinition1.xml",
+            VALID_CACHE_DEFINITION_XML.as_bytes(),
+        ),
+        ("xl/pivotCache/pivotCacheRecords1.xml", VALID_CACHE_RECORDS_XML.as_bytes()),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    zip.finish().unwrap().into_inner()
 }
 
 const VALID_WORKBOOK_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

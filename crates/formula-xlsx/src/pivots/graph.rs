@@ -232,11 +232,10 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, 
 
 fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, XlsxError> {
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = match package.part(workbook_part) {
-        Some(bytes) => bytes,
-        None => return Ok(HashMap::new()),
+    let cache_refs = match package.part(workbook_part) {
+        Some(bytes) => parse_workbook_pivot_caches(bytes).unwrap_or_default(),
+        None => Vec::new(),
     };
-    let cache_refs = parse_workbook_pivot_caches(workbook_xml)?;
 
     let rels_part = rels_for_part(workbook_part);
     let workbook_rels = match package.part(&rels_part) {
