@@ -13,6 +13,28 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
+# when many agents build concurrently. Preserve any user/CI override.
+#
+# Note: some environments pre-set `CARGO_HOME=$HOME/.cargo`. Treat that value as
+# "unset" for our purposes so we still get per-repo isolation by default.
+# In CI we respect `CARGO_HOME` even if it points at `$HOME/.cargo` so CI can use
+# shared caching.
+# To explicitly keep `CARGO_HOME=$HOME/.cargo` in local runs, set
+# `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
+DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
+CARGO_HOME_NORM="${CARGO_HOME:-}"
+CARGO_HOME_NORM="${CARGO_HOME_NORM%/}"
+DEFAULT_GLOBAL_CARGO_HOME_NORM="${DEFAULT_GLOBAL_CARGO_HOME%/}"
+if [ -z "${CARGO_HOME:-}" ] || {
+  [ -z "${CI:-}" ] &&
+    [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
+    [ "${CARGO_HOME_NORM}" = "${DEFAULT_GLOBAL_CARGO_HOME_NORM}" ];
+}; then
+  export CARGO_HOME="$repo_root/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
+
 # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
 # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift
 # for CI/local preflight runs.
