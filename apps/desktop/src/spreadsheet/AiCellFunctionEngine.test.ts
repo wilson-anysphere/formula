@@ -1195,6 +1195,37 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("END PRIVATE KEY");
   });
 
+  it("DLP heuristically redacts sensitive patterns in literal array inputs", async () => {
+    const workbookId = "dlp-heuristic-literal-array";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const input = ["user@example.com", "public payload"];
+    const pending = engine.evaluateAiFunction({
+      name: "AI",
+      args: ["summarize", input as any],
+      cellAddress: "Sheet1!B1",
+    });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).toContain("public payload");
+    expect(userMessage).not.toContain("user@example.com");
+  });
+
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
     const workbookId = "dlp-redact-range-workbook";
     const llmClient = {

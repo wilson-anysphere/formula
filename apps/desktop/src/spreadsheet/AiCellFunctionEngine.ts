@@ -1026,7 +1026,26 @@ function computeSelectionClassification(params: {
     const prov = params.provenance[i];
     const hasRefs = Boolean((prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
     if (hasRefs) continue;
-    selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(params.args[i], params.maxLiteralChars));
+    const arg = params.args[i];
+    if (Array.isArray(arg)) {
+      // Even without provenance refs, arrays can contain sensitive strings. Scan the same bounded
+      // preview+sample elements that we might include in the prompt.
+      selectionClassification = maxClassification(
+        selectionClassification,
+        heuristicClassifyReferencedValue({
+          functionName: params.functionName,
+          argIndex: i,
+          value: arg,
+          provenance: prov,
+          documentId: params.documentId,
+          defaultSheetId: params.defaultSheetId,
+          maxCellChars: params.maxCellChars,
+          sheetNameResolver: params.sheetNameResolver,
+        }),
+      );
+    } else {
+      selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(arg, params.maxLiteralChars));
+    }
     if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
   }
 
