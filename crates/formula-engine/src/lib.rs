@@ -20,6 +20,17 @@
 //! external 3D span expansion rules (`"[workbook]Sheet1:Sheet3"`), and the required
 //! [`ExternalValueProvider::sheet_order`] implementation for evaluating external 3D spans.
 //!
+//! ## Workbook text codepage (DBCS text functions)
+//!
+//! Excel's legacy DBCS ("double-byte character set") text functions depend on the workbook's
+//! configured ANSI text codepage (not the host OS locale). This affects:
+//! - Byte-count variants like `LENB` / `LEFTB` / `MIDB` / `RIGHTB` / `FINDB` / `SEARCHB` / `REPLACEB`
+//! - Fullwidth/halfwidth conversions via `ASC` / `DBCS`
+//!
+//! Hosts can configure the active workbook text codepage via [`Engine::set_text_codepage`]
+//! (default: 1252 / en-US). Changing this setting invalidates compiled formulas so dependent cells
+//! are recalculated in automatic modes.
+//!
 //! Performance is a feature (see `docs/16-performance-targets.md`). This crate exposes a
 //! small benchmark harness via [`run_benchmarks`] so CI can detect regressions in the core
 //! parsing/evaluation/recalc paths as the engine evolves.
