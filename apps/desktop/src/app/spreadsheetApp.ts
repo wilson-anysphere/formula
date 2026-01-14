@@ -853,8 +853,6 @@ export class SpreadsheetApp {
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
   private selectedDrawingId: number | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
-  private drawingInteraction: DrawingInteractionController;
-  private readonly drawingObjectsBySheetId = new Map<string, DrawingObject[]>();
   private nextDrawingObjectId = 1;
   private nextDrawingImageId = 1;
   private insertImageInput: HTMLInputElement | null = null;
@@ -2081,25 +2079,6 @@ export class SpreadsheetApp {
       this.drawingGeom,
       new ChartRendererAdapter(this.formulaChartModelStore),
     );
-    this.drawingInteraction = new DrawingInteractionController(
-      this.selectionCanvas,
-      this.drawingGeom,
-      {
-        getViewport: () => this.getDrawingInteractionViewport(),
-        getObjects: () => this.drawingObjectsBySheetId.get(this.sheetId) ?? [],
-        setObjects: (next) => {
-          this.drawingObjectsBySheetId.set(this.sheetId, next);
-          this.renderDrawings();
-        },
-        onSelectionChange: (selectedId) => {
-          this.drawingOverlay.setSelectedId(selectedId);
-          this.renderDrawings();
-        },
-      },
-      {
-        capture: true,
-      },
-    );
 
     if (opts.enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
@@ -3184,7 +3163,6 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
-    this.drawingInteraction?.dispose();
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
     this.sharedProvider = null;
@@ -5981,7 +5959,9 @@ export class SpreadsheetApp {
     input.onchange = () => {
       const file = input.files?.[0] ?? null;
       if (!file) return;
-      void this.insertImageFromPickedFile(file);
+      void this.insertImageFromPickedFile(file).catch((err) => {
+        console.warn("Insert image failed", err);
+      });
     };
 
     try {
@@ -6065,26 +6045,96 @@ export class SpreadsheetApp {
     const existingObjects = this.listDrawingObjectsForSheet();
     const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
     const nextObjectId = this.nextDrawingObjectId++;
-    const { objects: combinedObjects } = await insertImageFromFile(file, {
-      imageId,
-      anchor,
-      nextObjectId,
-      objects: existingObjects,
-      images: this.drawingImages,
+
+    const docAny = this.document as any;
+    const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
+    const canInsertDrawing = typeof docAny.insertDrawing === "function";
+
+    if (canInsertDrawing) {
+      this.document.beginBatch({ label: "Insert Image" });
+    }
+
+    try {
+      const { objects: combinedObjects, image } = await insertImageFromFile(file, {
+        imageId,
+        anchor,
+        nextObjectId,
+        objects: existingObjects,
+        images: this.drawingImages,
+      });
+
+      const inserted = combinedObjects[combinedObjects.length - 1];
+      if (!inserted) {
+        if (canInsertDrawing) this.document.endBatch();
+        return;
+      }
+
+      // Prefer placing the new object on top of existing drawings.
+      inserted.zOrder = maxZOrder + 1;
+
+      if (canInsertDrawing) {
+        try {
+          docAny.insertDrawing(this.sheetId, inserted);
+        } catch {
+          // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
+        }
+      }
+
+      if (canInsertDrawing) {
+        this.document.endBatch();
+      }
+
+      // Update the cache immediately so the first re-render includes the inserted object even
+      // if the DocumentController does not publish drawing changes synchronously.
+      this.drawingObjectsCache = { sheetId: this.sheetId, objects: combinedObjects, source: drawingsGetter };
+
+      // Preload the bitmap so the first overlay render can reuse the decode promise.
+      void this.drawingOverlay.preloadImage(image).catch(() => {
+        // ignore
+      });
+
+      this.selectedDrawingId = inserted.id;
+      this.drawingOverlay.setSelectedId(inserted.id);
+      this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+      this.renderDrawings();
+      this.focus();
+    } catch (err) {
+      if (canInsertDrawing) {
+        try {
+          this.document.cancelBatch();
+        } catch {
+          // ignore
+        }
+      }
+      throw err;
+    }
+  }
+
+  private ensureDrawingInteractionController(): DrawingInteractionController {
+    const existing = this.drawingInteractionController;
+    if (existing) return existing;
+
+    const docAny = this.document as any;
+    const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
+    const callbacks: DrawingInteractionCallbacks = {
+      getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
+      getObjects: () => this.listDrawingObjectsForSheet(),
+      setObjects: (next) => {
+        this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: drawingsGetter };
+        this.renderDrawings();
+      },
+      onSelectionChange: (selectedId) => {
+        this.selectedDrawingId = selectedId;
+        this.drawingOverlay.setSelectedId(selectedId);
+        this.renderDrawings();
+      },
+    };
+    this.drawingInteractionCallbacks = callbacks;
+    const controller = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
+      capture: this.gridMode === "shared",
     });
-
-    const inserted = combinedObjects[combinedObjects.length - 1];
-    if (!inserted) return;
-
-    // Prefer placing the new object on top of existing drawings.
-    inserted.zOrder = maxZOrder + 1;
-
-    const localObjects = this.drawingObjectsBySheetId.get(this.sheetId) ?? [];
-    this.drawingObjectsBySheetId.set(this.sheetId, [...localObjects, inserted]);
-    this.drawingOverlay.setSelectedId(inserted.id);
-    this.drawingInteraction.setSelectedId(inserted.id);
-    this.renderDrawings();
-    this.focus();
+    this.drawingInteractionController = controller;
+    return controller;
   }
 
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {
@@ -9563,7 +9613,6 @@ export class SpreadsheetApp {
   }
 
   private listDrawingObjectsForSheet(sheetId: string = this.sheetId): DrawingObject[] {
-    const localObjects = this.drawingObjectsBySheetId.get(sheetId) ?? [];
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
 
@@ -9629,15 +9678,7 @@ export class SpreadsheetApp {
       docObjects = objects;
     }
 
-    if (localObjects.length === 0) return docObjects;
-    if (docObjects.length === 0) return localObjects;
-
-    // Merge document-backed drawings with locally inserted/edited ones. Locals
-    // win on id collisions so interactive edits can override document state.
-    const byId = new Map<number, DrawingObject>();
-    for (const obj of docObjects) byId.set(obj.id, obj);
-    for (const obj of localObjects) byId.set(obj.id, obj);
-    return Array.from(byId.values());
+    return docObjects;
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
