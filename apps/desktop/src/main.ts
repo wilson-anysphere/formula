@@ -2558,14 +2558,25 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       return value.slice(idx + 1).trim() || value;
     };
 
+    const stripEllipsis = (value: string): string => {
+      const trimmed = String(value ?? "").trim();
+      if (!trimmed) return trimmed;
+      if (trimmed.endsWith("…")) return trimmed.slice(0, -1).trim();
+      if (trimmed.endsWith("...")) return trimmed.slice(0, -3).trim();
+      return trimmed;
+    };
+
     const numberFormatAriaPrefix = t("quickPick.numberFormat.placeholder");
+    const moreNumberFormatsLabel = t("ribbon.label.moreNumberFormats");
+    const openFormatCellsLabel = t("command.format.openFormatCells");
+    const customNumberFormatLabel = t("command.home.number.moreFormats.custom");
 
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
       // Include the current selection value in the accessible name so screen readers can
       // announce both the control purpose and the active format (e.g. "Number format: General").
       "home.number.numberFormat.ariaLabel": `${numberFormatAriaPrefix}: ${numberFormatLabel}`,
-      "home.number.moreFormats.ariaLabel": t("ribbon.label.moreNumberFormats"),
+      "home.number.moreFormats.ariaLabel": moreNumberFormatsLabel,
       "view.appearance.theme": themeLabel,
       // The visible label is already "Theme: X"; use the same value so screen readers can
       // announce the current preference.
@@ -2607,9 +2618,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.numberFormat.scientific.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.scientific")}`,
       "format.numberFormat.text.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.text")}`,
       // Number format dialog entrypoints.
-      "format.openFormatCells": t("command.format.openFormatCells"),
-      "format.openFormatCells.ariaLabel": t("command.format.openFormatCells"),
-      "home.number.moreFormats.custom": t("command.home.number.moreFormats.custom"),
+      "format.openFormatCells": openFormatCellsLabel,
+      "format.openFormatCells.ariaLabel": stripEllipsis(openFormatCellsLabel),
+      "home.number.moreFormats.custom": customNumberFormatLabel,
+      "home.number.moreFormats.custom.ariaLabel": `${moreNumberFormatsLabel}: ${stripEllipsis(customNumberFormatLabel)}`,
       // Accounting symbol picker menu items (Home → Number → Accounting dropdown).
       "format.numberFormat.accounting.usd": stripMenuPrefix(t("command.format.numberFormat.accounting.usd")),
       "format.numberFormat.accounting.eur": stripMenuPrefix(t("command.format.numberFormat.accounting.eur")),
