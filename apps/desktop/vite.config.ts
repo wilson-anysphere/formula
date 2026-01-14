@@ -242,8 +242,10 @@ export default defineConfig({
       // `.test.ts` suffix for historical reasons. Include the specific suite we rely on for
       // transform-aware selection handle hit-testing so `pnpm -C apps/desktop vitest run ...` works.
       "src/drawings/__tests__/selectionHandles.test.ts",
-      // Drawing model adapter tests use the `.test.ts` suffix as well.
-      "src/drawings/__tests__/modelAdapters.test.ts",
+      // Drawing model adapter tests use the `.test.ts` suffix as well. Include the wrapper path
+      // so `pnpm -C apps/desktop exec vitest run apps/desktop/src/drawings/__tests__/modelAdapters.test.ts`
+      // works even though the command is executed from within `apps/desktop/`.
+      "apps/desktop/src/drawings/__tests__/modelAdapters.test.ts",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
