@@ -1008,6 +1008,14 @@ jobs:
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
 
+      - name: Validate macOS bundle (DMG, Info.plist, signing)
+        # Always run on macOS so unsigned fork/dry-run builds still validate bundle structure.
+        # Codesign + notarization checks are conditional on env vars (APPLE_* secrets) and are
+        # skipped automatically when signing is not configured.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/validate-macos-bundle.sh
+
       # Debug symbols are not end-user installer assets, but they are needed for post-release crash
       # symbolication. Package them separately so they can be downloaded from the workflow run
       # without bloating installer bundles.
