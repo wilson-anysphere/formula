@@ -3086,7 +3086,39 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
         false
     }
 
-    if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
+    fn origin_xlsx_bytes_support_patch_based_save(origin_bytes: &[u8]) -> bool {
+        // The patch-based save path uses `formula_xlsx`'s streaming patcher, which must inflate
+        // workbook-level XML parts like `xl/workbook.xml` to resolve sheet relationships.
+        //
+        // For extremely large (or ZIP-bomb) parts, prefer falling back to the regeneration-based
+        // save path rather than risking OOM.
+        match formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(origin_bytes),
+            "xl/workbook.xml",
+            XLSX_WORKBOOK_XML_MAX_BYTES,
+        ) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(formula_xlsx::XlsxError::PartTooLarge { part, size, max }) => {
+                eprintln!(
+                    "[save] skipping patch-based save: xlsx part `{part}` is too large ({size} bytes, max {max})"
+                );
+                false
+            }
+            Err(err) => {
+                eprintln!(
+                    "[save] skipping patch-based save: failed to read xl/workbook.xml: {err}"
+                );
+                false
+            }
+        }
+    }
+
+    if let Some(origin_bytes) = workbook
+        .origin_xlsx_bytes
+        .as_deref()
+        .filter(|bytes| origin_xlsx_bytes_support_patch_based_save(bytes))
+    {
         // NOTE: This patch-based save path intentionally preserves most workbook-level parts
         // from the original package. This keeps unsupported XLSX parts (theme, comments,
         // conditional formatting, etc) intact by patching only the modified worksheet XML.
@@ -4777,6 +4809,54 @@ mod tests {
         assert!(
             xml.contains("date1904=\"1\"") || xml.contains("date1904='1'"),
             "expected workbook.xml to have date1904=1, got: {xml}"
+        );
+    }
+
+    #[test]
+    fn patch_save_falls_back_to_regeneration_when_workbook_xml_exceeds_limit() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx bytes");
+        let base_bytes = cursor.into_inner();
+
+        // Add an unknown part so we can detect whether the patch-based save path was used.
+        const CUSTOM_PART: &str = "xl/formula-custom-part.xml";
+        let mut pkg = XlsxPackage::from_bytes(&base_bytes).expect("parse base package");
+        pkg.set_part(CUSTOM_PART, b"<custom>Hello</custom>".to_vec());
+        let bytes_with_custom = pkg.write_to_bytes().expect("repack base package");
+
+        // Forge ZIP metadata to claim `xl/workbook.xml` exceeds our patch-based save workbook.xml cap.
+        // This should force save to fall back to regeneration (dropping unknown parts) rather than
+        // attempting to patch from the origin bytes.
+        let oversized_len = XLSX_WORKBOOK_XML_MAX_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(bytes_with_custom, "xl/workbook.xml", oversized_len);
+
+        let origin_path = tmp.path().join("origin.xlsx");
+        std::fs::write(&origin_path, &patched).expect("write patched origin");
+
+        let workbook = read_xlsx_blocking(&origin_path).expect("read origin workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected origin bytes to be retained for this small fixture"
+        );
+
+        let out_path = tmp.path().join("saved.xlsx");
+        let saved_bytes = write_xlsx_blocking(&out_path, &workbook).expect("save workbook");
+
+        // The regeneration-based save path will drop unknown parts.
+        let preserved_custom = formula_xlsx::read_part_from_reader(
+            Cursor::new(saved_bytes.as_ref()),
+            CUSTOM_PART,
+        )
+        .expect("read custom part");
+        assert!(
+            preserved_custom.is_none(),
+            "expected regeneration-based save to drop unknown part"
         );
     }
 
