@@ -770,7 +770,17 @@ impl Coord {
         if abs {
             Coord::A1 { index, abs }
         } else {
-            Coord::Offset(index as i32 - origin as i32)
+            // Relative coordinates are stored as signed i32 offsets so they can be embedded in the
+            // eval IR (`eval::ast::Ref`). When the offset cannot be represented in an `i32` (e.g.
+            // normalizing a reference on a very large sheet where `index`/`origin` exceed
+            // `i32::MAX`), we **do not** attempt to normalize and instead keep the original A1
+            // coordinate. This avoids overflow/wrapping while producing a deterministic AST.
+            let delta = i64::from(index) - i64::from(origin);
+            if delta < i64::from(i32::MIN) || delta > i64::from(i32::MAX) {
+                Coord::A1 { index, abs: false }
+            } else {
+                Coord::Offset(delta as i32)
+            }
         }
     }
 
@@ -781,11 +791,14 @@ impl Coord {
                 let origin = origin.ok_or_else(|| {
                     SerializeError::new("Cannot render relative offset without an origin cell")
                 })?;
-                let idx = origin as i32 + *delta;
+                let idx = i64::from(origin) + i64::from(*delta);
                 if idx < 0 {
                     return Err(SerializeError::new("Relative reference moved before A1"));
                 }
-                Ok((idx as u32, false))
+                let idx: u32 = idx.try_into().map_err(|_| {
+                    SerializeError::new("Relative reference moved beyond A1 coordinate limit")
+                })?;
+                Ok((idx, false))
             }
         }
     }
@@ -805,12 +818,20 @@ impl Coord {
                 let origin = origin.ok_or_else(|| {
                     SerializeError::new("Cannot render relative reference without an origin cell")
                 })?;
-                let delta = *index as i32 - origin as i32;
                 out.push(axis);
-                if delta != 0 {
-                    out.push('[');
-                    out.push_str(&delta.to_string());
-                    out.push(']');
+                let delta = i64::from(*index) - i64::from(origin);
+                if delta < i64::from(i32::MIN) || delta > i64::from(i32::MAX) {
+                    // The R1C1 relative offset syntax is limited to i32 offsets (matching the eval
+                    // IR). If the offset is out of range, fall back to an absolute coordinate
+                    // instead of overflowing/wrapping.
+                    out.push_str(&(u64::from(*index) + 1).to_string());
+                } else {
+                    let delta = delta as i32;
+                    if delta != 0 {
+                        out.push('[');
+                        out.push_str(&delta.to_string());
+                        out.push(']');
+                    }
                 }
             }
             Coord::Offset(delta) => {

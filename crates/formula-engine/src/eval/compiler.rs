@@ -15,12 +15,12 @@ const MAX_COL: u32 = EXCEL_MAX_COLS - 1;
 
 /// Maximum row index supported by the engine (0-indexed).
 ///
-/// Rows are **not** capped here: references beyond Excel's default row count remain syntactically
-/// valid and are validated dynamically at evaluation time using per-sheet dimensions.
+/// Rows are capped by what the eval IR can encode: [`eval::ast::Ref`] stores absolute row/column
+/// components in an `i32` with [`eval::ast::Ref::SHEET_END`] (`i32::MAX`) reserved as a sentinel.
+/// As a result, the largest concrete row index we can compile is `i32::MAX - 1` (0-indexed).
 ///
-/// `u32::MAX` is reserved for the sheet-end sentinel used in whole-row / whole-column references,
-/// so the largest representable concrete row index is `u32::MAX - 1`.
-const MAX_ROW: u32 = u32::MAX - 1;
+/// References beyond this limit compile deterministically to `#REF!`.
+const MAX_ROW: u32 = i32::MAX as u32 - 1;
 
 fn parse_number(raw: &str) -> Option<f64> {
     match raw.parse::<f64>() {
