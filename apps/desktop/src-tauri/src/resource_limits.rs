@@ -214,3 +214,40 @@ pub const MAX_CELL_VALUE_STRING_BYTES: usize = 64 * 1024; // 64 KiB
 /// bound a compromised webview can still force the backend to deserialize an arbitrarily large
 /// string before we ever attempt to parse it.
 pub const MAX_CELL_FORMULA_BYTES: usize = 32 * 1024; // 32 KiB
+
+/// Maximum number of fields allowed in each pivot table axis (rows, columns, filters, values).
+///
+/// Pivot layouts rarely contain more than a handful of fields; allowing dozens is generous for real
+/// workbooks while still preventing a compromised webview from sending a pathological payload that
+/// forces large allocations during deserialization or expensive pivot processing.
+pub const MAX_PIVOT_FIELDS: usize = 64;
+
+/// Maximum number of calculated fields allowed in a pivot config.
+///
+/// Calculated fields can contain arbitrary formulas which are parsed/validated; keeping this
+/// bounded prevents the backend from doing unbounded formula work and reduces memory pressure.
+pub const MAX_PIVOT_CALCULATED_FIELDS: usize = 64;
+
+/// Maximum number of calculated items allowed in a pivot config.
+///
+/// Calculated items multiply work because each item is scoped to a field and evaluated across the
+/// pivot's unique values. Real-world workbooks typically use very few calculated items.
+pub const MAX_PIVOT_CALCULATED_ITEMS: usize = 256;
+
+/// Maximum number of manual sort items allowed for a single pivot field.
+///
+/// Manual sorting enumerates individual pivot items. For high-cardinality fields this becomes
+/// unwieldy in the UI and expensive in the backend; cap it to ensure pivot configs remain small.
+pub const MAX_PIVOT_MANUAL_SORT_ITEMS: usize = 512;
+
+/// Maximum number of allowed values accepted in a single pivot filter allow-list.
+///
+/// The allow-list is specified over IPC and would otherwise be unbounded; large lists can cause
+/// excessive allocations and slow filter evaluation.
+pub const MAX_PIVOT_FILTER_ALLOWED_VALUES: usize = 1_000;
+
+/// Maximum size (in bytes) for any user-provided pivot string (field names, formulas, item text).
+///
+/// Pivot configs cross the IPC boundary as JSON. Bounding string sizes prevents a compromised
+/// webview from forcing large allocations and keeps pivot metadata reasonable.
+pub const MAX_PIVOT_TEXT_BYTES: usize = 4 * 1024; // 4 KiB

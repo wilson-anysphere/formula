@@ -1,4 +1,7 @@
-use formula_engine::pivot::PivotConfig;
+use formula_engine::pivot::{
+    AggregationType, GrandTotals, Layout, PivotConfig, PivotKeyPart, ShowAsType, SortOrder,
+    SubtotalPosition,
+};
 use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
 use serde::{de, Deserialize, Serialize};
 #[cfg(feature = "desktop")]
@@ -10,6 +13,7 @@ use formula_model::charts::ChartModel as FormulaChartModel;
 use formula_model::drawings::Anchor as FormulaDrawingAnchor;
 #[cfg(feature = "desktop")]
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -1132,6 +1136,228 @@ where
     }
 }
 
+/// IPC-specific pivot types with backend-enforced resource limits.
+///
+/// `formula_engine::pivot::PivotConfig` contains several unbounded collections (`Vec`, `HashSet`,
+/// nested `Vec`s, etc). A compromised WebView could send a huge config payload over IPC, forcing the
+/// backend to allocate large amounts of memory during deserialization (or spend significant CPU
+/// validating/processing pivots). These IPC-only mirror types apply conservative size limits at
+/// deserialization time and are converted to the core `PivotConfig` after validation.
+pub type PivotText = LimitedString<{ crate::resource_limits::MAX_PIVOT_TEXT_BYTES }>;
+
+/// IPC-friendly mirror of `formula_engine::pivot::PivotKeyPart` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum IpcPivotKeyPart {
+    Blank,
+    Number(u64),
+    Date(sqlx::types::chrono::NaiveDate),
+    Text(PivotText),
+    Bool(bool),
+}
+
+impl From<IpcPivotKeyPart> for PivotKeyPart {
+    fn from(value: IpcPivotKeyPart) -> Self {
+        match value {
+            IpcPivotKeyPart::Blank => PivotKeyPart::Blank,
+            IpcPivotKeyPart::Number(bits) => PivotKeyPart::Number(bits),
+            IpcPivotKeyPart::Date(date) => PivotKeyPart::Date(date),
+            IpcPivotKeyPart::Text(text) => PivotKeyPart::Text(text.into_inner()),
+            IpcPivotKeyPart::Bool(v) => PivotKeyPart::Bool(v),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::PivotField` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcPivotField {
+    pub source_field: PivotText,
+    #[serde(default)]
+    pub sort_order: SortOrder,
+    #[serde(default)]
+    pub manual_sort:
+        Option<LimitedVec<IpcPivotKeyPart, { crate::resource_limits::MAX_PIVOT_MANUAL_SORT_ITEMS }>>,
+}
+
+impl From<IpcPivotField> for formula_engine::pivot::PivotField {
+    fn from(value: IpcPivotField) -> Self {
+        Self {
+            source_field: value.source_field.into_inner(),
+            sort_order: value.sort_order,
+            manual_sort: value.manual_sort.map(|v| {
+                v.into_inner()
+                    .into_iter()
+                    .map(PivotKeyPart::from)
+                    .collect::<Vec<_>>()
+            }),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::ValueField` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcValueField {
+    pub source_field: PivotText,
+    pub name: PivotText,
+    pub aggregation: AggregationType,
+    #[serde(default)]
+    pub show_as: Option<ShowAsType>,
+    #[serde(default)]
+    pub base_field: Option<PivotText>,
+    #[serde(default)]
+    pub base_item: Option<PivotText>,
+}
+
+impl From<IpcValueField> for formula_engine::pivot::ValueField {
+    fn from(value: IpcValueField) -> Self {
+        Self {
+            source_field: value.source_field.into_inner(),
+            name: value.name.into_inner(),
+            aggregation: value.aggregation,
+            show_as: value.show_as,
+            base_field: value.base_field.map(|s| s.into_inner()),
+            base_item: value.base_item.map(|s| s.into_inner()),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::FilterField` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcFilterField {
+    pub source_field: PivotText,
+    /// Allowed values. `None` means allow all.
+    #[serde(default)]
+    pub allowed: Option<
+        LimitedVec<IpcPivotKeyPart, { crate::resource_limits::MAX_PIVOT_FILTER_ALLOWED_VALUES }>,
+    >,
+}
+
+impl From<IpcFilterField> for formula_engine::pivot::FilterField {
+    fn from(value: IpcFilterField) -> Self {
+        Self {
+            source_field: value.source_field.into_inner(),
+            allowed: value.allowed.map(|vals| {
+                vals.into_inner()
+                    .into_iter()
+                    .map(PivotKeyPart::from)
+                    .collect::<HashSet<_>>()
+            }),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::CalculatedField` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcCalculatedField {
+    pub name: PivotText,
+    pub formula: PivotText,
+}
+
+impl From<IpcCalculatedField> for formula_engine::pivot::CalculatedField {
+    fn from(value: IpcCalculatedField) -> Self {
+        Self {
+            name: value.name.into_inner(),
+            formula: value.formula.into_inner(),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::CalculatedItem` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcCalculatedItem {
+    pub field: PivotText,
+    pub name: PivotText,
+    pub formula: PivotText,
+}
+
+impl From<IpcCalculatedItem> for formula_engine::pivot::CalculatedItem {
+    fn from(value: IpcCalculatedItem) -> Self {
+        Self {
+            field: value.field.into_inner(),
+            name: value.name.into_inner(),
+            formula: value.formula.into_inner(),
+        }
+    }
+}
+
+/// IPC-friendly mirror of `formula_engine::pivot::PivotConfig` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcPivotConfig {
+    pub row_fields: LimitedVec<IpcPivotField, { crate::resource_limits::MAX_PIVOT_FIELDS }>,
+    pub column_fields: LimitedVec<IpcPivotField, { crate::resource_limits::MAX_PIVOT_FIELDS }>,
+    pub value_fields: LimitedVec<IpcValueField, { crate::resource_limits::MAX_PIVOT_FIELDS }>,
+    pub filter_fields: LimitedVec<IpcFilterField, { crate::resource_limits::MAX_PIVOT_FIELDS }>,
+    #[serde(default)]
+    pub calculated_fields: Option<
+        LimitedVec<IpcCalculatedField, { crate::resource_limits::MAX_PIVOT_CALCULATED_FIELDS }>,
+    >,
+    #[serde(default)]
+    pub calculated_items: Option<
+        LimitedVec<IpcCalculatedItem, { crate::resource_limits::MAX_PIVOT_CALCULATED_ITEMS }>,
+    >,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
+impl From<IpcPivotConfig> for PivotConfig {
+    fn from(value: IpcPivotConfig) -> Self {
+        Self {
+            row_fields: value
+                .row_fields
+                .into_inner()
+                .into_iter()
+                .map(formula_engine::pivot::PivotField::from)
+                .collect(),
+            column_fields: value
+                .column_fields
+                .into_inner()
+                .into_iter()
+                .map(formula_engine::pivot::PivotField::from)
+                .collect(),
+            value_fields: value
+                .value_fields
+                .into_inner()
+                .into_iter()
+                .map(formula_engine::pivot::ValueField::from)
+                .collect(),
+            filter_fields: value
+                .filter_fields
+                .into_inner()
+                .into_iter()
+                .map(formula_engine::pivot::FilterField::from)
+                .collect(),
+            calculated_fields: value
+                .calculated_fields
+                .map(|v| {
+                    v.into_inner()
+                        .into_iter()
+                        .map(formula_engine::pivot::CalculatedField::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            calculated_items: value
+                .calculated_items
+                .map(|v| {
+                    v.into_inner()
+                        .into_iter()
+                        .map(formula_engine::pivot::CalculatedItem::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            layout: value.layout,
+            subtotals: value.subtotals,
+            grand_totals: value.grand_totals,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PivotCellRange {
     pub start_row: usize,
@@ -1147,13 +1373,13 @@ pub struct PivotDestination {
     pub col: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CreatePivotTableRequest {
-    pub name: String,
+    pub name: PivotText,
     pub source_sheet_id: String,
     pub source_range: PivotCellRange,
     pub destination: PivotDestination,
-    pub config: PivotConfig,
+    pub config: IpcPivotConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -3197,7 +3423,7 @@ pub async fn create_pivot_table(
         let mut state = shared.lock().unwrap();
         let (pivot_id, updates) = state
             .create_pivot_table(
-                request.name,
+                request.name.into_inner(),
                 request.source_sheet_id,
                 crate::state::CellRect {
                     start_row: request.source_range.start_row,
@@ -3210,7 +3436,7 @@ pub async fn create_pivot_table(
                     row: request.destination.row,
                     col: request.destination.col,
                 },
-                request.config,
+                request.config.into(),
             )
             .map_err(app_error)?;
 
@@ -6665,6 +6891,168 @@ mod tests {
             serde_json::from_str::<LimitedF64Vec>(&json).expect_err("expected size limit to fail");
         assert!(
             err.to_string().contains("max") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn minimal_pivot_config_json() -> serde_json::Value {
+        serde_json::json!({
+            "rowFields": [],
+            "columnFields": [],
+            "valueFields": [],
+            "filterFields": [],
+            "layout": "tabular",
+            "subtotals": "none",
+            "grandTotals": { "rows": true, "columns": true }
+        })
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_too_many_row_fields() {
+        let max = crate::resource_limits::MAX_PIVOT_FIELDS;
+
+        let mut cfg = minimal_pivot_config_json();
+        let row_fields = (0..=max)
+            .map(|idx| {
+                serde_json::json!({
+                    "sourceField": format!("field-{idx}"),
+                    "sortOrder": "ascending",
+                    "manualSort": null
+                })
+            })
+            .collect::<Vec<_>>();
+        cfg.as_object_mut()
+            .unwrap()
+            .insert("rowFields".to_string(), serde_json::Value::Array(row_fields));
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_too_many_calculated_fields() {
+        let max = crate::resource_limits::MAX_PIVOT_CALCULATED_FIELDS;
+
+        let mut cfg = minimal_pivot_config_json();
+        let calculated_fields = (0..=max)
+            .map(|idx| {
+                serde_json::json!({
+                    "name": format!("Calc{idx}"),
+                    "formula": "=1+1"
+                })
+            })
+            .collect::<Vec<_>>();
+        cfg.as_object_mut().unwrap().insert(
+            "calculatedFields".to_string(),
+            serde_json::Value::Array(calculated_fields),
+        );
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_too_many_calculated_items() {
+        let max = crate::resource_limits::MAX_PIVOT_CALCULATED_ITEMS;
+
+        let mut cfg = minimal_pivot_config_json();
+        let calculated_items = (0..=max)
+            .map(|idx| {
+                serde_json::json!({
+                    "field": "Category",
+                    "name": format!("Item{idx}"),
+                    "formula": "=1"
+                })
+            })
+            .collect::<Vec<_>>();
+        cfg.as_object_mut().unwrap().insert(
+            "calculatedItems".to_string(),
+            serde_json::Value::Array(calculated_items),
+        );
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_too_many_manual_sort_items() {
+        let max = crate::resource_limits::MAX_PIVOT_MANUAL_SORT_ITEMS;
+
+        let mut cfg = minimal_pivot_config_json();
+        let manual_sort = (0..=max)
+            .map(|idx| serde_json::json!({ "type": "text", "value": format!("Item{idx}") }))
+            .collect::<Vec<_>>();
+        let row_fields = serde_json::json!([{
+            "sourceField": "Category",
+            "sortOrder": "manual",
+            "manualSort": manual_sort
+        }]);
+        cfg.as_object_mut()
+            .unwrap()
+            .insert("rowFields".to_string(), row_fields);
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_too_many_filter_allowed_values() {
+        let max = crate::resource_limits::MAX_PIVOT_FILTER_ALLOWED_VALUES;
+
+        let mut cfg = minimal_pivot_config_json();
+        let allowed = (0..=max)
+            .map(|idx| serde_json::json!({ "type": "text", "value": format!("Value{idx}") }))
+            .collect::<Vec<_>>();
+        let filter_fields = serde_json::json!([{
+            "sourceField": "Region",
+            "allowed": allowed
+        }]);
+        cfg.as_object_mut()
+            .unwrap()
+            .insert("filterFields".to_string(), filter_fields);
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_pivot_config_rejects_oversized_pivot_text() {
+        let max = crate::resource_limits::MAX_PIVOT_TEXT_BYTES;
+
+        let mut cfg = minimal_pivot_config_json();
+        let row_fields = serde_json::json!([{
+            "sourceField": "x".repeat(max + 1),
+            "sortOrder": "ascending",
+            "manualSort": null
+        }]);
+        cfg.as_object_mut()
+            .unwrap()
+            .insert("rowFields".to_string(), row_fields);
+
+        let err =
+            serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
             "unexpected error: {err}"
         );
     }
