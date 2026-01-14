@@ -703,7 +703,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                         }
                         return sheet;
                       })
-                    : [{ id: "Sheet1", name: "Sheet1" }];
+                    : [{ id: DEFAULT_SHEET_NAME, name: DEFAULT_SHEET_NAME }];
 
                 result = { path: null, origin_path: null, sheets } satisfies WorkbookInfoDto;
               }
