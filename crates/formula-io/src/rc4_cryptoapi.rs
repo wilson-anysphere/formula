@@ -91,6 +91,10 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 /// - `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes). MS-OFFCRYPTO specifies that for
 ///   RC4, `keySize == 0` MUST be interpreted as 40-bit.
 ///
+/// **Compatibility note (40-bit RC4):** Some Office/CryptoAPI variants treat a 40-bit key as a
+/// 16-byte RC4 key blob where the high 88 bits are zero. This behavior is observed for the SHA-1
+/// variant; the MD5 variant uses the raw 5-byte key material (matching published vector tests).
+///
 /// Seeking is supported by re-deriving the block key and discarding `o = pos % 0x200` bytes of
 /// RC4 keystream.
 #[derive(Debug)]
@@ -339,10 +343,11 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             }
         };
 
-        // CryptoAPI quirk: for SHA1 + 40-bit RC4, some CryptoAPI/Office implementations treat the
-        // key as a 16-byte blob with the high 88 bits zero. RC4's keystream depends on both the key
-        // bytes *and* the key length, so this is not equivalent to using the raw 5-byte key
-        // material.
+        // CryptoAPI quirk: for 40-bit RC4 (`key_len == 5`), some Office/CryptoAPI variants treat the
+        // RC4 key as a 16-byte blob with the high 88 bits set to zero. RC4's keystream depends on
+        // both the key bytes *and* the key length, so this is not equivalent to using the raw
+        // 5-byte key material. This behavior is observed for the SHA-1 variant; the MD5 variant
+        // uses the raw 5-byte key material (matching published vector tests).
         let mut padded_key = [0u8; 16];
         let key = if self.key_len == 5 && self.hash_alg == HashAlg::Sha1 {
             padded_key[..5].copy_from_slice(&digest[..5]);
@@ -575,8 +580,9 @@ mod tests {
                     hasher.finalize().to_vec()
                 }
             };
-            // CryptoAPI quirk: for SHA1 + 40-bit RC4, some implementations treat the key as a
-            // 16-byte blob with the high 88 bits zero.
+            // CryptoAPI quirk: for 40-bit RC4 (`key_len == 5`), some Office/CryptoAPI variants treat
+            // the RC4 key as a 16-byte blob with the high 88 bits set to zero. This behavior is
+            // observed for the SHA-1 variant; the MD5 variant uses the raw 5-byte key material.
             let mut padded_key = [0u8; 16];
             let key = if key_len == 5 && hash_alg == HashAlg::Sha1 {
                 padded_key[..5].copy_from_slice(&digest[..5]);
