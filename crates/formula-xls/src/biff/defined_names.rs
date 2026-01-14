@@ -2716,6 +2716,71 @@ mod tests {
     }
 
     #[test]
+    fn imports_defined_name_array_constant_with_mixed_types() {
+        // NAME formula `={"a""b","b";TRUE,#REF!}` encoded with PtgArray + trailing rgcb bytes.
+        let name = "ArrMixed";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // BIFF8 array constant: [cols_minus1: u16][rows_minus1: u16] + values row-major.
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 cols
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 rows
+
+        // "a\"b" (tests quote escaping -> "a""b" in formula text)
+        rgcb.push(0x02); // string
+        let s1 = "a\"b";
+        rgcb.extend_from_slice(&(s1.encode_utf16().count() as u16).to_le_bytes()); // cch
+        for unit in s1.encode_utf16() {
+            rgcb.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        // "b"
+        rgcb.push(0x02); // string
+        let s2 = "b";
+        rgcb.extend_from_slice(&(s2.encode_utf16().count() as u16).to_le_bytes());
+        for unit in s2.encode_utf16() {
+            rgcb.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        // TRUE
+        rgcb.push(0x04); // bool
+        rgcb.push(1);
+
+        // #REF!
+        rgcb.push(0x10); // error
+        rgcb.push(0x17);
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, rgce, rgcb].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, r#"{"a""b","b";TRUE,#REF!}"#);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
     fn imports_defined_name_array_constant_string_split_across_continue() {
         // NAME formula `={"ABCDE"}` encoded with PtgArray + trailing rgcb bytes, where the string's
         // UTF-16 bytes are split across a CONTINUE boundary and the continued fragment begins with
