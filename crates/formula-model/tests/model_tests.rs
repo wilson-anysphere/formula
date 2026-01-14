@@ -1,7 +1,7 @@
 use formula_model::{
-    Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment, DataValidationKind,
-    ErrorValue, Hyperlink, HyperlinkTarget, Range, Table, TableColumn, Workbook, Worksheet,
-    EXCEL_MAX_COLS, EXCEL_MAX_ROWS, SCHEMA_VERSION,
+    Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment,
+    DataValidationKind, ErrorValue, Hyperlink, HyperlinkTarget, Range, Table, TableColumn,
+    Workbook, Worksheet, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, SCHEMA_VERSION,
 };
 
 #[test]

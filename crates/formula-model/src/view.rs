@@ -76,15 +76,24 @@ pub struct SheetView {
     pub selection: Option<SheetSelection>,
 
     /// Display gridlines.
-    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "crate::serde_defaults::default_true",
+        skip_serializing_if = "is_true"
+    )]
     pub show_grid_lines: bool,
 
     /// Display row/column headings.
-    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "crate::serde_defaults::default_true",
+        skip_serializing_if = "is_true"
+    )]
     pub show_headings: bool,
 
     /// Display zeros.
-    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "crate::serde_defaults::default_true",
+        skip_serializing_if = "is_true"
+    )]
     pub show_zeros: bool,
 
     /// View zoom level (1.0 = 100%).

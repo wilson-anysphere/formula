@@ -20,4 +20,3 @@ fn pivot_field_ref_display_quotes_table_names_exactly_once() {
     };
     assert_eq!(escaped.to_string(), "'O''Reilly'[Name]");
 }
-

@@ -9,10 +9,7 @@ fn default_sheet_row_count_is_excel_max() {
     let styles = StyleTable::new();
 
     assert_eq!(sheet.row_count, EXCEL_MAX_ROWS);
-    assert!(sheet.is_cell_editable(
-        CellRef::new(EXCEL_MAX_ROWS - 1, 0),
-        &styles
-    ));
+    assert!(sheet.is_cell_editable(CellRef::new(EXCEL_MAX_ROWS - 1, 0), &styles));
     assert!(!sheet.is_cell_editable(CellRef::new(EXCEL_MAX_ROWS, 0), &styles));
 }
 
@@ -89,8 +86,5 @@ fn worksheet_deserialize_allows_row_count_above_excel_max_and_updates_editabilit
 
     let styles = StyleTable::new();
     assert!(sheet.is_cell_editable(CellRef::new(EXCEL_MAX_ROWS, 0), &styles));
-    assert!(!sheet.is_cell_editable(
-        CellRef::new(EXCEL_MAX_ROWS + 10, 0),
-        &styles
-    ));
+    assert!(!sheet.is_cell_editable(CellRef::new(EXCEL_MAX_ROWS + 10, 0), &styles));
 }

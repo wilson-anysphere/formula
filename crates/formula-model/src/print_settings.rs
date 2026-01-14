@@ -266,4 +266,3 @@ impl WorkbookPrintSettings {
         self.sheets.is_empty()
     }
 }
-

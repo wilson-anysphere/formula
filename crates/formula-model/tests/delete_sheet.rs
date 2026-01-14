@@ -19,10 +19,7 @@ fn delete_sheet_invalidates_formula_references() {
 
     let calc_sheet = wb.sheet(calc).unwrap();
     assert_eq!(calc_sheet.formula(CellRef::new(0, 0)), Some("#REF!"));
-    assert_eq!(
-        calc_sheet.formula(CellRef::new(1, 0)),
-        Some("SUM(#REF!)")
-    );
+    assert_eq!(calc_sheet.formula(CellRef::new(1, 0)), Some("SUM(#REF!)"));
 }
 
 #[test]
@@ -141,10 +138,7 @@ fn delete_sheet_invalidates_3d_reference_that_only_contains_deleted_sheet() {
     wb.delete_sheet(sheet1).unwrap();
 
     let calc_sheet = wb.sheet(calc).unwrap();
-    assert_eq!(
-        calc_sheet.formula(CellRef::new(0, 0)),
-        Some("SUM(#REF!)")
-    );
+    assert_eq!(calc_sheet.formula(CellRef::new(0, 0)), Some("SUM(#REF!)"));
 }
 
 #[test]

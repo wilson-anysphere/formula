@@ -1,6 +1,6 @@
 use formula_model::{
     validate_defined_name, DefinedNameError, DefinedNameScope, DefinedNameValidationError,
-    EXCEL_DEFINED_NAME_MAX_LEN, Workbook, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA, XLNM_PRINT_TITLES,
+    Workbook, EXCEL_DEFINED_NAME_MAX_LEN, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA, XLNM_PRINT_TITLES,
 };
 
 #[test]
@@ -15,14 +15,24 @@ fn validate_defined_name_accepts_common_and_builtin_names() {
         XLNM_PRINT_TITLES,
         XLNM_FILTER_DATABASE,
     ] {
-        assert_eq!(validate_defined_name(name), Ok(()), "name should be valid: {name}");
+        assert_eq!(
+            validate_defined_name(name),
+            Ok(()),
+            "name should be valid: {name}"
+        );
     }
 }
 
 #[test]
 fn validate_defined_name_rejects_invalid_names() {
-    assert_eq!(validate_defined_name(""), Err(DefinedNameValidationError::Empty));
-    assert_eq!(validate_defined_name("   "), Err(DefinedNameValidationError::Empty));
+    assert_eq!(
+        validate_defined_name(""),
+        Err(DefinedNameValidationError::Empty)
+    );
+    assert_eq!(
+        validate_defined_name("   "),
+        Err(DefinedNameValidationError::Empty)
+    );
     assert_eq!(
         validate_defined_name("A1"),
         Err(DefinedNameValidationError::LooksLikeCellReference)

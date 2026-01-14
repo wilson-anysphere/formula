@@ -1,9 +1,10 @@
-use formula_model::{
-    validate_value, CellRef, CellValue, DataValidation, DataValidationContext, DataValidationErrorAlert,
-    DataValidationErrorKind, DataValidationErrorStyle, DataValidationKind, DataValidationOperator,
-    EntityValue, ImageValue, Range, RecordValue, Worksheet,
-};
 use formula_model::drawings::ImageId;
+use formula_model::{
+    validate_value, CellRef, CellValue, DataValidation, DataValidationContext,
+    DataValidationErrorAlert, DataValidationErrorKind, DataValidationErrorStyle,
+    DataValidationKind, DataValidationOperator, EntityValue, ImageValue, Range, RecordValue,
+    Worksheet,
+};
 
 struct TestCtx;
 
@@ -51,113 +52,143 @@ fn dv(
 fn decimal_operators_match_expected_semantics() {
     let ctx = TestCtx;
 
-    assert!(validate_value(
-        &dv(DataValidationKind::Decimal, Some(DataValidationOperator::Between), "5", Some("10")),
-        &CellValue::Number(7.0),
-        &ctx
-    )
-    .ok);
-    assert!(!validate_value(
-        &dv(DataValidationKind::Decimal, Some(DataValidationOperator::Between), "5", Some("10")),
-        &CellValue::Number(4.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::Between),
+                "5",
+                Some("10")
+            ),
+            &CellValue::Number(7.0),
+            &ctx
+        )
+        .ok
+    );
+    assert!(
+        !validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::Between),
+                "5",
+                Some("10")
+            ),
+            &CellValue::Number(4.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::NotBetween),
-            "5",
-            Some("10")
-        ),
-        &CellValue::Number(4.0),
-        &ctx
-    )
-    .ok);
-    assert!(!validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::NotBetween),
-            "5",
-            Some("10")
-        ),
-        &CellValue::Number(7.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::NotBetween),
+                "5",
+                Some("10")
+            ),
+            &CellValue::Number(4.0),
+            &ctx
+        )
+        .ok
+    );
+    assert!(
+        !validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::NotBetween),
+                "5",
+                Some("10")
+            ),
+            &CellValue::Number(7.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::Equal),
-            "5",
-            None
-        ),
-        &CellValue::String("5".to_string()),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::Equal),
+                "5",
+                None
+            ),
+            &CellValue::String("5".to_string()),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(!validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::NotEqual),
-            "5",
-            None
-        ),
-        &CellValue::Number(5.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        !validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::NotEqual),
+                "5",
+                None
+            ),
+            &CellValue::Number(5.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::GreaterThan),
-            "5",
-            None
-        ),
-        &CellValue::Number(6.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::GreaterThan),
+                "5",
+                None
+            ),
+            &CellValue::Number(6.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::GreaterThanOrEqual),
-            "5",
-            None
-        ),
-        &CellValue::Number(5.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::GreaterThanOrEqual),
+                "5",
+                None
+            ),
+            &CellValue::Number(5.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::LessThan),
-            "5",
-            None
-        ),
-        &CellValue::Number(4.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::LessThan),
+                "5",
+                None
+            ),
+            &CellValue::Number(4.0),
+            &ctx
+        )
+        .ok
+    );
 
-    assert!(validate_value(
-        &dv(
-            DataValidationKind::Decimal,
-            Some(DataValidationOperator::LessThanOrEqual),
-            "5",
-            None
-        ),
-        &CellValue::Number(5.0),
-        &ctx
-    )
-    .ok);
+    assert!(
+        validate_value(
+            &dv(
+                DataValidationKind::Decimal,
+                Some(DataValidationOperator::LessThanOrEqual),
+                "5",
+                None
+            ),
+            &CellValue::Number(5.0),
+            &ctx
+        )
+        .ok
+    );
 }
 
 #[test]
@@ -174,7 +205,10 @@ fn whole_number_validation_coerces_strings_and_checks_integerness() {
 
     let bad = validate_value(&rule, &CellValue::Number(3.2), &ctx);
     assert_eq!(bad.ok, false);
-    assert_eq!(bad.error_kind, Some(DataValidationErrorKind::NotWholeNumber));
+    assert_eq!(
+        bad.error_kind,
+        Some(DataValidationErrorKind::NotWholeNumber)
+    );
 }
 
 #[test]
@@ -193,7 +227,10 @@ fn allow_blank_short_circuits_validation() {
     rule.allow_blank = false;
     let result = validate_value(&rule, &CellValue::Empty, &ctx);
     assert_eq!(result.ok, false);
-    assert_eq!(result.error_kind, Some(DataValidationErrorKind::BlankNotAllowed));
+    assert_eq!(
+        result.error_kind,
+        Some(DataValidationErrorKind::BlankNotAllowed)
+    );
 }
 
 #[test]
@@ -207,12 +244,7 @@ fn allow_blank_treats_empty_rich_display_string_as_blank() {
         Some("10"),
     );
     rule.allow_blank = true;
-    assert!(validate_value(
-        &rule,
-        &CellValue::Entity(EntityValue::new("")),
-        &ctx
-    )
-    .ok);
+    assert!(validate_value(&rule, &CellValue::Entity(EntityValue::new("")), &ctx).ok);
 }
 
 #[test]
@@ -234,19 +266,17 @@ fn allow_blank_does_not_treat_record_display_field_entity_as_blank() {
     );
     let result = validate_value(&rule, &record, &ctx);
     assert_eq!(result.ok, false);
-    assert_eq!(result.error_kind, Some(DataValidationErrorKind::TypeMismatch));
+    assert_eq!(
+        result.error_kind,
+        Some(DataValidationErrorKind::TypeMismatch)
+    );
 }
 
 #[test]
 fn list_validation_supports_constants_and_callback_sources() {
     let ctx = TestCtx;
 
-    let constant = dv(
-        DataValidationKind::List,
-        None,
-        "\"a,b,c\"",
-        None,
-    );
+    let constant = dv(DataValidationKind::List, None, "\"a,b,c\"", None);
     assert!(validate_value(&constant, &CellValue::String("B".to_string()), &ctx).ok);
     let bad = validate_value(&constant, &CellValue::String("d".to_string()), &ctx);
     assert_eq!(bad.ok, false);
@@ -263,12 +293,7 @@ fn list_validation_is_case_insensitive_for_unicode_text() {
 
     // Unicode-aware case-insensitive matching should behave like Excel (ß -> SS).
     let constant = dv(DataValidationKind::List, None, "\"Maß\"", None);
-    assert!(validate_value(
-        &constant,
-        &CellValue::String("MASS".to_string()),
-        &ctx
-    )
-    .ok);
+    assert!(validate_value(&constant, &CellValue::String("MASS".to_string()), &ctx).ok);
 }
 
 #[test]
@@ -276,12 +301,7 @@ fn list_and_text_validations_use_rich_value_display_strings() {
     let ctx = TestCtx;
 
     let list = dv(DataValidationKind::List, None, "\"a,b,c\"", None);
-    assert!(validate_value(
-        &list,
-        &CellValue::Entity(EntityValue::new("B")),
-        &ctx
-    )
-    .ok);
+    assert!(validate_value(&list, &CellValue::Entity(EntityValue::new("B")), &ctx).ok);
 
     let record = CellValue::Record(
         RecordValue::default()
@@ -306,23 +326,20 @@ fn list_and_text_validations_use_rich_value_display_strings() {
         "2",
         None,
     );
-    assert!(validate_value(
-        &len_rule,
-        &CellValue::Entity(EntityValue::new("🙂")),
-        &ctx
-    )
-    .ok);
-    assert!(validate_value(
-        &len_rule,
-        &CellValue::Image(ImageValue {
-            image_id: ImageId::new("image1.png"),
-            alt_text: Some("🙂".to_string()),
-            width: None,
-            height: None,
-        }),
-        &ctx
-    )
-    .ok);
+    assert!(validate_value(&len_rule, &CellValue::Entity(EntityValue::new("🙂")), &ctx).ok);
+    assert!(
+        validate_value(
+            &len_rule,
+            &CellValue::Image(ImageValue {
+                image_id: ImageId::new("image1.png"),
+                alt_text: Some("🙂".to_string()),
+                width: None,
+                height: None,
+            }),
+            &ctx
+        )
+        .ok
+    );
 }
 
 fn excel_serial(date: chrono::NaiveDate) -> f64 {
@@ -346,17 +363,26 @@ fn date_and_time_validations_accept_strings_and_serial_numbers() {
         "\"2020-01-01\"",
         Some("\"2020-01-31\""),
     );
-    assert!(validate_value(&date_rule, &CellValue::String("2020-01-15".to_string()), &ctx).ok);
+    assert!(
+        validate_value(
+            &date_rule,
+            &CellValue::String("2020-01-15".to_string()),
+            &ctx
+        )
+        .ok
+    );
 
     let jan_15 = excel_serial(chrono::NaiveDate::from_ymd_opt(2020, 1, 15).unwrap());
     assert!(validate_value(&date_rule, &CellValue::Number(jan_15), &ctx).ok);
 
-    assert!(!validate_value(
-        &date_rule,
-        &CellValue::String("2020-02-01".to_string()),
-        &ctx
-    )
-    .ok);
+    assert!(
+        !validate_value(
+            &date_rule,
+            &CellValue::String("2020-02-01".to_string()),
+            &ctx
+        )
+        .ok
+    );
 
     let time_rule = dv(
         DataValidationKind::Time,
@@ -380,23 +406,20 @@ fn numeric_validation_parses_rich_value_display_strings() {
         "123",
         None,
     );
-    assert!(validate_value(
-        &rule,
-        &CellValue::Entity(EntityValue::new("123")),
-        &ctx
-    )
-    .ok);
-    assert!(validate_value(
-        &rule,
-        &CellValue::Image(ImageValue {
-            image_id: ImageId::new("image1.png"),
-            alt_text: Some("123".to_string()),
-            width: None,
-            height: None,
-        }),
-        &ctx
-    )
-    .ok);
+    assert!(validate_value(&rule, &CellValue::Entity(EntityValue::new("123")), &ctx).ok);
+    assert!(
+        validate_value(
+            &rule,
+            &CellValue::Image(ImageValue {
+                image_id: ImageId::new("image1.png"),
+                alt_text: Some("123".to_string()),
+                width: None,
+                height: None,
+            }),
+            &ctx
+        )
+        .ok
+    );
 }
 
 #[test]
@@ -431,7 +454,10 @@ fn error_alert_style_and_messages_are_resolved() {
     assert_eq!(result.error_kind, Some(DataValidationErrorKind::NotInList));
     assert_eq!(result.error_style, Some(DataValidationErrorStyle::Warning));
     assert_eq!(result.error_title.as_deref(), Some("Oops"));
-    assert_eq!(result.error_message.as_deref(), Some("Choose from the list"));
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some("Choose from the list")
+    );
 }
 
 #[test]
@@ -443,12 +469,18 @@ fn custom_validation_uses_callback_hook() {
 
     let bad = validate_value(&rule, &CellValue::Number(-1.0), &ctx);
     assert_eq!(bad.ok, false);
-    assert_eq!(bad.error_kind, Some(DataValidationErrorKind::CustomFormulaFalse));
+    assert_eq!(
+        bad.error_kind,
+        Some(DataValidationErrorKind::CustomFormulaFalse)
+    );
 
     let unresolved = dv(DataValidationKind::Custom, None, "UNKNOWN", None);
     let bad = validate_value(&unresolved, &CellValue::Number(1.0), &ctx);
     assert_eq!(bad.ok, false);
-    assert_eq!(bad.error_kind, Some(DataValidationErrorKind::CustomFormulaUnresolved));
+    assert_eq!(
+        bad.error_kind,
+        Some(DataValidationErrorKind::CustomFormulaUnresolved)
+    );
 }
 
 #[test]

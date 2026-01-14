@@ -1,6 +1,4 @@
-use formula_model::{
-    CellRef, ManualPageBreaks, Orientation, PageSetup, Range, Scaling, Workbook,
-};
+use formula_model::{CellRef, ManualPageBreaks, Orientation, PageSetup, Range, Scaling, Workbook};
 
 #[test]
 fn default_print_settings_exist_for_sheet() {
@@ -54,7 +52,10 @@ fn print_settings_roundtrip_through_serde() {
             orientation: Orientation::Landscape,
             paper_size: formula_model::PaperSize::A4,
             margins: formula_model::PageMargins::default(),
-            scaling: Scaling::FitTo { width: 1, height: 2 },
+            scaling: Scaling::FitTo {
+                width: 1,
+                height: 2
+            },
         },
     ));
 

@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::RichText;
 
-use super::{
-    ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle,
-};
+use super::{ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

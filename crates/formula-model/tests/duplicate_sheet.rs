@@ -2,8 +2,8 @@ use std::cell::Cell;
 
 use formula_model::{
     parse_range_a1, validate_sheet_name, CellRef, CellValue, CfRule, CfRuleKind, CfRuleSchema,
-    CfStyleOverride, Color, Comment, CommentKind, CommentPatch, DuplicateSheetError, FormulaEvaluator,
-    Range, SheetNameError, Table, TableColumn, Workbook,
+    CfStyleOverride, Color, Comment, CommentKind, CommentPatch, DuplicateSheetError,
+    FormulaEvaluator, Range, SheetNameError, Table, TableColumn, Workbook,
 };
 
 #[test]
@@ -215,7 +215,10 @@ fn duplicate_sheet_clears_conditional_formatting_cache_after_rewrites() {
         let sheet = wb.sheet(sheet1).unwrap();
         let eval = sheet.evaluate_conditional_formatting(visible, sheet, Some(&evaluator));
         assert_eq!(
-            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .style
+                .fill,
             Some(Color::new_argb(0xFFFF0000))
         );
     }
@@ -226,9 +229,13 @@ fn duplicate_sheet_clears_conditional_formatting_cache_after_rewrites() {
     // After duplication, the CF rule formula is rewritten to the new sheet name. The duplicated
     // sheet must not re-use the source sheet's cached evaluation result.
     let copied_sheet = wb.sheet(copied).unwrap();
-    let eval = copied_sheet.evaluate_conditional_formatting(visible, copied_sheet, Some(&evaluator));
+    let eval =
+        copied_sheet.evaluate_conditional_formatting(visible, copied_sheet, Some(&evaluator));
     assert_eq!(
-        eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+        eval.get(CellRef::from_a1("A1").unwrap())
+            .unwrap()
+            .style
+            .fill,
         None
     );
     assert_eq!(evaluator.calls(), 2);

@@ -37,8 +37,9 @@ pub fn format_cell_display(
                     CellValue::Empty => Some(""),
                     CellValue::String(s) => Some(s.as_str()),
                     CellValue::Number(n) => {
-                        display_buf =
-                            Some(formula_format::format_value(FmtValue::Number(*n), None, options).text);
+                        display_buf = Some(
+                            formula_format::format_value(FmtValue::Number(*n), None, options).text,
+                        );
                         display_buf.as_deref()
                     }
                     CellValue::Boolean(b) => {
@@ -62,7 +63,9 @@ pub fn format_cell_display(
                         }),
                     _ => None,
                 })
-                .or_else(|| (!record.display_value.is_empty()).then_some(record.display_value.as_str()))
+                .or_else(|| {
+                    (!record.display_value.is_empty()).then_some(record.display_value.as_str())
+                })
                 .unwrap_or("");
             FmtValue::Text(display)
         }

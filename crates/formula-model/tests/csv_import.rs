@@ -14,14 +14,22 @@ fn csv_import_streams_into_columnar_backed_worksheet() {
         "2,$0.01,12.5%,false,1970-01-03,B\n",
     );
 
-    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-        .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(12.34));
     assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Number(0.5));
     assert_eq!(sheet.value(CellRef::new(0, 3)), CellValue::Boolean(true));
-    assert_eq!(sheet.value(CellRef::new(0, 4)), CellValue::Number(86_400_000.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 4)),
+        CellValue::Number(86_400_000.0)
+    );
     assert_eq!(
         sheet.value(CellRef::new(0, 5)),
         CellValue::String("A".to_string())
@@ -31,7 +39,10 @@ fn csv_import_streams_into_columnar_backed_worksheet() {
     assert_eq!(sheet.value(CellRef::new(1, 1)), CellValue::Number(0.01));
     assert_eq!(sheet.value(CellRef::new(1, 2)), CellValue::Number(0.125));
     assert_eq!(sheet.value(CellRef::new(1, 3)), CellValue::Boolean(false));
-    assert_eq!(sheet.value(CellRef::new(1, 4)), CellValue::Number(172_800_000.0));
+    assert_eq!(
+        sheet.value(CellRef::new(1, 4)),
+        CellValue::Number(172_800_000.0)
+    );
     assert_eq!(
         sheet.value(CellRef::new(1, 5)),
         CellValue::String("B".to_string())
@@ -47,9 +58,13 @@ fn csv_import_rfc4180_quotes_newlines_and_crlf() {
         "3,\"he said \"\"hi\"\"\"\r\n",
     );
 
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         sheet.value(CellRef::new(0, 1)),
@@ -68,9 +83,13 @@ fn csv_import_rfc4180_quotes_newlines_and_crlf() {
 #[test]
 fn csv_import_supports_cr_only_line_endings() {
     let csv = "id,text\r1,hello\r2,world\r";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(
@@ -87,9 +106,13 @@ fn csv_import_supports_cr_only_line_endings() {
 #[test]
 fn csv_import_trailing_delimiter_produces_empty_field() {
     let csv = "a,b,c\n1,2,\n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     // Trailing delimiter => third field exists but is empty.
     assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Empty);
@@ -98,9 +121,13 @@ fn csv_import_trailing_delimiter_produces_empty_field() {
 #[test]
 fn csv_import_handles_utf8_inside_quoted_fields() {
     let csv = "id,text\n1,\"こんにちは,世界\"\n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
     assert_eq!(
         sheet.value(CellRef::new(0, 1)),
         CellValue::String("こんにちは,世界".to_string())
@@ -110,9 +137,13 @@ fn csv_import_handles_utf8_inside_quoted_fields() {
 #[test]
 fn csv_import_preserves_whitespace_in_string_values() {
     let csv = "text\n  hello  \n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
     assert_eq!(
         sheet.value(CellRef::new(0, 0)),
         CellValue::String("  hello  ".to_string())
@@ -338,9 +369,13 @@ fn csv_import_handles_wide_rows() {
         .join(",");
     let csv = format!("{header}\n{row}\n");
 
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(
@@ -378,9 +413,13 @@ fn csv_import_autodetects_decimal_comma_locale_for_semicolon_csv() {
     // Import should infer that `,` is a decimal separator (so delimiter sniffing does not mistake
     // decimal commas for field separators) and parse values accordingly.
     let csv = "amount;ratio\n€1.234,50;12,5%\n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1234.5));
     assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(0.125));
@@ -418,7 +457,10 @@ fn csv_import_date_order_preference_changes_ambiguous_dates() {
         ..CsvOptions::default()
     };
     let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), mdy).unwrap();
-    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(86_400_000.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::Number(86_400_000.0)
+    );
 
     let dmy = CsvOptions {
         date_order: CsvDateOrder::Dmy,
@@ -439,26 +481,43 @@ fn csv_import_supports_timezone_offset_policy() {
         ..CsvOptions::default()
     };
     let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), options).unwrap();
-    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(3_600_000.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::Number(3_600_000.0)
+    );
 }
 
 #[test]
 fn csv_import_supports_additional_date_formats() {
     let csv = "d1,d2\n1970/01/02,19700102\n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
-    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(86_400_000.0));
-    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(86_400_000.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::Number(86_400_000.0)
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::Number(86_400_000.0)
+    );
 }
 
 #[test]
 fn csv_import_parses_parentheses_negative_numbers_with_grouping() {
     let csv = "n\n\"(1,234.50)\"\n";
-    let sheet =
-        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
-            .unwrap();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(csv.as_bytes()),
+        CsvOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(-1234.5));
 }
@@ -493,7 +552,11 @@ fn csv_import_utf8_encoding_reports_invalid_utf8_with_row_and_column() {
     .unwrap_err();
 
     match err {
-        formula_model::import::CsvImportError::Parse { row, column, reason } => {
+        formula_model::import::CsvImportError::Parse {
+            row,
+            column,
+            reason,
+        } => {
             assert_eq!(row, 2);
             assert_eq!(column, 2);
             assert!(reason.contains("UTF-8"));
@@ -558,8 +621,7 @@ fn csv_import_decodes_windows1252_header_names() {
 #[test]
 fn csv_import_strips_utf8_bom_from_first_header_field() {
     let bytes = b"\xEF\xBB\xBFid,text\n1,hello\n".to_vec();
-    let table =
-        import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
+    let table = import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
     assert_eq!(table.schema()[0].name, "id");
 }
 
@@ -568,8 +630,7 @@ fn csv_import_strips_utf8_bom_when_first_header_field_is_quoted() {
     // If the BOM appears before the opening quote, the CSV parser should still treat the field as
     // quoted after the BOM is stripped.
     let bytes = b"\xEF\xBB\xBF\"id\",text\n1,hello\n".to_vec();
-    let table =
-        import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
+    let table = import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
     assert_eq!(table.schema()[0].name, "id");
 }
 

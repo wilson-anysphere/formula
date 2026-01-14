@@ -91,7 +91,11 @@ fn stream_100k_rows_and_render_viewport_smoke() {
         .columns
         .iter()
         .all(|c| c.len() == VIEWPORT_ROWS as usize));
-    assert_eq!(sheet.cell_count(), 0, "reading a viewport must not populate sparse cells");
+    assert_eq!(
+        sheet.cell_count(),
+        0,
+        "reading a viewport must not populate sparse cells"
+    );
 
     // Spot-check a few representative values.
     const CATS: [&str; 10] = ["AA", "BB", "CC", "DD", "EE", "FF", "GG", "HH", "II", "JJ"];
@@ -103,7 +107,10 @@ fn stream_100k_rows_and_render_viewport_smoke() {
         viewport.columns[1][0],
         CellValue::String(cat_at(start_row).to_string())
     );
-    assert_eq!(viewport.columns[2][0], CellValue::Boolean(flag_at(start_row)));
+    assert_eq!(
+        viewport.columns[2][0],
+        CellValue::Boolean(flag_at(start_row))
+    );
 
     // Spot-check a row well inside the viewport. When `start_row` is 65_500 (the default),
     // this crosses the 65_536 row page boundary.

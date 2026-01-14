@@ -2,7 +2,9 @@ use formula_model::pivots::{
     DefinedNameIdentifier, PivotCacheModel, PivotChartModel, PivotConfig, PivotDestination,
     PivotSource, PivotTableModel, SlicerModel,
 };
-use formula_model::{CellRef, DefinedNameScope, Range, Table, TableColumn, TableIdentifier, Workbook};
+use formula_model::{
+    CellRef, DefinedNameScope, Range, Table, TableColumn, TableIdentifier, Workbook,
+};
 
 #[test]
 fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {

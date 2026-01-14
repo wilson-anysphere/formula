@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-pub use crate::rich_text::RichText;
 use crate::drawings::ImageId;
+pub use crate::rich_text::RichText;
 use crate::{CellRef, ErrorValue};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -126,7 +126,11 @@ impl From<RichText> for CellValue {
 #[serde(rename_all = "camelCase")]
 pub struct LinkedEntityValue {
     /// Entity type discriminator (e.g. `"stock"`, `"geography"`).
-    #[serde(default, alias = "entity_type", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        alias = "entity_type",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub entity_type: String,
     /// Entity identifier (e.g. `"AAPL"`).
     #[serde(default, alias = "entity_id", skip_serializing_if = "String::is_empty")]
@@ -195,7 +199,11 @@ impl From<LinkedEntityValue> for CellValue {
 pub struct RecordValue {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, CellValue>,
-    #[serde(default, alias = "display_field", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "display_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub display_field: Option<String>,
     /// Optional precomputed display string (legacy / fallback).
     ///

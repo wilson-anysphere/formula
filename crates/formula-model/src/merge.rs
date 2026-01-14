@@ -188,7 +188,11 @@ impl MergedRegions {
                 continue;
             }
 
-            let new_start_row = if r.start.row >= at_row { at_row } else { r.start.row };
+            let new_start_row = if r.start.row >= at_row {
+                at_row
+            } else {
+                r.start.row
+            };
             let new_end_row = if r.end.row > del_end {
                 r.end.row - count
             } else {
@@ -237,7 +241,11 @@ impl MergedRegions {
                 continue;
             }
 
-            let new_start_col = if r.start.col >= at_col { at_col } else { r.start.col };
+            let new_start_col = if r.start.col >= at_col {
+                at_col
+            } else {
+                r.start.col
+            };
             let new_end_col = if r.end.col > del_end {
                 r.end.col - count
             } else {

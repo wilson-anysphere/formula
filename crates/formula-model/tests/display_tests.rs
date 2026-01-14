@@ -31,7 +31,11 @@ fn model_aligns_bools_and_errors_center_under_general_alignment() {
     assert_eq!(display.text, "TRUE");
     assert_eq!(display.alignment, HorizontalAlignment::Center);
 
-    let display = format_cell_display(&CellValue::Error(formula_model::ErrorValue::Div0), None, &options);
+    let display = format_cell_display(
+        &CellValue::Error(formula_model::ErrorValue::Div0),
+        None,
+        &options,
+    );
     assert_eq!(display.text, "#DIV/0!");
     assert_eq!(display.alignment, HorizontalAlignment::Center);
 }

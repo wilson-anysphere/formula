@@ -6,7 +6,9 @@ use crate::value::text_eq_case_insensitive;
 use crate::{CellRef, Range};
 use serde::{Deserialize, Serialize};
 
-pub use crate::autofilter::{FilterColumn, SheetAutoFilter as AutoFilter, SortCondition, SortState};
+pub use crate::autofilter::{
+    FilterColumn, SheetAutoFilter as AutoFilter, SortCondition, SortState,
+};
 
 /// Errors that can occur when creating or mutating a table.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -196,21 +198,23 @@ impl Table {
         }
     }
 
-    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) {
         for column in &mut self.columns {
             if let Some(formula) = column.formula.as_mut() {
-                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                    formula,
-                    old_name,
-                    new_name,
-                );
+                *formula =
+                    crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                        formula, old_name, new_name,
+                    );
             }
             if let Some(formula) = column.totals_formula.as_mut() {
-                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                    formula,
-                    old_name,
-                    new_name,
-                );
+                *formula =
+                    crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                        formula, old_name, new_name,
+                    );
             }
         }
     }
@@ -327,10 +331,7 @@ impl Table {
             .header_row_count
             .checked_sub(1)
             .and_then(|delta| r.start.row.checked_add(delta))?;
-        Some(Range::new(
-            r.start,
-            CellRef::new(header_end, r.end.col),
-        ))
+        Some(Range::new(r.start, CellRef::new(header_end, r.end.col)))
     }
 
     pub fn totals_range(&self) -> Option<Range> {

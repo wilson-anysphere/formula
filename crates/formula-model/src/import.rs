@@ -101,7 +101,8 @@ pub fn sniff_csv_delimiter_with_decimal_separator(sample: &[u8], decimal_separat
             .unwrap_or(b',');
     }
     if let Some(encoding) = detect_utf16_bomless_encoding(sample) {
-        let utf8 = Utf16ToUtf8Reader::new(Cursor::new(sample), encoding.new_decoder_with_bom_removal());
+        let utf8 =
+            Utf16ToUtf8Reader::new(Cursor::new(sample), encoding.new_decoder_with_bom_removal());
         let mut reader = BufReader::new(utf8);
         return sniff_csv_delimiter_prefix(&mut reader, decimal_separator)
             .map(|(_, delimiter)| delimiter)
@@ -169,7 +170,11 @@ pub enum CsvImportError {
     #[error("csv input was empty")]
     EmptyInput,
     #[error("csv parse error at row {row}, column {column}: {reason}")]
-    Parse { row: u64, column: u64, reason: String },
+    Parse {
+        row: u64,
+        column: u64,
+        reason: String,
+    },
     #[error(transparent)]
     SheetName(#[from] SheetNameError),
     #[error(transparent)]
@@ -212,7 +217,8 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
 ) -> Result<ColumnarTable, CsvImportError> {
     let mut options = options;
     let (sniff_prefix, mut delimiter) = if options.delimiter == CSV_DELIMITER_AUTO {
-        sniff_csv_delimiter_prefix(&mut reader, options.decimal_separator).map_err(CsvImportError::Io)?
+        sniff_csv_delimiter_prefix(&mut reader, options.decimal_separator)
+            .map_err(CsvImportError::Io)?
     } else {
         (Vec::new(), options.delimiter)
     };
@@ -335,7 +341,13 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
     let mut row_values: Vec<ColumnarValue> = vec![ColumnarValue::Null; column_count];
 
     for row in &sample_rows {
-        parse_row_to_values(row, &column_types, &options, &mut string_pool, &mut row_values);
+        parse_row_to_values(
+            row,
+            &column_types,
+            &options,
+            &mut string_pool,
+            &mut row_values,
+        );
         builder.append_row(&row_values);
     }
 
@@ -348,8 +360,7 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
                 record_index += 1;
                 for i in 0..column_count {
                     let raw = record.get(i).unwrap_or(b"");
-                    let field =
-                        decode_field(raw, record_index, i as u64 + 1, options.encoding)?;
+                    let field = decode_field(raw, record_index, i as u64 + 1, options.encoding)?;
                     row_values[i] = parse_typed_value(
                         field.as_ref(),
                         column_types[i],
@@ -590,9 +601,7 @@ fn parse_csv_sep_directive(prefix: &[u8]) -> Option<u8> {
     // data/header record.
     //
     // Example: `sep=;` (followed by `\n` or `\r\n`).
-    let line_end = prefix
-        .iter()
-        .position(|b| matches!(b, b'\n' | b'\r'))?;
+    let line_end = prefix.iter().position(|b| matches!(b, b'\n' | b'\r'))?;
     let mut line = &prefix[..line_end];
     if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
         line = &line[3..];
@@ -743,10 +752,11 @@ fn sniff_csv_delimiter_prefix<R: Read>(
     decimal_separator: char,
 ) -> Result<(Vec<u8>, u8), std::io::Error> {
     let mut prefix: Vec<u8> = Vec::new();
-    let mut hists: Vec<HashMap<usize, usize>> =
-        CSV_SNIFF_DELIMITERS.iter().map(|_| HashMap::new()).collect();
-    let mut delim_counts: [usize; CSV_SNIFF_DELIMITERS.len()] =
-        [0; CSV_SNIFF_DELIMITERS.len()];
+    let mut hists: Vec<HashMap<usize, usize>> = CSV_SNIFF_DELIMITERS
+        .iter()
+        .map(|_| HashMap::new())
+        .collect();
+    let mut delim_counts: [usize; CSV_SNIFF_DELIMITERS.len()] = [0; CSV_SNIFF_DELIMITERS.len()];
 
     let mut in_quotes = false;
     let mut pending_quote = false;
@@ -860,7 +870,12 @@ fn sniff_csv_delimiter_prefix<R: Read>(
             in_quotes = false;
         }
         if record_len > 0 && !in_quotes {
-            commit_csv_sniff_record(record_len, &mut delim_counts, &mut hists, &mut sampled_records);
+            commit_csv_sniff_record(
+                record_len,
+                &mut delim_counts,
+                &mut hists,
+                &mut sampled_records,
+            );
         }
     }
 
@@ -903,7 +918,8 @@ fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>], decimal_separat
         mode_fields: usize,
     }
 
-    let mut stats: [Stats; CSV_SNIFF_DELIMITERS.len()] = [Stats::default(); CSV_SNIFF_DELIMITERS.len()];
+    let mut stats: [Stats; CSV_SNIFF_DELIMITERS.len()] =
+        [Stats::default(); CSV_SNIFF_DELIMITERS.len()];
 
     for (idx, hist) in hists.iter().enumerate() {
         let mut mode_count = 0usize;
@@ -976,7 +992,9 @@ fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>], decimal_separat
         }
     }
 
-    best_idx.map(|idx| CSV_SNIFF_DELIMITERS[idx]).unwrap_or(b',')
+    best_idx
+        .map(|idx| CSV_SNIFF_DELIMITERS[idx])
+        .unwrap_or(b',')
 }
 
 /// Import a CSV stream into a new [`Worksheet`] backed by a columnar table.
@@ -1545,13 +1563,15 @@ fn decode_field<'a>(
     };
 
     match encoding {
-        CsvTextEncoding::Utf8 => std::str::from_utf8(field)
-            .map(Cow::Borrowed)
-            .map_err(|e| CsvImportError::Parse {
-                row,
-                column,
-                reason: format!("invalid UTF-8: {e}"),
-            }),
+        CsvTextEncoding::Utf8 => {
+            std::str::from_utf8(field)
+                .map(Cow::Borrowed)
+                .map_err(|e| CsvImportError::Parse {
+                    row,
+                    column,
+                    reason: format!("invalid UTF-8: {e}"),
+                })
+        }
         CsvTextEncoding::Windows1252 => {
             let (cow, _, _) = WINDOWS_1252.decode(field);
             Ok(cow)
@@ -1592,7 +1612,9 @@ struct StringPool {
 
 impl StringPool {
     fn new() -> Self {
-        Self { set: HashMap::new() }
+        Self {
+            set: HashMap::new(),
+        }
     }
 
     fn intern(&mut self, s: &str) -> Arc<str> {

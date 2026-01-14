@@ -51,7 +51,10 @@ fn worksheet_can_be_backed_by_columnar_table_and_override_with_sparse_cells() {
     );
 
     // Sparse overlay should override the backing store.
-    sheet.set_value(CellRef::new(0, 1), CellValue::String("Override".to_string()));
+    sheet.set_value(
+        CellRef::new(0, 1),
+        CellValue::String("Override".to_string()),
+    );
     assert_eq!(
         sheet.value(CellRef::new(0, 1)),
         CellValue::String("Override".to_string())

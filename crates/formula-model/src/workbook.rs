@@ -15,8 +15,8 @@ use crate::pivots::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::table::{validate_table_name, TableError, TableIdentifier};
-use crate::value::text_eq_case_insensitive;
 use crate::value::casefold;
+use crate::value::text_eq_case_insensitive;
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
     rewrite_table_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
@@ -681,7 +681,7 @@ impl Workbook {
                         // Preserve unresolved/name-based references; we can't reliably infer scope
                         // when only given a string.
                     }
-                }
+                },
                 PivotSource::DataModel { .. } => {}
             }
 
@@ -1541,10 +1541,7 @@ fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
 }
 
 fn collect_pivot_table_names(pivots: &[PivotTableModel]) -> HashSet<String> {
-    pivots
-        .iter()
-        .map(|pivot| casefold(&pivot.name))
-        .collect()
+    pivots.iter().map(|pivot| casefold(&pivot.name)).collect()
 }
 
 fn next_table_id(sheets: &[Worksheet]) -> u32 {

@@ -54,8 +54,14 @@ fn validates_table_names() {
         validate_table_name("R1C1").unwrap_err(),
         TableError::ConflictsWithCellReference
     );
-    assert_eq!(validate_table_name("C").unwrap_err(), TableError::ReservedName);
-    assert_eq!(validate_table_name("TRUE").unwrap_err(), TableError::ReservedName);
+    assert_eq!(
+        validate_table_name("C").unwrap_err(),
+        TableError::ReservedName
+    );
+    assert_eq!(
+        validate_table_name("TRUE").unwrap_err(),
+        TableError::ReservedName
+    );
     validate_table_name("Table1").unwrap();
 }
 
@@ -67,7 +73,8 @@ fn workbook_enforces_unique_table_names_case_insensitive() {
 
     wb.add_table(sheet1, table_fixture(1, "Table1")).unwrap();
     assert_eq!(
-        wb.add_table(sheet2, table_fixture(2, "table1")).unwrap_err(),
+        wb.add_table(sheet2, table_fixture(2, "table1"))
+            .unwrap_err(),
         TableError::DuplicateName
     );
 }
@@ -81,10 +88,14 @@ fn rename_table_rewrites_structured_refs_in_formulas() {
 
     {
         let sheet = wb.sheet_mut(sheet1).unwrap();
-        sheet.set_formula_a1("A1", Some("=SUM(table1[Col1])".into())).unwrap();
-        sheet.set_formula_a1("A2", Some("=SUM(Sheet1!TABLE1[Col1])".into()))
+        sheet
+            .set_formula_a1("A1", Some("=SUM(table1[Col1])".into()))
             .unwrap();
-        sheet.set_formula_a1("A3", Some("=\"table1[Col1]\"".into()))
+        sheet
+            .set_formula_a1("A2", Some("=SUM(Sheet1!TABLE1[Col1])".into()))
+            .unwrap();
+        sheet
+            .set_formula_a1("A3", Some("=\"table1[Col1]\"".into()))
             .unwrap();
     }
 
@@ -101,7 +112,10 @@ fn rename_table_rewrites_structured_refs_in_formulas() {
     let (_sheet, table) = wb.find_table_case_insensitive("sales").unwrap();
     assert_eq!(table.name, "Sales");
     assert_eq!(table.display_name, "Sales");
-    assert_eq!(table.columns[0].formula.as_deref(), Some("SUM(Sales[Col1])"));
+    assert_eq!(
+        table.columns[0].formula.as_deref(),
+        Some("SUM(Sales[Col1])")
+    );
 }
 
 #[test]

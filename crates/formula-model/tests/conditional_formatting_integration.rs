@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use formula_model::{
-    parse_range_a1, CellRef, CellValue, CellValueProvider, CfRule, CfRuleKind, CfRuleSchema,
-    CfStyleOverride, CellIsOperator, Worksheet,
+    parse_range_a1, CellIsOperator, CellRef, CellValue, CellValueProvider, CfRule, CfRuleKind,
+    CfRuleSchema, CfStyleOverride, Worksheet,
 };
 
 fn sample_rule_and_dxfs() -> (Vec<CfRule>, Vec<CfStyleOverride>) {
@@ -45,7 +45,10 @@ fn worksheet_stores_and_evaluates_conditional_formatting() {
     let eval = sheet.evaluate_conditional_formatting(visible, &sheet, None);
 
     let a1 = eval.get(CellRef::from_a1("A1").unwrap()).unwrap();
-    assert_eq!(a1.style.fill, Some(formula_model::Color::new_argb(0xFFFF0000)));
+    assert_eq!(
+        a1.style.fill,
+        Some(formula_model::Color::new_argb(0xFFFF0000))
+    );
     assert_eq!(a1.style.bold, Some(true));
 
     let a2 = eval.get(CellRef::from_a1("A2").unwrap()).unwrap();
@@ -107,7 +110,11 @@ fn invalidation_clears_cached_evaluation_entries() {
 
     let eval1 = sheet.evaluate_conditional_formatting(visible, &values, None);
     assert_eq!(
-        eval1.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+        eval1
+            .get(CellRef::from_a1("A1").unwrap())
+            .unwrap()
+            .style
+            .fill,
         Some(formula_model::Color::new_argb(0xFFFF0000))
     );
 
@@ -115,7 +122,11 @@ fn invalidation_clears_cached_evaluation_entries() {
     values.set(CellRef::from_a1("A1").unwrap(), CellValue::Number(0.0));
     let eval2 = sheet.evaluate_conditional_formatting(visible, &values, None);
     assert_eq!(
-        eval2.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+        eval2
+            .get(CellRef::from_a1("A1").unwrap())
+            .unwrap()
+            .style
+            .fill,
         Some(formula_model::Color::new_argb(0xFFFF0000))
     );
 
@@ -123,8 +134,11 @@ fn invalidation_clears_cached_evaluation_entries() {
     sheet.invalidate_conditional_formatting_cells([CellRef::from_a1("A1").unwrap()]);
     let eval3 = sheet.evaluate_conditional_formatting(visible, &values, None);
     assert_eq!(
-        eval3.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+        eval3
+            .get(CellRef::from_a1("A1").unwrap())
+            .unwrap()
+            .style
+            .fill,
         None
     );
 }
-

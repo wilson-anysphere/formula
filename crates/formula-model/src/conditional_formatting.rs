@@ -65,9 +65,7 @@ impl Cfvo {
             return;
         };
         *value = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-            value,
-            old_name,
-            new_name,
+            value, old_name, new_name,
         );
     }
 
@@ -88,7 +86,8 @@ impl Cfvo {
         let Some(value) = self.value.as_mut() else {
             return;
         };
-        *value = crate::rewrite_deleted_sheet_references_in_formula(value, deleted_sheet, sheet_order);
+        *value =
+            crate::rewrite_deleted_sheet_references_in_formula(value, deleted_sheet, sheet_order);
     }
 }
 
@@ -344,27 +343,35 @@ impl CfRuleKind {
         }
     }
 
-    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) {
         match self {
             CfRuleKind::CellIs { formulas, .. } => {
                 for formula in formulas {
-                    *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                        formula,
-                        old_name,
-                        new_name,
-                    );
+                    *formula =
+                        crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                            formula, old_name, new_name,
+                        );
                 }
             }
             CfRuleKind::Expression { formula } => {
-                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                    formula,
-                    old_name,
-                    new_name,
-                );
+                *formula =
+                    crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                        formula, old_name, new_name,
+                    );
             }
-            CfRuleKind::DataBar(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
-            CfRuleKind::ColorScale(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
-            CfRuleKind::IconSet(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
+            CfRuleKind::DataBar(rule) => {
+                rule.rewrite_sheet_references_internal_refs_only(old_name, new_name)
+            }
+            CfRuleKind::ColorScale(rule) => {
+                rule.rewrite_sheet_references_internal_refs_only(old_name, new_name)
+            }
+            CfRuleKind::IconSet(rule) => {
+                rule.rewrite_sheet_references_internal_refs_only(old_name, new_name)
+            }
             CfRuleKind::TopBottom(_)
             | CfRuleKind::UniqueDuplicate(_)
             | CfRuleKind::Unsupported { .. } => {}
@@ -418,7 +425,9 @@ impl CfRuleKind {
             CfRuleKind::ColorScale(rule) => {
                 rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order)
             }
-            CfRuleKind::IconSet(rule) => rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order),
+            CfRuleKind::IconSet(rule) => {
+                rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order)
+            }
             CfRuleKind::TopBottom(_)
             | CfRuleKind::UniqueDuplicate(_)
             | CfRuleKind::Unsupported { .. } => {}
@@ -448,7 +457,11 @@ impl CfRule {
         self.kind.rewrite_sheet_references(old_name, new_name);
     }
 
-    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) {
         self.kind
             .rewrite_sheet_references_internal_refs_only(old_name, new_name);
     }
@@ -709,7 +722,9 @@ fn evaluate_rules(
             CfRuleKind::IconSet(is) => {
                 apply_icon_set(&mut result, rule, is, visible, values, formula_evaluator)
             }
-            CfRuleKind::TopBottom(tb) => apply_top_bottom(&mut result, rule, tb, visible, values, dxfs),
+            CfRuleKind::TopBottom(tb) => {
+                apply_top_bottom(&mut result, rule, tb, visible, values, dxfs)
+            }
             CfRuleKind::UniqueDuplicate(ud) => {
                 apply_unique_duplicate(&mut result, rule, ud, visible, values, dxfs)
             }
@@ -808,10 +823,24 @@ fn apply_data_bar(
     let Some(mut stats) = NumericRangeStats::collect(&rule.applies_to, values) else {
         return;
     };
-    let Some(min) = cfvo_threshold(&db.min, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::DataBar) else {
+    let Some(min) = cfvo_threshold(
+        &db.min,
+        &mut stats,
+        ctx,
+        values,
+        formula_evaluator,
+        CfvoContextKind::DataBar,
+    ) else {
         return;
     };
-    let Some(max) = cfvo_threshold(&db.max, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::DataBar) else {
+    let Some(max) = cfvo_threshold(
+        &db.max,
+        &mut stats,
+        ctx,
+        values,
+        formula_evaluator,
+        CfvoContextKind::DataBar,
+    ) else {
         return;
     };
     let denom = max - min;
@@ -866,16 +895,36 @@ fn apply_color_scale(
     let max_cfvo = &cs.cfvos[cs.cfvos.len() - 1];
     let mid_cfvo = has_mid.then(|| &cs.cfvos[1]);
 
-    let Some(min) = cfvo_threshold(min_cfvo, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other)
-    else {
+    let Some(min) = cfvo_threshold(
+        min_cfvo,
+        &mut stats,
+        ctx,
+        values,
+        formula_evaluator,
+        CfvoContextKind::Other,
+    ) else {
         return;
     };
-    let Some(max) = cfvo_threshold(max_cfvo, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other)
-    else {
+    let Some(max) = cfvo_threshold(
+        max_cfvo,
+        &mut stats,
+        ctx,
+        values,
+        formula_evaluator,
+        CfvoContextKind::Other,
+    ) else {
         return;
     };
-    let mid = mid_cfvo
-        .and_then(|m| cfvo_threshold(m, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other));
+    let mid = mid_cfvo.and_then(|m| {
+        cfvo_threshold(
+            m,
+            &mut stats,
+            ctx,
+            values,
+            formula_evaluator,
+            CfvoContextKind::Other,
+        )
+    });
     let min_color = cs.colors[0];
     let max_color = cs.colors[cs.colors.len() - 1];
 
@@ -893,16 +942,28 @@ fn apply_color_scale(
             let high_color = cs.colors[2];
             if v <= mid {
                 let denom = mid - min;
-                let t = if denom == 0.0 { 0.0 } else { ((v - min) / denom) as f32 };
+                let t = if denom == 0.0 {
+                    0.0
+                } else {
+                    ((v - min) / denom) as f32
+                };
                 lerp_color(min_color, mid_color, t)
             } else {
                 let denom = max - mid;
-                let t = if denom == 0.0 { 0.0 } else { ((v - mid) / denom) as f32 };
+                let t = if denom == 0.0 {
+                    0.0
+                } else {
+                    ((v - mid) / denom) as f32
+                };
                 lerp_color(mid_color, high_color, t)
             }
         } else {
             let denom = max - min;
-            let t = if denom == 0.0 { 0.0 } else { ((v - min) / denom) as f32 };
+            let t = if denom == 0.0 {
+                0.0
+            } else {
+                ((v - min) / denom) as f32
+            };
             lerp_color(min_color, max_color, t)
         };
 
@@ -925,7 +986,8 @@ fn apply_icon_set(
     let Some(mut stats) = NumericRangeStats::collect(&rule.applies_to, values) else {
         return;
     };
-    let Some(thresholds) = icon_set_thresholds(is, &mut stats, ctx, values, formula_evaluator) else {
+    let Some(thresholds) = icon_set_thresholds(is, &mut stats, ctx, values, formula_evaluator)
+    else {
         return;
     };
     let icon_count = is.set.icon_count();
@@ -1325,7 +1387,11 @@ fn eval_threshold(
         }
     }
     if let Some(fe) = formula_evaluator {
-        if let Some(v) = fe.eval(expr, ctx).and_then(cell_value_as_number).filter(|n| !n.is_nan()) {
+        if let Some(v) = fe
+            .eval(expr, ctx)
+            .and_then(cell_value_as_number)
+            .filter(|n| !n.is_nan())
+        {
             return Some(v);
         }
         if expr != trimmed {
@@ -1337,11 +1403,17 @@ fn eval_threshold(
     }
     // Support a bare A1 reference even without a formula evaluator.
     if let Ok(cell) = CellRef::from_a1(expr) {
-        return values.get_value(cell).and_then(cell_value_as_number).filter(|n| !n.is_nan());
+        return values
+            .get_value(cell)
+            .and_then(cell_value_as_number)
+            .filter(|n| !n.is_nan());
     }
     if let Some((_, a1)) = expr.rsplit_once('!') {
         if let Ok(cell) = CellRef::from_a1(a1) {
-            return values.get_value(cell).and_then(cell_value_as_number).filter(|n| !n.is_nan());
+            return values
+                .get_value(cell)
+                .and_then(cell_value_as_number)
+                .filter(|n| !n.is_nan());
         }
     }
     None
@@ -1589,7 +1661,10 @@ mod tests {
 
     impl FormulaEvaluator for AssertCtxFormulaEvaluator {
         fn eval(&self, formula: &str, ctx: CellRef) -> Option<CellValue> {
-            assert_eq!(ctx, self.expected_ctx, "formula evaluated with unexpected ctx");
+            assert_eq!(
+                ctx, self.expected_ctx,
+                "formula evaluated with unexpected ctx"
+            );
             self.results.get(formula.trim()).cloned()
         }
     }
@@ -1609,12 +1684,16 @@ mod tests {
     #[test]
     fn extract_refs_avoids_sheet_names_that_look_like_cells() {
         let refs = extract_a1_references("SUM('ABC1'!A1, ABC1!B2)");
-        assert_eq!(refs, vec![parse_range_a1("A1").unwrap(), parse_range_a1("B2").unwrap()]);
+        assert_eq!(
+            refs,
+            vec![parse_range_a1("A1").unwrap(), parse_range_a1("B2").unwrap()]
+        );
     }
 
     #[test]
     fn percent_and_percentile_thresholds_differ() {
-        let values = TestValues::with_numbers([("A1", 0.0), ("A2", 0.0), ("A3", 100.0), ("A4", 100.0)]);
+        let values =
+            TestValues::with_numbers([("A1", 0.0), ("A2", 0.0), ("A3", 100.0), ("A4", 100.0)]);
 
         let visible = parse_range_a1("A1:A4").unwrap();
         let percent_rule = CfRule {
@@ -1672,14 +1751,46 @@ mod tests {
         let rules = vec![percent_rule];
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
-        assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
-        assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
+        assert_eq!(
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .icon
+                .as_ref()
+                .unwrap()
+                .index,
+            0
+        );
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .icon
+                .as_ref()
+                .unwrap()
+                .index,
+            0
+        );
 
         let rules = vec![percentile_rule];
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
-        assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
-        assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
+        assert_eq!(
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .icon
+                .as_ref()
+                .unwrap()
+                .index,
+            1
+        );
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .icon
+                .as_ref()
+                .unwrap()
+                .index,
+            1
+        );
     }
 
     #[test]
@@ -1723,7 +1834,10 @@ mod tests {
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         assert_eq!(
-            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .style
+                .fill,
             Some(Color::new_argb(0xFFFFFF00)),
             "value at cfvo-driven midpoint should receive the midpoint color"
         );
@@ -1770,7 +1884,12 @@ mod tests {
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, Some(&evaluator), None);
 
-        let bar1 = eval.get(CellRef::from_a1("B1").unwrap()).unwrap().data_bar.as_ref().unwrap();
+        let bar1 = eval
+            .get(CellRef::from_a1("B1").unwrap())
+            .unwrap()
+            .data_bar
+            .as_ref()
+            .unwrap();
         assert!((bar1.fill_ratio - 0.5).abs() < 1e-6);
         assert_eq!(bar1.min_length, 10);
         assert_eq!(bar1.max_length, 90);
@@ -1814,8 +1933,18 @@ mod tests {
         let rules = vec![rule];
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
-        let c1 = eval.get(CellRef::from_a1("C1").unwrap()).unwrap().icon.as_ref().unwrap();
-        let c3 = eval.get(CellRef::from_a1("C3").unwrap()).unwrap().icon.as_ref().unwrap();
+        let c1 = eval
+            .get(CellRef::from_a1("C1").unwrap())
+            .unwrap()
+            .icon
+            .as_ref()
+            .unwrap();
+        let c3 = eval
+            .get(CellRef::from_a1("C3").unwrap())
+            .unwrap()
+            .icon
+            .as_ref()
+            .unwrap();
         assert_eq!(c1.index, 2);
         assert_eq!(c3.index, 0);
         assert!(!c1.show_value);
@@ -1857,7 +1986,12 @@ mod tests {
         let rules = vec![rule];
         let mut engine = ConditionalFormattingEngine::new();
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
-        let d1 = eval.get(CellRef::from_a1("D1").unwrap()).unwrap().data_bar.as_ref().unwrap();
+        let d1 = eval
+            .get(CellRef::from_a1("D1").unwrap())
+            .unwrap()
+            .data_bar
+            .as_ref()
+            .unwrap();
         assert!((d1.fill_ratio - 0.5).abs() < 1e-6);
     }
 
@@ -1901,14 +2035,21 @@ mod tests {
 
         let values = TestValues::default();
         let mut engine = ConditionalFormattingEngine::new();
-        let eval = engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
+        let eval =
+            engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
 
         assert_eq!(
-            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .style
+                .fill,
             Some(Color::new_argb(0xFFFF0000))
         );
         assert_eq!(
-            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .style
+                .fill,
             None
         );
     }
@@ -1960,14 +2101,21 @@ mod tests {
 
         let values = TestValues::default();
         let mut engine = ConditionalFormattingEngine::new();
-        let eval = engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
+        let eval =
+            engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
 
         assert_eq!(
-            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .style
+                .fill,
             Some(Color::new_argb(0xFFFF0000))
         );
         assert_eq!(
-            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .style
+                .fill,
             None
         );
     }
@@ -2030,11 +2178,17 @@ mod tests {
             engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
 
         assert_eq!(
-            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .style
+                .fill,
             Some(Color::new_argb(0xFFFF0000))
         );
         assert_eq!(
-            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            eval.get(CellRef::from_a1("A2").unwrap())
+                .unwrap()
+                .style
+                .fill,
             None
         );
     }
@@ -2178,7 +2332,8 @@ mod tests {
         obj.remove("axis_color");
         obj.remove("direction");
 
-        let deserialized: DataBarRule = serde_json::from_value(value).expect("deserialize without x14 fields");
+        let deserialized: DataBarRule =
+            serde_json::from_value(value).expect("deserialize without x14 fields");
         assert_eq!(deserialized.negative_fill_color, None);
         assert_eq!(deserialized.axis_color, None);
         assert_eq!(deserialized.direction, None);

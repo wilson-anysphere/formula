@@ -211,4 +211,3 @@ pub fn validate_defined_name(name: &str) -> Result<(), DefinedNameValidationErro
 
     Ok(())
 }
-

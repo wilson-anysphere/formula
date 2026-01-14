@@ -6,6 +6,7 @@
 //! - Tauri/IPC and WASM boundaries via `serde` (JSON-safe schema)
 
 mod address;
+pub mod autofilter;
 pub mod calc_settings;
 mod cell;
 pub mod charts;
@@ -16,7 +17,6 @@ mod date_system;
 mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
-pub mod autofilter;
 mod error;
 pub mod formula_rewrite;
 mod formula_text;
@@ -26,8 +26,8 @@ mod merge;
 mod names;
 mod outline;
 pub mod pivots;
-mod protection;
 mod print_settings;
+mod protection;
 pub mod rich_text;
 mod serde_defaults;
 mod sheet_name;
@@ -40,6 +40,10 @@ mod workbook;
 mod worksheet;
 
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
+pub use autofilter::{
+    DateComparison, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
+    OpaqueDynamicFilter, SheetAutoFilter, TextMatch, TextMatchKind,
+};
 pub use calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 pub use comments::{
@@ -63,17 +67,13 @@ pub use names::{
     XLNM_PRINT_TITLES,
 };
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
-pub use autofilter::{
-    DateComparison, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
-    OpaqueDynamicFilter, SheetAutoFilter, TextMatch, TextMatchKind,
+pub use print_settings::{
+    ColRange, ManualPageBreaks, Orientation, PageMargins, PageSetup, PaperSize, PrintTitles,
+    RowRange, Scaling, SheetPrintSettings, WorkbookPrintSettings,
 };
 pub use protection::{
     hash_legacy_password, verify_legacy_password, SheetProtection, SheetProtectionAction,
     WorkbookProtection,
-};
-pub use print_settings::{
-    ColRange, ManualPageBreaks, Orientation, PageMargins, PageSetup, PaperSize, PrintTitles,
-    RowRange, Scaling, SheetPrintSettings, WorkbookPrintSettings,
 };
 pub use sheet_name::{
     sanitize_sheet_name, validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
@@ -99,9 +99,7 @@ pub use view::{
     a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
     SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
-pub use workbook::{
-    DeleteSheetError, DuplicateSheetError, RenameSheetError, Workbook, WorkbookId,
-};
+pub use workbook::{DeleteSheetError, DuplicateSheetError, RenameSheetError, Workbook, WorkbookId};
 pub use worksheet::{
     ColProperties, RangeBatch, RangeBatchBuffer, RangeBatchRef, RowProperties, SheetVisibility,
     TabColor, Worksheet, WorksheetId,

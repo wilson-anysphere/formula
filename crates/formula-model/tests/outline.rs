@@ -76,4 +76,3 @@ fn missing_outline_in_json_payload_still_deserializes_and_preserves_user_hidden(
     assert!(deserialized.row_outline_entry(3).hidden.user);
     assert!(deserialized.outline.rows.entry(3).hidden.user);
 }
-

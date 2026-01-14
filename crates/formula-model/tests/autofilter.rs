@@ -3,7 +3,7 @@ use formula_model::{
     SheetAutoFilter, SortCondition, SortState, TextMatch, TextMatchKind,
 };
 use serde_json::json;
- 
+
 #[test]
 fn sheet_autofilter_is_serde_roundtrippable() {
     let filter = SheetAutoFilter {
@@ -47,28 +47,30 @@ fn sheet_autofilter_is_serde_roundtrippable() {
                 descending: true,
             }],
         }),
-        raw_xml: vec![r#"<extLst><ext uri="{00000000-0000-0000-0000-000000000000}"/></extLst>"#.to_string()],
+        raw_xml: vec![
+            r#"<extLst><ext uri="{00000000-0000-0000-0000-000000000000}"/></extLst>"#.to_string(),
+        ],
     };
- 
+
     let json = serde_json::to_string(&filter).unwrap();
     let reparsed: SheetAutoFilter = serde_json::from_str(&json).unwrap();
     assert_eq!(reparsed, filter);
 }
- 
+
 #[test]
 fn legacy_table_filter_column_values_still_deserializes() {
     let payload = json!({
         "col_id": 0,
         "values": ["Apple", "Cherry"]
     });
- 
+
     let col: FilterColumn = serde_json::from_value(payload).unwrap();
     assert_eq!(col.col_id, 0);
     assert_eq!(col.values, vec!["Apple", "Cherry"]);
     assert_eq!(col.join, FilterJoin::Any);
     assert_eq!(col.criteria, Vec::<FilterCriterion>::new());
 }
- 
+
 #[test]
 fn sheet_autofilter_defaults_missing_optional_fields() {
     let payload = json!({
@@ -77,7 +79,7 @@ fn sheet_autofilter_defaults_missing_optional_fields() {
             "end": { "row": 1, "col": 0 }
         }
     });
- 
+
     let filter: SheetAutoFilter = serde_json::from_value(payload).unwrap();
     assert!(filter.filter_columns.is_empty());
     assert!(filter.sort_state.is_none());

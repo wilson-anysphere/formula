@@ -1,6 +1,4 @@
-use formula_model::{
-    CellRef, Comment, CommentKind, CommentPatch, Range, Reply, Worksheet,
-};
+use formula_model::{CellRef, Comment, CommentKind, CommentPatch, Range, Reply, Worksheet};
 
 #[test]
 fn create_note_and_threaded_comments_on_same_cell() {
@@ -67,9 +65,7 @@ fn reply_add_and_remove() {
 #[test]
 fn merge_cell_anchor_normalization() {
     let mut sheet = Worksheet::new(1, "Sheet1");
-    sheet
-        .merge_range(Range::from_a1("A1:B2").unwrap())
-        .unwrap();
+    sheet.merge_range(Range::from_a1("A1:B2").unwrap()).unwrap();
 
     // B2 is inside the merged region anchored at A1.
     let merged_cell = CellRef::new(1, 1);
@@ -127,4 +123,3 @@ fn comment_updates_and_serde_roundtrip() {
     assert_eq!(comments[0].content, "after");
     assert!(comments[0].resolved);
 }
-

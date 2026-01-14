@@ -1,19 +1,19 @@
 use crate::Range;
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
- 
+
 /// Sort condition within an AutoFilter / SortState payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SortCondition {
     pub range: Range,
     pub descending: bool,
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SortState {
     pub conditions: Vec<SortCondition>,
 }
- 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterJoin {
@@ -23,7 +23,7 @@ pub enum FilterJoin {
     /// All criteria must match (logical AND).
     All,
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterValue {
@@ -32,7 +32,7 @@ pub enum FilterValue {
     Bool(bool),
     DateTime(NaiveDateTime),
 }
- 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextMatchKind {
@@ -40,7 +40,7 @@ pub enum TextMatchKind {
     BeginsWith,
     EndsWith,
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextMatch {
     pub kind: TextMatchKind,
@@ -48,7 +48,7 @@ pub struct TextMatch {
     #[serde(default)]
     pub case_sensitive: bool,
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NumberComparison {
@@ -59,19 +59,22 @@ pub enum NumberComparison {
     Between { min: f64, max: f64 },
     NotEqual(f64),
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DateComparison {
     After(NaiveDateTime),
     Before(NaiveDateTime),
-    Between { start: NaiveDateTime, end: NaiveDateTime },
+    Between {
+        start: NaiveDateTime,
+        end: NaiveDateTime,
+    },
     OnDate(NaiveDate),
     Today,
     Yesterday,
     Tomorrow,
 }
- 
+
 /// Preserve an unsupported custom filter operator/value pair so it can be
 /// round-tripped without loss.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,7 +83,7 @@ pub struct OpaqueCustomFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
 }
- 
+
 /// Preserve an unsupported dynamic filter payload so it can be round-tripped
 /// without loss.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +95,7 @@ pub struct OpaqueDynamicFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_value: Option<String>,
 }
- 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterCriterion {
@@ -107,7 +110,7 @@ pub enum FilterCriterion {
     /// An unknown `<dynamicFilter type="..."/>` payload.
     OpaqueDynamic(OpaqueDynamicFilter),
 }
- 
+
 /// A filter definition for a column within an AutoFilter range.
 ///
 /// `col_id` is a 0-based offset from the AutoFilter range start column, matching
@@ -135,7 +138,7 @@ pub struct FilterColumn {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub raw_xml: Vec<String>,
 }
- 
+
 /// Worksheet-level AutoFilter state.
 ///
 /// This payload corresponds to the worksheet `<autoFilter>` element, and is

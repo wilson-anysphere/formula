@@ -21,13 +21,19 @@ pub struct SheetProtection {
     /// Allow selecting locked cells while the sheet is protected.
     ///
     /// Excel defaults this to true when protecting a sheet.
-    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "crate::serde_defaults::default_true",
+        skip_serializing_if = "is_true"
+    )]
     pub select_locked_cells: bool,
 
     /// Allow selecting unlocked cells while the sheet is protected.
     ///
     /// Excel defaults this to true when protecting a sheet.
-    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "crate::serde_defaults::default_true",
+        skip_serializing_if = "is_true"
+    )]
     pub select_unlocked_cells: bool,
 
     /// Allow formatting cells.

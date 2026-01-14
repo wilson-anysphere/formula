@@ -1859,7 +1859,10 @@ mod tests {
 
         sheet.set_phonetic(cell_ref, Some("PHO".to_string()));
         assert_eq!(sheet.phonetic(cell_ref), Some("PHO"));
-        assert!(sheet.cell(cell_ref).is_some(), "phonetic should create a cell record");
+        assert!(
+            sheet.cell(cell_ref).is_some(),
+            "phonetic should create a cell record"
+        );
 
         sheet.set_phonetic(cell_ref, None);
         assert!(

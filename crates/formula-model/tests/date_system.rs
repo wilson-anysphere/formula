@@ -1,5 +1,5 @@
 use formula_format::Locale;
-use formula_model::{format_cell_display, DateSystem, CellValue, Style, Workbook};
+use formula_model::{format_cell_display, CellValue, DateSystem, Style, Workbook};
 
 #[test]
 fn workbook_date_system_defaults_to_excel_1900() {
@@ -33,4 +33,3 @@ fn date_serial_formatting_depends_on_workbook_date_system() {
 
     assert_ne!(display_1900.text, display_1904.text);
 }
-

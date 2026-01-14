@@ -55,7 +55,9 @@ fn parse_hex_argb(s: &str) -> Result<ArgbColor, String> {
         let rgb = u32::from_str_radix(hex, 16).map_err(|_| "invalid hex".to_string())?;
         0xFF00_0000 | rgb
     } else {
-        return Err("expected a #AARRGGBB (8 hex digits) or #RRGGBB (6 hex digits) string".to_string());
+        return Err(
+            "expected a #AARRGGBB (8 hex digits) or #RRGGBB (6 hex digits) string".to_string(),
+        );
     };
     Ok(ArgbColor(argb))
 }

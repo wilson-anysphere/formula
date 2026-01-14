@@ -116,27 +116,29 @@ impl DataValidation {
         }
     }
 
-    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) {
         // For list validations, `formula1` can contain a literal list (e.g. `"A,B,C"`). Preserve
         // literal lists unchanged while still rewriting formula-like list sources.
         let formula1_is_literal_list =
             self.kind == DataValidationKind::List && parse_list_constant(&self.formula1).is_some();
 
         if !formula1_is_literal_list && !self.formula1.is_empty() {
-            self.formula1 = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                &self.formula1,
-                old_name,
-                new_name,
-            );
-        }
-
-        if let Some(formula2) = self.formula2.as_mut() {
-            *formula2 =
+            self.formula1 =
                 crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                    formula2,
+                    &self.formula1,
                     old_name,
                     new_name,
                 );
+        }
+
+        if let Some(formula2) = self.formula2.as_mut() {
+            *formula2 = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                formula2, old_name, new_name,
+            );
         }
     }
 

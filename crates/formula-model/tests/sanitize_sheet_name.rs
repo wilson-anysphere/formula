@@ -45,4 +45,3 @@ fn always_produces_a_valid_sheet_name() {
         );
     }
 }
-

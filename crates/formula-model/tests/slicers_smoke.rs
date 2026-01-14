@@ -96,4 +96,3 @@ fn slicer_filters_pivot_and_updates_chart() -> Result<(), String> {
 
     Ok(())
 }
-
