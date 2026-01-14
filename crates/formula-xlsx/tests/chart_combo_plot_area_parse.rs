@@ -85,6 +85,87 @@ fn parses_combo_plot_area_with_multiple_chart_types() {
 }
 
 #[test]
+fn parses_combo_plot_area_with_area_and_line_chart_types() {
+    let xml = r#"
+        <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart>
+            <c:plotArea>
+              <c:areaChart>
+                <c:grouping val="standard"/>
+                <c:ser>
+                  <c:tx><c:v>Area Series</c:v></c:tx>
+                  <c:cat>
+                    <c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef>
+                  </c:cat>
+                  <c:val>
+                    <c:numRef><c:f>Sheet1!$B$2:$B$3</c:f></c:numRef>
+                  </c:val>
+                </c:ser>
+                <c:axId val="1"/>
+                <c:axId val="2"/>
+              </c:areaChart>
+
+              <c:lineChart>
+                <c:grouping val="standard"/>
+                <c:ser>
+                  <c:tx><c:v>Line Series</c:v></c:tx>
+                  <c:cat>
+                    <c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef>
+                  </c:cat>
+                  <c:val>
+                    <c:numRef><c:f>Sheet1!$C$2:$C$3</c:f></c:numRef>
+                  </c:val>
+                </c:ser>
+                <c:axId val="1"/>
+                <c:axId val="2"/>
+              </c:lineChart>
+
+              <c:catAx>
+                <c:axId val="1"/>
+                <c:axPos val="b"/>
+              </c:catAx>
+              <c:valAx>
+                <c:axId val="2"/>
+                <c:axPos val="l"/>
+              </c:valAx>
+            </c:plotArea>
+          </c:chart>
+        </c:chartSpace>
+    "#;
+
+    let model = parse_chart_space(xml.as_bytes(), "combo-area-line.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Area);
+    assert_eq!(model.series.len(), 2);
+
+    let PlotAreaModel::Combo(combo) = model.plot_area else {
+        panic!("expected combo plot area");
+    };
+    assert_eq!(combo.charts.len(), 2);
+
+    match &combo.charts[0] {
+        ComboChartEntry::Area { model, series } => {
+            assert_eq!(series.start, 0);
+            assert_eq!(series.end, 1);
+            assert_eq!(model.grouping.as_deref(), Some("standard"));
+            assert_eq!(model.ax_ids, vec![1, 2]);
+        }
+        other => panic!("expected first subplot to be area, got {other:?}"),
+    }
+
+    match &combo.charts[1] {
+        ComboChartEntry::Line { model, series } => {
+            assert_eq!(series.start, 1);
+            assert_eq!(series.end, 2);
+            assert_eq!(model.ax_ids, vec![1, 2]);
+        }
+        other => panic!("expected second subplot to be line, got {other:?}"),
+    }
+
+    assert_eq!(model.series[0].plot_index, Some(0));
+    assert_eq!(model.series[1].plot_index, Some(1));
+}
+
+#[test]
 fn combo_plot_area_warns_only_for_unknown_chart_types() {
     let xml = r#"
         <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">

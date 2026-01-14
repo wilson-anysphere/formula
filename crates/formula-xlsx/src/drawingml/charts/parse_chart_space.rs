@@ -278,20 +278,20 @@ fn parse_plot_area_chart(
 
         let series_range = SeriesIndexRange { start, end };
         let entry = match subplot_plot_area {
-            PlotAreaModel::Area(_) => ComboChartEntry::Unknown {
-                name: "area".to_string(),
+            PlotAreaModel::Area(model) => ComboChartEntry::Area {
+                model,
                 series: series_range,
             },
             PlotAreaModel::Bar(model) => ComboChartEntry::Bar {
                 model,
                 series: series_range,
             },
-            PlotAreaModel::Bubble(_) => ComboChartEntry::Unknown {
-                name: "bubble".to_string(),
+            PlotAreaModel::Bubble(model) => ComboChartEntry::Bubble {
+                model,
                 series: series_range,
             },
-            PlotAreaModel::Doughnut(_) => ComboChartEntry::Unknown {
-                name: "doughnut".to_string(),
+            PlotAreaModel::Doughnut(model) => ComboChartEntry::Doughnut {
+                model,
                 series: series_range,
             },
             PlotAreaModel::Line(model) => ComboChartEntry::Line {
@@ -302,20 +302,20 @@ fn parse_plot_area_chart(
                 model,
                 series: series_range,
             },
-            PlotAreaModel::Radar(_) => ComboChartEntry::Unknown {
-                name: "radar".to_string(),
+            PlotAreaModel::Radar(model) => ComboChartEntry::Radar {
+                model,
                 series: series_range,
             },
             PlotAreaModel::Scatter(model) => ComboChartEntry::Scatter {
                 model,
                 series: series_range,
             },
-            PlotAreaModel::Stock(_) => ComboChartEntry::Unknown {
-                name: "stock".to_string(),
+            PlotAreaModel::Stock(model) => ComboChartEntry::Stock {
+                model,
                 series: series_range,
             },
-            PlotAreaModel::Surface(_) => ComboChartEntry::Unknown {
-                name: "surface".to_string(),
+            PlotAreaModel::Surface(model) => ComboChartEntry::Surface {
+                model,
                 series: series_range,
             },
             PlotAreaModel::Combo(_) => unreachable!("nested combo plot area is not supported"),
@@ -324,19 +324,6 @@ fn parse_plot_area_chart(
                 series: series_range,
             },
         };
-
-        // If a chart type is known but does not have a first-class `ComboChartEntry` variant,
-        // emit a warning so consumers can distinguish "we parsed it" from "we can render/model it".
-        //
-        // Note: Unknown chart kinds are already warned in `parse_plot_area_model`.
-        if matches!(&entry, ComboChartEntry::Unknown { .. })
-            && !matches!(&subplot_kind, ChartKind::Unknown { .. })
-        {
-            warn(
-                diagnostics,
-                format!("unsupported chart type {raw_chart_type}; rendering may be incomplete"),
-            );
-        }
 
         charts.push(entry);
     }

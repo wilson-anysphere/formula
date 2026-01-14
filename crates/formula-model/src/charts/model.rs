@@ -210,9 +210,24 @@ pub struct SeriesIndexRange {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ComboChartEntry {
+    Area {
+        #[serde(flatten)]
+        model: AreaChartModel,
+        series: SeriesIndexRange,
+    },
     Bar {
         #[serde(flatten)]
         model: BarChartModel,
+        series: SeriesIndexRange,
+    },
+    Bubble {
+        #[serde(flatten)]
+        model: BubbleChartModel,
+        series: SeriesIndexRange,
+    },
+    Doughnut {
+        #[serde(flatten)]
+        model: DoughnutChartModel,
         series: SeriesIndexRange,
     },
     Line {
@@ -225,9 +240,24 @@ pub enum ComboChartEntry {
         model: PieChartModel,
         series: SeriesIndexRange,
     },
+    Radar {
+        #[serde(flatten)]
+        model: RadarChartModel,
+        series: SeriesIndexRange,
+    },
     Scatter {
         #[serde(flatten)]
         model: ScatterChartModel,
+        series: SeriesIndexRange,
+    },
+    Stock {
+        #[serde(flatten)]
+        model: StockChartModel,
+        series: SeriesIndexRange,
+    },
+    Surface {
+        #[serde(flatten)]
+        model: SurfaceChartModel,
         series: SeriesIndexRange,
     },
     Unknown {
