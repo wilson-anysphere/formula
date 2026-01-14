@@ -836,6 +836,9 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        # Multiple jobs within the release matrix can race to populate the same cache key
+        # (e.g. Windows x64 + ARM64). Cache save conflicts are expected; don't fail the build.
+        continue-on-error: true
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: apps/desktop/public/pyodide/
