@@ -23,6 +23,8 @@ test("Ribbon schema includes File tab command ids", () => {
     "file.save.saveAs.copy",
     "file.save.saveAs.download",
     "file.save.autoSave",
+    "file.info.manageWorkbook.versions",
+    "file.info.manageWorkbook.branches",
     "file.print.print",
     "file.print.printPreview",
     "file.print.pageSetup",
@@ -88,6 +90,8 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
     "file.export.createPdf",
     "file.export.export.pdf",
     "file.export.changeFileType.pdf",
+    // These are always registered (they export without the desktop print backend), but keep
+    // them in this list so the test covers both export paths.
     "file.export.changeFileType.csv",
     "file.export.changeFileType.xlsx",
   ];
@@ -103,5 +107,19 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
       `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
     );
   }
-});
 
+  // These file ids are registered as hidden aliases that route to canonical view/panel commands.
+  const panelAliases = ["file.info.manageWorkbook.versions", "file.info.manageWorkbook.branches"];
+  for (const id of panelAliases) {
+    assert.match(
+      commands,
+      new RegExp(`\\bregisterPanelAlias\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerDesktopCommands.ts to register ${id} via registerPanelAlias`,
+    );
+    assert.doesNotMatch(
+      disabling,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
+    );
+  }
+});
