@@ -21,7 +21,6 @@ import {
   resizeAnchor,
   shiftAnchor,
   type DrawingInteractionCallbacks,
-  type DrawingInteractionCommitKind,
 } from "../drawings/interaction.js";
 import {
   cursorForRotationHandle,
@@ -16169,9 +16168,7 @@ export class SpreadsheetApp {
       // Allow grabbing a resize handle for the current drawing selection even when the
       // pointer is slightly outside the object's bounds (handles extend beyond the
       // selection outline).
-      //
-      // When the dedicated DrawingInteractionController is enabled, it owns resize handling.
-      if (!this.drawingInteractionController && primaryButton && this.selectedDrawingId != null) {
+      if (primaryButton && this.selectedDrawingId != null) {
         const selectedIndex = hitIndex.byId.get(this.selectedDrawingId);
         const selected = selectedIndex != null ? hitIndex.ordered[selectedIndex] ?? null : null;
         if (selected) {
@@ -16263,8 +16260,8 @@ export class SpreadsheetApp {
         this.focus();
 
         // Begin drag/resize gesture for primary-button interactions when the legacy
-        // DrawingInteractionController is disabled (legacy mode).
-        if (!this.drawingInteractionController && primaryButton) {
+        // pointer handlers are active (legacy mode).
+        if (primaryButton) {
           e.preventDefault();
           const handle = hitTestResizeHandle(drawingBounds, x, y, hit.transform);
           const scroll = effectiveScrollForAnchor(hit.anchor, drawingViewport);
