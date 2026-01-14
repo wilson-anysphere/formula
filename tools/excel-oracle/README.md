@@ -109,6 +109,9 @@ Notes / caveats:
 - `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
   `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
   English in the generated TSVs.
+- Prefer committing the extractor output verbatim (one entry per canonical function, including
+  identity mappings) so the JSON represents an explicit snapshot of what Excel reports for the full
+  catalog.
 - For `es-ES`, treat a “complete” extraction as **one translation per canonical function** in
   `shared/functionCatalog.json` (i.e. the extractor should not report a large skipped set).
 - After extracting, regenerate + verify with:

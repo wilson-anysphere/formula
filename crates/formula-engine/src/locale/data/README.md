@@ -51,6 +51,11 @@ Missing entries are treated as identity mappings (canonical == localized).
 whenever possible. Hand-maintained or web-scraped translation tables are frequently incomplete, and
 any missing entry will silently fall back to English in the generated TSVs.
 
+In general, prefer to keep the extractor output **verbatim** (one entry per canonical function,
+including identity mappings). That makes the source JSON an explicit snapshot of what Excel reports
+for the full catalog, and avoids accidentally dropping translations for functions that *are*
+localized.
+
 #### `es-ES` (Spanish) source requirements
 
 `es-ES` must be backed by a **complete Excel-extracted** mapping that covers the engine’s full
