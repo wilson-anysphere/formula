@@ -1211,6 +1211,58 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_blank_style_
 }
 
 #[test]
+fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_rk_edit_when_staying_rk() {
+    const NUM: u32 = 0x0002;
+    // BrtCellRk (NUM) payload is 12 bytes ([col][style][rk:u32]).
+    const NUM_PAYLOAD_LEN: u8 = 12;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number_rk(0, 0, 0.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(id_raw, vec![0x82, 0x00], "expected non-canonical id varint for NUM/RK");
+    assert_eq!(
+        len_raw,
+        vec![(NUM_PAYLOAD_LEN | 0x80), 0x00],
+        "expected non-canonical len varint for NUM/RK payload"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(0.125),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, NUM);
+    let rk = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    assert_eq!(decode_rk_number(rk).to_bits(), 0.125f64.to_bits());
+}
+
+#[test]
 fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_payload_len_unchanged() {
     const FORMULA_FLOAT: u32 = 0x0009;
 
