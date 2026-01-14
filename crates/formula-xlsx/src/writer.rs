@@ -440,7 +440,6 @@ fn trim_float(value: f64) -> String {
         s.to_string()
     }
 }
-
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {
     let mut settings_by_sheet_name: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet_settings in &workbook.print_settings.sheets {
