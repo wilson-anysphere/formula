@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use formula_engine::{BytecodeCompileReason, Engine, Value};
+use formula_engine::{BytecodeCompileReason, Engine, ErrorKind, Value};
 
 #[test]
 fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
@@ -274,4 +274,61 @@ fn bytecode_custom_sheet_dims_expand_3d_whole_row_per_sheet() {
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_sheet_prefixed_whole_column_can_reference_wider_sheet() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 10, 7)
+        .expect("set Sheet2 dimensions");
+
+    engine.set_cell_value("Sheet2", "G1", 2.0).unwrap();
+    engine
+        // Sheet1 only has 5 columns, but can still reference a wider Sheet2.
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet2!G:G)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_3d_whole_column_returns_ref_when_out_of_bounds_for_any_sheet() {
+    let mut engine = Engine::new();
+    // Sheet1 is narrower than Sheet2, so column G is out-of-bounds on Sheet1 but valid on Sheet2.
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 10, 7)
+        .expect("set Sheet2 dimensions");
+
+    engine.set_cell_value("Sheet2", "G1", 2.0).unwrap();
+    engine
+        // 3D refs should still compile to bytecode even if some areas are out-of-bounds; evaluation
+        // should surface `#REF!`.
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet2!G:G)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
