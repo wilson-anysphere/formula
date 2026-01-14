@@ -48,6 +48,25 @@ function normalizeRect(rect) {
 }
 
 /**
+ * Normalize a workbook collection field (sheets/tables/namedRanges) into an Array.
+ *
+ * Some hosts represent metadata as Maps (e.g. keyed by name). We keep the public
+ * API typed as arrays, but accept Map/Set/object shapes at runtime for robustness.
+ *
+ * @param {any} value
+ * @returns {any[]}
+ */
+function normalizeCollection(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Map || value instanceof Set) return Array.from(value.values());
+  if (value && typeof value === "object") {
+    // Plain object map: `{ key: value }`
+    return Object.values(value);
+  }
+  return [];
+}
+
+/**
  * @param {any} sheet
  * @returns {any[][] | null}
  */
@@ -313,9 +332,9 @@ export function extractWorkbookSchema(workbook, options = {}) {
       ? Math.floor(maxAnalyzeColsRaw)
       : 50;
 
-  const workbookSheets = Array.isArray(workbook?.sheets) ? workbook.sheets : [];
-  const workbookTables = Array.isArray(workbook?.tables) ? workbook.tables : [];
-  const workbookNamedRanges = Array.isArray(workbook?.namedRanges) ? workbook.namedRanges : [];
+  const workbookSheets = normalizeCollection(workbook?.sheets);
+  const workbookTables = normalizeCollection(workbook?.tables);
+  const workbookNamedRanges = normalizeCollection(workbook?.namedRanges);
 
   /** @type {Array<{ name: string, sheet: any }>} */
   const sheetEntries = [];

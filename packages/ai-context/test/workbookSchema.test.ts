@@ -67,6 +67,32 @@ describe("extractWorkbookSchema", () => {
     expect(schema1.tables.map((t) => t.name)).toEqual(["A", "B"]);
   });
 
+  it("accepts Map-shaped workbook metadata (tables + namedRanges)", () => {
+    const tables = new Map<string, any>();
+    tables.set("T", { name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } });
+
+    const namedRanges = new Map<string, any>();
+    namedRanges.set("NR", { name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 1 } });
+
+    const workbook = {
+      id: "wb-map-meta",
+      sheets: [{ name: "Sheet1", cells: [["Name", "Value"], ["A", 1]] }],
+      tables,
+      namedRanges,
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.tables[0]).toMatchObject({
+      name: "T",
+      sheetName: "Sheet1",
+      rangeA1: "Sheet1!A1:B2",
+      rowCount: 1,
+      columnCount: 2,
+    });
+    expect(schema.namedRanges).toEqual([{ name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 1 }, rangeA1: "Sheet1!A1:B1" }]);
+  });
+
   it("bounds sampling work for very large table rects", () => {
     let readCount = 0;
     const sheet = {
