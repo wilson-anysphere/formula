@@ -280,31 +280,26 @@ Verifier nuances (very common bug source):
 - The verifier hash is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the encrypted
   blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
-### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-CBC, 0x1000 segments)
+### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB)
 
-Standard `EncryptedPackage` decryption uses **AES-CBC** over the package payload, segmented into
-4096-byte plaintext segments with per-segment IV derivation:
+Standard `EncryptedPackage` decryption (as implemented in `crates/formula-offcrypto`) uses
+**AES-ECB** over the package ciphertext (no IV).
+
+High-level:
 
 ```text
-iv_i = SHA1(salt || LE32(i))[0..16]
-plaintext_i = AES-CBC-Decrypt(key, iv_i, ciphertext_segment_i)
+orig_size = U64LE(encrypted_package[0..8])
+ciphertext = encrypted_package[8..]
+plaintext = AES-ECB-Decrypt(key, ciphertext)  // ciphertext must be 16-byte aligned
+return plaintext[0..orig_size]
 ```
 
-Where:
+Notes:
 
-- `salt` is `EncryptionVerifier.salt` (16 bytes).
-- Segment index `i` is 0-based.
-- After concatenation, truncate plaintext to the 8-byte `orig_size` prefix.
-
-See `docs/offcrypto-standard-encryptedpackage.md` for edge cases (notably the “extra full padding
-block” case where the final ciphertext segment can be `0x1010` bytes).
-
-Implementation nuance:
-
-- `crates/formula-io/src/offcrypto/encrypted_package.rs` implements the CBC + per-segment-IV scheme
-  above (given a derived key and salt).
-- `crates/formula-office-crypto` attempts a small set of Standard/CryptoAPI AES variants observed in
-  the wild (including the scheme above) to maximize compatibility.
+- Some producers pad `ciphertext` well beyond `orig_size` (e.g. to 4096 bytes for tiny packages).
+  Truncation to `orig_size` is authoritative.
+- For broader real-world compatibility across Standard/CryptoAPI AES variants, see
+  `crates/formula-office-crypto` (it attempts multiple schemes and validates by magic bytes).
 
 ## Interop notes / fixture generation
 
@@ -374,8 +369,8 @@ otherwise:
   defaults are:
   - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
   - Iteration count is effectively fixed at 50,000 in the key derivation.
-  - `EncryptedPackage` segmentation: 4096-byte plaintext segments (`0x1000`) and IV derivation
-    `SHA1(salt || LE32(i))[0..16]` (see `docs/offcrypto-standard-encryptedpackage.md`).
+  - `EncryptedPackage` encryption: AES-ECB (no IV); pad plaintext to 16-byte blocks when encrypting
+    and rely on the `orig_size` prefix for truncation (see `docs/offcrypto-standard-encryptedpackage.md`).
 
 These defaults are intended for **interoperability** with Excel, not for novel cryptographic
 design.
