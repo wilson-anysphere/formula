@@ -9,7 +9,8 @@ import type { ThemeController } from "../theme/themeController.js";
 
 import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
-import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "../formatting/selectionSizeGuard.js";
+import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import { executeCellsStructuralRibbonCommand } from "../ribbon/cellsStructuralCommands.js";
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
@@ -335,6 +336,38 @@ export function registerDesktopCommands(params: {
     t("command.home.number.moreFormats.custom"),
     async () => {
       try {
+        // Mirror `applyFormattingToSelection` selection guards before prompting so users don't
+        // enter a format code only to hit selection size caps (or read-only role restrictions)
+        // when applying.
+        if (isEditingFn()) return;
+
+        const selectionRanges =
+          typeof (app as any)?.getSelectionRanges === "function" ? ((app as any).getSelectionRanges() as any[]) : [];
+        const ranges = Array.isArray(selectionRanges) ? selectionRanges : [];
+
+        const rawLimits = typeof (app as any)?.getGridLimits === "function" ? (app as any).getGridLimits() : null;
+        const limits = {
+          maxRows:
+            Number.isInteger((rawLimits as any)?.maxRows) && (rawLimits as any).maxRows > 0
+              ? (rawLimits as any).maxRows
+              : DEFAULT_GRID_LIMITS.maxRows,
+          maxCols:
+            Number.isInteger((rawLimits as any)?.maxCols) && (rawLimits as any).maxCols > 0
+              ? (rawLimits as any).maxCols
+              : DEFAULT_GRID_LIMITS.maxCols,
+        };
+
+        const decision = evaluateFormattingSelectionSize(ranges as any, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+        if (!decision.allowed) {
+          safeShowToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+          return;
+        }
+
+        if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true && !decision.allRangesBand) {
+          safeShowToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+          return;
+        }
+
         await promptAndApplyCustomNumberFormat({
           isEditing: isEditingFn,
           showInputBox,
