@@ -502,6 +502,12 @@ fn decrypt_biff_xor_obfuscation(
     if !ct_eq(&expected.to_le_bytes(), &verifier.to_le_bytes()) {
         return Err(DecryptError::WrongPassword);
     }
+    // Guard against accidentally treating a real Method-1 XOR-encrypted workbook as a simplified
+    // test fixture. The deterministic test encryptor uses `key = verifier ^ 0xFFFF`; real Excel
+    // workbooks use `CreateXorKey_Method1` for the key.
+    if key != (expected ^ 0xFFFF) {
+        return Err(DecryptError::WrongPassword);
+    }
 
     let xor_array = Zeroizing::new(derive_xor_array(password));
     apply_xor_obfuscation_in_place(workbook_stream, encrypted_start, key, &xor_array)
