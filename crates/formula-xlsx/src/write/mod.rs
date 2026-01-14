@@ -897,18 +897,14 @@ fn build_parts(
         )?;
         let has_drawings = !sheet.drawings.is_empty();
         // Best-effort: only rewrite drawing-related parts when the worksheet model references new
-        // media that does not already exist in the package, or when the source sheet has no
-        // drawing relationship.
+        // media that does not already exist in the package, or when the in-memory drawing object
+        // list diverges from the source drawing part.
         //
         // This is important for chart-heavy fixtures where a no-op round-trip is expected to
         // preserve `xl/drawings/*` and `.rels` parts byte-for-byte.
-        let existing_drawing_target = if has_drawings {
-            match rels_xml.as_deref() {
-                Some(xml) => relationship_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?,
-                None => None,
-            }
-        } else {
-            None
+        let existing_drawing_target = match rels_xml.as_deref() {
+            Some(xml) => relationship_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?,
+            None => None,
         };
         let existing_drawing_part_path = existing_drawing_target
             .as_deref()
@@ -949,8 +945,30 @@ fn build_parts(
         } else {
             false
         };
+        let drawings_removed = if !has_drawings && has_existing_drawing_part {
+            // Best-effort: only remove drawing pointers/relationships when we can successfully
+            // parse the source drawing part (avoids dropping opaque drawing content if parsing
+            // fails for any reason).
+            existing_drawing_part_path
+                .as_deref()
+                .and_then(|drawing_path| {
+                    let mut tmp_workbook = formula_model::Workbook::new();
+                    crate::drawings::DrawingPart::parse_from_parts(
+                        sheet_index,
+                        drawing_path,
+                        &parts,
+                        &mut tmp_workbook,
+                    )
+                    .ok()
+                    .map(|part| !part.objects.is_empty())
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
         let drawings_need_emit =
             has_drawings && (!has_existing_drawing_part || missing_drawing_media || drawings_changed);
+        let drawings_need_remove = drawings_removed;
 
         if has_drawings && !drawings_need_emit {
             if let Some(drawing_part_path) = existing_drawing_part_path.as_deref() {
@@ -968,6 +986,7 @@ fn build_parts(
             && !autofilter_changed
             && !sheet_protection_changed
             && !drawings_need_emit
+            && !drawings_need_remove
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -1100,6 +1119,31 @@ fn build_parts(
             )?;
             drawing_part.write_into_parts(&mut parts, &doc.workbook)?;
             ensure_drawing_part_content_types(&mut parts, &drawing_part_path)?;
+        } else if drawings_need_remove {
+            // Remove the worksheet-level `<drawing>` pointer and its corresponding relationship
+            // entry. We intentionally do not delete the underlying drawing parts/media because
+            // they may contain other content that Formula doesn't model yet.
+            if worksheet_drawing_rel_id(&sheet_xml)?.is_some() {
+                sheet_xml = remove_worksheet_drawing_xml(&sheet_xml)?;
+            }
+
+            if let Some(existing_rels) = parts
+                .get(&rels_part)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            {
+                let rels = crate::relationships::Relationships::from_xml(existing_rels)?;
+                let filtered: Vec<crate::relationships::Relationship> = rels
+                    .iter()
+                    .filter(|rel| rel.type_ != DRAWING_REL_TYPE)
+                    .cloned()
+                    .collect();
+                if filtered.is_empty() {
+                    parts.remove(&rels_part);
+                } else {
+                    let rels = crate::relationships::Relationships::new(filtered);
+                    parts.insert(rels_part.clone(), rels.to_xml());
+                }
+            }
         } else if has_drawings && existing_drawing_target.is_some() {
             // We have an existing drawing relationship/part in the source package. Avoid touching
             // any `.rels` / `xl/drawings/*` parts unless we need to add new media. Still ensure the
@@ -2344,6 +2388,42 @@ fn insert_drawing_before_tag(name: &[u8]) -> bool {
             | b"tableParts"
             | b"extLst"
     )
+}
+
+fn remove_worksheet_drawing_xml(sheet_xml: &str) -> Result<String, WriteError> {
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"drawing" => {
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"drawing" => {
+                // Drop the element.
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
 fn update_worksheet_drawing_xml(

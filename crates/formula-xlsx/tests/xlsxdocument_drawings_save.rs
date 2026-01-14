@@ -6,6 +6,7 @@ use formula_model::drawings::{
 use formula_model::CellRef;
 use formula_xlsx::drawings::DrawingPart;
 use formula_xlsx::{load_from_bytes, XlsxDocument, XlsxPackage};
+use roxmltree::Document;
 use std::collections::HashMap;
 
 #[test]
@@ -237,5 +238,51 @@ fn xlsxdocument_can_duplicate_image_without_adding_new_media() {
     assert!(
         image_count >= 2,
         "expected duplicated image to round-trip; got {image_count} occurrences of {existing_image_id:?}"
+    );
+}
+
+#[test]
+fn xlsxdocument_can_remove_sheet_drawings() {
+    let fixture = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
+
+    let mut doc = load_from_bytes(fixture).expect("load fixture");
+    doc.workbook.sheets[0].drawings.clear();
+
+    let saved = doc.save_to_vec().expect("save");
+
+    let pkg = XlsxPackage::from_bytes(&saved).expect("open saved workbook");
+    let sheet_xml = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("sheet xml should exist"),
+    )
+    .expect("sheet xml utf8");
+    let sheet_doc = Document::parse(sheet_xml).expect("parse sheet xml");
+    assert!(
+        !sheet_doc
+            .descendants()
+            .any(|n| n.is_element() && n.tag_name().name() == "drawing"),
+        "expected worksheet XML to not contain a <drawing> element after removal, got:\n{sheet_xml}"
+    );
+
+    if let Some(rels_bytes) = pkg.part("xl/worksheets/_rels/sheet1.xml.rels") {
+        let rels_xml = std::str::from_utf8(rels_bytes).expect("rels utf8");
+        let rels_doc = Document::parse(rels_xml).expect("parse rels xml");
+        assert!(
+            !rels_doc.descendants().any(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Relationship"
+                    && n.attribute("Type")
+                        == Some(
+                            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+                        )
+            }),
+            "expected worksheet .rels to not contain a drawing relationship after removal, got:\n{rels_xml}"
+        );
+    }
+
+    let reloaded = load_from_bytes(&saved).expect("reload");
+    assert!(
+        reloaded.workbook.sheets[0].drawings.is_empty(),
+        "expected drawings to be removed on reload"
     );
 }
