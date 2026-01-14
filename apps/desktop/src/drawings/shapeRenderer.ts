@@ -207,7 +207,25 @@ function decodeEntities(text: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (match, code) => {
+      const cp = Number.parseInt(code, 10);
+      if (!Number.isFinite(cp)) return match;
+      try {
+        return String.fromCodePoint(cp);
+      } catch {
+        return match;
+      }
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (match, code) => {
+      const cp = Number.parseInt(code, 16);
+      if (!Number.isFinite(cp)) return match;
+      try {
+        return String.fromCodePoint(cp);
+      } catch {
+        return match;
+      }
+    });
 }
 
 function parseAttributes(text: string): Record<string, string> {

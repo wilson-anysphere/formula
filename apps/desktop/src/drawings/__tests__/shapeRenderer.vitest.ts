@@ -47,6 +47,27 @@ describe("parseShapeRenderSpec", () => {
     });
   });
 
+  it("decodes numeric XML entities in txBody text (fallback parser path)", () => {
+    // In Vitest's default node environment, `DOMParser` is unavailable, so
+    // `parseShapeRenderSpec` exercises the fallback tokenizer/decoder.
+    const raw = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello &#x1F600;</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+        <xdr:spPr>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    expect(parseShapeRenderSpec(raw)?.label).toBe("Hello 😀");
+  });
+
   it("returns null for unsupported preset geometries", () => {
     const raw = `
       <xdr:spPr>
