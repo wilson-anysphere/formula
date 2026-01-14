@@ -583,23 +583,28 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
+      const keyStore = app.getCollabEncryptionKeyStore();
+      if (!keyStore) {
+        showToast("Encryption is not available for this workbook.", "error");
+        return;
+      }
+
       const active = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();
       const sheetName = app.getCurrentSheetDisplayName();
       const docId = session.doc.guid;
       const cell = { sheetId, row: active.row, col: active.col };
-      // Prefer the key id from an existing encrypted payload so callers can export the correct
-      // key even if the encrypted range policy has since changed (e.g. key rotation via
-      // add/remove overrides).
+      // Prefer the key id from an existing encrypted payload (when available locally) so callers
+      // can export the correct key even if the encrypted range policy has since changed (e.g.
+      // key rotation via add/remove overrides).
       const keyIdFromEnc = keyIdFromEncryptedCellPayload(session as any, cell);
       const policy = createEncryptionPolicyFromDoc(session.doc);
       const keyIdFromPolicy = policy.keyIdForCell(cell);
-      const keyId = keyIdFromEnc ?? keyIdFromPolicy;
-      if (!keyId) {
+      if (!keyIdFromEnc && !keyIdFromPolicy) {
         // If the policy fails closed (unknown encryptedRanges schema), shouldEncryptCell returns true
         // for all valid cells but keyIdForCell returns null. In that case, surface a more actionable
         // error rather than incorrectly claiming the cell isn't encrypted.
-        if (!keyIdFromEnc && policy.shouldEncryptCell(cell)) {
+        if (policy.shouldEncryptCell(cell)) {
           showToast("Encrypted range metadata is in an unsupported format; cannot determine the key id for this cell.", "error");
           return;
         }
@@ -607,15 +612,10 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      const keyStore = app.getCollabEncryptionKeyStore();
-      if (!keyStore) {
-        showToast("Encryption is not available for this workbook.", "error");
-        return;
-      }
-
-      const cached = keyStore.getCachedKey(docId, keyId);
-      let keyBytes: Uint8Array | null = cached?.keyBytes ?? null;
-      if (!keyBytes) {
+      const loadKeyBytes = async (keyId: string): Promise<Uint8Array | null> => {
+        const cached = keyStore.getCachedKey(docId, keyId);
+        let keyBytes: Uint8Array | null = cached?.keyBytes ?? null;
+        if (keyBytes) return keyBytes;
         try {
           const entry = await keyStore.get(docId, keyId);
           if (entry) {
@@ -624,8 +624,25 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         } catch {
           // ignore
         }
+        return keyBytes;
+      };
+
+      // Match the desktop session's key resolution precedence:
+      // - If the active cell has an `enc` payload and we have that key locally, export it.
+      // - Otherwise, fall back to the policy key id (supports key rotation/overwrite flows).
+      const keyIdCandidates = [keyIdFromEnc, keyIdFromPolicy].filter((id): id is string => Boolean(id));
+
+      let keyId: string | null = null;
+      let keyBytes: Uint8Array | null = null;
+      for (const candidate of keyIdCandidates) {
+        const bytes = await loadKeyBytes(candidate);
+        if (!bytes) continue;
+        keyId = candidate;
+        keyBytes = bytes;
+        break;
       }
-      if (!keyBytes) {
+
+      if (!keyId || !keyBytes) {
         showToast("Missing encryption key for this range. Import the key first.", "warning");
         return;
       }

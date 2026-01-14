@@ -85,6 +85,68 @@ describe("registerEncryptionUiCommands", () => {
     expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/not inside an encrypted range/i), "warning");
   });
 
+  it("exportEncryptionKey falls back to the policy key when the encrypted payload key is unavailable locally", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    const range = new Y.Map<any>();
+    range.set("id", "r1");
+    range.set("sheetId", "Sheet1");
+    range.set("startRow", 0);
+    range.set("startCol", 0);
+    range.set("endRow", 0);
+    range.set("endCol", 0);
+    range.set("keyId", "k-new");
+    ranges.push([range]);
+    metadata.set("encryptedRanges", ranges);
+
+    // Cell ciphertext references a different key id ("k-old"), but we don't have that key locally.
+    const cells = doc.getMap("cells");
+    const cellMap = new Y.Map<any>();
+    cellMap.set("enc", {
+      v: 1,
+      alg: "AES-256-GCM",
+      keyId: "k-old",
+      ivBase64: "AA==",
+      tagBase64: "AA==",
+      ciphertextBase64: "AA==",
+    });
+    cells.set("Sheet1:0:0", cellMap);
+
+    const keyBytes = new Uint8Array(32).fill(5);
+    const keyStore = {
+      getCachedKey: vi.fn((_docId: string, keyId: string) => (keyId === "k-new" ? { keyId, keyBytes } : null)),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("done");
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    // Should probe the payload key first, then export the policy key.
+    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k-old");
+    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k-new");
+
+    const inputOptions = vi.mocked(showInputBox).mock.calls[0]?.[0] as any;
+    const parsed = parseEncryptionKeyExportString(String(inputOptions.value));
+    expect(parsed.keyId).toBe("k-new");
+    expect(parsed.keyBytes).toEqual(keyBytes);
+  });
+
   it("exportEncryptionKey falls back to policy metadata when the active cell is not yet encrypted", async () => {
     const commandRegistry = new CommandRegistry();
 
