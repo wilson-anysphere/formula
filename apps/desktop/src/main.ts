@@ -8793,6 +8793,15 @@ function handleRibbonCommand(commandId: string): void {
         if (isSpreadsheetEditing()) return;
 
         // Guard before prompting so users don't pick a style only to hit size caps on apply.
+        const selection = app.getSelectionRanges();
+        const limits = getGridLimitsForFormatting();
+        const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+        if (!decision.allowed) {
+          showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+          app.focus();
+          return;
+        }
+
         const ranges = selectionRangesForFormatting();
         if (ranges.length !== 1) {
           showToast("Format as Table currently supports a single rectangular selection.", "warning");
