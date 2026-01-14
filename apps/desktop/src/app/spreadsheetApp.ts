@@ -10326,11 +10326,20 @@ export class SpreadsheetApp {
 
     const { frozenRows, frozenCols } = this.getFrozen();
 
+    const sheetCount = (this.document as any)?.model?.sheets?.size;
+    const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+    const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
+    const trackFormulaCells = !hasWasmEngine || !useEngineCache;
+    if (!trackFormulaCells && this.chartHasFormulaCells.size > 0) {
+      // Avoid retaining potentially-stale `false` entries when the engine availability changes.
+      // If we later need to fall back to recalc-driven invalidation, missing entries are treated
+      // conservatively (we mark charts dirty).
+      this.chartHasFormulaCells.clear();
+    }
+
     const createProvider = () => {
       // Avoid allocating a fresh `{row,col}` object for every chart range cell read.
       const coordScratch = { row: 0, col: 0 };
-      const sheetCount = (this.document as any)?.model?.sheets?.size;
-      const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
       const memo = new Map<string, Map<number, SpreadsheetValue>>();
       const stack = new Map<string, Set<number>>();
       return {
@@ -10484,7 +10493,7 @@ export class SpreadsheetApp {
           this.dirtyChartIds.delete(chart.id);
         } else {
           if (!provider) provider = createProvider();
-          const rangeFlags = { sawFormula: false };
+          const rangeFlags = trackFormulaCells ? { sawFormula: false } : undefined;
 
           const nextSeries = base.series.map((ser, idx) => {
             const def = chart.series[idx];
@@ -10512,7 +10521,11 @@ export class SpreadsheetApp {
           });
 
           this.chartModels.set(chart.id, { ...base, series: nextSeries });
-          this.chartHasFormulaCells.set(chart.id, rangeFlags.sawFormula);
+          if (trackFormulaCells) {
+            this.chartHasFormulaCells.set(chart.id, Boolean(rangeFlags?.sawFormula));
+          } else {
+            this.chartHasFormulaCells.delete(chart.id);
+          }
           this.dirtyChartIds.delete(chart.id);
         }
       }
