@@ -256,7 +256,7 @@ pub struct ImportedEmbeddedCellImageInfo {
 ///
 /// Excel stores tiled worksheet background images as `<picture r:id="..."/>` inside the worksheet
 /// XML, with the relationship pointing at an image part in `xl/media/...`.
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImportedSheetBackgroundImageInfo {
     pub sheet_name: String,
@@ -268,6 +268,158 @@ pub struct ImportedSheetBackgroundImageInfo {
     pub bytes_base64: String,
     /// Best-effort MIME type inferred from the image file extension.
     pub mime_type: String,
+}
+
+#[cfg(any(feature = "desktop", test))]
+#[derive(Clone, Debug, PartialEq)]
+struct ImportedSheetBackgroundImagePayload {
+    sheet_name: String,
+    worksheet_part: String,
+    image_id: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn sheet_background_image_payloads_from_preserved_parts(
+    workbook: &crate::file_io::Workbook,
+) -> Vec<ImportedSheetBackgroundImagePayload> {
+    use crate::resource_limits::{
+        MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+    };
+
+    let Some(preserved) = workbook.preserved_drawing_parts.as_ref() else {
+        return Vec::new();
+    };
+
+    // Resolve worksheet part names by sheet name so we can resolve relationship targets.
+    let mut worksheet_part_by_sheet_name: std::collections::HashMap<&str, &str> =
+        std::collections::HashMap::new();
+    for sheet in &workbook.sheets {
+        if let Some(part) = sheet.xlsx_worksheet_part.as_deref() {
+            worksheet_part_by_sheet_name.insert(sheet.name.as_str(), part);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut total_bytes = 0usize;
+
+    fn strip_uri_suffixes(target: &str) -> &str {
+        let target = target.trim();
+        let target = target.split_once('#').map(|(t, _)| t).unwrap_or(target);
+        target.split_once('?').map(|(t, _)| t).unwrap_or(target)
+    }
+
+    fn normalize_part_path(path: &str) -> String {
+        let mut out: Vec<&str> = Vec::new();
+        for part in path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    out.pop();
+                }
+                other => out.push(other),
+            }
+        }
+        out.join("/")
+    }
+
+    fn resolve_part_target(source_part: &str, target: &str) -> String {
+        let source_part: std::borrow::Cow<'_, str> = if source_part.contains('\\') {
+            std::borrow::Cow::Owned(source_part.replace('\\', "/"))
+        } else {
+            std::borrow::Cow::Borrowed(source_part)
+        };
+
+        let target: std::borrow::Cow<'_, str> = if target.contains('\\') {
+            std::borrow::Cow::Owned(target.replace('\\', "/"))
+        } else {
+            std::borrow::Cow::Borrowed(target)
+        };
+
+        let target = strip_uri_suffixes(target.as_ref());
+        if target.is_empty() {
+            return normalize_part_path(source_part.as_ref());
+        }
+        if let Some(target) = target.strip_prefix('/') {
+            return normalize_part_path(target);
+        }
+        let base_dir = source_part
+            .rsplit_once('/')
+            .map(|(dir, _)| dir)
+            .unwrap_or("");
+        normalize_part_path(&format!("{base_dir}/{target}"))
+    }
+
+    for (sheet_name, picture) in preserved.sheet_pictures.iter() {
+        let Some(worksheet_part) = worksheet_part_by_sheet_name.get(sheet_name.as_str()) else {
+            continue;
+        };
+
+        let target_part = resolve_part_target(worksheet_part, picture.picture_rel.target.as_str());
+        if target_part.trim().is_empty() {
+            continue;
+        }
+
+        // Prefer filename-only ids to match other in-app image sources.
+        let image_id = target_part
+            .rsplit('/')
+            .next()
+            .unwrap_or(target_part.as_str())
+            .to_string();
+        if image_id.trim().is_empty() {
+            continue;
+        }
+
+        let Some(bytes) = preserved.parts.get(&target_part) else {
+            continue;
+        };
+
+        let byte_len = bytes.len();
+        if byte_len == 0 {
+            continue;
+        }
+        if byte_len > MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES {
+            continue;
+        }
+        if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+            // Best-effort: stop once we've hit the aggregate cap.
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(byte_len);
+
+        let mime_type = mime_guess::from_path(&image_id)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_string();
+
+        out.push(ImportedSheetBackgroundImagePayload {
+            sheet_name: sheet_name.clone(),
+            worksheet_part: (*worksheet_part).to_string(),
+            image_id,
+            mime_type,
+            bytes: bytes.clone(),
+        });
+    }
+
+    out
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn imported_sheet_background_images_from_preserved_payloads(
+    payloads: Vec<ImportedSheetBackgroundImagePayload>,
+) -> Vec<ImportedSheetBackgroundImageInfo> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    payloads
+        .into_iter()
+        .map(|p| ImportedSheetBackgroundImageInfo {
+            sheet_name: p.sheet_name,
+            worksheet_part: p.worksheet_part,
+            image_id: p.image_id,
+            bytes_base64: STANDARD.encode(p.bytes),
+            mime_type: p.mime_type,
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -2985,17 +3137,37 @@ pub async fn list_imported_sheet_background_images(
         ipc_origin::Verb::Are,
     )?;
 
-    let origin_bytes = {
+    let (origin_bytes, preserved_payloads) = {
         let state = state.inner().lock().unwrap();
         let Ok(workbook) = state.get_workbook() else {
             return Ok(Vec::new());
         };
-        workbook.origin_xlsx_bytes.clone()
+        let origin_bytes = workbook.origin_xlsx_bytes.clone();
+        let preserved_payloads = if origin_bytes.is_none() {
+            sheet_background_image_payloads_from_preserved_parts(&workbook)
+        } else {
+            Vec::new()
+        };
+        (origin_bytes, preserved_payloads)
     };
 
-    let Some(origin_bytes) = origin_bytes else {
-        return Ok(Vec::new());
-    };
+    // Fallback: when we don't retain the full origin XLSX bytes (large workbooks or explicitly
+    // dropped origin bytes), use preserved drawing parts to still surface worksheet backgrounds.
+    if origin_bytes.is_none() {
+        if preserved_payloads.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        return tauri::async_runtime::spawn_blocking(move || {
+            Ok::<_, String>(imported_sheet_background_images_from_preserved_payloads(
+                preserved_payloads,
+            ))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    let origin_bytes = origin_bytes.expect("checked origin_bytes above");
 
     tauri::async_runtime::spawn_blocking(move || {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -7355,11 +7527,60 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::file_io::read_xlsx_blocking;
     use crate::resource_limits::{MAX_MARKETPLACE_HEADER_BYTES, MAX_MARKETPLACE_PACKAGE_BYTES};
+    use formula_xlsx::drawingml::{PreservedDrawingParts, PreservedSheetPicture, SheetRelationshipStub};
     use std::io::Write;
     use std::path::Path;
     use tempfile::TempDir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn imported_sheet_background_images_falls_back_to_preserved_parts_when_origin_bytes_missing() {
+        use std::collections::BTreeMap;
+
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.sheets[0].xlsx_worksheet_part = Some("xl/worksheets/sheet1.xml".to_string());
+
+        workbook.preserved_drawing_parts = Some(PreservedDrawingParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::from([(
+                "xl/media/bg.png".to_string(),
+                vec![0x01, 0x02, 0x03],
+            )]),
+            sheet_drawings: BTreeMap::new(),
+            sheet_pictures: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetPicture {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    picture_xml: br#"<picture r:id="rId1"/>"#.to_vec(),
+                    picture_rel: SheetRelationshipStub {
+                        rel_id: "rId1".to_string(),
+                        target: "../media/bg.png".to_string(),
+                    },
+                },
+            )]),
+            sheet_ole_objects: BTreeMap::new(),
+            sheet_controls: BTreeMap::new(),
+            sheet_drawing_hfs: BTreeMap::new(),
+            chart_sheets: BTreeMap::new(),
+        });
+
+        // Ensure we exercise the preserved-parts path (no origin bytes).
+        workbook.origin_xlsx_bytes = None;
+
+        let payloads = sheet_background_image_payloads_from_preserved_parts(&workbook);
+        assert_eq!(payloads.len(), 1);
+
+        let infos = imported_sheet_background_images_from_preserved_payloads(payloads);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].sheet_name, "Sheet1");
+        assert_eq!(infos[0].worksheet_part, "xl/worksheets/sheet1.xml");
+        assert_eq!(infos[0].image_id, "bg.png");
+        assert_eq!(infos[0].bytes_base64, "AQID");
+        assert_eq!(infos[0].mime_type, "image/png");
+    }
 
     #[tokio::test]
     async fn marketplace_download_payload_rejects_oversized_package_bytes() {
