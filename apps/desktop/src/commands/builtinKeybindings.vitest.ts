@@ -78,6 +78,10 @@ describe("builtin keybinding catalog", () => {
     expect(typeof commentsToggleWhen).toBe("string");
     expect(evaluateWhenClause(commentsToggleWhen, emptyLookup)).toBe(false);
 
+    const addCommentWhen = builtinKeybindings.find((kb) => kb.command === "comments.addComment" && kb.key === "shift+f2")?.when;
+    expect(typeof addCommentWhen).toBe("string");
+    expect(evaluateWhenClause(addCommentWhen, emptyLookup)).toBe(false);
+
     const saveWhen = builtinKeybindings.find((kb) => kb.command === "workbench.saveWorkbook" && kb.key === "ctrl+s")?.when;
     expect(typeof saveWhen).toBe("string");
     expect(evaluateWhenClause(saveWhen, emptyLookup)).toBe(false);
@@ -99,6 +103,12 @@ describe("builtin keybinding catalog", () => {
     contextKeys.batch({ "workbench.commandPaletteOpen": false, "focus.inTextInput": false });
     expect(evaluateWhenClause(findWhen, lookup)).toBe(true);
     expect(evaluateWhenClause(commentsToggleWhen, lookup)).toBe(true);
+
+    // Add Comment (Shift+F2) should be gated by comment permissions, not just edit state.
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "spreadsheet.canComment": false });
+    expect(evaluateWhenClause(addCommentWhen, lookup)).toBe(false);
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "spreadsheet.canComment": true });
+    expect(evaluateWhenClause(addCommentWhen, lookup)).toBe(true);
 
     contextKeys.batch({ "workbench.commandPaletteOpen": false, "focus.inTextInput": true });
     expect(evaluateWhenClause(findWhen, lookup)).toBe(false);
