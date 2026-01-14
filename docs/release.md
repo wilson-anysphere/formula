@@ -558,7 +558,7 @@ dumpbin /headers apps/desktop\src-tauri\target\aarch64-pc-windows-msvc\release\f
   | Select-String -Pattern 'machine' -CaseSensitive:$false
 ```
 
-Expected output includes `machine (AA64)`.
+Expected output includes `AA64` (for example: `AA64 machine (ARM64)`).
 
 Sanity-check (optional): verify the produced MSI targets ARM64 (Template Summary contains `ARM64`):
 
@@ -596,6 +596,7 @@ CI smoke test:
   - Additional validations:
     - `formula-desktop.exe` must report **AA64** in `dumpbin /headers` output (guards against accidentally producing an x64 binary).
     - The ARM64 MSI installer must have `ARM64` in its **Template Summary** (guards against producing a non-ARM64 MSI).
+    - Windows installers must bundle/reference the WebView2 runtime bootstrapper/runtime (see `scripts/ci/check-windows-webview2-installer.py`).
 
 ## Windows installer bundler prerequisites (WiX + NSIS)
 
