@@ -646,6 +646,7 @@ fn verify_password_standard_with_key_and_mode(
     }
 }
 
+#[allow(dead_code)]
 /// Verify the Standard/CryptoAPI password using the *spec* AES-ECB verifier mode only.
 ///
 /// Some producers encrypt verifier fields with AES-CBC; callers that need that compatibility should
