@@ -35,6 +35,19 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(consumerRefs).toEqual(sharedRefs);
   });
 
+  it("matches between packages for external workbook refs with escaped closing brackets in the workbook name", () => {
+    const input = "=SUM([Book]]Name.xlsx]Sheet1!A1, 1)";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["[Book]]Name.xlsx]Sheet1!A1"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
   it("matches between packages for structured table specifiers and selectors", () => {
     const input =
       "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals], Table1[[#Headers],[Amount]], Table1[[#Totals],[Amount]])";

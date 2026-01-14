@@ -249,7 +249,18 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   if (first.ch === "[") {
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
     let i = first.nextIndex;
-    while (i < input.length && input[i] !== "]") i += 1;
+    while (i < input.length) {
+      // Excel escapes `]` in external workbook names by doubling: `]]` -> literal `]`.
+      // Continue scanning for the *real* closing bracket of the workbook prefix.
+      if (input[i] === "]") {
+        if (input[i + 1] === "]") {
+          i += 2;
+          continue;
+        }
+        break;
+      }
+      i += 1;
+    }
     if (i >= input.length || input[i] !== "]") return null;
     i += 1;
     const sheetStart = codePointAt(input, i);
