@@ -155,6 +155,14 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["[Book]]Name.xlsx]Sheet1!A1"]);
   });
 
+  it("tokenizes external workbook references whose workbook name contains '[' characters (non-nesting)", () => {
+    // Workbook names may contain literal `[` without introducing nesting. The workbook prefix ends
+    // at the first non-escaped `]` before the sheet name.
+    const tokens = tokenizeFormula("=SUM([A1[Name.xlsx]Sheet1!A1, 1)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[A1[Name.xlsx]Sheet1!A1"]);
+  });
+
   it("tokenizes Excel structured references as single reference tokens", () => {
     const input = "=SUM(Table1[Amount])";
     const tokens = tokenizeFormula(input);
