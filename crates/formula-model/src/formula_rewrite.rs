@@ -162,21 +162,67 @@ fn format_sheet_reference(workbook_prefix: Option<&str>, start: &str, end: Optio
     }
 }
 
+fn find_workbook_prefix_end(sheet_spec: &str, start: usize) -> Option<usize> {
+    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
+    //
+    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+    let bytes = sheet_spec.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+        let ch = sheet_spec[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
+}
+
 fn split_workbook_prefix(sheet_spec: &str) -> (Option<&str>, &str) {
     // External references can include a path component that itself contains `[` / `]` (e.g.
     // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`). The *workbook* delimiter is the last `[...]` pair in the
     // spec, so search from the end.
-    let Some(open) = sheet_spec.rfind('[') else {
+    let bytes = sheet_spec.as_bytes();
+    let mut last_end: Option<usize> = None;
+
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(end) = find_workbook_prefix_end(sheet_spec, i) {
+                if end < sheet_spec.len() {
+                    last_end = Some(end);
+                }
+                i = end;
+                continue;
+            }
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside a multi-byte sequence as actual bracket characters.
+        let ch = sheet_spec[i..]
+            .chars()
+            .next()
+            .expect("i always at char boundary");
+        i += ch.len_utf8();
+    }
+
+    let Some(prefix_end) = last_end else {
         return (None, sheet_spec);
     };
-    let Some(close_rel) = sheet_spec[open..].find(']') else {
-        return (None, sheet_spec);
-    };
-    let close = open + close_rel;
-    let prefix_end = close + 1;
+
     if prefix_end >= sheet_spec.len() {
         return (None, sheet_spec);
     }
+
     let (prefix, remainder) = sheet_spec.split_at(prefix_end);
     (Some(prefix), remainder)
 }
@@ -361,16 +407,8 @@ fn parse_unquoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str
 
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
     if first == '[' {
-        // Scan until the closing `]` (workbook name can contain many characters).
-        i += 1;
-        while i < bytes.len() {
-            if bytes[i] == b']' {
-                i += 1;
-                break;
-            }
-            let ch = formula[i..].chars().next()?;
-            i += ch.len_utf8();
-        }
+        let end = find_workbook_prefix_end(formula, start)?;
+        i = end;
 
         if i >= bytes.len() {
             return None;
@@ -956,6 +994,23 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("=[Book1.xlsx]Sheet1!A1", "Sheet1", "Data"),
             "=[Book1.xlsx]Sheet1!A1"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_external_workbook_reference_with_escaped_brackets() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=[Book]]Name.xlsx]Sheet1!A1", "Sheet1", "Data"),
+            "=[Book]]Name.xlsx]Sheet1!A1"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_external_workbook_reference_with_nested_brackets_in_name() {
+        // Workbook name: `Book[Name].xlsx` (note: the literal `]` must be escaped as `]]`).
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=[Book[Name]].xlsx]Sheet1!A1", "Sheet1", "Data"),
+            "=[Book[Name]].xlsx]Sheet1!A1"
         );
     }
 
