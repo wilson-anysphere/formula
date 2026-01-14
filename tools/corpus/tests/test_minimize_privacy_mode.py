@@ -145,6 +145,67 @@ class MinimizePrivacyModeTests(unittest.TestCase):
             triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
             minimize_mod.minimize_workbook_package = original_minimize_pkg  # type: ignore[assignment]
 
+    def test_minimize_private_mode_redacts_windows_out_xlsx_paths_in_json_and_stdout(self) -> None:
+        import tools.corpus.minimize as minimize_mod
+        import tools.corpus.triage as triage_mod
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_run_rust_triage = triage_mod._run_rust_triage
+        original_minimize_pkg = minimize_mod.minimize_workbook_package
+        argv = sys.argv
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {"diff": {"details": {"counts": {"critical": 0, "warning": 0, "info": 0, "total": 0}}}},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            def _fake_minimize_workbook_package(*args, **kwargs):  # type: ignore[no-untyped-def]
+                return ({"diff_counts": {"critical": 0}, "critical_parts": []}, [], b"min-bytes")
+
+            minimize_mod.minimize_workbook_package = _fake_minimize_workbook_package  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as td:
+                td_path = Path(td)
+                input_path = td_path / "sensitive-name.xlsx"
+                input_path.write_bytes(_make_empty_zip())
+                out_path = td_path / "out.json"
+                # Simulate a Windows-style output path (common in logs when users copy/paste).
+                out_xlsx = r"C:\Users\Alice\minimized.xlsx"
+
+                sys.argv = [
+                    "tools.corpus.minimize",
+                    "--input",
+                    str(input_path),
+                    "--out",
+                    str(out_path),
+                    "--out-xlsx",
+                    out_xlsx,
+                    "--privacy-mode",
+                    "private",
+                ]
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", new=buf):
+                    rc = minimize_mod.main()
+                self.assertEqual(rc, 0)
+
+                out = json.loads(out_path.read_text(encoding="utf-8"))
+                minimized = out.get("minimized") or {}
+                self.assertIsInstance(minimized, dict)
+                self.assertEqual(minimized.get("path"), "minimized.xlsx")
+                self.assertNotIn("Alice", json.dumps(out))
+
+                stdout = buf.getvalue()
+                self.assertNotIn("Alice", stdout)
+                self.assertNotIn("C:\\Users", stdout)
+                self.assertNotIn(str(td_path), stdout)
+                self.assertNotIn("sensitive-name.xlsx", stdout)
+        finally:
+            sys.argv = argv
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+            minimize_mod.minimize_workbook_package = original_minimize_pkg  # type: ignore[assignment]
+
     def test_minimize_private_mode_hashes_minimized_errors(self) -> None:
         import tools.corpus.minimize as minimize_mod
         import tools.corpus.triage as triage_mod

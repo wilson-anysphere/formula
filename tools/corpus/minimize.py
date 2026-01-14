@@ -28,6 +28,23 @@ from xml.etree import ElementTree as ET
 MAX_DIFF_ENTRIES_AUTO_RERUN = 200_000
 
 
+def _basename_for_privacy(path_str: str) -> str:
+    """Return a privacy-safe basename for a user-supplied path string.
+
+    Note: `path_str` can be a Windows/UNC path or a URI-like string (e.g. file://...). Using
+    `Path(path_str).name` directly is OS-dependent and can fail to strip Windows backslashes on
+    non-Windows platforms. Normalize slashes first for consistent behavior.
+    """
+
+    raw = (path_str or "").strip()
+    if not raw:
+        return raw
+    normalized = raw.replace("\\", "/").rstrip("/")
+    if not normalized:
+        return raw
+    return Path(normalized).name or raw
+
+
 def _relationship_id_from_diff_path(path: str) -> str | None:
     """Extract `rId...` relationship ids from xlsx-diff XML paths.
 
@@ -830,7 +847,7 @@ def main() -> int:
             # Do not leak local output paths; keep only the basename.
             p = minimized.get("path")
             if isinstance(p, str) and p:
-                minimized["path"] = Path(p).name
+                minimized["path"] = _basename_for_privacy(p)
             err = minimized.get("error")
             if isinstance(err, str) and err:
                 minimized["error"] = f"sha256={triage_mod._sha256_text(err)}"  # noqa: SLF001
@@ -916,14 +933,14 @@ def main() -> int:
 
     wrote_summary = str(out_path)
     if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
-        wrote_summary = out_path.name
+        wrote_summary = _basename_for_privacy(str(out_path))
     print(f"Wrote summary: {wrote_summary}")
     if out_xlsx is not None:
         minimized = summary.get("minimized")
         if isinstance(minimized, dict) and "path" in minimized:
             wrote_min = str(out_xlsx)
             if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
-                wrote_min = out_xlsx.name
+                wrote_min = _basename_for_privacy(str(out_xlsx))
             print(f"Wrote minimized workbook: {wrote_min}")
         elif isinstance(minimized, dict) and "error" in minimized:
             print(f"Minimized workbook not written: {minimized['error']}")
