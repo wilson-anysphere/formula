@@ -187,7 +187,7 @@ function main() {
   const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (stepSummaryPath) {
     try {
-      appendFileSync(stepSummaryPath, `- Manifest signature: OK\n`, "utf8");
+      appendFileSync(stepSummaryPath, `\n### Signature\n\n- Manifest signature: OK\n`, "utf8");
     } catch {
       // Non-fatal: the signature verification already passed; don't fail the release
       // workflow just because the step summary could not be updated.
