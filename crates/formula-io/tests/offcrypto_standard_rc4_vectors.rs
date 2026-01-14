@@ -10,6 +10,7 @@ use md5::{Digest as _, Md5};
 use sha1::Sha1;
 use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
 
+use formula_io::offcrypto::cryptoapi::CALG_MD5;
 use formula_io::{HashAlg, Rc4CryptoApiDecryptReader};
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
@@ -417,9 +418,24 @@ fn standard_cryptoapi_rc4_md5_40bit_padding_vector() {
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     stream.extend_from_slice(&ciphertext_padded);
+
+    // Exercise the production framing + parameter-validation path.
+    let cursor = Cursor::new(stream.clone());
+    let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+        cursor,
+        h.to_vec(),
+        0, // keySize=0 => 40-bit per MS-OFFCRYPTO
+        CALG_MD5,
+    )
+    .unwrap();
+    let mut decrypted = Vec::new();
+    reader.read_to_end(&mut decrypted).unwrap();
+    assert_eq!(decrypted, plaintext);
+
+    // Also exercise the lower-level constructor that assumes the caller has already parsed the
+    // `EncryptedPackage` size prefix.
     let mut cursor = Cursor::new(stream);
     cursor.seek(SeekFrom::Start(8)).unwrap();
-
     let mut reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
         cursor,
         plaintext.len() as u64,
