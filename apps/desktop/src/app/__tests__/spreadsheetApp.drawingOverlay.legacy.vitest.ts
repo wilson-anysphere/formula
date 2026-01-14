@@ -571,4 +571,75 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("locks image aspect ratio when Shift is held during corner resize (legacy grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      // Avoid exercising async image rendering / bitmap decode paths in this unit test; we only
+      // care about the interaction math + cached anchor updates.
+      vi.spyOn((app as any).drawingOverlay, "render").mockResolvedValue();
+
+      const image: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(200), cy: pxToEmu(100) },
+        },
+        zOrder: 0,
+      };
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => [image];
+
+      const viewport = (app as any).getDrawingInteractionViewport();
+      const geom = (app as any).drawingGeom;
+      const bounds = drawingObjectToViewportRect(image, viewport, geom);
+      const handleCenter = getResizeHandleCenters(bounds, image.transform).find((c) => c.handle === "se");
+      expect(handleCenter).toBeTruthy();
+
+      (app as any).onPointerDown({
+        clientX: handleCenter!.x,
+        clientY: handleCenter!.y,
+        pointerType: "mouse",
+        button: 0,
+        pointerId: 1,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        preventDefault: () => {},
+      } as any);
+
+      // Drag horizontally while holding Shift; height should adjust to keep 2:1 ratio.
+      (app as any).onPointerMove({
+        clientX: handleCenter!.x + 50,
+        clientY: handleCenter!.y,
+        pointerId: 1,
+        shiftKey: true,
+      } as any);
+
+      const resized = ((app as any).listDrawingObjectsForSheet() as DrawingObject[]).find((obj) => obj.id === 1);
+      expect(resized?.anchor).toMatchObject({
+        type: "absolute",
+        size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+      });
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
