@@ -16,6 +16,7 @@ duplicated follow-up work across the task queue.
 - DONE — Task 380: External invalidation (sheet/workbook) + external dependency indexing
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
+- DONE — INDIRECT rejects external workbook refs (bytecode + AST) (`a3a4632c`, `dfbd573f`)
 
 ## Remaining (open)
 
@@ -25,7 +26,3 @@ duplicated follow-up work across the task queue.
       - `analyze_external_dependencies` + `set_cell_external_refs`
 - TODO — Task 383: Copy rewrite for external refs
   - Pointers: `crates/formula-engine/src/editing/rewrite.rs` (`rewrite_formula_for_copy_delta`, etc.)
-- TODO — Bytecode: make `INDIRECT` reject external workbook refs (match AST + `tests/indirect.rs`)
-  - Pointers:
-    - `crates/formula-engine/src/bytecode/runtime.rs` (`fn_indirect`, external sheet handling)
-    - `crates/formula-engine/tests/bytecode_external_refs.rs` (currently expects INDIRECT external refs to resolve)
