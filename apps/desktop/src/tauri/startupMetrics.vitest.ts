@@ -202,6 +202,52 @@ describe("startupMetrics", () => {
     }
   });
 
+  it("boots when running under tauri:// even if __TAURI__ is injected later (protocol heuristic)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
+
+    const originalLocation = (globalThis as any).location;
+    Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "tauri:" } });
+
+    try {
+      // Start with no `__TAURI__` to force the bootstrap's heuristic path.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        // ignore
+      }
+
+      (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
+      (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
+
+      vi.resetModules();
+      await import("./startupMetricsBootstrap");
+
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      setTimeout(() => {
+        (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      }, 5);
+
+      vi.advanceTimersByTime(10);
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
+      expect(listen).toHaveBeenCalled();
+    } finally {
+      if (typeof originalLocation === "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).location;
+      } else {
+        Object.defineProperty(globalThis, "location", { configurable: true, value: originalLocation });
+      }
+    }
+  });
+
   it("treats a throwing __TAURI__ getter as \"missing\" (best-effort hardening)", async () => {
     Object.defineProperty(globalThis, "__TAURI__", {
       configurable: true,
