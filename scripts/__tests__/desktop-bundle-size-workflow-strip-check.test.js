@@ -68,11 +68,12 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
   );
   const buildSnippet = yamlListItemBlock(lines, buildIdx);
+  const buildStructuralSnippet = stripYamlBlockScalarBodies(buildSnippet);
   // `scripts/cargo_agent.sh` sets CARGO_PROFILE_RELEASE_CODEGEN_UNITS based on its job count unless
   // callers override it. Ensure this workflow pins it to 1 so bundle sizes match the repo's
   // Cargo.toml release profile and remain comparable to tagged releases.
   assert.match(
-    buildSnippet,
+    buildStructuralSnippet,
     /\bCARGO_PROFILE_RELEASE_CODEGEN_UNITS:\s*["']?1["']?\b/,
     `Expected the Tauri build step to set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1.\nSaw snippet:\n${buildSnippet}`,
   );
@@ -89,9 +90,14 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
   );
 
   const snippet = yamlListItemBlock(lines, idx);
+  const stepIndent = lines[idx]?.match(/^\s*/)?.[0]?.length ?? 0;
+  const runLineRe = new RegExp(
+    `^\\s{${stepIndent + 2}}run:\\s*python(?:3)?\\s+scripts\\/verify_desktop_binary_stripped\\.py\\b`,
+    "m",
+  );
   assert.match(
     snippet,
-    /run:\s*python(?:3)?\s+scripts\/verify_desktop_binary_stripped\.py\b/,
+    runLineRe,
     `Expected the strip verification step to invoke scripts/verify_desktop_binary_stripped.py.\nSaw snippet:\n${snippet}`,
   );
 });

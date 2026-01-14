@@ -22,7 +22,7 @@ function snippetAfter(lines, needle, windowSize = 40) {
   const searchLines = stripYamlBlockScalarBodies(lines.join("\n")).split(/\r?\n/);
   const idx = searchLines.findIndex((line) => needle.test(line));
   assert.ok(idx >= 0, `Expected to find line matching ${needle} in ${path.relative(repoRoot, workflowPath)}`);
-  return lines.slice(idx, idx + windowSize).join("\n");
+  return searchLines.slice(idx, idx + windowSize).join("\n");
 }
 
 test("release workflow gates updater secret enforcement on upstream repo or TAURI_PRIVATE_KEY", async () => {

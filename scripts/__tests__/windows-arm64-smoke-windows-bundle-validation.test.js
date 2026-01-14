@@ -63,5 +63,10 @@ test("windows-arm64-smoke workflow verifies the produced desktop binary is strip
   assert.ok(stripIdx > buildIdx, `Expected strip verification to run after the build step.`);
 
   const snippet = lines.slice(stripIdx, stripIdx + 10).join("\n");
-  assert.match(snippet, /run:\s*python(?:3)?\s+scripts\/verify_desktop_binary_stripped\.py\b/);
+  const stepIndent = lines[stripIdx]?.match(/^\s*/)?.[0]?.length ?? 0;
+  const runLineRe = new RegExp(
+    `^\\s{${stepIndent + 2}}run:\\s*python(?:3)?\\s+scripts\\/verify_desktop_binary_stripped\\.py\\b`,
+    "m",
+  );
+  assert.match(snippet, runLineRe);
 });

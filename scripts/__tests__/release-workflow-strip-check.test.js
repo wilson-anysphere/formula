@@ -80,9 +80,14 @@ test("release workflow verifies the produced desktop binary is stripped", async 
   assert.ok(stripIdx > buildIdx, `Expected the strip verification step to run after bundling.`);
 
   const snippet = yamlListItemBlock(lines, stripIdx);
+  const stepIndent = lines[stripIdx]?.match(/^\s*/)?.[0]?.length ?? 0;
+  const runLineRe = new RegExp(
+    `^\\s{${stepIndent + 2}}run:\\s*python(?:3)?\\s+scripts\\/verify_desktop_binary_stripped\\.py\\b`,
+    "m",
+  );
   assert.match(
     snippet,
-    /run:\s*python(?:3)?\s+scripts\/verify_desktop_binary_stripped\.py\b/,
+    runLineRe,
     `Expected the strip verification step to invoke scripts/verify_desktop_binary_stripped.py.\nSaw snippet:\n${snippet}`,
   );
 });

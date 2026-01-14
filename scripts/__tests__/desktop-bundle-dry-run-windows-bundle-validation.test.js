@@ -106,9 +106,14 @@ test("desktop-bundle-dry-run workflow verifies the produced desktop binary is st
   assert.ok(idx > buildIdx, `Expected strip verification to run after the Tauri build step.`);
 
   const snippet = yamlListItemBlock(lines, idx);
+  const stepIndent = lines[idx]?.match(/^\s*/)?.[0]?.length ?? 0;
+  const runLineRe = new RegExp(
+    `^\\s{${stepIndent + 2}}run:\\s*python(?:3)?\\s+scripts\\/verify_desktop_binary_stripped\\.py\\b`,
+    "m",
+  );
   assert.match(
     snippet,
-    /run:\s*python(?:3)?\s+scripts\/verify_desktop_binary_stripped\.py\b/,
+    runLineRe,
     `Expected strip verification step to invoke scripts/verify_desktop_binary_stripped.py.\nSaw snippet:\n${snippet}`,
   );
 });

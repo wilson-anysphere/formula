@@ -72,7 +72,8 @@ test("release workflow includes a Linux ARM64 (aarch64) build runner in the matr
   const idx = searchLines.findIndex((line) => /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/.test(line));
   assert.ok(idx >= 0);
   const snippet = yamlListItemBlock(lines, idx);
-  assert.match(snippet, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
+  const structuralSnippet = stripYamlBlockScalarBodies(snippet);
+  assert.match(structuralSnippet, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
 });
 
 test("release workflow validates .deb packages on all Linux runners (x86_64 + arm64)", async () => {
@@ -88,6 +89,7 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
   );
 
   const snippet = yamlListItemBlock(lines, idx);
+  const structuralSnippet = stripYamlBlockScalarBodies(snippet);
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
   const ubuntuPrefixGuard = /if:\s*startsWith\(matrix\.platform,\s*['"]ubuntu-24\.04['"]\)/;
   const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
@@ -96,12 +98,12 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
   // `matrix.platform == 'ubuntu-24.04'`, which skipped the ARM64 build. Accept either a broad Linux
   // guard (`runner.os == 'Linux'`) or an Ubuntu prefix guard (`startsWith(matrix.platform, 'ubuntu-24.04')`).
   assert.doesNotMatch(
-    snippet,
+    structuralSnippet,
     x86OnlyGuard,
     `Expected the Linux .deb validation step NOT to be gated to only ubuntu-24.04 (x86_64).`,
   );
   assert.ok(
-    runnerOsGuard.test(snippet) || ubuntuPrefixGuard.test(snippet),
+    runnerOsGuard.test(structuralSnippet) || ubuntuPrefixGuard.test(structuralSnippet),
     `Expected the Linux .deb validation step to run for both ubuntu-24.04 and ubuntu-24.04-arm64.\nSaw snippet:\n${snippet}`,
   );
 });
@@ -122,7 +124,8 @@ function snippetAfter(lines, needle, windowSize = 40) {
  * @param {string} snippet
  */
 function parseTauriArgsFromSnippet(snippet) {
-  const m = snippet.match(/tauri_args:\s*["']([^"']+)["']/);
+  const structuralSnippet = stripYamlBlockScalarBodies(snippet);
+  const m = structuralSnippet.match(/tauri_args:\s*["']([^"']+)["']/);
   assert.ok(m, `Expected to find a tauri_args: \"...\" line.\nSaw snippet:\n${snippet}`);
   return m[1];
 }
@@ -168,17 +171,18 @@ test("release workflow verifies Linux artifacts include .AppImage + .deb + .rpm 
   );
 
   const snippet = yamlListItemBlock(lines, idx);
+  const structuralSnippet = stripYamlBlockScalarBodies(snippet);
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
   const ubuntuPrefixGuard = /if:\s*startsWith\(matrix\.platform,\s*['"]ubuntu-24\.04['"]\)/;
   const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
 
   assert.doesNotMatch(
-    snippet,
+    structuralSnippet,
     x86OnlyGuard,
     `Expected the Linux artifact verification step NOT to be gated to only ubuntu-24.04 (x86_64).`,
   );
   assert.ok(
-    runnerOsGuard.test(snippet) || ubuntuPrefixGuard.test(snippet),
+    runnerOsGuard.test(structuralSnippet) || ubuntuPrefixGuard.test(structuralSnippet),
     `Expected the Linux artifact verification step to run for both ubuntu-24.04 and ubuntu-24.04-arm64.\nSaw snippet:\n${snippet}`,
   );
 });
@@ -196,6 +200,7 @@ test("release workflow installs required Linux build deps for both x86_64 and AR
   );
 
   const snippet = yamlListItemBlock(lines, idx);
+  const structuralSnippet = stripYamlBlockScalarBodies(snippet);
 
   // This must run for both ubuntu-24.04 (x86_64) and ubuntu-24.04-arm64.
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
@@ -203,12 +208,12 @@ test("release workflow installs required Linux build deps for both x86_64 and AR
   const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
 
   assert.doesNotMatch(
-    snippet,
+    structuralSnippet,
     x86OnlyGuard,
     `Expected the Linux dependency install step NOT to be gated to only ubuntu-24.04 (x86_64).`,
   );
   assert.ok(
-    runnerOsGuard.test(snippet) || ubuntuPrefixGuard.test(snippet),
+    runnerOsGuard.test(structuralSnippet) || ubuntuPrefixGuard.test(structuralSnippet),
     `Expected the Linux dependency install step to run for both ubuntu-24.04 and ubuntu-24.04-arm64.\nSaw snippet:\n${snippet}`,
   );
 

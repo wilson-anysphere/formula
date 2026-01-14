@@ -75,8 +75,11 @@ for (const wf of workflows) {
       `Expected ${path.relative(repoRoot, wf.path)} to contain a step named: ${wf.stepName}`,
     );
     const snippet = yamlListItemBlock(lines, idx);
+    // Ignore YAML block scalar bodies (e.g. `run: |`) so YAML-like strings embedded inside script
+    // bodies cannot satisfy this workflow configuration assertion.
+    const structuralSnippet = stripYamlBlockScalarBodies(snippet);
     assert.match(
-      snippet,
+      structuralSnippet,
       /\bCARGO_PROFILE_RELEASE_CODEGEN_UNITS:\s*["']?1["']?\b/,
       `Expected ${wf.stepName} to set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1.\nSaw snippet:\n${snippet}`,
     );
