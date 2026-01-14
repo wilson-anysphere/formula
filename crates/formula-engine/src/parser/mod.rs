@@ -492,6 +492,122 @@ fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
     None
 }
 
+fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
+    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
+    //
+    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
+}
+
+fn skip_ws(src: &str, mut i: usize) -> usize {
+    while i < src.len() {
+        let Some(ch) = src[i..].chars().next() else {
+            break;
+        };
+        if !ch.is_whitespace() {
+            break;
+        }
+        i += ch.len_utf8();
+    }
+    i
+}
+
+fn scan_quoted_sheet_name(src: &str, start: usize) -> Option<usize> {
+    // Quoted sheet names escape apostrophes by doubling them: `''` -> `'`.
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'\'') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            if bytes.get(i + 1) == Some(&b'\'') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+    None
+}
+
+fn scan_unquoted_sheet_name(src: &str, start: usize) -> Option<usize> {
+    // Match the engine's identifier lexer rules for unquoted sheet names.
+    let first = src[start..].chars().next()?;
+    if !is_ident_start_char(first) {
+        return None;
+    }
+    let mut i = start + first.len_utf8();
+    while i < src.len() {
+        let ch = src[i..].chars().next()?;
+        if is_ident_cont_char(ch) {
+            i += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    Some(i)
+}
+
+fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
+    let i = skip_ws(src, start);
+    if i >= src.len() {
+        return None;
+    }
+    match src[i..].chars().next()? {
+        '\'' => scan_quoted_sheet_name(src, i),
+        _ => scan_unquoted_sheet_name(src, i),
+    }
+}
+
+fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
+    let end = find_workbook_prefix_end(src, start)?;
+
+    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by a
+    // sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating nested
+    // structured references (which *are* nested) as workbook prefixes.
+    let mut i = skip_ws(src, end);
+    i = scan_sheet_name_token(src, i)?;
+    i = skip_ws(src, i);
+
+    if i < src.len() && src[i..].starts_with(':') {
+        i += 1;
+        i = skip_ws(src, i);
+        i = scan_sheet_name_token(src, i)?;
+        i = skip_ws(src, i);
+    }
+
+    if i < src.len() && src[i..].starts_with('!') {
+        Some(end)
+    } else {
+        None
+    }
+}
+
 impl<'a> Lexer<'a> {
     fn new(src: &'a str, locale: LocaleConfig, reference_style: ReferenceStyle) -> Self {
         Self {
@@ -683,7 +799,12 @@ impl<'a> Lexer<'a> {
                 }
                 '[' => {
                     if self.bracket_depth == 0 {
-                        if let Some(end) = find_bracket_end(self.src, start) {
+                        // Workbook prefixes are *not* nesting, even if the workbook name contains
+                        // `[` characters (e.g. `=[A1[Name.xlsx]Sheet1!A1`). Prefer a non-nesting
+                        // scan when the bracketed segment is followed by a sheet name and `!`.
+                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start)
+                            .or_else(|| find_bracket_end(self.src, start))
+                        {
                             self.bump();
                             self.push(TokenKind::LBracket, start, self.idx);
 
@@ -1073,7 +1194,9 @@ impl<'a> Lexer<'a> {
                 }
                 '[' => {
                     if self.bracket_depth == 0 {
-                        if let Some(end) = find_bracket_end(self.src, start) {
+                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start)
+                            .or_else(|| find_bracket_end(self.src, start))
+                        {
                             self.bump();
                             self.push(TokenKind::LBracket, start, self.idx);
 
