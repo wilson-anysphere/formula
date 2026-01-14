@@ -14,6 +14,7 @@ cd "$repo_root"
 workflows=(
   ".github/workflows/ci.yml"
   ".github/workflows/release.yml"
+  ".github/workflows/desktop-bundle-dry-run.yml"
   ".github/workflows/desktop-bundle-size.yml"
   ".github/workflows/windows-arm64-smoke.yml"
 )
