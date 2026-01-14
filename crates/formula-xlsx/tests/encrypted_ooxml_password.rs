@@ -30,11 +30,27 @@ fn assert_plaintext_contents(workbook: &formula_model::Workbook) {
     );
 }
 
+fn assert_excel_plaintext_contents(workbook: &formula_model::Workbook) {
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+    let sheet = &workbook.sheets[0];
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("lorem".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("ipsum".to_string())
+    );
+}
+
 #[test]
 fn workbook_and_document_loaders_decrypt_agile_standard_and_empty_password_fixtures() {
     let cases = [
         ("plaintext.xlsx", "ignored"),
         ("agile.xlsx", "password"),
+        ("agile-unicode.xlsx", "pässwörd"),
         ("standard.xlsx", "password"),
         ("agile-empty-password.xlsx", ""),
     ];
@@ -50,6 +66,31 @@ fn workbook_and_document_loaders_decrypt_agile_standard_and_empty_password_fixtu
             .unwrap_or_else(|err| panic!("load_from_bytes_with_password({name}): {err:?}"));
         assert_plaintext_contents(&doc.workbook);
     }
+}
+
+#[test]
+fn workbook_and_document_loaders_decrypt_agile_unicode_excel_fixture() {
+    let plaintext_name = "plaintext-excel.xlsx";
+    let encrypted_name = "agile-unicode-excel.xlsx";
+    let password = "pässwörd🔒";
+
+    let plaintext_bytes = read_fixture(plaintext_name);
+    let plaintext_model = read_workbook_model_from_bytes_with_password(&plaintext_bytes, "ignored")
+        .unwrap_or_else(|err| {
+            panic!("read_workbook_model_from_bytes_with_password({plaintext_name}): {err:?}")
+        });
+    assert_excel_plaintext_contents(&plaintext_model);
+
+    let encrypted_bytes = read_fixture(encrypted_name);
+    let model = read_workbook_model_from_bytes_with_password(&encrypted_bytes, password)
+        .unwrap_or_else(|err| {
+            panic!("read_workbook_model_from_bytes_with_password({encrypted_name}): {err:?}")
+        });
+    assert_excel_plaintext_contents(&model);
+
+    let doc = load_from_bytes_with_password(&encrypted_bytes, password)
+        .unwrap_or_else(|err| panic!("load_from_bytes_with_password({encrypted_name}): {err:?}"));
+    assert_excel_plaintext_contents(&doc.workbook);
 }
 
 #[test]
@@ -85,5 +126,34 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
     assert!(
         matches!(err, XlsxError::InvalidPassword),
         "expected XlsxError::InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn unicode_password_normalization_mismatch_fails() {
+    // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
+    let nfd = "pa\u{0308}sswo\u{0308}rd";
+    assert_ne!(nfd, "pässwörd");
+
+    let bytes = read_fixture("agile-unicode.xlsx");
+    let err = read_workbook_model_from_bytes_with_password(&bytes, nfd).expect_err("expected error");
+    assert!(
+        matches!(err, ReadError::InvalidPassword),
+        "expected ReadError::InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn unicode_emoji_password_normalization_mismatch_fails() {
+    // NFC password is "pässwörd🔒" (U+00E4, U+00F6). NFD decomposes those into combining marks, but
+    // leaves the non-BMP emoji alone.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒";
+    assert_ne!(nfd, "pässwörd🔒");
+
+    let bytes = read_fixture("agile-unicode-excel.xlsx");
+    let err = read_workbook_model_from_bytes_with_password(&bytes, nfd).expect_err("expected error");
+    assert!(
+        matches!(err, ReadError::InvalidPassword),
+        "expected ReadError::InvalidPassword, got {err:?}"
     );
 }
