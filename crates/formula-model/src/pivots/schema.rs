@@ -224,7 +224,6 @@ impl fmt::Display for PivotFieldRef {
         }
     }
 }
-
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
     // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
@@ -265,7 +264,6 @@ fn quote_dax_identifier(raw: &str) -> String {
     out.push('\'');
     out
 }
-
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -277,7 +275,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
         Cow::Borrowed(raw)
     }
 }
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
