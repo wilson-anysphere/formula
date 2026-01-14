@@ -1043,6 +1043,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const dragViewportPointScratch = { x: 0, y: 0 };
     const hoverViewportPointScratch = { x: 0, y: 0 };
+    const pickCellScratch = { row: 0, col: 0 };
 
     const getViewportPoint = (event: { clientX: number; clientY: number }, out?: { x: number; y: number }) => {
       const origin = selectionCanvasViewportOriginRef.current;
@@ -1290,7 +1291,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         const clampedX = Math.max(0, Math.min(viewport.width, point.x));
         const clampedY = Math.max(0, Math.min(viewport.height, point.y));
-        const picked = renderer.pickCellAt(clampedX, clampedY);
+        const picked = renderer.pickCellAt(clampedX, clampedY, pickCellScratch);
         if (picked) {
           if (dragModeRef.current === "fillHandle") {
             applyFillHandleDrag(picked);
@@ -1811,7 +1812,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const point = getViewportPoint(event, dragViewportPointScratch);
       lastPointerViewportRef.current = point;
 
-      const picked = renderer.pickCellAt(point.x, point.y);
+      const picked = renderer.pickCellAt(point.x, point.y, pickCellScratch);
       if (!picked) return;
 
       if (dragModeRef.current === "fillHandle") {

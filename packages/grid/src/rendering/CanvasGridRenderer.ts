@@ -2181,7 +2181,7 @@ export class CanvasGridRenderer {
     return next;
   }
 
-  pickCellAt(viewportX: number, viewportY: number): Selection | null {
+  pickCellAt(viewportX: number, viewportY: number, out?: Selection): Selection | null {
     const viewport = this.scroll.getViewportState();
     const { frozenWidth, frozenHeight, frozenRows, frozenCols } = viewport;
 
@@ -2225,8 +2225,16 @@ export class CanvasGridRenderer {
     const row = rowAxis.indexAt(sheetY, { min: minRow, maxInclusive: maxRowInclusive });
     const col = colAxis.indexAt(sheetX, { min: minCol, maxInclusive: maxColInclusive });
 
-    const resolved = this.getMergedIndex(viewport).resolveCell({ row, col });
-    return { row: resolved.row, col: resolved.col };
+    const result = out ?? { row, col };
+    result.row = row;
+    result.col = col;
+
+    const merged = this.getMergedIndex(viewport).rangeAt(result);
+    if (merged) {
+      result.row = merged.startRow;
+      result.col = merged.startCol;
+    }
+    return result;
   }
 
   renderImmediately(): void {
