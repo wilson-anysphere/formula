@@ -2912,6 +2912,29 @@ function currentSelectionRect(): SelectionRect {
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
 
+// Register the AutoFilter ribbon MVP command early so keybindings (Ctrl+Shift+L / Cmd+Shift+L)
+// can dispatch it as soon as the KeybindingService is installed.
+commandRegistry.registerBuiltinCommand(
+  "data.sortFilter.filter",
+  "Filter",
+  () => {
+    // In Excel, Ctrl+Shift+L toggles AutoFilter. For this MVP:
+    // - if any filter is active on the sheet, clear it
+    // - otherwise, prompt for values and apply a simple row-hiding filter
+    if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
+      clearRibbonAutoFiltersForActiveSheet();
+      return;
+    }
+    void applyRibbonAutoFilterFromSelection().catch((err) => {
+      console.error("Failed to apply filter:", err);
+      showToast(`Failed to apply filter: ${String(err)}`, "error");
+      scheduleRibbonSelectionFormatStateUpdate();
+      app.focus();
+    });
+  },
+  { category: t("commandCategory.data"), icon: null, keywords: ["filter", "auto filter"] },
+);
+
 const RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING: Record<string, true> = Object.fromEntries(
   [
     ...FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
