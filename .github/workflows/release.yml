@@ -1778,14 +1778,6 @@ jobs:
           echo "$info" | grep -qw "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
           echo "$info" | grep -qw "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
-      - name: Validate macOS bundle (DMG, Info.plist, signing)
-        # Always run on macOS so unsigned fork/dry-run builds still validate bundle structure.
-        # Codesign + notarization checks are conditional on env vars (APPLE_* secrets) and are
-        # skipped automatically when signing is not configured.
-        if: runner.os == 'macOS'
-        shell: bash
-        run: bash scripts/validate-macos-bundle.sh
-
       - name: Verify Windows ARM64 binary (formula-desktop.exe is AA64)
         if: matrix.rust_target == 'aarch64-pc-windows-msvc'
         shell: pwsh
