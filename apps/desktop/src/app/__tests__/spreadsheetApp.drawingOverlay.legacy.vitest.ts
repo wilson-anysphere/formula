@@ -10,6 +10,9 @@ import { getResizeHandleCenters } from "../../drawings/selectionHandles";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+let priorCanvasCharts: string | undefined;
+let priorUseCanvasCharts: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -99,6 +102,23 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     process.env.CANVAS_CHARTS = "0";
     process.env.USE_CANVAS_CHARTS = "0";
     document.body.innerHTML = "";
+
+    // This suite covers legacy chart selection overlay behavior; disable canvas charts so
+    // the dedicated selection overlay canvas is mounted.
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
+    process.env.USE_CANVAS_CHARTS = "0";
+
+    // Avoid leaking `?canvasCharts=...` URL params between test suites.
+    try {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // ignore history errors
+    }
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });

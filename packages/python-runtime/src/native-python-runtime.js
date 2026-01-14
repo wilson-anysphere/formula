@@ -132,11 +132,19 @@ export class NativePythonRuntime {
         rejectOnce(err);
       });
 
-      child.on("exit", (code, signal) => {
+      // Note: `exit` can fire before the stdout stream has flushed its final
+      // chunks. Rejecting immediately can race with the "result" line being read,
+      // producing flaky "exited unexpectedly" errors even though a valid result
+      // was printed. `close` fires after stdio streams are closed; additionally,
+      // defer the rejection one tick to allow readline to emit any pending lines.
+      child.on("close", (code, signal) => {
         if (done) return;
-        const err = new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`);
-        err.stderr = stderrText;
-        rejectOnce(err);
+        setImmediate(() => {
+          if (done) return;
+          const err = new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`);
+          err.stderr = stderrText;
+          rejectOnce(err);
+        });
       });
     });
 

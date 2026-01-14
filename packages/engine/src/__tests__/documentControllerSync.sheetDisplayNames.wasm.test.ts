@@ -82,6 +82,9 @@ class MockMessagePort {
   private dispatchMessage(data: unknown): void {
     const event = { data } as MessageEvent<unknown>;
     this.onmessage?.(event);
+    // Only deliver to "message" listeners. EngineWorker also subscribes to
+    // "messageerror"; those should only fire when the browser fails to decode
+    // a structured clone payload, which this mock does not simulate.
     for (const listener of this.listeners.get("message") ?? []) {
       listener(event);
     }

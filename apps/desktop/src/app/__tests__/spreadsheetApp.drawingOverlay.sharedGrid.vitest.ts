@@ -9,6 +9,9 @@ import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings } from 
 import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+let priorCanvasCharts: string | undefined;
+let priorUseCanvasCharts: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -126,6 +129,25 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     process.env.CANVAS_CHARTS = "0";
     process.env.USE_CANVAS_CHARTS = "0";
     document.body.innerHTML = "";
+
+    // This suite exercises SpreadsheetApp's drawing overlay mechanics, independent of
+    // the canvas-charts integration (which has its own dedicated tests). Disable
+    // canvas charts so the demo chart does not appear as a drawing-layer object and
+    // so the legacy chart selection overlay exists for error-handling coverage.
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
+    process.env.USE_CANVAS_CHARTS = "0";
+
+    // Avoid leaking `?canvasCharts=...` URL params between unrelated test suites.
+    try {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // ignore history errors
+    }
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
