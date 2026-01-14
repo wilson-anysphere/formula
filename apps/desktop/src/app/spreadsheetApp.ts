@@ -3,7 +3,6 @@ import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTa
 import {
   FormulaBarView,
   type FormulaBarCommit,
-  type NameBoxDropdownItem,
   type NameBoxDropdownProvider,
 } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
@@ -2730,9 +2729,9 @@ export class SpreadsheetApp {
     if (opts.formulaBar) {
       const nameBoxDropdownProvider: NameBoxDropdownProvider = {
         getItems: () => {
-          const items: NameBoxDropdownItem[] = [];
+          const items: ReturnType<NameBoxDropdownProvider["getItems"]> = [];
           const seen = new Set<string>();
-          const push = (item: NameBoxDropdownItem): void => {
+          const push = (item: ReturnType<NameBoxDropdownProvider["getItems"]>[number]): void => {
             if (seen.has(item.key)) return;
             seen.add(item.key);
             items.push(item);

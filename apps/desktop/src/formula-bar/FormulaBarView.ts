@@ -98,7 +98,7 @@ type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
 
 type FunctionPickerItem = { name: string; signature?: string; summary?: string };
 
-export type NameBoxDropdownItem = {
+type NameBoxDropdownItem = {
   /**
    * Stable key used for ARIA ids + testing.
    */
