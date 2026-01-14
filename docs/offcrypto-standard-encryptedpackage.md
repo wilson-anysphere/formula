@@ -16,9 +16,10 @@ High-level behavior in `formula-io`:
     password is provided.
   - The password-aware entrypoints `open_workbook_with_password` /
     `open_workbook_model_with_password` can decrypt and open both **Agile (4.4)** and
-    **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`.
+    **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`.
+    - Encrypted `.xlsb` currently surfaces `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided (returns a `Workbook::Xlsx` / `Workbook::Xlsb` on success).
+    is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`, but the high-level `open_workbook*` APIs
     currently decrypt to in-memory buffers.
