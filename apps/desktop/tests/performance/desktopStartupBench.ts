@@ -47,7 +47,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 
 import { type BenchmarkResult } from './benchmark.ts';
 import {
@@ -59,6 +59,7 @@ import {
   percentile,
   buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
+  repoRoot,
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
@@ -256,11 +257,12 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       },
       afterCaptureTimeoutMs: rssIdleDelayMs + 4000,
       onProgress: ({ phase, mode, iteration, total, profileDir }) => {
+        const profileLabel = relative(repoRoot, profileDir) || profileDir;
         // eslint-disable-next-line no-console
         if (phase === 'warmup') {
-          console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+          console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileLabel})...`);
         } else {
-          console.log(`[desktop-${benchKind}-startup] run ${iteration}/${total} (${mode}, profile=${profileDir})...`);
+          console.log(`[desktop-${benchKind}-startup] run ${iteration}/${total} (${mode}, profile=${profileLabel})...`);
         }
       },
     })),
