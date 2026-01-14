@@ -471,6 +471,9 @@ With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
   Agile (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`
   workbooks in memory. For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world
   producers omit it.
+  - Encrypted `.xlsb` workbooks are supported in native `formula-io` (decrypted payload contains
+    `xl/workbook.bin`).
+    - The WASM loader still rejects decrypted `.xlsb` payloads.
 
 Without that feature, encrypted OOXML containers surface as `UnsupportedEncryption` (the password-aware
 entrypoints do not decrypt them end-to-end).

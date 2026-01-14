@@ -371,7 +371,9 @@ Implementation nuance:
 MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES).
 
 In this repo, `formula-io` (behind the `encrypted-workbooks` feature) can decrypt and open
-Standard/CryptoAPI RC4-encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks end-to-end. The streaming RC4
+Standard/CryptoAPI RC4-encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks end-to-end. (Encrypted `.xlsb`
+payloads decrypt to an OOXML ZIP containing `xl/workbook.bin` and are routed through the `.xlsb`
+reader in native `formula-io`; the WASM loader still rejects decrypted `.xlsb`.) The streaming RC4
 decryptor lives in `crates/formula-io/src/rc4_cryptoapi.rs` and is exercised by
 `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`.
 
