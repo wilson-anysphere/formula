@@ -79,7 +79,7 @@
 
 .script-editor__console {
   height: 140px;
-  margin: 0;
+  margin: var(--space-0);
   padding: var(--space-4);
   overflow: auto;
   border-top: 1px solid var(--panel-border);
