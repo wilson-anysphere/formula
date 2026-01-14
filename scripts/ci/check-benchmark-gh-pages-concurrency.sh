@@ -102,18 +102,30 @@ for wf in "${workflows[@]}"; do
           has_benchmark = 1;
         }
 
-        if (line ~ /^[[:space:]]*group:[[:space:]]*["\x27]?benchmark-gh-pages-publish["\x27]?[[:space:]]*$/) {
-          has_concurrency = 1;
+        if (line ~ /^[[:space:]]*group:[[:space:]]*/) {
+          group_value = line;
+          sub(/^[[:space:]]*group:[[:space:]]*/, "", group_value);
+          gsub(/^[[:space:]]+/, "", group_value);
+          gsub(/[[:space:]]+$/, "", group_value);
+          if (substr(group_value, 1, 1) == "\"" && substr(group_value, length(group_value), 1) == "\"") {
+            group_value = substr(group_value, 2, length(group_value) - 2);
+          } else if (substr(group_value, 1, 1) == "'"'"'" && substr(group_value, length(group_value), 1) == "'"'"'") {
+            group_value = substr(group_value, 2, length(group_value) - 2);
+          }
+          if (group_value == "benchmark-gh-pages-publish") {
+            has_concurrency = 1;
+          }
         }
 
-        if (match(line, /^[[:space:]]*auto-push:[[:space:]]*(.*)$/, m)) {
-          v = m[1];
+        if (line ~ /^[[:space:]]*auto-push:[[:space:]]*/) {
+          v = line;
+          sub(/^[[:space:]]*auto-push:[[:space:]]*/, "", v);
           gsub(/^[[:space:]]+/, "", v);
           gsub(/[[:space:]]+$/, "", v);
-          if (match(v, /^"([^"]*)"$/, q)) {
-            v = q[1];
-          } else if (match(v, /^'\''([^'\'']*)'\''$/, q)) {
-            v = q[1];
+          if (substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") {
+            v = substr(v, 2, length(v) - 2);
+          } else if (substr(v, 1, 1) == "'"'"'" && substr(v, length(v), 1) == "'"'"'") {
+            v = substr(v, 2, length(v) - 2);
           }
           low = tolower(v);
           compact = low;
