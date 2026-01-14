@@ -19,10 +19,118 @@ async function collectDtsFiles(dir, out = []) {
   return out;
 }
 
-function stripComments(code) {
-  // This is a lightweight heuristic to avoid flagging the English word "any" in doc comments.
-  // It is not a full TS lexer, but it is sufficient for `.d.ts` files in this package.
-  return code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+function isIdentChar(ch) {
+  // A simplified JS/TS identifier character check. This intentionally ignores unicode
+  // identifier categories since our `.d.ts` sources are ASCII.
+  return /[A-Za-z0-9_$]/.test(ch);
+}
+
+function containsAnyTypeToken(code) {
+  /** @type {Array<{ kind: "code" | "template" | "templateExpr" | "string" | "lineComment" | "blockComment", quote?: string, depth?: number }>} */
+  const stack = [{ kind: "code" }];
+
+  for (let i = 0; i < code.length; ) {
+    const top = stack[stack.length - 1];
+    const ch = code[i];
+    const next = code[i + 1];
+
+    if (top.kind === "lineComment") {
+      if (ch === "\n") stack.pop();
+      i += 1;
+      continue;
+    }
+
+    if (top.kind === "blockComment") {
+      if (ch === "*" && next === "/") {
+        stack.pop();
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (top.kind === "string") {
+      if (ch === "\\") {
+        // Skip escaped char.
+        i += 2;
+        continue;
+      }
+      if (ch === top.quote) {
+        stack.pop();
+        i += 1;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (top.kind === "template") {
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "`") {
+        stack.pop();
+        i += 1;
+        continue;
+      }
+      // Template literal type expressions: scan inside `${ ... }`.
+      if (ch === "$" && next === "{") {
+        stack.push({ kind: "templateExpr", depth: 1 });
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    // `code` or `templateExpr`
+    if (ch === "/" && next === "/") {
+      stack.push({ kind: "lineComment" });
+      i += 2;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      stack.push({ kind: "blockComment" });
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      stack.push({ kind: "string", quote: ch });
+      i += 1;
+      continue;
+    }
+    if (ch === "`") {
+      stack.push({ kind: "template" });
+      i += 1;
+      continue;
+    }
+
+    if (top.kind === "templateExpr") {
+      if (ch === "{") {
+        top.depth += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === "}") {
+        top.depth -= 1;
+        i += 1;
+        if (top.depth === 0) stack.pop();
+        continue;
+      }
+    }
+
+    // Detect bare `any` tokens outside strings/comments.
+    if (ch === "a" && code.slice(i, i + 3) === "any") {
+      const prev = i > 0 ? code[i - 1] : "";
+      const after = code[i + 3] ?? "";
+      if (!isIdentChar(prev) && !isIdentChar(after)) return true;
+    }
+
+    i += 1;
+  }
+  return false;
 }
 
 test("ai-context .d.ts files do not use the `any` type", async () => {
@@ -31,9 +139,8 @@ test("ai-context .d.ts files do not use the `any` type", async () => {
 
   const offenders = [];
   for (const file of files) {
-    const text = stripComments(await readFile(file, "utf8"));
-    // Use word boundaries so we don't flag ordinary words like "many".
-    if (/\bany\b/.test(text)) offenders.push(file.slice(srcDir.length + 1));
+    const text = await readFile(file, "utf8");
+    if (containsAnyTypeToken(text)) offenders.push(file.slice(srcDir.length + 1));
   }
 
   offenders.sort();
