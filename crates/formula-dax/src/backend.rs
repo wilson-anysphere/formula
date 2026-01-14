@@ -105,6 +105,22 @@ pub trait TableBackend: fmt::Debug + Send + Sync {
         None
     }
 
+    /// Group the table by `group_by` column indices and compute aggregations for each group,
+    /// restricted to rows where `mask` is true.
+    ///
+    /// This is primarily an optimization for columnar-backed tables: it avoids materializing a
+    /// potentially huge `Vec<usize>` of row indices for large filtered datasets.
+    ///
+    /// When `mask` is `None`, the backend may assume all rows are included.
+    fn group_by_aggregations_mask(
+        &self,
+        _group_by: &[usize],
+        _aggs: &[AggregationSpec],
+        _mask: Option<&formula_columnar::BitVec>,
+    ) -> Option<Vec<Vec<Value>>> {
+        None
+    }
+
     /// If the backend can efficiently find rows where `column IN (values...)`, return those rows.
     ///
     /// This is useful for relationship propagation and multi-value filters.
@@ -235,6 +251,13 @@ pub struct ColumnarTableBackend {
     pub(crate) table: Arc<formula_columnar::ColumnarTable>,
 }
 
+#[derive(Clone, Copy)]
+enum RowSelection<'a> {
+    All,
+    Rows(&'a [usize]),
+    Mask(&'a formula_columnar::BitVec),
+}
+
 impl fmt::Debug for ColumnarTableBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ColumnarTableBackend")
@@ -355,7 +378,7 @@ impl ColumnarTableBackend {
         &self,
         group_by: &[usize],
         aggs: &[AggregationSpec],
-        rows: Option<&[usize]>,
+        selection: RowSelection<'_>,
     ) -> Option<Vec<Vec<Value>>> {
         use formula_columnar::{AggOp, AggSpec};
         use std::collections::HashMap;
@@ -526,20 +549,30 @@ impl ColumnarTableBackend {
         }
 
         let row_count = self.table.row_count();
-        let rows = match rows {
-            Some(rows)
+        if let RowSelection::Mask(mask) = selection {
+            if mask.len() != row_count {
+                return None;
+            }
+        }
+
+        let selection = match selection {
+            RowSelection::Rows(rows)
                 if rows.len() == row_count
                     && rows.first().copied() == Some(0)
                     && rows.last().copied() == row_count.checked_sub(1) =>
             {
-                None
+                RowSelection::All
+            }
+            RowSelection::Mask(mask) if mask.len() == row_count && mask.all_true() => {
+                RowSelection::All
             }
             other => other,
         };
 
-        let grouped = match rows {
-            Some(rows) => self.table.group_by_rows(group_by, &planned, rows).ok()?,
-            None => self.table.group_by(group_by, &planned).ok()?,
+        let grouped = match selection {
+            RowSelection::All => self.table.group_by(group_by, &planned).ok()?,
+            RowSelection::Rows(rows) => self.table.group_by_rows(group_by, &planned, rows).ok()?,
+            RowSelection::Mask(mask) => self.table.group_by_mask(group_by, &planned, mask).ok()?,
         };
         let grouped_schema = grouped.schema();
         let grouped_cols = grouped.to_values();
@@ -621,12 +654,17 @@ impl ColumnarTableBackend {
         &self,
         group_by: &[usize],
         aggs: &[AggregationSpec],
-        rows: Option<&[usize]>,
+        selection: RowSelection<'_>,
     ) -> Option<Vec<Vec<Value>>> {
         use std::collections::HashMap;
         use std::collections::HashSet;
 
         let row_count = self.table.row_count();
+        if let RowSelection::Mask(mask) = selection {
+            if mask.len() != row_count {
+                return None;
+            }
+        }
         let schema = self.table.schema();
 
         #[derive(Clone)]
@@ -838,8 +876,8 @@ impl ColumnarTableBackend {
             groups.insert(key_buf.clone(), states);
         };
 
-        match rows {
-            None => {
+        match selection {
+            RowSelection::All => {
                 let mut start = 0;
                 while start < row_count {
                     let end = (start + CHUNK_ROWS).min(row_count);
@@ -850,7 +888,7 @@ impl ColumnarTableBackend {
                     start = end;
                 }
             }
-            Some(rows) => {
+            RowSelection::Rows(rows) => {
                 let mut pos = 0;
                 while pos < rows.len() {
                     let row = rows[pos];
@@ -867,6 +905,26 @@ impl ColumnarTableBackend {
                         process_row(row - chunk_start, &range);
                         pos += 1;
                     }
+                }
+            }
+            RowSelection::Mask(mask) => {
+                let mut current_chunk_start = usize::MAX;
+                let mut current_range: Option<formula_columnar::ColumnarRange> = None;
+                for row in mask.iter_ones() {
+                    if row >= row_count {
+                        return None;
+                    }
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    if chunk_start != current_chunk_start {
+                        current_chunk_start = chunk_start;
+                        current_range = Some(
+                            self.table
+                                .get_range(chunk_start, (chunk_start + CHUNK_ROWS).min(row_count), col_start, col_end),
+                        );
+                    }
+
+                    let range = current_range.as_ref().expect("range set for chunk");
+                    process_row(row - current_chunk_start, range);
                 }
             }
         }
@@ -1154,11 +1212,45 @@ impl TableBackend for ColumnarTableBackend {
             return None;
         }
 
-        if let Some(out) = self.group_by_aggregations_query(group_by, aggs, rows) {
+        let selection = rows.map_or(RowSelection::All, RowSelection::Rows);
+
+        if let Some(out) = self.group_by_aggregations_query(group_by, aggs, selection) {
             return Some(out);
         }
 
-        self.group_by_aggregations_scan(group_by, aggs, rows)
+        self.group_by_aggregations_scan(group_by, aggs, selection)
+    }
+
+    fn group_by_aggregations_mask(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+        mask: Option<&formula_columnar::BitVec>,
+    ) -> Option<Vec<Vec<Value>>> {
+        if group_by.is_empty() {
+            return None;
+        }
+        if group_by
+            .iter()
+            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
+            .any(|idx| *idx >= self.table.column_count())
+        {
+            return None;
+        }
+
+        let selection = match mask {
+            Some(mask) if mask.len() == self.table.row_count() && mask.all_true() => {
+                RowSelection::All
+            }
+            Some(mask) => RowSelection::Mask(mask),
+            None => RowSelection::All,
+        };
+
+        if let Some(out) = self.group_by_aggregations_query(group_by, aggs, selection) {
+            return Some(out);
+        }
+
+        self.group_by_aggregations_scan(group_by, aggs, selection)
     }
 
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {

@@ -1273,15 +1273,21 @@ fn pivot_columnar_group_by(
         plans.push(plan);
     }
 
-    let rows_buffer;
-    let rows = if filter.is_empty() {
-        None
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
+        .transpose()?;
+    let allowed = if let Some(sets) = row_sets.as_ref() {
+        Some(
+            sets.get(&base_table_key)
+                .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?,
+        )
     } else {
-        rows_buffer = crate::engine::resolve_table_rows(model, filter, base_table)?;
-        Some(rows_buffer.as_slice())
+        None
     };
 
-    let Some(grouped_rows) = table_ref.group_by_aggregations(&group_idxs, &agg_specs, rows) else {
+    let Some(grouped_rows) =
+        table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
+    else {
         return Ok(None);
     };
 
@@ -1348,15 +1354,19 @@ fn pivot_columnar_groups_with_measure_eval(
         group_idxs.push(idx);
     }
 
-    let rows_buffer;
-    let rows = if filter.is_empty() {
-        None
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
+        .transpose()?;
+    let allowed = if let Some(sets) = row_sets.as_ref() {
+        Some(
+            sets.get(&base_table_key)
+                .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?,
+        )
     } else {
-        rows_buffer = crate::engine::resolve_table_rows(model, filter, base_table)?;
-        Some(rows_buffer.as_slice())
+        None
     };
 
-    let Some(mut groups) = table_ref.group_by_aggregations(&group_idxs, &[], rows) else {
+    let Some(mut groups) = table_ref.group_by_aggregations_mask(&group_idxs, &[], allowed) else {
         return Ok(None);
     };
 
@@ -1565,15 +1575,22 @@ fn pivot_columnar_star_schema_group_by(
         }
     }
 
-    let rows_buffer;
-    let rows = if filter.is_empty() {
-        None
+    let base_table_key = normalize_ident(base_table);
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
+        .transpose()?;
+    let allowed = if let Some(sets) = row_sets.as_ref() {
+        Some(
+            sets.get(&base_table_key)
+                .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?,
+        )
     } else {
-        rows_buffer = crate::engine::resolve_table_rows(model, filter, base_table)?;
-        Some(rows_buffer.as_slice())
+        None
     };
 
-    let Some(grouped_rows) = table_ref.group_by_aggregations(&group_idxs, &agg_specs, rows) else {
+    let Some(grouped_rows) =
+        table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
+    else {
         return Ok(None);
     };
 

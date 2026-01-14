@@ -445,6 +445,15 @@ impl TableBackend for Table {
         self.backend().group_by_aggregations(group_by, aggs, rows)
     }
 
+    fn group_by_aggregations_mask(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+        mask: Option<&BitVec>,
+    ) -> Option<Vec<Vec<Value>>> {
+        self.backend().group_by_aggregations_mask(group_by, aggs, mask)
+    }
+
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
         self.backend().filter_in(idx, values)
     }
