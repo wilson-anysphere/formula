@@ -1490,6 +1490,109 @@ export class ContextManager {
       return redacted;
     };
 
+    /** @type {Map<string, boolean>} */
+    const sheetNameDisallowedCache = new Map();
+    /**
+     * Determine whether a sheet-name token should be treated as disallowed metadata under
+     * structured DLP.
+     *
+     * Even if an individual chunk/range is allowed, the sheet name itself is a user-controlled
+     * identifier that can contain non-heuristic sensitive strings (e.g. "TopSecret") that a
+     * no-op redactor cannot detect. When any structured selector on the sheet would require
+     * redaction, conservatively redact the sheet name everywhere it appears in prompt context
+     * and structured outputs.
+     *
+     * Best-effort: if we cannot build the structured selector index, we fall back to heuristic
+     * behavior (no extra sheet-name redaction).
+     *
+     * @param {unknown} sheetName
+     */
+    const sheetNameDisallowed = (sheetName) => {
+      const raw = typeof sheetName === "string" ? sheetName.trim() : "";
+      if (!dlp || !raw) return false;
+      const sheetId = resolveDlpSheetId(raw);
+      if (!sheetId) return false;
+      const cached = sheetNameDisallowedCache.get(sheetId);
+      if (cached !== undefined) return cached;
+
+      const index = getDlpDocumentIndex();
+      if (!index) {
+        sheetNameDisallowedCache.set(sheetId, false);
+        return false;
+      }
+
+      // Base classification applied to the entire sheet (document + sheet selectors).
+      let baseClassification = maxClassification({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }, index.docClassificationMax);
+      const sheetMax = index.sheetClassificationMaxBySheetId.get(sheetId);
+      if (sheetMax) baseClassification = maxClassification(baseClassification, sheetMax);
+
+      // If the sheet itself is disallowed due to doc/sheet scope, redact the name.
+      const baseDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: baseClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
+      if (baseDecision.decision !== DLP_DECISION.ALLOW) {
+        sheetNameDisallowedCache.set(sheetId, true);
+        return true;
+      }
+
+      // Otherwise, if any structured selector on the sheet would require redaction,
+      // treat the sheet name as disallowed metadata.
+      const colMap = index.columnClassificationBySheetId.get(sheetId);
+      if (colMap) {
+        for (const colClassification of colMap.values()) {
+          throwIfAborted(signal);
+          const decision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: maxClassification(baseClassification, colClassification),
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+          if (decision.decision !== DLP_DECISION.ALLOW) {
+            sheetNameDisallowedCache.set(sheetId, true);
+            return true;
+          }
+        }
+      }
+
+      const rangeRecords = index.rangeRecordsBySheetId.get(sheetId) ?? [];
+      for (const rec of rangeRecords) {
+        throwIfAborted(signal);
+        const decision = evaluatePolicy({
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          classification: maxClassification(baseClassification, rec.classification),
+          policy: dlp.policy,
+          options: { includeRestrictedContent },
+        });
+        if (decision.decision !== DLP_DECISION.ALLOW) {
+          sheetNameDisallowedCache.set(sheetId, true);
+          return true;
+        }
+      }
+
+      const cellMap = index.cellClassificationBySheetId.get(sheetId);
+      if (cellMap) {
+        for (const cellClassification of cellMap.values()) {
+          throwIfAborted(signal);
+          const decision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: maxClassification(baseClassification, cellClassification),
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+          if (decision.decision !== DLP_DECISION.ALLOW) {
+            sheetNameDisallowedCache.set(sheetId, true);
+            return true;
+          }
+        }
+      }
+
+      sheetNameDisallowedCache.set(sheetId, false);
+      return false;
+    };
+
     /**
      * @param {any} rect
      */
@@ -1852,20 +1955,37 @@ export class ContextManager {
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
       const recordDecision = audit?.recordDecision ?? null;
-      const shouldRedactStructuredMetadataTokens =
-        Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
-      const safeSheetName = shouldRedactStructuredMetadataTokens
+      const rangeDisallowed = Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
+      const rawSheetName = String(meta.sheetName ?? "");
+      const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
+      const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
+      const shouldRedactTitleToken = Boolean(dlp) && rangeDisallowed;
+      const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken;
+
+      const safeSheetName = shouldRedactSheetNameToken
         ? "[REDACTED]"
         : dlp
-          ? redactChunkToken(meta.sheetName ?? "")
-          : String(meta.sheetName ?? "");
-      const safeTitle = shouldRedactStructuredMetadataTokens
+          ? redactChunkToken(rawSheetName)
+          : rawSheetName;
+      const safeTitle = shouldRedactTitleToken
         ? "[REDACTED]"
         : dlp
           ? redactChunkToken(title)
           : String(title ?? "");
       const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${safeSheetName} title="${safeTitle}"`;
-      const text = meta.text ?? "";
+      const rawText = typeof meta.text === "string" ? meta.text : "";
+      const text = shouldRedactSheetNameToken
+        ? (() => {
+            // The stored chunk text (from `chunkToText`) repeats the sheet name in its first line.
+            // If the sheet-name token is disallowed under structured DLP, rewrite it deterministically
+            // so non-heuristic sensitive strings cannot leak even with a no-op redactor.
+            const idxNl = rawText.indexOf("\n");
+            const firstLine = idxNl === -1 ? rawText : rawText.slice(0, idxNl);
+            const rest = idxNl === -1 ? "" : rawText.slice(idxNl);
+            const replaced = firstLine.replace(/sheet="[^"]*"/, `sheet="${safeSheetName}"`);
+            return `${replaced}${rest}`;
+          })()
+        : rawText;
       const raw = `${header}\n${text}`;
 
       let outText = this.redactor(raw);
@@ -1900,16 +2020,13 @@ export class ContextManager {
       // creates an easy footgun for callers that might serialize metadata into cloud LLM
       // prompts.
       const { text: _metaText, dlpSheetId: _metaSheetId, ...safeMeta } = meta;
-      const safeMetaOut = shouldRedactStructuredMetadataTokens
-        ? {
-            ...safeMeta,
-            sheetName: "[REDACTED]",
-            title: "[REDACTED]",
-          }
-        : safeMeta;
+      /** @type {any} */
+      const safeMetaOut = { ...safeMeta };
+      if (shouldRedactSheetNameToken) safeMetaOut.sheetName = "[REDACTED]";
+      if (shouldRedactTitleToken) safeMetaOut.title = "[REDACTED]";
 
       return {
-        id: shouldRedactStructuredMetadataTokens ? `redacted:${idx + 1}` : hit.id,
+        id: shouldRedactChunkId ? `redacted:${idx + 1}` : hit.id,
         score: hit.score,
         metadata: safeMetaOut,
         text: outText,
@@ -1959,6 +2076,9 @@ export class ContextManager {
               return item;
             }
             if (!parsed.sheetName) return item;
+            if (sheetNameDisallowed(parsed.sheetName)) {
+              return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
+            }
             const sheetId = resolveDlpSheetId(parsed.sheetName);
             const range = {
               start: { row: parsed.startRow, col: parsed.startCol },
@@ -2084,7 +2204,11 @@ export class ContextManager {
         if (!raw) return raw;
         try {
           const parsed = parseA1Range(raw);
-          const safeSheet = parsed.sheetName ? redactSchemaToken(parsed.sheetName, blockedReason) : "";
+          const safeSheet = parsed.sheetName
+            ? sheetNameDisallowed(parsed.sheetName)
+              ? "[REDACTED]"
+              : redactSchemaToken(parsed.sheetName, blockedReason)
+            : "";
           return rangeToA1({ ...parsed, sheetName: safeSheet || undefined });
         } catch {
           const redacted = this.redactor(raw);
@@ -2304,7 +2428,7 @@ export class ContextManager {
             const title = String(meta.title ?? "");
             const safeTitle = title ? redactSchemaToken(title) : "";
             const sheetName = String(meta.sheetName ?? "");
-            const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
+            const safeSheetName = sheetNameDisallowed(sheetName) ? "[REDACTED]" : sheetName ? redactSchemaToken(sheetName) : "";
             const rect = meta.rect ?? {};
             const r0 = rect.r0;
             const c0 = rect.c0;

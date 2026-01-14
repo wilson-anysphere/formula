@@ -981,6 +981,103 @@ test("buildWorkbookContext: range-level structured DLP REDACT also redacts non-h
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT does not leak non-heuristic sheet names via retrieved/schema when an allowed chunk is retrieved (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-sheetname-allowed-chunk",
+    sheets: [
+      {
+        name: "TopSecret",
+        // Two disconnected 2-cell regions (A1:B1 and D1:E1) so chunking yields two chunks.
+        // The A1:B1 region is classified as Restricted; D1:E1 remains allowed and should still be retrievable.
+        cells: [[{ v: "SecretA" }, { v: "SecretB" }, null, { v: "Hello" }, { v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "Hello",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "TopSecret",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic sheet names in allowed range attachment references (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-attachment-allowed-range",
+    sheets: [
+      {
+        name: "TopSecret",
+        // Two disconnected 2-cell regions (A1:B1 and D1:E1).
+        cells: [[{ v: "SecretA" }, { v: "SecretB" }, null, { v: "Hello" }, { v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    attachments: [{ type: "range", reference: "TopSecret!D1:E1" }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "TopSecret",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic table attachment references (no-op redactor)", async () => {
   const workbook = {
     id: "wb-dlp-structured-table-attachment",
