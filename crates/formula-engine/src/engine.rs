@@ -407,6 +407,36 @@ impl Workbook {
         name.nfkc().flat_map(|c| c.to_uppercase()).collect()
     }
 
+    /// Returns `true` if `name` would conflict with any existing sheet (stable key or display name)
+    /// under Excel-style case-insensitive name resolution.
+    fn sheet_name_taken(&self, name: &str) -> bool {
+        let key = Self::sheet_key(name);
+        self.sheet_display_name_to_id.contains_key(&key) || self.sheet_key_to_id.contains_key(&key)
+    }
+
+    /// Generate a valid, unique Excel worksheet **display name** for a new sheet.
+    ///
+    /// Display names must satisfy Excel sheet-name validation rules and must not conflict with any
+    /// existing sheet display name or stable key (otherwise name resolution becomes ambiguous).
+    fn generate_default_sheet_display_name(&self) -> String {
+        // Excel's default naming scheme: Sheet1, Sheet2, ...
+        //
+        // Note: stable sheet keys are allowed to be arbitrary (including long UUID-like strings),
+        // so we must *not* derive a display name by defaulting to the key when the key is not a
+        // valid Excel sheet name.
+        for idx in 1usize.. {
+            let candidate = format!("Sheet{idx}");
+            // `Sheet{n}` is always valid for reasonable `n`, but validate anyway to avoid accidental
+            // future changes (or pathological `idx` growth).
+            if formula_model::validate_sheet_name(&candidate).is_ok()
+                && !self.sheet_name_taken(&candidate)
+            {
+                return candidate;
+            }
+        }
+        unreachable!("infinite iterator must return a sheet name")
+    }
+
     fn ensure_sheet(&mut self, sheet_key: &str) -> SheetId {
         // When adding sheets, treat the provided string as a stable key, but re-use existing sheets
         // when it matches either an existing stable key or display name. This preserves backwards
@@ -414,16 +444,32 @@ impl Workbook {
         if let Some(id) = self.resolve_sheet_name(sheet_key) {
             return id;
         }
+
+        // Stable sheet keys are host-provided identifiers and may be arbitrary (e.g. long UUIDs).
+        // However, sheet *display names* must always be valid Excel worksheet tab names so:
+        // - formulas remain parseable (`Sheet1!A1` semantics)
+        // - worksheet-info outputs never emit invalid names
+        //
+        // If the stable key is itself a valid Excel sheet name, use it as the initial display
+        // name for backwards compatibility. Otherwise, generate a default `Sheet{n}` name.
+        let display_name = if formula_model::validate_sheet_name(sheet_key).is_ok()
+            && !self.sheet_name_taken(sheet_key)
+        {
+            sheet_key.to_string()
+        } else {
+            self.generate_default_sheet_display_name()
+        };
+
         let id = self.sheets.len();
         self.sheets.push(Sheet::default());
         self.sheet_keys.push(Some(sheet_key.to_string()));
-        // Default display name to the stable key until overridden by the host.
-        self.sheet_display_names.push(Some(sheet_key.to_string()));
-        let key = Self::sheet_key(sheet_key);
-        self.sheet_key_to_id.insert(key.clone(), id);
-        // Ensure new sheets are resolvable by their initial display name (which defaults to the
-        // key).
-        self.sheet_display_name_to_id.insert(key, id);
+        self.sheet_display_names.push(Some(display_name.clone()));
+
+        let stable_key = Self::sheet_key(sheet_key);
+        let display_key = Self::sheet_key(&display_name);
+        self.sheet_key_to_id.insert(stable_key, id);
+        // Ensure new sheets are resolvable by their initial display name.
+        self.sheet_display_name_to_id.insert(display_key, id);
         self.sheet_order.push(id);
         self.sheet_tab_index_by_id
             .push(self.sheet_order.len().saturating_sub(1));
@@ -1109,11 +1155,78 @@ impl Engine {
 
     /// Ensure a sheet exists in the workbook.
     ///
-    /// This is useful for workbook load flows where formulas may refer to other sheets
-    /// that have not been populated yet; callers should create all sheets up-front
-    /// before setting formulas to ensure cross-sheet references resolve correctly.
+    /// The `sheet` parameter is treated as the sheet's **stable key** (used by Engine APIs and
+    /// persistence). For backwards compatibility, existing sheets may also be resolved by their
+    /// user-visible **display name** (Excel tab name).
+    ///
+    /// When creating a new sheet, the engine will choose an Excel-valid initial display name:
+    /// - If `sheet` itself is a valid Excel sheet name, it is used as the display name.
+    /// - Otherwise a default `Sheet{n}` name is generated.
+    ///
+    /// This is useful for workbook load flows where formulas may refer to other sheets that have
+    /// not been populated yet; callers should create all sheets up-front before setting formulas to
+    /// ensure cross-sheet references resolve correctly.
     pub fn ensure_sheet(&mut self, sheet: &str) {
         self.workbook.ensure_sheet(sheet);
+    }
+
+    /// Ensure a sheet exists with the given stable key and display (tab) name.
+    ///
+    /// This is recommended for collaboration/persistence layers where the stable sheet key may be
+    /// an arbitrary identifier (e.g. UUID) that is not a valid Excel worksheet name.
+    ///
+    /// `display_name` must satisfy Excel sheet-name validation rules and must be unique (case
+    /// insensitive) across both existing sheet display names **and** stable sheet keys.
+    pub fn ensure_sheet_with_display_name(
+        &mut self,
+        sheet_key: &str,
+        display_name: &str,
+    ) -> Result<SheetId, SheetLifecycleError> {
+        formula_model::validate_sheet_name(display_name)?;
+
+        // If the stable key already exists, update the display name (validated) and return.
+        if let Some(sheet_id) = self.workbook.sheet_id_by_key(sheet_key) {
+            if let Some(existing) = self.workbook.resolve_sheet_name(display_name) {
+                if existing != sheet_id {
+                    return Err(SheetLifecycleError::InvalidName(
+                        formula_model::SheetNameError::DuplicateName,
+                    ));
+                }
+            }
+            if self.workbook.sheet_name(sheet_id) != Some(display_name) {
+                if !self.workbook.set_sheet_display_name(sheet_id, display_name) {
+                    return Err(SheetLifecycleError::Internal(format!(
+                        "failed to set display name for sheet id {sheet_id}"
+                    )));
+                }
+            }
+            return Ok(sheet_id);
+        }
+
+        // Do not allow creating a new stable key that would be ambiguous with an existing sheet
+        // display name.
+        if self.workbook.resolve_sheet_name(sheet_key).is_some() {
+            return Err(SheetLifecycleError::InvalidName(
+                formula_model::SheetNameError::DuplicateName,
+            ));
+        }
+
+        // Enforce uniqueness across both stable keys and display names (Excel semantics).
+        if self.workbook.resolve_sheet_name(display_name).is_some() {
+            return Err(SheetLifecycleError::InvalidName(
+                formula_model::SheetNameError::DuplicateName,
+            ));
+        }
+
+        let sheet_id = self.workbook.ensure_sheet(sheet_key);
+        if self.workbook.sheet_name(sheet_id) != Some(display_name) {
+            if !self.workbook.set_sheet_display_name(sheet_id, display_name) {
+                return Err(SheetLifecycleError::Internal(format!(
+                    "failed to set display name for sheet id {sheet_id}"
+                )));
+            }
+        }
+        Ok(sheet_id)
     }
 
     /// Resolve a worksheet name to its stable [`SheetId`].
