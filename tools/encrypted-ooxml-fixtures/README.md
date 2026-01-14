@@ -44,6 +44,12 @@ tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/encrypted/ooxml/pla
 
 Apache POI version: **5.2.5** (see `generate.sh` for the full pinned jar list + checksums).
 
+You can override the cache location by setting:
+
+```bash
+export ENCRYPTED_OOXML_FIXTURES_CACHE_DIR="$HOME/.cache/formula/encrypted-ooxml-fixtures"
+```
+
 ## Notes
 
 - The encrypted output is **not expected to be byte-for-byte stable** across runs (encryption uses

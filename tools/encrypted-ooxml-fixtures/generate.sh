@@ -64,7 +64,9 @@ if [[ "${IN_PLAINTEXT_XLSX}" == "${OUT_ENCRYPTED_XLSX}" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CACHE_DIR="${SCRIPT_DIR}/.cache"
+# Allow overriding the cache directory (downloaded jars + compiled classes).
+# This is useful if you don't want caches stored under the repo checkout.
+CACHE_DIR="${ENCRYPTED_OOXML_FIXTURES_CACHE_DIR:-${SCRIPT_DIR}/.cache}"
 JARS_DIR="${CACHE_DIR}/jars"
 CLASSES_DIR="${CACHE_DIR}/classes"
 
