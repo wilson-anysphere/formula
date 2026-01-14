@@ -122,7 +122,7 @@ test("validateLatestJson rejects Linux AppImage tarballs for macOS updater keys"
     (err) =>
       err instanceof ActionableError &&
       err.message.includes("darwin-x86_64") &&
-      /appimage tarballs/i.test(err.message),
+      /appimage tarball/i.test(err.message),
   );
 });
 
