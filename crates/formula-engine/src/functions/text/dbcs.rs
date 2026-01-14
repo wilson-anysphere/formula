@@ -166,6 +166,13 @@ fn phonetic_from_reference(ctx: &dyn FunctionContext, reference: Reference) -> V
 const FULLWIDTH_SPACE: char = '\u{3000}';
 const HALFWIDTH_DAKUTEN: char = '\u{FF9E}';
 const HALFWIDTH_HANDAKUTEN: char = '\u{FF9F}';
+const FULLWIDTH_CENT: char = '\u{FFE0}';
+const FULLWIDTH_POUND: char = '\u{FFE1}';
+const FULLWIDTH_NOT: char = '\u{FFE2}';
+const FULLWIDTH_MACRON: char = '\u{FFE3}';
+const FULLWIDTH_BROKEN_BAR: char = '\u{FFE4}';
+const FULLWIDTH_YEN: char = '\u{FFE5}';
+const FULLWIDTH_WON: char = '\u{FFE6}';
 
 fn asc_cp932(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
@@ -181,6 +188,11 @@ fn asc_cp932(input: &str) -> String {
             let ascii = char::from_u32((ch as u32).saturating_sub(0xFEE0))
                 .expect("FF01..FF5E - 0xFEE0 must remain in Unicode scalar range");
             out.push(ascii);
+            continue;
+        }
+
+        if let Some(mapped) = fullwidth_symbol_to_halfwidth(ch) {
+            out.push(mapped);
             continue;
         }
 
@@ -214,6 +226,11 @@ fn dbcs_cp932(input: &str) -> String {
             continue;
         }
 
+        if let Some(mapped) = halfwidth_symbol_to_fullwidth(ch) {
+            out.push(mapped);
+            continue;
+        }
+
         // Halfwidth katakana + punctuation live in U+FF61..U+FF9F (including dakuten marks).
         if ('\u{FF61}'..='\u{FF9F}').contains(&ch) {
             if let Some(&next) = iter.peek() {
@@ -239,6 +256,32 @@ fn dbcs_cp932(input: &str) -> String {
     }
 
     out
+}
+
+fn fullwidth_symbol_to_halfwidth(ch: char) -> Option<char> {
+    Some(match ch {
+        FULLWIDTH_CENT => '¢',
+        FULLWIDTH_POUND => '£',
+        FULLWIDTH_NOT => '¬',
+        FULLWIDTH_MACRON => '¯',
+        FULLWIDTH_BROKEN_BAR => '¦',
+        FULLWIDTH_YEN => '¥',
+        FULLWIDTH_WON => '₩',
+        _ => return None,
+    })
+}
+
+fn halfwidth_symbol_to_fullwidth(ch: char) -> Option<char> {
+    Some(match ch {
+        '¢' => FULLWIDTH_CENT,
+        '£' => FULLWIDTH_POUND,
+        '¬' => FULLWIDTH_NOT,
+        '¯' => FULLWIDTH_MACRON,
+        '¦' => FULLWIDTH_BROKEN_BAR,
+        '¥' => FULLWIDTH_YEN,
+        '₩' => FULLWIDTH_WON,
+        _ => return None,
+    })
 }
 
 fn fullwidth_katakana_to_halfwidth(ch: char) -> Option<&'static str> {
