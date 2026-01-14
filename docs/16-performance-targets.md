@@ -340,6 +340,14 @@ startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON art
 - `.github/workflows/desktop-perf-platform-matrix.yml`
   - pinned runner matrix: `ubuntu-24.04`, `windows-2022`, `macos-14`
   - scheduled runs on `main` also publish key p95 metrics to the benchmark-action `gh-pages` history (non-gating)
+    - metric name prefix: `desktop.platform.<os>.…` where `<os>` is `linux`, `windows`, or `macos`
+    - currently published (p95):
+      - `desktop.platform.<os>.startup.cold.window_visible_ms.p95`
+      - `desktop.platform.<os>.startup.cold.tti_ms.p95`
+      - `desktop.platform.<os>.startup.warm.window_visible_ms.p95`
+      - `desktop.platform.<os>.startup.warm.tti_ms.p95`
+      - `desktop.platform.linux.memory.idle_rss_mb.p95` / `desktop.platform.macos.memory.idle_rss_mb.p95`
+      - `desktop.platform.windows.memory.idle_working_set_mb.p95` (Windows uses Working Set, not true RSS)
   - manual `workflow_dispatch` runs support overriding run counts/timeouts via inputs (e.g. `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`) and can optionally restrict the OS via `os`
 - `.github/workflows/desktop-memory-perf.yml` (Linux-only; publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action gh-pages history for long-term trending; non-gating)
 
