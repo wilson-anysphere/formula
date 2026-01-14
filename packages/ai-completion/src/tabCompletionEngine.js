@@ -2347,12 +2347,24 @@ function normalizeBackendCompletion(input, cursorPosition, completion) {
   const raw = (completion ?? "").toString().trim();
   if (!raw) return "";
 
-  // If the backend returned a full formula, trust it.
-  if (raw.startsWith("=")) return raw;
-
-  // Otherwise treat it as text to insert at the cursor.
   const before = input.slice(0, cursorPosition);
   const after = input.slice(cursorPosition);
+
+  // If the backend returned a full formula, only accept it when it can be represented
+  // as a pure insertion at the caret (formula-bar tab completion UX constraint).
+  //
+  // This means:
+  // - The suggestion must preserve everything the user has already typed before the cursor.
+  // - The suggestion must preserve everything after the cursor (when completing mid-string).
+  // - The suggestion must strictly extend the current input (avoid no-ops / rewrites).
+  if (raw.startsWith("=")) {
+    if (!raw.startsWith(before)) return "";
+    if (!raw.endsWith(after)) return "";
+    if (raw.length <= input.length) return "";
+    return raw;
+  }
+
+  // Otherwise treat it as text to insert at the cursor.
   return `${before}${raw}${after}`;
 }
 

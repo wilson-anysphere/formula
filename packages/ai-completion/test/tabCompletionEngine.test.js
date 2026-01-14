@@ -4633,6 +4633,53 @@ test("Completion client request is structured and completion inserts at the curs
   );
 });
 
+test("Backend full-formula completions are only accepted when they are pure insertions", async () => {
+  // 1) Accept a full-formula completion when it strictly extends the current input.
+  {
+    const completionClient = {
+      async completeTabCompletion() {
+        return "=1+2";
+      },
+    };
+    const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
+    const currentInput = "=1+";
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    assert.ok(
+      suggestions.some((s) => s.text === "=1+2"),
+      `Expected a full-formula backend completion to be accepted, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  // 2) Reject a full-formula completion that would rewrite user-typed characters (not a pure insertion).
+  {
+    const completionClient = {
+      async completeTabCompletion() {
+        return "=2";
+      },
+    };
+    const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
+    const currentInput = "=1+";
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    assert.equal(
+      suggestions.length,
+      0,
+      `Expected backend rewrite completion to be dropped, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("TabCompletionEngine forwards AbortSignal to completionClient and aborts when caller cancels", async () => {
   let calls = 0;
   let sawAbort = false;
