@@ -1119,9 +1119,10 @@ mod tests {
     #[test]
     fn resolves_record_value_non_index_passthrough() {
         let def = PivotCacheDefinition::default();
+        let value = PivotCacheValue::Number(1.234);
         assert_eq!(
-            def.resolve_record_value(0, PivotCacheValue::Number(3.14)),
-            PivotCacheValue::Number(3.14)
+            def.resolve_record_value(0, value.clone()),
+            value
         );
     }
 
