@@ -225,28 +225,28 @@ impl fmt::Display for PivotFieldRef {
     }
 }
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
-    // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
-    //
-    // Keep this conservative—quoting is always safe and keeps `Display` stable across table names
-    // that contain punctuation or whitespace. Also quote identifiers that collide with keywords
-    // like `VAR`/`RETURN`/`IN`.
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
     };
-    // DAX allows unquoted identifiers in a conservative "C identifier" form. If the identifier
-    // contains anything other than ASCII alphanumerics/underscore, or starts with a non-letter /
-    // underscore, quote it.
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return true;
-    }
-
+    // DAX identifiers (when unquoted) follow an identifier-like grammar. Everything else (spaces,
+    // punctuation, leading digits, etc.) must be wrapped in single quotes.
+    //
+    // Use Unicode-aware character classes so names like `Straße` can remain unquoted.
+    // Also quote identifiers that collide with keywords like `VAR`/`RETURN`/`IN`.
     let is_keyword = raw.eq_ignore_ascii_case("VAR")
         || raw.eq_ignore_ascii_case("RETURN")
         || raw.eq_ignore_ascii_case("IN");
-
-    chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_')) || is_keyword
+    if first != '_' && !first.is_alphabetic() {
+        return true;
+    }
+    for ch in chars {
+        if ch == '_' || ch.is_alphanumeric() {
+            continue;
+        }
+        return true;
+    }
+    is_keyword
 }
 
 fn quote_dax_identifier(raw: &str) -> String {
