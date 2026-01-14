@@ -1523,8 +1523,9 @@ fn bytecode_backend_inlines_dynamic_defined_name_formulas() {
         .set_cell_formula("Sheet1", "B1", "=SUM(MyDyn)")
         .unwrap();
 
-    // Defined-name formulas are inlined for bytecode compilation (the VM cannot resolve names at
-    // runtime), including formulas that use dynamic-dependency functions like `INDIRECT`.
+    // Defined-name formulas are inlined for bytecode compilation (bytecode does not resolve
+    // workbook names at runtime). `INDIRECT` is now supported, so INDIRECT-based definitions can
+    // still compile and evaluate.
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();

@@ -588,22 +588,10 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // Allow external workbook references (single-sheet keys) to flow through the
-                    // existing external value provider machinery, matching behavior of direct
-                    // external references.
-                    if let crate::functions::SheetId::External(key) = &r.sheet_id {
-                        // Keep INDIRECT's current "no true 3D spans" behavior: reject
-                        // `[Book.xlsx]Sheet1:Sheet3!A1` even if the provider could theoretically
-                        // resolve it.
-                        if let Some(end) = key.find(']') {
-                            if key[end + 1..].contains(':') {
-                                return Value::Error(ErrorKind::Ref);
-                            }
-                        }
-
-                        if !crate::eval::is_valid_external_sheet_key(key) {
-                            return Value::Error(ErrorKind::Ref);
-                        }
+                    // Excel's INDIRECT does not support external workbook references. Keep engine
+                    // semantics consistent across backends by rejecting them here.
+                    if matches!(r.sheet_id, crate::functions::SheetId::External(_)) {
+                        return Value::Error(ErrorKind::Ref);
                     }
                     Value::Reference(r)
                 }

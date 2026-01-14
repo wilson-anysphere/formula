@@ -44,7 +44,7 @@ fn indirect_r1c1_relative_is_resolved_against_formula_cell() {
 }
 
 #[test]
-fn indirect_external_workbook_refs_fall_back_to_ast_and_resolve_via_provider() {
+fn indirect_external_workbook_refs_are_ref_error() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -91,11 +91,14 @@ fn indirect_external_workbook_refs_fall_back_to_ast_and_resolve_via_provider() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert_eq!(
         provider.calls(),
-        1,
-        "INDIRECT should query external providers when resolving external references"
+        0,
+        "INDIRECT does not support external workbook references"
     );
     // `Engine::precedents()` reflects static parse-time references plus local dependency-graph edges.
     // Today, dynamic external workbook references produced by INDIRECT are not represented.
