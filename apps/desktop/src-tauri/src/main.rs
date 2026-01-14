@@ -2453,9 +2453,27 @@ fn main() {
 
     let emit = null;
     try {
-      const tauri = globalThis.__TAURI__;
-      const eventApi = tauri?.event ?? tauri?.plugin?.event ?? tauri?.plugins?.event ?? null;
-      emit = eventApi?.emit ?? null;
+      const safeGetProp = (obj, prop) => {
+        if (!obj) return undefined;
+        try {
+          return obj[prop];
+        } catch {
+          return undefined;
+        }
+      };
+
+      let tauri = null;
+      try {
+        tauri = globalThis.__TAURI__ ?? null;
+      } catch {
+        tauri = null;
+      }
+
+      const plugin = safeGetProp(tauri, "plugin");
+      const plugins = safeGetProp(tauri, "plugins");
+      const eventApi = safeGetProp(tauri, "event") ?? safeGetProp(plugin, "event") ?? safeGetProp(plugins, "event") ?? null;
+      const candidate = safeGetProp(eventApi, "emit");
+      emit = typeof candidate === "function" ? candidate.bind(eventApi) : null;
     } catch {
       emit = null;
     }
