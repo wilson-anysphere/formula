@@ -1040,8 +1040,8 @@ a:visited {
 }
 
 .command-palette__list:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
   border-radius: var(--radius);
 }
 
