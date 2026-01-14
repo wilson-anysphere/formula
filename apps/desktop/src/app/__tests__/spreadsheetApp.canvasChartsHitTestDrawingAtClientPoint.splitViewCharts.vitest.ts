@@ -1109,4 +1109,210 @@ describe("SpreadsheetApp.hitTestDrawingAtClientPoint (canvas charts, split view)
     secondaryContainer.remove();
     root.remove();
   });
+
+  it("allows resizing a selected drawing via its handles even when a chart overlaps (secondary pane)", () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 300,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("legacy");
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Split View Chart",
+      position: "A1",
+    });
+
+    // Make the chart large so it overlaps the drawing's resize handles.
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(20),
+      yEmu: pxToEmu(10),
+      cxEmu: pxToEmu(200),
+      cyEmu: pxToEmu(150),
+    });
+    const chartBefore = app.listCharts().find((c) => c.id === chartId) ?? null;
+    expect(chartBefore).toBeTruthy();
+    const chartAnchorBefore = JSON.parse(JSON.stringify(chartBefore!.anchor));
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-resize-under-chart" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(60), yEmu: pxToEmu(50) },
+        size: { cx: pxToEmu(40), cy: pxToEmu(30) },
+      },
+      zOrder: 0,
+    };
+    const sheetId = app.getCurrentSheetId();
+    (app.getDocument() as any).setSheetDrawings(sheetId, [drawing], { label: "Set Drawings" });
+    app.syncSheetDrawings();
+
+    const secondaryContainer = document.createElement("div");
+    secondaryContainer.tabIndex = 0;
+    Object.defineProperty(secondaryContainer, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(secondaryContainer, "clientHeight", { configurable: true, value: 300 });
+    secondaryContainer.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 500,
+          top: 0,
+          right: 900,
+          bottom: 300,
+          x: 500,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(secondaryContainer);
+
+    const view = new SecondaryGridView({
+      container: secondaryContainer,
+      document: app.getDocument(),
+      getSheetId: () => sheetId,
+      rowCount: 50,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+      images: app.getDrawingImages(),
+      getSelectedDrawingId: () => app.getSelectedDrawingId(),
+      chartRenderer: app.getDrawingChartRenderer(),
+    });
+
+    const selectionCanvas = secondaryContainer.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    if (!selectionCanvas) throw new Error("Missing secondary selection canvas");
+    selectionCanvas.getBoundingClientRect = secondaryContainer.getBoundingClientRect as any;
+
+    app.setSplitViewSecondaryGridView({ container: secondaryContainer, grid: view.grid });
+
+    // Select the drawing first (e.g. via selection pane). Resize should still work even if the chart overlaps the handles.
+    app.selectDrawingById(drawing.id);
+    expect(app.getSelectedDrawingId()).toBe(drawing.id);
+    expect(app.getSelectedChartId()).toBeNull();
+
+    const drawingObj = app.getDrawingObjects(sheetId).find((o) => o.id === drawing.id) ?? null;
+    expect(drawingObj).toBeTruthy();
+
+    const chartDrawingId = chartIdToDrawingId(chartId);
+    const chartObj = app.getDrawingObjects(sheetId).find((o) => o.id === chartDrawingId) ?? null;
+    expect(chartObj).toBeTruthy();
+
+    const rect = secondaryContainer.getBoundingClientRect();
+    const scroll = view.grid.getScroll();
+    const viewportState = view.grid.renderer.scroll.getViewportState();
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = view.grid.renderer.scroll.cols.totalSize(headerCols);
+    const headerHeight = view.grid.renderer.scroll.rows.totalSize(headerRows);
+    const headerOffsetX = Math.min(headerWidth, rect.width);
+    const headerOffsetY = Math.min(headerHeight, rect.height);
+    const zoom = view.grid.renderer.getZoom();
+    const { frozenRows, frozenCols } = app.getFrozen();
+
+    const viewport = {
+      scrollX: scroll.x,
+      scrollY: scroll.y,
+      width: rect.width,
+      height: rect.height,
+      dpr: 1,
+      zoom,
+      frozenRows,
+      frozenCols,
+      headerOffsetX,
+      headerOffsetY,
+      frozenWidthPx: viewportState.frozenWidth,
+      frozenHeightPx: viewportState.frozenHeight,
+    };
+
+    const geom = {
+      cellOriginPx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: view.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: view.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: view.grid.renderer.getColWidth(gridCol),
+          height: view.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    const drawRect = drawingObjectToViewportRect(drawingObj!, viewport as any, geom as any);
+    const chartRect = drawingObjectToViewportRect(chartObj!, viewport as any, geom as any);
+
+    // Hit the drawing's bottom-right resize handle, which lies inside the chart bounds.
+    const startX = drawRect.x + drawRect.width;
+    const startY = drawRect.y + drawRect.height;
+    // Be tolerant of minor float drift from EMU<->px conversions.
+    expect(startX).toBeGreaterThanOrEqual(chartRect.x - 0.5);
+    expect(startY).toBeGreaterThanOrEqual(chartRect.y - 0.5);
+    expect(startX).toBeLessThanOrEqual(chartRect.x + chartRect.width + 0.5);
+    expect(startY).toBeLessThanOrEqual(chartRect.y + chartRect.height + 0.5);
+
+    const dx = 20;
+    const dy = 10;
+
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", { clientX: rect.left + startX, clientY: rect.top + startY, button: 0, pointerId: 1 }),
+    );
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointermove", { clientX: rect.left + startX + dx, clientY: rect.top + startY + dy, button: 0, pointerId: 1 }),
+    );
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerup", { clientX: rect.left + startX + dx, clientY: rect.top + startY + dy, button: 0, pointerId: 1 }),
+    );
+
+    const persisted = (app.getDocument() as any).getSheetDrawings(sheetId) as any[];
+    const after = persisted.find((d) => d?.id === drawing.id) ?? null;
+    expect(after).not.toBeNull();
+    expect(after.anchor?.type).toBe("absolute");
+    const afterAnchor = after.anchor as any;
+    const beforeAnchor = drawing.anchor as any;
+    const expectedCx = beforeAnchor.size.cx + Math.round(pxToEmu(dx, zoom));
+    const expectedCy = beforeAnchor.size.cy + Math.round(pxToEmu(dy, zoom));
+    expect(afterAnchor.size.cx).toBeCloseTo(expectedCx, 4);
+    expect(afterAnchor.size.cy).toBeCloseTo(expectedCy, 4);
+
+    // Ensure the chart did not move/resize as a side effect of the pointerdown (the handle should win).
+    const chartAfter = app.listCharts().find((c) => c.id === chartId) ?? null;
+    expect(chartAfter).toBeTruthy();
+    expect(chartAfter!.anchor).toEqual(chartAnchorBefore);
+
+    view.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
 });

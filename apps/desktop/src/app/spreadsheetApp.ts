@@ -9230,7 +9230,24 @@ export class SpreadsheetApp {
           if (this.formulaBar?.isFormulaEditing()) return false;
           const target = e.target as HTMLElement | null;
           if (!target) return true;
-          return target === view.container || target.tagName === "CANVAS";
+          const isGridSurface = target === view.container || target.tagName === "CANVAS";
+          if (!isGridSurface) return false;
+
+          // Charts render above workbook drawings, but drawing selection handles are rendered
+          // above all objects. If a drawing is currently selected, allow interactions on its
+          // visible selection chrome to win even when a chart lies underneath (Excel-like).
+          //
+          // This matters in split view because the chart controller runs before the drawing
+          // controller; without yielding here, a chart can steal pointerdowns intended for a
+          // selected drawing's resize/rotation handles.
+          if (this.selectedDrawingId != null) {
+            const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+            if (hit && hit.id === this.selectedDrawingId) {
+              return false;
+            }
+          }
+
+          return true;
         },
         setObjects: (next) => {
           const activeChartId = this.selectedChartId;
