@@ -4068,6 +4068,20 @@ if (
 
   window.addEventListener("formula:zoom-changed", persistPrimaryZoomFromApp);
 
+  // SpreadsheetApp draws drawing overlays (pictures/shapes/imported charts) on its own canvas layers.
+  // Some drawing-related UI updates do not flow through DocumentController mutations (e.g. async
+  // imported chart model hydration, drawing selection changes). In split view, ensure the secondary
+  // pane redraws its drawings overlay in response so the two panes stay visually consistent.
+  const repaintSecondaryDrawings = () => {
+    if (!secondaryGridView) return;
+    // `scrollBy(0,0)` is treated as a "sync + notify" call in DesktopSharedGrid; it triggers
+    // the scroll callback without changing scroll offsets, which is where SecondaryGridView
+    // repaints its drawings overlay.
+    secondaryGridView.grid.scrollBy(0, 0);
+  };
+  window.addEventListener("formula:drawings-changed", repaintSecondaryDrawings);
+  window.addEventListener("formula:drawing-selection-changed", repaintSecondaryDrawings);
+
   const invalidateSecondaryProvider = () => {
     if (!secondaryGridView) return;
     // Sheet view state (frozen panes + axis overrides) lives in the DocumentController and is

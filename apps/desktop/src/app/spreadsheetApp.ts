@@ -1839,6 +1839,7 @@ export class SpreadsheetApp {
       endBatch: () => this.document.endBatch(),
       cancelBatch: () => this.document.cancelBatch(),
       onSelectionChange: (selectedId) => {
+        const prev = this.selectedDrawingId;
         this.selectedDrawingId = selectedId;
         if (selectedId != null && this.selectedChartId != null) {
           // Drawings and charts share a single selection model; selecting one should clear the other.
@@ -1849,6 +1850,9 @@ export class SpreadsheetApp {
         // pointer handlers, so we cannot rely on `onPointerDown` to trigger a redraw).
         this.drawingOverlay.setSelectedId(selectedId);
         this.scheduleDrawingsRender("drawings:selection");
+        if (prev !== selectedId) {
+          this.dispatchDrawingSelectionChanged();
+        }
       },
     });
     this.syncSheetDrawings();
@@ -2363,7 +2367,11 @@ export class SpreadsheetApp {
           this.renderDrawings();
         },
         onSelectionChange: (selectedId) => {
+          const prev = this.selectedDrawingId;
           this.selectedDrawingId = selectedId;
+          if (prev !== selectedId) {
+            this.dispatchDrawingSelectionChanged();
+          }
           // Drawings and charts are mutually exclusive selections; selecting a drawing
           // should clear any active chart selection so selection handles don't double-render.
           if (selectedId != null && this.selectedChartId != null) {
@@ -3391,6 +3399,16 @@ export class SpreadsheetApp {
     // via keyboard shortcuts).
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("formula:view-changed"));
+  }
+
+  private dispatchDrawingsChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event("formula:drawings-changed"));
+  }
+
+  private dispatchDrawingSelectionChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("formula:drawing-selection-changed", { detail: { id: this.selectedDrawingId } }));
   }
 
   private dispatchCommentsChanged(): void {
@@ -5140,6 +5158,9 @@ export class SpreadsheetApp {
     this.chartTheme = theme;
     // Keep imported chart rendering aligned with the workbook palette too.
     this.formulaChartModelStore.setDefaultTheme({ seriesColors: theme.seriesColors });
+    // Imported charts are rendered via the drawings overlay; repaint so the new palette applies.
+    this.renderDrawings();
+    this.dispatchDrawingsChanged();
     this.renderCharts(false);
   }
 
@@ -5235,6 +5256,7 @@ export class SpreadsheetApp {
 
     // Re-render the drawings overlay so chart placeholders can upgrade to real charts.
     this.renderDrawings();
+    this.dispatchDrawingsChanged();
   }
 
   listCharts(): readonly ChartRecord[] {
@@ -6896,9 +6918,13 @@ export class SpreadsheetApp {
   }
 
   selectDrawing(id: number | null): void {
+    const prev = this.selectedDrawingId;
     this.selectedDrawingId = id;
     this.drawingInteractionController?.setSelectedId(id);
     this.drawingOverlay.setSelectedId(id);
+    if (prev !== id) {
+      this.dispatchDrawingSelectionChanged();
+    }
     this.renderDrawings();
   }
 
@@ -7476,10 +7502,14 @@ export class SpreadsheetApp {
         // Best-effort: never fail insertion due to collab image propagation.
       }
 
+      const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = inserted.id;
       this.drawingOverlay.setSelectedId(inserted.id);
       if (this.gridMode === "shared") {
         this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+      }
+      if (prevSelected !== inserted.id) {
+        this.dispatchDrawingSelectionChanged();
       }
       this.renderDrawings();
       this.renderSelection();
@@ -7510,8 +7540,12 @@ export class SpreadsheetApp {
         this.renderDrawings();
       },
       onSelectionChange: (selectedId) => {
+        const prev = this.selectedDrawingId;
         this.selectedDrawingId = selectedId;
         this.drawingOverlay.setSelectedId(selectedId);
+        if (prev !== selectedId) {
+          this.dispatchDrawingSelectionChanged();
+        }
         if (selectedId != null && this.selectedChartId != null) {
           // Drawings and charts share a single selection model; selecting one should clear the other.
           this.setSelectedChartId(null);
@@ -10425,6 +10459,7 @@ export class SpreadsheetApp {
     if (objects.length === 0) {
       if (prevSelected != null) {
         this.selectedDrawingId = null;
+        this.dispatchDrawingSelectionChanged();
         this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
       }
       return;
@@ -10447,6 +10482,7 @@ export class SpreadsheetApp {
         const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
         if (x >= headerOffsetX && y >= headerOffsetY) {
           this.selectedDrawingId = null;
+          this.dispatchDrawingSelectionChanged();
           this.renderDrawings(sharedViewport);
         }
       }
@@ -10464,6 +10500,7 @@ export class SpreadsheetApp {
 
     this.selectedDrawingId = hit.object.id;
     if (this.selectedDrawingId !== prevSelected) {
+      this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
     }
     this.focus();
