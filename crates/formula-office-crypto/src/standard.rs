@@ -146,7 +146,7 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
     }
     // DWORD flags, sizeExtra, algId, algIdHash, keySize, providerType, reserved1, reserved2
     let flags_raw = read_u32_le(bytes, 0)?;
-    let _size_extra = read_u32_le(bytes, 4)?;
+    let size_extra = read_u32_le(bytes, 4)?;
     let alg_id = read_u32_le(bytes, 8)?;
     let alg_id_hash = read_u32_le(bytes, 12)?;
     let mut key_bits = read_u32_le(bytes, 16)?;
@@ -157,7 +157,20 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
     let provider_type = read_u32_le(bytes, 20)?;
     let _reserved1 = read_u32_le(bytes, 24)?;
     let _reserved2 = read_u32_le(bytes, 28)?;
-    let csp_name = decode_utf16le_nul_terminated(&bytes[32..])?;
+    // MS-OFFCRYPTO `EncryptionHeader` stores a UTF-16LE CSPName string followed by `sizeExtra`
+    // opaque bytes. Some real-world files set `sizeExtra` to a non-zero (and potentially odd)
+    // value. We must avoid decoding those trailing bytes as UTF-16LE.
+    let tail_len = bytes.len() - 32;
+    if (size_extra as usize) > tail_len {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionHeader sizeExtra out of range (sizeExtra={size_extra}, tailLen={tail_len})"
+        )));
+    }
+    let csp_len = tail_len - (size_extra as usize);
+    let csp_bytes = bytes.get(32..32 + csp_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionHeader CSPName out of range".to_string())
+    })?;
+    let csp_name = decode_utf16le_nul_terminated(csp_bytes)?;
 
     // Validate key `EncryptionHeader.Flags` semantics.
     //
@@ -1034,6 +1047,36 @@ pub(crate) mod tests {
         header_bytes.extend_from_slice(&reserved2.to_le_bytes());
         header_bytes.extend_from_slice(&csp_name_utf16_nul);
         header_bytes
+    }
+
+    #[test]
+    fn standard_encryption_header_ignores_sizeextra_trailing_bytes() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
+        let size_extra = 1u32;
+        let alg_id = CALG_AES_128;
+        let alg_id_hash = 0x0000_8004u32; // CALG_SHA1
+        let key_bits = 128u32;
+        let provider_type = 0x0000_0018u32; // PROV_RSA_AES
+        let reserved1 = 0u32;
+        let reserved2 = 0u32;
+
+        let expected_csp_name = "Test CSP";
+        let csp_name_utf16_nul = encode_utf16le_nul_terminated(expected_csp_name);
+
+        let mut header_bytes = Vec::new();
+        header_bytes.extend_from_slice(&flags.to_le_bytes());
+        header_bytes.extend_from_slice(&size_extra.to_le_bytes());
+        header_bytes.extend_from_slice(&alg_id.to_le_bytes());
+        header_bytes.extend_from_slice(&alg_id_hash.to_le_bytes());
+        header_bytes.extend_from_slice(&key_bits.to_le_bytes());
+        header_bytes.extend_from_slice(&provider_type.to_le_bytes());
+        header_bytes.extend_from_slice(&reserved1.to_le_bytes());
+        header_bytes.extend_from_slice(&reserved2.to_le_bytes());
+        header_bytes.extend_from_slice(&csp_name_utf16_nul);
+        header_bytes.push(0xAA); // trailing opaque sizeExtra byte (odd length total)
+
+        let header = parse_encryption_header(&header_bytes).expect("parse header");
+        assert_eq!(header.csp_name, expected_csp_name);
     }
 
     #[test]
