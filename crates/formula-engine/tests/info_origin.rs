@@ -74,3 +74,20 @@ fn info_origin_dynamic_key_marks_dependents_dirty() {
         Value::Text("$C$5".to_string())
     );
 }
+
+#[test]
+fn info_origin_falls_back_to_legacy_engine_info_override() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INFO("origin")"#)
+        .unwrap();
+
+    // Backward compatibility: if the host uses the legacy `EngineInfo.origin*` plumbing, `INFO("origin")`
+    // should still resolve that A1 reference when no sheet view origin is set.
+    engine.set_info_origin_for_sheet("Sheet1", Some("C5"));
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("$C$5".to_string())
+    );
+}

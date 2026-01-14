@@ -108,7 +108,12 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
             if let Some(origin) = ctx.sheet_origin_cell(ctx.current_sheet_id()) {
                 return Value::Text(abs_a1(origin));
             }
-            if let Some(origin) = ctx.info_origin().filter(|s| !s.is_empty()) {
+            if let Some(origin) = ctx.info_origin().map(str::trim).filter(|s| !s.is_empty()) {
+                // If the legacy value looks like an A1 reference, normalize it to Excel's absolute
+                // A1 form (`$A$1`). Otherwise return it verbatim for backward compatibility.
+                if let Ok(addr) = parse_a1(origin) {
+                    return Value::Text(abs_a1(addr));
+                }
                 return Value::Text(origin.to_string());
             }
 

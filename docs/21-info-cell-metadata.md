@@ -7,7 +7,7 @@ The Rust `formula-engine` intentionally does **not** reach out to the host OS / 
 - which keys are supported today vs planned
 - which keys are engine-internal vs host-provided
 - what workbook/worksheet metadata is required for Excel-compatible results
-- which APIs hosts should call (or which APIs are planned) to supply that metadata
+- which APIs hosts should call to supply that metadata
 
 ## Status (implementation reality)
 
@@ -17,10 +17,9 @@ As of today:
   - engine-internal: `INFO("recalc")`, `INFO("numfile")`
   - host-provided (via `EngineInfo`): `INFO("system")`, `INFO("directory")`, `INFO("osversion")`,
     `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`
-  - per-sheet view metadata (via `setSheetOrigin`): `INFO("origin")`
+  - per-sheet view metadata (via `setSheetOrigin`): `INFO("origin")` (defaults to `"$A$1"` when unset)
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
-- `CELL("protect")` and `CELL("prefix")` are implemented based on the cell’s **effective style**
-  (layered style resolution), matching Excel semantics:
+- `CELL("protect")` and `CELL("prefix")` are implemented based on the cell’s **effective style** (layered style resolution), matching Excel semantics:
   - `protect`: `1` if the effective style is locked (default), `0` if unlocked.
   - `prefix`: single-character alignment prefix (`'`, `"`, `^`, `\`) or `""` for general/unspecified.
 - `CELL("width")` is implemented with Excel-compatible encoding:
@@ -76,7 +75,7 @@ To get Excel-compatible results, hosts should supply a best-effort snapshot of:
 
 - `system`: `"pcdos"` (Windows-style) or `"mac"` (macOS-style). For web, choose one (we default to `"pcdos"` today).
 - `directory`: workbook directory / “current directory” string (platform-specific path conventions).
-- `origin`: absolute A1 address of the top-left visible cell, including `$` markers (e.g. `"$A$1"`).
+- `origin`: top-left visible cell for the sheet view. Hosts should provide this via `setSheetOrigin(sheet, originA1)`; the engine will normalize it to absolute A1 (including `$` markers).
 - `osversion`: OS version string (exact string should match Excel as closely as feasible on that platform).
 - `release` / `version`: application/host version identifiers (to be defined to match Excel behavior once implemented).
 - `memavail` / `totmem`: numeric memory values (units to be validated against Excel; treat as bytes unless/until we lock a different convention).
@@ -156,7 +155,7 @@ This is computed from the cell’s **effective style**:
 
 Excel returns a **single-character prefix** describing the effective horizontal alignment.
 
-Planned mapping (must match Excel exactly when implemented):
+Mapping (Excel semantics):
 
 | Effective alignment | `CELL("prefix")` |
 |---|---|
@@ -343,7 +342,16 @@ Desktop hosts generally have access to:
 
 ---
 
-## Remaining TODOs (for contributors)
+## Implementation notes (for contributors)
+
+Most of the metadata plumbing described above is implemented. Key code locations:
+
+- Formula implementations: `crates/formula-engine/src/functions/information/worksheet.rs`
+- Engine host metadata setters: `crates/formula-engine/src/engine.rs`
+- WASM exports: `crates/formula-wasm/src/lib.rs`
+- Worker RPC protocol + dispatch: `packages/engine/src/protocol.ts` and `packages/engine/src/engine.worker.ts`
+
+Remaining TODOs / future work:
 
 - Implement additional `CELL()` keys and conditional formatting-aware number formats (Excel has many more variants).
 - Keep `CELL("width")` encoding stable (default/custom/hidden semantics are tested in `crates/formula-engine/tests/functions/info_cell.rs`).
