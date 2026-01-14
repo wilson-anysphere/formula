@@ -46,4 +46,19 @@ export class WasmWorkbook {
       ],
     };
   }
+
+  getPivotSchema(sheet, sourceRangeA1, sampleSize) {
+    recordCall("getPivotSchema", sheet, sourceRangeA1, sampleSize);
+    return { fields: [], recordCount: 0 };
+  }
+
+  getPivotFieldItems(sheet, sourceRangeA1, field) {
+    recordCall("getPivotFieldItems", sheet, sourceRangeA1, field);
+    return [];
+  }
+
+  getPivotFieldItemsPaged(sheet, sourceRangeA1, field, offset, limit) {
+    recordCall("getPivotFieldItemsPaged", sheet, sourceRangeA1, field, offset, limit);
+    return [];
+  }
 }

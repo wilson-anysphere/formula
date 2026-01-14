@@ -178,6 +178,49 @@ describe("engine.worker pivot RPC normalization", () => {
       delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
     }
   });
+
+  it("trims and defaults sheet names for getPivotSchema/getPivotFieldItems/getPivotFieldItemsPaged", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookPivot.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "getPivotSchema",
+        params: { sheet: "  Sheet1  ", sourceRangeA1: "A1:B2", sampleSize: 10 },
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "getPivotFieldItems",
+        params: { sheet: "   ", sourceRangeA1: "A1:B2", field: "Category" },
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "getPivotFieldItemsPaged",
+        params: { sheet: "  Sheet2  ", sourceRangeA1: "A1:B2", field: "Category", offset: 0, limit: 5 },
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["getPivotSchema", "Sheet1", "A1:B2", 10],
+        ["getPivotFieldItems", "Sheet1", "A1:B2", "Category"],
+        ["getPivotFieldItemsPaged", "Sheet2", "A1:B2", "Category", 0, 5],
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;
