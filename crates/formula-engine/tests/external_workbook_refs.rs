@@ -1,4 +1,5 @@
 use formula_engine::eval::CellAddr;
+use formula_engine::calc_settings::{CalcSettings, CalculationMode};
 use formula_engine::{Engine, ExternalValueProvider, PrecedentNode, Value};
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
@@ -644,6 +645,33 @@ fn external_sheet_invalidation_dirties_external_3d_span_dependents() {
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet2");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(121.0));
+}
+
+#[test]
+fn external_sheet_invalidation_dirties_dynamic_external_dependents_from_indirect() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 2.0);
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 3.0);
+    engine.mark_external_workbook_dirty("Book.xlsx");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
 }
 
 #[test]
