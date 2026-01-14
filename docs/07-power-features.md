@@ -993,6 +993,7 @@ WASM binding validation rules (current `formula-wasm` implementation):
   - must be non-empty strings
   - must be valid A1 addresses
   - must **not** contain `!` (no sheet prefix)
+  - `$` absolute markers are allowed (e.g. `"$A$1"`); the binding normalizes them to `A1` internally.
 - `targetValue` must be a finite number.
 - `tolerance` (optional) must be a finite number and `> 0`.
 - `maxIterations` (optional) must be an integer `> 0` and not exceed `usize::MAX`.
