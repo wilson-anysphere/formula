@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 // Opt-in perf smoke test. Run with `PERF_TESTS=1 pnpm -C apps/desktop test:e2e`.
 test.skip(process.env.PERF_TESTS !== "1", "PERF_TESTS not enabled");
 
@@ -9,7 +11,7 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
 }
 
 test("shared grid scroll perf smoke", async ({ page }) => {
-  await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
+  await gotoDesktop(page, "/?grid=shared");
 
   await waitForIdle(page);
   await page.evaluate(() => (window as any).__formulaApp.setGridPerfStatsEnabled(true));
@@ -38,7 +40,7 @@ test("shared grid scroll perf smoke", async ({ page }) => {
 });
 
 test("shared grid million-row deep scroll perf smoke (A900001)", async ({ page }) => {
-  await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
+  await gotoDesktop(page, "/?grid=shared");
 
   await waitForIdle(page);
   await page.evaluate(() => (window as any).__formulaApp.setGridPerfStatsEnabled(true));
