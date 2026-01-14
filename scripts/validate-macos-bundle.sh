@@ -439,11 +439,11 @@ except Exception as e:
 
 found_exts = set()
 
-# CFBundleDocumentTypes is the authoritative source of *file associations* (what Finder uses to
-# decide which apps can open a given extension). Extensions may also be declared in
-# UT*TypeDeclarations, but those declarations are only meaningful when CFBundleDocumentTypes
-# references the corresponding UTIs (via LSItemContentTypes).
-doc_types = data.get("CFBundleDocumentTypes") or []
+# Collect extension registrations from both CFBundleDocumentTypes and UT*TypeDeclarations.
+doc_types = data.get("CFBundleDocumentTypes")
+if doc_types is None:
+    print("CFBundleDocumentTypes is missing")
+    raise SystemExit(1)
 if isinstance(doc_types, (list, tuple)):
     for doc in doc_types:
         if not isinstance(doc, dict):
@@ -460,24 +460,6 @@ if isinstance(doc_types, (list, tuple)):
                     if normalized:
                         found_exts.add(normalized)
 
-doc_utis = set()
-if isinstance(doc_types, (list, tuple)):
-    for doc in doc_types:
-        if not isinstance(doc, dict):
-            continue
-        raw_types = doc.get("LSItemContentTypes") or []
-        if isinstance(raw_types, str):
-            val = raw_types.strip()
-            if val:
-                doc_utis.add(val)
-        elif isinstance(raw_types, (list, tuple)):
-            for t in raw_types:
-                if isinstance(t, str) and t.strip():
-                    doc_utis.add(t.strip())
-
-uti_to_exts = {}
-ut_decl_exts = set()
-
 for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     decls = data.get(key) or []
     if not isinstance(decls, (list, tuple)):
@@ -485,8 +467,6 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     for decl in decls:
         if not isinstance(decl, dict):
             continue
-        uti = decl.get("UTTypeIdentifier")
-        uti = uti.strip() if isinstance(uti, str) else ""
         tags = decl.get("UTTypeTagSpecification") or {}
         if not isinstance(tags, dict):
             continue
@@ -494,52 +474,22 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
         if isinstance(raw_exts, str):
             normalized = raw_exts.strip().lower().lstrip(".")
             if normalized:
-                ut_decl_exts.add(normalized)
-                if uti:
-                    uti_to_exts.setdefault(uti, set()).add(normalized)
+                found_exts.add(normalized)
         elif isinstance(raw_exts, (list, tuple)):
             for ext in raw_exts:
                 if isinstance(ext, str) and ext.strip():
                     normalized = ext.strip().lower().lstrip(".")
                     if normalized:
-                        ut_decl_exts.add(normalized)
-                        if uti:
-                            uti_to_exts.setdefault(uti, set()).add(normalized)
-
-# Only treat UT*TypeDeclarations as contributing to file associations when the declared UTI is
-# referenced by CFBundleDocumentTypes (LSItemContentTypes).
-for uti in doc_utis:
-    exts = uti_to_exts.get(uti)
-    if not exts:
-        continue
-    for ext in exts:
-        found_exts.add(ext)
+                        found_exts.add(normalized)
 
 if not found_exts:
-    if ut_decl_exts:
-        print(
-            "no file extension registrations found in CFBundleDocumentTypes. "
-            "Found extension declarations in UT*TypeDeclarations "
-            f"({', '.join(sorted(ut_decl_exts))}), but Finder associations require CFBundleDocumentTypes "
-            "(CFBundleTypeExtensions or LSItemContentTypes)."
-        )
-    else:
-        print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
+    print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
     raise SystemExit(1)
 
 missing = [ext for ext in expected_exts if ext and ext not in found_exts]
 if missing:
     found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
-    declared_only_in_ut = sorted({ext for ext in expected_exts if ext in ut_decl_exts and ext not in found_exts})
-    hint = ""
-    if declared_only_in_ut:
-        hint = (
-            ". Note: "
-            + ", ".join(declared_only_in_ut)
-            + " appear under UT*TypeDeclarations, but are not referenced by CFBundleDocumentTypes "
-            "(CFBundleTypeExtensions or LSItemContentTypes)."
-        )
-    print("missing extension(s): " + ", ".join(sorted(set(missing))) + f". Found extensions: {found}{hint}")
+    print("missing extension(s): " + ", ".join(sorted(set(missing))) + f". Found extensions: {found}")
     raise SystemExit(1)
 PY
   )"
