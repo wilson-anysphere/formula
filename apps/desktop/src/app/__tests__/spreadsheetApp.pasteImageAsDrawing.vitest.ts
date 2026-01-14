@@ -4,7 +4,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { convertDocumentSheetDrawingsToUiDrawingObjects } from "../../drawings/modelAdapters";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -138,19 +137,12 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const sheetId = app.getCurrentSheetId();
-    const docAny = app.getDocument() as any;
-    const drawings = docAny.getSheetDrawings?.(sheetId) ?? [];
-    expect(drawings).toHaveLength(1);
+    const objects = app.getDrawingObjects();
+    expect(objects).toHaveLength(1);
+    expect(objects[0]!.kind.type).toBe("image");
+    expect(app.getSelectedDrawingId()).toBe(objects[0]!.id);
 
-    const raw = drawings[0] as any;
-    expect(raw?.kind?.type).toBe("image");
-
-    const uiObjects = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
-    expect(uiObjects).toHaveLength(1);
-    expect((app as any).selectedDrawingId).toBe(uiObjects[0]!.id);
-
-    const imageId = raw?.kind?.imageId;
+    const imageId = (objects[0]!.kind as any).imageId;
     expect(typeof imageId).toBe("string");
     // Image bytes are stored out-of-band (IndexedDB + in-memory drawing image store)
     // rather than in DocumentController snapshots.
@@ -195,11 +187,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const sheetId = app.getCurrentSheetId();
-    const docAny = app.getDocument() as any;
-    const drawings = docAny.getSheetDrawings?.(sheetId) ?? [];
-    expect(drawings).toHaveLength(1);
-    expect(drawings[0]?.kind?.type).toBe("image");
+    const objects = app.getDrawingObjects();
+    expect(objects).toHaveLength(1);
+    expect(objects[0]!.kind.type).toBe("image");
 
     app.destroy();
     root.remove();
@@ -231,11 +221,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const sheetId = app.getCurrentSheetId();
-    const docAny = app.getDocument() as any;
-    const drawings = docAny.getSheetDrawings?.(sheetId) ?? [];
-    expect(drawings).toHaveLength(1);
-    expect(drawings[0]?.kind?.type).toBe("image");
+    const objects = app.getDrawingObjects();
+    expect(objects).toHaveLength(1);
+    expect(objects[0]!.kind.type).toBe("image");
 
     app.destroy();
     root.remove();
