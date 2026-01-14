@@ -413,6 +413,7 @@ files (including our committed fixture corpus), Formula’s decryptors are curre
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
   - HMAC over ciphertext only (excludes the 8-byte size header)
   - HMAC over plaintext only (decrypted ZIP bytes)
+  - HMAC over (8-byte size header + plaintext ZIP bytes)
 - `crates/formula-offcrypto` accepts:
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
     when integrity verification is enabled (`DecryptOptions.verify_integrity = true`); it does not
