@@ -98,7 +98,7 @@ CI enforces this policy via `scripts/ci/check-gha-action-sha-pins.sh` (run on ev
 release workflow also runs it as an early guardrail.
 
 To keep pins fresh, `.github/dependabot.yml` enables weekly Dependabot PRs for the
-`github-actions` ecosystem.
+`github-actions` ecosystem (grouped into a single PR).
 
 ## Testing the release pipeline (workflow_dispatch)
 
