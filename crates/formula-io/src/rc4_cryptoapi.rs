@@ -362,9 +362,10 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         // For 40-bit RC4 (`keySize == 0`/`40` → `key_len == 5`), the key material is the first
         // 5 bytes of the digest. Do **not** pad the key to 16 bytes; RC4's KSA depends on the key
         // length and a zero-padded 16-byte key produces a different keystream.
-        let key = &digest[..self.key_len];
-
-        let mut rc4 = Rc4::new(key);
+        let mut rc4 = Rc4::new(&digest[..self.key_len]);
+        // Drop the `Zeroizing` wrapper early so derived key material is wiped as soon as we've
+        // initialized the RC4 state.
+        drop(digest);
         rc4.skip(offset);
 
         self.rc4 = Some(rc4);
