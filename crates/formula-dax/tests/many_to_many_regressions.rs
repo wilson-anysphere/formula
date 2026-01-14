@@ -361,6 +361,215 @@ fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m
 }
 
 #[test]
+fn relatedtable_respects_userelationship_overrides_with_m2m() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    dim.push_row(vec![3.into(), 30.into(), "C".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB"]);
+    // KeyA=1 has 3 facts; KeyB=10 has 2 facts. This makes it easy to detect whether
+    // USERELATIONSHIP is respected (should switch the navigation key used by RELATEDTABLE).
+    fact.push_row(vec![100.into(), 1.into(), 10.into()]).unwrap();
+    fact.push_row(vec![101.into(), 1.into(), 20.into()]).unwrap();
+    fact.push_row(vec![102.into(), 1.into(), 30.into()]).unwrap();
+    fact.push_row(vec![103.into(), 2.into(), 10.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", 0);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    // Another sanity check: for the third dimension row, KeyA has no matches but KeyB does.
+    let mut ctx_c = RowContext::default();
+    ctx_c.push("Dim", 2);
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn relatedtable_respects_userelationship_overrides_with_m2m_for_columnar_fact() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    dim.push_row(vec![3.into(), 30.into(), "C".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(102.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(30.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(103.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", 0);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        2.into()
+    );
+}
+
+#[test]
 fn insert_row_updates_m2m_from_index() {
     let mut model = DataModel::new();
 
