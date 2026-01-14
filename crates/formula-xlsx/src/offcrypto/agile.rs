@@ -1405,6 +1405,30 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_package_does_not_fall_back_when_low_dword_is_zero() {
+        // Some files may store a true 64-bit size that is an exact multiple of 2^32 (lo=0, hi!=0).
+        // The compatibility fallback must not treat this as an empty package.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // lo
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // hi
+
+        let err =
+            decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
+                .expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::InvalidAttribute {
+                    ref element,
+                    ref attr,
+                    ..
+                } if element == "EncryptedPackage" && attr == "originalSize"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn encrypted_package_errors_when_length_header_exceeds_ciphertext() {
         // Header declares 32 bytes, but we only have a single AES block of ciphertext.
         let mut bytes = Vec::new();

@@ -1403,6 +1403,22 @@ mod tests {
         assert_eq!(ciphertext.len(), 16);
     }
 
+    #[test]
+    fn parse_encrypted_package_stream_does_not_fall_back_when_low_dword_is_zero() {
+        // Some files may store a true 64-bit size that is an exact multiple of 2^32 (lo=0, hi!=0).
+        // The compatibility fallback must not reinterpret that as 0.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // lo
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // hi
+
+        let (declared_len, ciphertext) = parse_encrypted_package_stream(&bytes).expect("parse");
+        assert_eq!(ciphertext.len(), 0);
+        // On 64-bit targets we can represent 2^32 in usize. On 32-bit targets this would fail to
+        // parse due to `usize` conversion, but our test suite runs on 64-bit.
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(declared_len, (1u64 << 32) as usize);
+    }
+
     fn encrypt_aes128_cbc_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
         assert_eq!(key.len(), 16, "AES-128 key required for test helper");
         assert_eq!(iv.len(), 16, "AES block-sized IV required");
