@@ -7,6 +7,7 @@ use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
 use crate::functions::{FunctionContext, Reference};
 use crate::locale::ValueLocaleConfig;
+use formula_format::{FormatOptions, Value as FmtValue};
 use formula_model::{CellRef, ErrorValue as ModelErrorValue};
 
 mod formatting;
@@ -733,11 +734,25 @@ impl From<&str> for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Number(n) => write!(f, "{n}"),
+            Value::Number(n) => {
+                // `Display` intentionally uses Excel-like "General" formatting (en-US fallback)
+                // so any accidental `.to_string()` or `format!("{value}")` behaves like Excel.
+                let options = FormatOptions::default();
+                let formatted =
+                    formula_format::format_value(FmtValue::Number(*n), None, &options).text;
+                f.write_str(&formatted)
+            }
             Value::Text(s) => f.write_str(s),
-            Value::Bool(b) => write!(f, "{b}"),
+            Value::Bool(b) => f.write_str(if *b { "TRUE" } else { "FALSE" }),
             Value::Entity(entity) => f.write_str(&entity.display),
-            Value::Record(record) => f.write_str(&record.display),
+            Value::Record(record) => {
+                if let Some(display_field) = record.display_field.as_deref() {
+                    if let Some(value) = record.get_field_case_insensitive(display_field) {
+                        return write!(f, "{value}");
+                    }
+                }
+                f.write_str(&record.display)
+            }
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
             Value::Reference(_) | Value::ReferenceUnion(_) => {
@@ -747,5 +762,28 @@ impl fmt::Display for Value {
             Value::Lambda(_) => f.write_str(ErrorKind::Calc.as_code()),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_number_uses_excel_like_general_formatting() {
+        assert_eq!(Value::Number(-0.0).to_string(), "0");
+    }
+
+    #[test]
+    fn display_bool_uses_excel_spelling() {
+        assert_eq!(Value::Bool(true).to_string(), "TRUE");
+        assert_eq!(Value::Bool(false).to_string(), "FALSE");
+    }
+
+    #[test]
+    fn display_record_honors_display_field() {
+        let mut record = RecordValue::with_fields_iter("Fallback", [("name", "Apple")]);
+        record.display_field = Some("Name".to_string());
+        assert_eq!(Value::Record(record).to_string(), "Apple");
     }
 }
