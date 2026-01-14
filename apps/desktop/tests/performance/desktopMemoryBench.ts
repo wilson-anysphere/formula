@@ -27,6 +27,7 @@ import {
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
+  resolveDesktopMemoryBenchEnv,
   sleep,
   resolvePerfHome,
   runOnce as runDesktopOnce,
@@ -95,24 +96,9 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     return [];
   }
 
-  const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? '10') || 10);
-  // Allow explicitly setting `FORMULA_DESKTOP_MEMORY_SETTLE_MS=0` to sample immediately. Treat
-  // unset/blank/invalid values as the default.
-  const settleRaw = process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS;
-  const settleParsed = settleRaw && settleRaw.trim() !== '' ? Number(settleRaw) : 5000;
-  const settleMs = Number.isFinite(settleParsed) ? Math.max(0, settleParsed) : 5000;
-  const timeoutMs = Math.max(
-    1,
-    Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '20000') || 20000,
-  );
+  const { runs, timeoutMs, settleMs, targetMb, binPath: binFromEnv } = resolveDesktopMemoryBenchEnv();
 
-  const targetRaw =
-    process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? '100';
-  const targetMb = Number(targetRaw) || 100;
-
-  const binPath = process.env.FORMULA_DESKTOP_BIN
-    ? resolve(process.env.FORMULA_DESKTOP_BIN)
-    : defaultDesktopBinPath();
+  const binPath = binFromEnv ?? defaultDesktopBinPath();
 
   if (!binPath || !existsSync(binPath)) {
     throw new Error(

@@ -9,6 +9,7 @@ import {
   formatPerfPath,
   getProcessTreeRssBytesLinux,
   repoRoot,
+  resolveDesktopMemoryBenchEnv,
   resolvePerfHome,
   runOnce as runDesktopOnce,
   sleep,
@@ -58,29 +59,16 @@ function parseArgs(argv: string[]): {
   jsonPath: string | null;
 } {
   const args = [...argv];
-  const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? '') || 10;
-  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '') || 20_000;
-  // Allow explicitly setting `FORMULA_DESKTOP_MEMORY_SETTLE_MS=0` to sample immediately.
-  // Treat unset/blank/invalid values as the default.
-  const settleRaw = process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS;
-  const settleParsed = settleRaw && settleRaw.trim() !== '' ? Number(settleRaw) : 5_000;
-  const envSettleMs = Number.isFinite(settleParsed) ? Math.max(0, settleParsed) : 5_000;
-
-  const rawTarget =
-    process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? '';
-  const envTargetMb = Number(rawTarget) || 100;
-
-  const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH === '1';
-  const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
+  const envDefaults = resolveDesktopMemoryBenchEnv();
 
   const out = {
-    runs: Math.max(1, envRuns),
-    timeoutMs: Math.max(1, envTimeoutMs),
-    settleMs: Math.max(0, envSettleMs),
-    binPath: envBin as string | null,
-    targetMb: Math.max(1, envTargetMb),
+    runs: envDefaults.runs,
+    timeoutMs: envDefaults.timeoutMs,
+    settleMs: envDefaults.settleMs,
+    binPath: envDefaults.binPath,
+    targetMb: envDefaults.targetMb,
     allowInCi: false,
-    enforce: envEnforce,
+    enforce: envDefaults.enforce,
     jsonPath: null as string | null,
   };
 
