@@ -604,7 +604,7 @@ export default {
       "name": "CELL",
       "min_args": 1,
       "max_args": 2,
-      "volatility": "non_volatile",
+      "volatility": "volatile",
       "return_type": "any",
       "arg_types": [
         "text",
@@ -2588,7 +2588,7 @@ export default {
       "name": "INFO",
       "min_args": 1,
       "max_args": 1,
-      "volatility": "non_volatile",
+      "volatility": "volatile",
       "return_type": "any",
       "arg_types": [
         "text"
