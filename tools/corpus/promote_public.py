@@ -475,7 +475,7 @@ def main() -> int:
         if fixture_path.exists():
             existing_fixture_bytes = read_workbook_input(fixture_path).data
             fixture_changed = existing_fixture_bytes != workbook_bytes
-            fixture_needs_force = fixture_changed
+            fixture_needs_force = fixture_changed and not args.force
             if fixture_changed and not args.force and not args.dry_run:
                 raise FileExistsError(
                     f"Refusing to overwrite existing fixture {fixture_path} (bytes differ). "
