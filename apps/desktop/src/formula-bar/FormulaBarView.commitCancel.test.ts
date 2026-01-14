@@ -516,6 +516,48 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commitEdit()/cancelEdit() still work even if the view is unmounted mid-edit", () => {
+    const host1 = document.createElement("div");
+    document.body.appendChild(host1);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view1 = new FormulaBarView(host1, { onCommit, onCancel });
+    view1.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view1.textarea.focus();
+    view1.textarea.value = "changed";
+    view1.textarea.setSelectionRange(view1.textarea.value.length, view1.textarea.value.length);
+    view1.textarea.dispatchEvent(new Event("input"));
+
+    host1.remove();
+
+    view1.commitEdit();
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("changed", { reason: "command", shift: false });
+    expect(view1.model.isEditing).toBe(false);
+    expect(view1.model.activeCell.input).toBe("changed");
+
+    const host2 = document.createElement("div");
+    document.body.appendChild(host2);
+
+    const view2 = new FormulaBarView(host2, { onCommit: () => {}, onCancel });
+    view2.setActiveCell({ address: "A1", input: "orig2", value: null });
+
+    view2.textarea.focus();
+    view2.textarea.value = "changed2";
+    view2.textarea.setSelectionRange(view2.textarea.value.length, view2.textarea.value.length);
+    view2.textarea.dispatchEvent(new Event("input"));
+
+    host2.remove();
+
+    view2.cancelEdit();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view2.model.isEditing).toBe(false);
+    expect(view2.model.draft).toBe("orig2");
+    expect(view2.model.activeCell.input).toBe("orig2");
+  });
+
   it("hides commit/cancel buttons when not editing and shows them on focus", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
