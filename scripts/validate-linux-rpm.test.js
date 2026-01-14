@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
-const expectedRpmName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedMainBinaryName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedRpmName = expectedMainBinaryName;
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -120,7 +121,7 @@ function writeFakeRpmExtractTools(
   {
     withMimeType = true,
     mimeTypeLine = "MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;",
-    execLine = "Exec=formula-desktop %U",
+    execLine = `Exec=${expectedMainBinaryName} %U`,
   } = {},
 ) {
   const rpm2cpioScript = `#!/usr/bin/env bash
@@ -157,7 +158,16 @@ exit 0
   chmodSync(cpioPath, 0o755);
 }
 
-function runValidator({ cwd, rpmArg, fakeListFile, fakeRequiresFile, fakeMode, fakeVersion, fakeName }) {
+function runValidator({
+  cwd,
+  rpmArg,
+  fakeListFile,
+  fakeRequiresFile,
+  fakeMode,
+  fakeVersion,
+  fakeName,
+  rpmNameOverride,
+}) {
   const proc = spawnSync(
     "bash",
     [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", rpmArg],
@@ -172,6 +182,7 @@ function runValidator({ cwd, rpmArg, fakeListFile, fakeRequiresFile, fakeMode, f
         FAKE_RPM_MODE: fakeMode ?? "ok",
         FAKE_RPM_VERSION: fakeVersion ?? expectedVersion,
         FAKE_RPM_NAME: fakeName ?? expectedRpmName,
+        ...(rpmNameOverride ? { FORMULA_RPM_NAME_OVERRIDE: rpmNameOverride } : {}),
       },
     },
   );
@@ -197,7 +208,7 @@ test(
     writeFileSync(
       listFile,
       [
-        "/usr/bin/formula-desktop",
+        `/usr/bin/${expectedMainBinaryName}`,
         "/usr/share/applications/formula.desktop",
         `/usr/share/doc/${expectedRpmName}/LICENSE`,
         `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -232,7 +243,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinaryName}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -244,7 +255,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("validate-linux-rpm fails when /usr/bin/formula-desktop is missing", { skip: !hasBash }, () => {
+test("validate-linux-rpm fails when the expected desktop binary path is missing", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
@@ -258,6 +269,39 @@ test("validate-linux-rpm fails when /usr/bin/formula-desktop is missing", { skip
   const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /missing expected desktop binary path/i);
+});
+
+test("validate-linux-rpm accepts when RPM %{NAME} is overridden for validation", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const overrideName = "formula-desktop-alt";
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinaryName}`,
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${overrideName}/LICENSE`,
+      `/usr/share/doc/${overrideName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({
+    cwd: tmp,
+    rpmArg: "Formula.rpm",
+    fakeListFile: listFile,
+    fakeRequiresFile: requiresFile,
+    fakeName: overrideName,
+    rpmNameOverride: overrideName,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
 });
 
 test("validate-linux-rpm fails when no .desktop file exists under /usr/share/applications/", { skip: !hasBash }, () => {
