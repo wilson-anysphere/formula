@@ -18,6 +18,17 @@ import {
   preloadFunctionSignatureCatalog,
   signatureParts,
 } from "./highlight/functionSignatures.js";
+import {
+  normalizeFormulaLocaleId,
+  normalizeLocaleId,
+  type FormulaLocaleId,
+} from "../spreadsheet/formulaLocale.js";
+
+// Translation tables from the Rust engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+import DE_DE_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
 
 type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -356,25 +367,81 @@ const FUNCTION_ENTRIES: Array<{ name: string; upper: string }> = (() => {
 
 const FUNCTION_NAMES_UPPER = new Set(FUNCTION_ENTRIES.map((e) => e.upper));
 
-const DEFAULT_ARG_SEPARATOR = (() => {
-  const locale = (() => {
-    try {
-      const nav = (globalThis as any).navigator;
-      const lang = typeof nav?.language === "string" ? nav.language : "";
-      return lang || "en-US";
-    } catch {
-      return "en-US";
+type FunctionTranslationTables = {
+  localizedToCanonical: Map<string, string>;
+  canonicalToLocalized: Map<string, string>;
+  localizedNamesUpper: Set<string>;
+};
+
+function casefoldIdent(ident: string): string {
+  // Mirror Rust's locale behavior (`casefold_ident` / `casefold`): Unicode-aware uppercasing.
+  return String(ident ?? "").toUpperCase();
+}
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
+  const localizedToCanonical: Map<string, string> = new Map();
+  const canonicalToLocalized: Map<string, string> = new Map();
+  const localizedNamesUpper: Set<string> = new Set();
+
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+
+    const canonUpper = casefoldIdent(canonical.trim());
+    const localizedTrimmed = localized.trim();
+    const locUpper = casefoldIdent(localizedTrimmed);
+    if (!canonUpper || !locUpper) continue;
+
+    // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
+    if (canonUpper !== locUpper) {
+      localizedToCanonical.set(locUpper, canonUpper);
+      canonicalToLocalized.set(canonUpper, localizedTrimmed);
     }
-  })();
+    localizedNamesUpper.add(locUpper);
+  }
+
+  return { localizedToCanonical, canonicalToLocalized, localizedNamesUpper };
+}
+
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<FormulaLocaleId, FunctionTranslationTables> = {
+  "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
+  "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
+  "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+  // Canonical locale: no translations needed, but keep the table shape consistent.
+  "en-US": { localizedToCanonical: new Map(), canonicalToLocalized: new Map(), localizedNamesUpper: new Set() },
+};
+
+function getFunctionTranslationTables(localeId: string): FunctionTranslationTables | null {
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
+  if (!formulaLocaleId) return null;
+  return FUNCTION_TRANSLATIONS_BY_LOCALE[formulaLocaleId] ?? null;
+}
+
+function isKnownFunctionNameUpper(nameUpper: string, localeId: string): boolean {
+  if (FUNCTION_NAMES_UPPER.has(nameUpper)) return true;
+  const tables = getFunctionTranslationTables(localeId);
+  return Boolean(tables?.localizedNamesUpper.has(nameUpper));
+}
+
+const ARG_SEPARATOR_CACHE = new Map<string, string>();
+
+function inferArgSeparator(localeId: string): string {
+  const locale = normalizeLocaleId(localeId) || "en-US";
+  const cached = ARG_SEPARATOR_CACHE.get(locale);
+  if (cached) return cached;
 
   try {
     const parts = new Intl.NumberFormat(locale).formatToParts(1.1);
     const decimal = parts.find((p) => p.type === "decimal")?.value ?? ".";
-    return decimal === "," ? "; " : ", ";
+    const sep = decimal === "," ? "; " : ", ";
+    ARG_SEPARATOR_CACHE.set(locale, sep);
+    return sep;
   } catch {
     return ", ";
   }
-})();
+}
 
 const SIGNATURE_PREVIEW_CACHE = new Map<string, string>();
 
@@ -433,12 +500,10 @@ function isFormulaText(text: string): boolean {
   return firstNonWhitespace >= 0 && text[firstNonWhitespace] === "=";
 }
 
-function findCompletionContext(input: string, cursorPosition: number): CompletionContext | null {
+function findCompletionContext(input: string, cursorPosition: number, localeId: string): CompletionContext | null {
   const cursor = clampCursor(input, cursorPosition);
 
-  const firstNonWhitespace = firstNonWhitespaceIndex(input);
-  if (firstNonWhitespace < 0) return null;
-  if (input[firstNonWhitespace] !== "=") return null;
+  if (!isFormulaText(input)) return null;
 
   // Require a collapsed selection (caller ensures selectionStart === selectionEnd).
   let replaceStart = cursor;
@@ -452,7 +517,7 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   // Avoid showing function autocomplete when the caret is inside a likely A1 cell reference
   // (e.g. `=A1+1` with the caret between `A` and `1`). In these cases the dropdown can
   // unexpectedly consume Escape/Tab, making the formula bar feel "stuck".
-  if (/^[A-Za-z]{1,3}\d{1,7}$/.test(fullToken) && !FUNCTION_NAMES_UPPER.has(fullTokenUpper)) return null;
+  if (/^[A-Za-z]{1,3}\d{1,7}$/.test(fullToken) && !isKnownFunctionNameUpper(fullTokenUpper, localeId)) return null;
 
   const typedPrefix = input.slice(replaceStart, cursor);
   if (typedPrefix.length < 1) return null;
@@ -467,7 +532,7 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   // Escape/Tab semantics while users edit references.
   const fullIdent = input.slice(replaceStart, replaceEnd);
   const fullUpper = fullIdent.toUpperCase();
-  if (/^[A-Z]{1,3}[0-9]+$/.test(fullUpper) && !FUNCTION_NAMES_UPPER.has(fullUpper)) return null;
+  if (/^[A-Z]{1,3}[0-9]+$/.test(fullUpper) && !isKnownFunctionNameUpper(fullUpper, localeId)) return null;
 
   // Ensure we're at the start of an expression-like position:
   // `=VLO`, `=1+VLO`, `=SUM(VLO`, `=SUM(A, VLO)`
@@ -485,8 +550,8 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   // names. Be conservative here so we don't steal Tab from range completion.
   if (prevChar === "(" || prevChar === "," || prevChar === ";") {
     if (/^[A-Za-z]+$/.test(typedPrefix)) {
-      if (typedPrefix.length === 1 && !FUNCTION_NAMES_UPPER.has(typedPrefix.toUpperCase())) return null;
-      if (typedPrefix.length === 2 && !FUNCTION_NAMES_UPPER.has(typedPrefix.toUpperCase())) return null;
+      if (typedPrefix.length === 1 && !isKnownFunctionNameUpper(typedPrefix.toUpperCase(), localeId)) return null;
+      if (typedPrefix.length === 2 && !isKnownFunctionNameUpper(typedPrefix.toUpperCase(), localeId)) return null;
     }
   }
 
@@ -514,8 +579,9 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   };
 }
 
-function signaturePreview(name: string): string {
-  const cached = SIGNATURE_PREVIEW_CACHE.get(name);
+function signaturePreview(name: string, localeId: string): string {
+  const cacheKey = `${normalizeFormulaLocaleId(localeId) ?? localeId}\0${name}`;
+  const cached = SIGNATURE_PREVIEW_CACHE.get(cacheKey);
   if (cached) return cached;
 
   const sig = getFunctionSignature(name);
@@ -524,14 +590,14 @@ function signaturePreview(name: string): string {
     // When the signature catalog is still loading, avoid permanently caching the fallback.
     // (Once the catalog is ready, a subsequent call can fill the cache with the real signature.)
     if (isFunctionSignatureCatalogReady()) {
-      SIGNATURE_PREVIEW_CACHE.set(name, fallback);
+      SIGNATURE_PREVIEW_CACHE.set(cacheKey, fallback);
     }
     return fallback;
   }
 
   // The dropdown already shows the function name; display just the argument list for
   // a compact "signature preview" (Excel-like).
-  const parts = signatureParts(sig, null, { argSeparator: DEFAULT_ARG_SEPARATOR });
+  const parts = signatureParts(sig, null, { argSeparator: inferArgSeparator(localeId) });
   if (parts.length < 2) return "(…)";
 
   // `signatureParts` yields: `${NAME}(` + [params/separators] + `)`.
@@ -542,7 +608,7 @@ function signaturePreview(name: string): string {
   const args = `(${inner})`;
   const summary = sig.summary?.trim?.() ?? "";
   const out = summary ? `${args} — ${summary}` : args;
-  SIGNATURE_PREVIEW_CACHE.set(name, out);
+  SIGNATURE_PREVIEW_CACHE.set(cacheKey, out);
   return out;
 }
 
@@ -555,7 +621,10 @@ function preserveTypedCasing(typedPrefix: string, canonical: string): string {
   //   "=vlo"  -> "=vlookup("
   //   "=VLO"  -> "=VLOOKUP("
   //   "=Vlo"  -> "=Vlookup("
-  const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
+  let letters = "";
+  for (const ch of typedPrefix) {
+    if (isUnicodeAlphabetic(ch)) letters += ch;
+  }
   if (!letters) return typedPrefix + canonical.slice(typedPrefix.length);
 
   const lower = letters.toLowerCase();
@@ -566,7 +635,13 @@ function preserveTypedCasing(typedPrefix: string, canonical: string): string {
   // Title-ish casing: first letter uppercase, remainder lowercase.
   if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
     const lowered = canonical.toLowerCase();
-    const firstLetterIdx = lowered.search(/[a-z]/);
+    let firstLetterIdx = -1;
+    for (let i = 0; i < lowered.length; i += 1) {
+      if (isUnicodeAlphabetic(lowered[i]!)) {
+        firstLetterIdx = i;
+        break;
+      }
+    }
     if (firstLetterIdx >= 0) {
       return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx]!.toUpperCase() + lowered.slice(firstLetterIdx + 1);
     }
@@ -577,21 +652,39 @@ function preserveTypedCasing(typedPrefix: string, canonical: string): string {
   return typedPrefix + canonical.slice(typedPrefix.length);
 }
 
-function buildSuggestions(prefixUpper: string, limit: number): FunctionSuggestion[] {
+function buildSuggestions(params: {
+  prefixUpper: string;
+  limit: number;
+  localeId: string;
+  allowLocalized: boolean;
+}): FunctionSuggestion[] {
   const out: FunctionSuggestion[] = [];
-  if (!prefixUpper) {
-    for (let i = 0; i < FUNCTION_ENTRIES.length && out.length < limit; i += 1) {
-      const fn = FUNCTION_ENTRIES[i]!;
-      out.push({ name: fn.name, signature: signaturePreview(fn.name) });
+  const { prefixUpper, limit, localeId, allowLocalized } = params;
+
+  const tables = allowLocalized ? getFunctionTranslationTables(localeId) : null;
+  const suppressCanonical = new Set<string>();
+
+  if (tables) {
+    // Prefer localized aliases when they match the prefix, and suppress the canonical
+    // version of those same functions to avoid duplicate suggestions.
+    for (const fn of FUNCTION_ENTRIES) {
+      const localized = tables.canonicalToLocalized.get(fn.upper);
+      if (!localized) continue;
+      const localizedUpper = casefoldIdent(localized);
+      if (prefixUpper && !localizedUpper.startsWith(prefixUpper)) continue;
+      out.push({ name: localized, signature: signaturePreview(localized, localeId) });
+      suppressCanonical.add(fn.upper);
+      if (out.length >= limit) return out;
     }
-    return out;
   }
 
   for (const fn of FUNCTION_ENTRIES) {
-    if (!fn.upper.startsWith(prefixUpper)) continue;
-    out.push({ name: fn.name, signature: signaturePreview(fn.name) });
+    if (suppressCanonical.has(fn.upper)) continue;
+    if (prefixUpper && !fn.upper.startsWith(prefixUpper)) continue;
+    out.push({ name: fn.name, signature: signaturePreview(fn.name, localeId) });
     if (out.length >= limit) break;
   }
+
   return out;
 }
 
@@ -758,13 +851,20 @@ class FormulaBarFunctionAutocompleteController {
     }
 
     const input = this.#textarea.value;
-    const ctx = findCompletionContext(input, start);
+    const localeId = this.#formulaBar.currentLocaleId();
+    const ctx = findCompletionContext(input, start, localeId);
     if (!ctx) {
       this.close();
       return;
     }
 
-    const suggestions = buildSuggestions(ctx.matchPrefixUpper, this.#maxItems);
+    const suggestions = buildSuggestions({
+      prefixUpper: ctx.matchPrefixUpper,
+      limit: this.#maxItems,
+      localeId,
+      // `_xlfn.` prefix is primarily used with canonical English names; avoid localizing completions in this mode.
+      allowLocalized: ctx.qualifier.length === 0,
+    });
     if (suggestions.length === 0) {
       this.close();
       return;
@@ -2211,6 +2311,19 @@ export class FormulaBarView {
 
   isEditing(): boolean {
     return this.model.isEditing;
+  }
+
+  /**
+   * Best-effort formula locale ID used for editor tooling and locale-aware UI affordances
+   * (e.g. localized function-name autocompletion).
+   */
+  currentLocaleId(): string {
+    const raw =
+      this.#tooling?.getLocaleId?.() ??
+      (typeof document !== "undefined" ? document.documentElement?.lang : "") ??
+      "en-US";
+    const trimmed = String(raw ?? "").trim();
+    return trimmed || "en-US";
   }
 
   commitEdit(reason: FormulaBarCommitReason = "command", shift = false): void {

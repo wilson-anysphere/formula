@@ -27,25 +27,65 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
-  it("does not treat non-ASCII letters as token boundaries (=ZÄH should not suggest HLOOKUP)", () => {
+  it("supports localized function-name suggestions with non-ASCII letters in de-DE (=ZÄH → ZÄHLENWENN)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
-    view.setActiveCell({ address: "A1", input: "", value: null });
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
 
-    view.focus({ cursor: "end" });
-    view.textarea.value = "=ZÄH";
-    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
-    view.textarea.dispatchEvent(new Event("input"));
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=ZÄH";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
 
-    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
-    // We don't currently provide localized function-name suggestions here, but we should also
-    // avoid suggesting unrelated ASCII functions due to mis-tokenizing `Ä`.
-    expect(dropdown?.hasAttribute("hidden")).toBe(true);
-    expect(dropdown?.textContent).not.toContain("HLOOKUP");
+      const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+      expect(dropdown?.hasAttribute("hidden")).toBe(false);
+      expect(dropdown?.textContent).toContain("ZÄHLENWENN");
+      // Avoid suggesting unrelated ASCII functions due to mis-tokenizing `Ä`.
+      expect(dropdown?.textContent).not.toContain("HLOOKUP");
 
-    host.remove();
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("does not suppress 2-letter localized function names inside arguments in es-ES (=SUM(SI → includes SI)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "es-ES";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SUM(SI";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+      expect(dropdown?.hasAttribute("hidden")).toBe(false);
+      expect(dropdown?.textContent).toContain("SI");
+
+      const siItem = host.querySelector<HTMLButtonElement>(
+        '[data-testid="formula-function-autocomplete-item"][data-name="SI"]',
+      );
+      expect(siItem).not.toBeNull();
+
+      siItem?.click();
+      expect(view.model.draft).toBe("=SUM(SI(");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
   });
 
   it("shows function suggestions inside argument lists (=SUM(IF → includes IF)", () => {
