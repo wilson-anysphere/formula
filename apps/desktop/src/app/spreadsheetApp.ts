@@ -11112,9 +11112,12 @@ export class SpreadsheetApp {
     this.drawingCanvas.style.left = "0px";
     this.drawingCanvas.style.top = "0px";
 
+    const scrollX = this.sharedGrid && sharedViewport ? sharedViewport.scrollX : this.scrollX;
+    const scrollY = this.sharedGrid && sharedViewport ? sharedViewport.scrollY : this.scrollY;
+
     const viewport: DrawingViewport = {
-      scrollX: this.scrollX,
-      scrollY: this.scrollY,
+      scrollX,
+      scrollY,
       width: layout.rootWidth,
       height: layout.rootHeight,
       dpr: this.dpr,
@@ -11146,9 +11149,11 @@ export class SpreadsheetApp {
    */
   getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
+    const scrollX = this.sharedGrid && sharedViewport ? sharedViewport.scrollX : this.scrollX;
+    const scrollY = this.sharedGrid && sharedViewport ? sharedViewport.scrollY : this.scrollY;
     return {
-      scrollX: this.scrollX,
-      scrollY: this.scrollY,
+      scrollX,
+      scrollY,
       width: layout.rootWidth,
       height: layout.rootHeight,
       dpr: this.dpr,
