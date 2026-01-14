@@ -3468,9 +3468,24 @@ function classifyValuesForDlp(values, options = {}) {
     for (const cell of row || []) {
       throwIfAborted(signal);
       if (cell === null || cell === undefined) continue;
-      const heuristic = classifyTextForDlp(String(cell));
+      const heuristic = (() => {
+        const t = typeof cell;
+        if (t === "string" || t === "number" || t === "bigint") {
+          return classifyTextForDlp(String(cell));
+        }
+        if (t === "object") {
+          // Sheet cells can contain rich values (objects) whose visible text lives in nested fields
+          // (e.g. `{ text, runs }` for rich text, typed values, in-cell images, etc). Reuse the
+          // structured traversal logic (bounded) so we still detect heuristic-sensitive strings.
+          return classifyStructuredForDlp(cell, { signal, maxNodes: 200, maxDepth: 10, maxStringLength: 10_000 });
+        }
+        return { level: "public", findings: [] };
+      })();
       if (heuristic.level !== "sensitive") continue;
-      for (const f of heuristic.findings || []) findings.add(String(f));
+      for (const f of heuristic.findings || []) {
+        if (typeof f === "string") findings.add(f);
+        else if (typeof f === "number" || typeof f === "boolean" || typeof f === "bigint") findings.add(String(f));
+      }
       // Early exit once we've found at least one sensitive pattern; policy evaluation only
       // needs the max classification, not exhaustive findings.
       if (findings.size > 0) {
@@ -3631,28 +3646,37 @@ function redactValuesForDlp(values, redactor, options = {}) {
     for (const cell of row) {
       throwIfAborted(signal);
       const isTextLike = typeof cell === "string" || typeof cell === "number" || typeof cell === "bigint";
-      if (!isTextLike) {
-        nextRow.push(cell);
+      if (isTextLike) {
+        const raw = String(cell);
+        const redacted = redactor(raw);
+        // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
+        // ensure heuristic sensitive patterns never slip through under DLP redaction.
+        if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") {
+          nextRow.push("[REDACTED]");
+          continue;
+        }
+
+        // Preserve non-string primitives when redaction is a no-op (keeps API behavior stable),
+        // but allow redactors to return strings when they transform the content.
+        if (typeof cell !== "string" && redacted === raw) {
+          nextRow.push(cell);
+          continue;
+        }
+
+        nextRow.push(redacted);
         continue;
       }
 
-      const raw = String(cell);
-      const redacted = redactor(raw);
-      // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
-      // ensure heuristic sensitive patterns never slip through under DLP redaction.
-      if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") {
-        nextRow.push("[REDACTED]");
+      // Rich cell values (DocumentController rich text, typed values, etc) can be objects that
+      // still render into prompt/embedding text via `valuesRangeToTsv`. Under DLP REDACT, deep-redact
+      // those objects so heuristic-sensitive strings cannot leak to embeddings even when the
+      // configured redactor is a no-op.
+      if (cell && typeof cell === "object") {
+        nextRow.push(redactStructuredValue(cell, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }));
         continue;
       }
 
-      // Preserve non-string primitives when redaction is a no-op (keeps API behavior stable),
-      // but allow redactors to return strings when they transform the content.
-      if (typeof cell !== "string" && redacted === raw) {
-        nextRow.push(cell);
-        continue;
-      }
-
-      nextRow.push(redacted);
+      nextRow.push(cell);
     }
     out.push(nextRow);
   }

@@ -57,6 +57,45 @@ test("buildContext: redacts sensitive query before sheet-level RAG embedding whe
   assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
 });
 
+test("buildContext: heuristic DLP detects rich object cell values and prevents them from leaking to embeddings (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [
+        // Rich text cells (DocumentController-style) use `{ text, runs }`.
+        [{ text: "Email", runs: [] }, { text: "alice@example.com", runs: [] }],
+        [{ text: "Other", runs: [] }, { text: "Hello", runs: [] }],
+      ],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
   const embedder = new CapturingEmbedder();
   const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
