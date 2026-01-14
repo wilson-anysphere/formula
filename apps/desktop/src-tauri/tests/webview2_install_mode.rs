@@ -29,8 +29,9 @@ fn windows_bundle_configures_webview2_install_mode() {
             "tauri.conf.json missing `bundle.windows.webviewInstallMode`.\n\n\
              Formula relies on the Microsoft Edge WebView2 Evergreen Runtime on Windows.\n\
              Configure the installer to install WebView2 automatically on clean machines, e.g.:\n\
-             - {{ \"type\": \"downloadBootstrapper\" }} (small, downloads runtime during install)\n\
-             - {{ \"type\": \"offlineInstaller\" }} / {{ \"type\": \"fixedRuntime\" }} (offline, larger)\n"
+             - {{ \"type\": \"downloadBootstrapper\", \"silent\": true }} (small, downloads runtime during install)\n\
+             - {{ \"type\": \"embedBootstrapper\", \"silent\": true }} (bundles bootstrapper; still downloads runtime)\n\
+             - {{ \"type\": \"offlineInstaller\", \"silent\": true }} / {{ \"type\": \"fixedRuntime\", \"path\": \"...\" }} (offline, larger)\n"
         )
     });
 
