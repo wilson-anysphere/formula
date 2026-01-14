@@ -152,6 +152,16 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getFunction("CEILING.MATH")?.args?.[2]?.name, "mode", "Expected CEILING.MATH arg3 to be mode");
   assert.ok(registry.getFunction("CEILING.MATH")?.args?.[2]?.optional, "Expected CEILING.MATH mode to be optional");
   assert.ok(registry.isRangeArg("FLOOR.MATH", 0), "Expected FLOOR.MATH number to be a range");
+  assert.ok(registry.isRangeArg("CEILING", 0), "Expected CEILING number to be a range");
+  assert.equal(registry.getFunction("CEILING")?.args?.[1]?.name, "significance", "Expected CEILING arg2 to be significance");
+  assert.ok(registry.isRangeArg("FLOOR", 0), "Expected FLOOR number to be a range");
+  assert.ok(registry.isRangeArg("CEILING.PRECISE", 0), "Expected CEILING.PRECISE number to be a range");
+  assert.ok(registry.getFunction("CEILING.PRECISE")?.args?.[1]?.optional, "Expected CEILING.PRECISE significance to be optional");
+  assert.ok(registry.isRangeArg("FLOOR.PRECISE", 0), "Expected FLOOR.PRECISE number to be a range");
+  assert.ok(registry.isRangeArg("ISO.CEILING", 0), "Expected ISO.CEILING number to be a range");
+  assert.ok(registry.isRangeArg("MROUND", 0), "Expected MROUND number to be a range");
+  assert.ok(registry.isRangeArg("EVEN", 0), "Expected EVEN number to be a range");
+  assert.ok(registry.isRangeArg("ODD", 0), "Expected ODD number to be a range");
 
   // FORECAST.LINEAR(x, known_y's, known_x's)
   assert.equal(

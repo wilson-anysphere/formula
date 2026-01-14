@@ -428,6 +428,68 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CEILING",
+    description: "Rounds a number up, away from zero, to the nearest multiple of significance.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number" },
+    ],
+  },
+  {
+    name: "FLOOR",
+    description: "Rounds a number down, toward zero, to the nearest multiple of significance.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number" },
+    ],
+  },
+  {
+    name: "CEILING.PRECISE",
+    description: "Rounds a number up to the nearest integer or multiple of significance (always toward +∞).",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FLOOR.PRECISE",
+    description: "Rounds a number down to the nearest integer or multiple of significance (always toward -∞).",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "ISO.CEILING",
+    description: "Rounds a number up to the nearest integer or multiple of significance (ISO variant).",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "MROUND",
+    description: "Rounds a number to the nearest multiple of a specified value.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "multiple", type: "number" },
+    ],
+  },
+  {
+    name: "EVEN",
+    description: "Rounds a number up to the nearest even integer.",
+    args: [
+      { name: "number", type: "range" },
+    ],
+  },
+  {
+    name: "ODD",
+    description: "Rounds a number up to the nearest odd integer.",
+    args: [
+      { name: "number", type: "range" },
+    ],
+  },
+  {
     name: "WORKDAY",
     description: "Returns a date that is a specified number of working days before or after a start date.",
     args: [
