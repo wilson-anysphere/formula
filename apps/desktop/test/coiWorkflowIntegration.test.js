@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function readWorkflow(repoRoot, name) {
@@ -12,7 +14,9 @@ function readWorkflow(repoRoot, name) {
 }
 
 function assertWorkflowUsesNoBuildForCoi(workflowName, text) {
-  const lines = text.split(/\r?\n/);
+  // Strip `# ...` comments so commented-out commands/flags cannot satisfy assertions.
+  const stripped = stripHashComments(text);
+  const lines = stripped.split(/\r?\n/);
 
   /** @type {Array<{ line: number, snippet: string, window: string }>} */
   const matches = [];
@@ -38,11 +42,11 @@ function assertWorkflowUsesNoBuildForCoi(workflowName, text) {
       blockText = body.join("\n");
     }
 
-    if (!blockText.includes("pnpm -C apps/desktop check:coi")) continue;
+    if (!stripHashComments(blockText).includes("pnpm -C apps/desktop check:coi")) continue;
 
     // Capture a small window (line + a few following lines) so we can enforce --no-build even
     // when a command is wrapped across multiple lines.
-    const window = [line, ...(lines.slice(i + 1, i + 8) ?? [])].join("\n");
+    const window = stripHashComments([line, ...(lines.slice(i + 1, i + 8) ?? [])].join("\n"));
     matches.push({
       line: i + 1,
       snippet: line.trim(),

@@ -317,3 +317,74 @@ export function stripHtmlComments(html) {
 
   return out;
 }
+
+export function stripHashComments(source) {
+  // Strip `# ...` comments (YAML/shell-style) while preserving quoted strings and newlines.
+  //
+  // This is intentionally lightweight: it does not attempt to fully parse YAML or shell,
+  // but is sufficient for guardrail tests that scan workflow files / scripts and should not
+  // treat commented-out commands as present.
+  const text = String(source);
+  let out = "";
+  /** @type {"code" | "single" | "double"} */
+  let state = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+    const prev = i > 0 ? text[i - 1] : "";
+
+    if (state === "code") {
+      if (ch === "'") {
+        state = "single";
+        out += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        state = "double";
+        out += ch;
+        continue;
+      }
+
+      const startsLine = i === 0 || prev === "\n";
+      if (ch === "#" && (startsLine || /\s/.test(prev))) {
+        // Treat as a comment until the end of the line.
+        while (i < text.length && text[i] !== "\n") {
+          out += " ";
+          i += 1;
+        }
+        if (i < text.length) out += "\n";
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    // String literals: preserve as-is so `#` inside quotes doesn't get stripped.
+    out += ch;
+    if (state === "double" && ch === "\\") {
+      if (next) {
+        out += next;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (state === "single" && ch === "'" && next === "'") {
+      // YAML-style escaping for single quotes: `''` => literal `'`.
+      out += next;
+      i += 1;
+      continue;
+    }
+
+    if (state === "single" && ch === "'") {
+      state = "code";
+    } else if (state === "double" && ch === '"') {
+      state = "code";
+    }
+  }
+
+  return out;
+}

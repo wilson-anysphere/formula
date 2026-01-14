@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { stripComments, stripCssComments, stripHtmlComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments, stripHtmlComments, stripHashComments } from "./sourceTextUtils.js";
 
 test("stripComments strips line/block comments but preserves string literals", () => {
   const input = [
@@ -90,4 +90,22 @@ test("stripHtmlComments strips HTML comments", () => {
   assert.match(out, /\bid="app"/);
   assert.doesNotMatch(out, /\bid="commented"/);
   assert.match(out, /data-testid="live"/);
+});
+
+test("stripHashComments strips # line comments but preserves strings/urls", () => {
+  const input = [
+    `run: pnpm -C apps/desktop check:coi # --no-build (commented-out flag should not count)`,
+    `  # pnpm -C apps/desktop check:coi --no-build (commented-out command should not count)`,
+    `name: "build #1"`,
+    `url: https://example.com/#anchor`,
+    `single: 'it''s # not a comment'`,
+  ].join("\n");
+
+  const out = stripHashComments(input);
+  assert.ok(out.includes("pnpm -C apps/desktop check:coi"), "expected the COI command itself to remain");
+  assert.doesNotMatch(out, /--no-build \(commented-out flag/, "expected inline # comment to be stripped");
+  assert.doesNotMatch(out, /pnpm -C apps\/desktop check:coi --no-build \(commented-out command/, "expected full comment line to be stripped");
+  assert.match(out, /name:\s*"build #1"/);
+  assert.match(out, /https:\/\/example\.com\/#anchor/);
+  assert.match(out, /single:\s*'it''s # not a comment'/);
 });
