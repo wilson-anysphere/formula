@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveDesktopMemoryBenchEnv } from './desktopStartupUtil.ts';
+import { buildDesktopMemoryProfileRoot, resolveDesktopMemoryBenchEnv } from './desktopStartupUtil.ts';
 import { repoRoot } from './desktopStartupUtil.ts';
 
 describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
@@ -70,5 +70,12 @@ describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
       enforce: false,
       binPath: null,
     });
+  });
+
+  it('names profile roots consistently', () => {
+    const perfHome = '/tmp/perf-home';
+    expect(buildDesktopMemoryProfileRoot({ perfHome, now: 123, pid: 456 })).toBe(
+      resolve(perfHome, 'desktop-memory-123-456'),
+    );
   });
 });

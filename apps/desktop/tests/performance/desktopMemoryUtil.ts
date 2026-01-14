@@ -67,3 +67,13 @@ export function resolveDesktopMemoryBenchEnv(options: {
 
   return { runs, timeoutMs, settleMs, targetMb, enforce, binPath };
 }
+
+export function buildDesktopMemoryProfileRoot(options: {
+  perfHome: string;
+  now?: number;
+  pid?: number;
+}): string {
+  const now = options.now ?? Date.now();
+  const pid = options.pid ?? process.pid;
+  return resolve(options.perfHome, `desktop-memory-${now}-${pid}`);
+}

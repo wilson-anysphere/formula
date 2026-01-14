@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import {
   buildBenchmarkResultFromValues,
   defaultDesktopBinPath,
+  buildDesktopMemoryProfileRoot,
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
@@ -304,7 +305,7 @@ async function main(): Promise<void> {
 
   const memoryKind = process.platform === 'win32' ? 'Working Set' : 'RSS';
   const perfHome = resolvePerfHome();
-  const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
+  const profileRoot = buildDesktopMemoryProfileRoot({ perfHome });
   // eslint-disable-next-line no-console
   console.log(
     `[desktop-memory] measuring idle memory for the desktop app (${memoryKind} after TTI).\n` +

@@ -19,11 +19,11 @@
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import {
   buildBenchmarkResultFromValues,
   type BenchmarkResult,
+  buildDesktopMemoryProfileRoot,
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   formatPerfPath,
@@ -109,7 +109,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
 
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
   const perfHome = resolvePerfHome();
-  const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
+  const profileRoot = buildDesktopMemoryProfileRoot({ perfHome });
 
   // eslint-disable-next-line no-console
   console.log(
