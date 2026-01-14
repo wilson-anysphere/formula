@@ -253,13 +253,31 @@ fn locale_es_es_suspicious_identity_mappings_are_rare() {
 
     fn parse(tsv: &str) -> std::collections::BTreeMap<String, String> {
         let mut out = std::collections::BTreeMap::new();
-        for line in tsv.lines() {
-            if line.is_empty() || line.starts_with('#') {
+        for (idx, raw_line) in tsv.lines().enumerate() {
+            let line_no = idx + 1;
+            let trimmed = raw_line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
-            let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
-                panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}")
+
+            // Parse the raw line (not the trimmed line) so trailing empty columns like
+            // `SUM\tSUMME\t` are not silently accepted.
+            let mut parts = raw_line.split('\t');
+            let canon = parts.next().unwrap_or("");
+            let loc = parts.next().unwrap_or_else(|| {
+                panic!(
+                    "invalid TSV entry (expected Canonical<TAB>Localized) at line {line_no}: {raw_line}"
+                )
             });
+            if parts.next().is_some() {
+                panic!("invalid TSV entry (too many columns) at line {line_no}: {raw_line}");
+            }
+            let canon = canon.trim();
+            let loc = loc.trim();
+            if canon.is_empty() || loc.is_empty() {
+                panic!("invalid TSV entry (empty field) at line {line_no}: {raw_line}");
+            }
+
             out.insert(canon.to_string(), loc.to_string());
         }
         out
