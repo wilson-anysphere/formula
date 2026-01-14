@@ -68,11 +68,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Common text helpers often take ranges/arrays, so we mark their text arguments as range-like.
   assert.ok(registry.isRangeArg("LEFT", 0), "Expected LEFT text to be a range");
   assert.ok(registry.getFunction("LEFT")?.args?.[1]?.optional, "Expected LEFT num_chars to be optional");
+  assert.ok(registry.isRangeArg("LEFTB", 0), "Expected LEFTB text to be a range");
   assert.ok(registry.isRangeArg("MID", 0), "Expected MID text to be a range");
   assert.ok(registry.isRangeArg("LEN", 0), "Expected LEN text to be a range");
+  assert.ok(registry.isRangeArg("LENB", 0), "Expected LENB text to be a range");
   assert.ok(registry.isRangeArg("TRIM", 0), "Expected TRIM text to be a range");
   assert.ok(registry.isRangeArg("SUBSTITUTE", 0), "Expected SUBSTITUTE text to be a range");
   assert.ok(registry.isRangeArg("FIND", 1), "Expected FIND within_text to be a range");
+  assert.ok(registry.isRangeArg("FINDB", 1), "Expected FINDB within_text to be a range");
   assert.ok(registry.isRangeArg("EXACT", 0), "Expected EXACT text1 to be a range");
   assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
   assert.ok(registry.isRangeArg("DECIMAL", 0), "Expected DECIMAL text to be a range");

@@ -1847,11 +1847,27 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "LEFTB",
+    description: "Returns the leftmost bytes from a text value.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "num_bytes", type: "number", optional: true },
+    ],
+  },
+  {
     name: "RIGHT",
     description: "Returns the rightmost characters from a text value.",
     args: [
       { name: "text", type: "range" },
       { name: "num_chars", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RIGHTB",
+    description: "Returns the rightmost bytes from a text value.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "num_bytes", type: "number", optional: true },
     ],
   },
   {
@@ -1864,8 +1880,24 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "MIDB",
+    description: "Returns a specific number of bytes from a text string, starting at the position you specify.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "start_num", type: "number" },
+      { name: "num_bytes", type: "number" },
+    ],
+  },
+  {
     name: "LEN",
     description: "Returns the number of characters in a text string.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "LENB",
+    description: "Returns the number of bytes used to represent the characters in a text string.",
     args: [
       { name: "text", type: "range" },
     ],
@@ -1926,6 +1958,16 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "REPLACEB",
+    description: "Replaces part of a text string with a different text string (byte-based).",
+    args: [
+      { name: "old_text", type: "range" },
+      { name: "start_num", type: "number" },
+      { name: "num_bytes", type: "number" },
+      { name: "new_text", type: "value" },
+    ],
+  },
+  {
     name: "FIND",
     description: "Finds one text value within another (case-sensitive).",
     args: [
@@ -1935,8 +1977,26 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "FINDB",
+    description: "Finds one text value within another (case-sensitive, byte-based).",
+    args: [
+      { name: "find_text", type: "value" },
+      { name: "within_text", type: "range" },
+      { name: "start_num", type: "number", optional: true },
+    ],
+  },
+  {
     name: "SEARCH",
     description: "Finds one text value within another (case-insensitive) and returns the position.",
+    args: [
+      { name: "find_text", type: "value" },
+      { name: "within_text", type: "range" },
+      { name: "start_num", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "SEARCHB",
+    description: "Finds one text value within another (case-insensitive, byte-based) and returns the position.",
     args: [
       { name: "find_text", type: "value" },
       { name: "within_text", type: "range" },
