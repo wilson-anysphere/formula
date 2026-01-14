@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+/**
+ * @vitest-environment jsdom
+ */
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
 import { executeCellsStructuralRibbonCommand } from "../cellsStructuralCommands";
 
 describe("executeCellsStructuralRibbonCommand", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<div id=\"toast-root\"></div>`;
+  });
+
   it("inserts sheet rows based on a full-row band selection", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", "top");
@@ -66,5 +74,19 @@ describe("executeCellsStructuralRibbonCommand", () => {
     } finally {
       delete (globalThis as any).__formulaSpreadsheetIsEditing;
     }
+  });
+
+  it("shows a read-only toast when structural edits are blocked", () => {
+    const focus = vi.fn();
+    const app = {
+      isEditing: () => false,
+      isReadOnly: () => true,
+      focus,
+    };
+
+    const handled = executeCellsStructuralRibbonCommand(app as any, "home.cells.insert.insertSheetRows");
+    expect(handled).toBe(true);
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("insert rows");
+    expect(focus).toHaveBeenCalled();
   });
 });

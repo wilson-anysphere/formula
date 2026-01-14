@@ -4,6 +4,8 @@ import { cellToA1, rangeToA1 } from "../selection/a1";
 type RejectionReason = "permission" | "encryption" | "unknown";
 type RejectionKind =
   | "cell"
+  | "cellContents"
+  | "editCells"
   | "format"
   | "formatDefaults"
   | "insertPictures"
@@ -11,6 +13,14 @@ type RejectionKind =
   | "sort"
   | "mergeCells"
   | "fillCells"
+  | "insertRows"
+  | "insertColumns"
+  | "deleteRows"
+  | "deleteColumns"
+  | "pageSetup"
+  | "printAreaSet"
+  | "printAreaClear"
+  | "printAreaEdit"
   | "rangeRun"
   | "drawing"
   | "chart"
@@ -62,6 +72,8 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
     const kind = typeof delta?.rejectionKind === "string" ? delta.rejectionKind : null;
     if (
       kind === "cell" ||
+      kind === "cellContents" ||
+      kind === "editCells" ||
       kind === "format" ||
       kind === "formatDefaults" ||
       kind === "insertPictures" ||
@@ -69,6 +81,14 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
       kind === "sort" ||
       kind === "mergeCells" ||
       kind === "fillCells" ||
+      kind === "insertRows" ||
+      kind === "insertColumns" ||
+      kind === "deleteRows" ||
+      kind === "deleteColumns" ||
+      kind === "pageSetup" ||
+      kind === "printAreaSet" ||
+      kind === "printAreaClear" ||
+      kind === "printAreaEdit" ||
       kind === "rangeRun" ||
       kind === "drawing" ||
       kind === "chart" ||
@@ -110,12 +130,22 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
   }
 
   if (
+    kind === "cellContents" ||
+    kind === "editCells" ||
     kind === "formatDefaults" ||
     kind === "insertPictures" ||
     kind === "backgroundImage" ||
     kind === "sort" ||
     kind === "mergeCells" ||
     kind === "fillCells" ||
+    kind === "insertRows" ||
+    kind === "insertColumns" ||
+    kind === "deleteRows" ||
+    kind === "deleteColumns" ||
+    kind === "pageSetup" ||
+    kind === "printAreaSet" ||
+    kind === "printAreaClear" ||
+    kind === "printAreaEdit" ||
     kind === "drawing" ||
     kind === "chart" ||
     kind === "undoRedo" ||
@@ -199,6 +229,14 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
         : "Read-only: you don't have permission to change formatting";
     }
 
+    if (kind === "cellContents") {
+      return "Read-only: you don't have permission to edit cell contents.";
+    }
+
+    if (kind === "editCells") {
+      return "Read-only: you don't have permission to edit cells.";
+    }
+
     if (kind === "formatDefaults") {
       return "Read-only: select an entire row, column, or sheet to change formatting defaults.";
     }
@@ -221,6 +259,38 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "fillCells") {
       return "Read-only: you don't have permission to fill cells.";
+    }
+
+    if (kind === "insertRows") {
+      return "Read-only: you don't have permission to insert rows.";
+    }
+
+    if (kind === "insertColumns") {
+      return "Read-only: you don't have permission to insert columns.";
+    }
+
+    if (kind === "deleteRows") {
+      return "Read-only: you don't have permission to delete rows.";
+    }
+
+    if (kind === "deleteColumns") {
+      return "Read-only: you don't have permission to delete columns.";
+    }
+
+    if (kind === "pageSetup") {
+      return "Read-only: you don't have permission to edit page setup.";
+    }
+
+    if (kind === "printAreaSet") {
+      return "Read-only: you don't have permission to set a print area.";
+    }
+
+    if (kind === "printAreaClear") {
+      return "Read-only: you don't have permission to clear the print area.";
+    }
+
+    if (kind === "printAreaEdit") {
+      return "Read-only: you don't have permission to edit the print area.";
     }
 
     if (kind === "drawing") {

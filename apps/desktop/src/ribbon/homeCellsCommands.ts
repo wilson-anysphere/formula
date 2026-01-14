@@ -1,4 +1,5 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 import { normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import type { Range } from "../selection/types";
 
@@ -38,7 +39,7 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
   // otherwise leave focus on the trigger button).
   try {
     if (typeof (app as any).isReadOnly === "function" && (app as any).isReadOnly()) {
-      showToast("Read-only: you don't have permission to edit cells.", "warning");
+      showCollabEditRejectedToast([{ rejectionKind: "editCells", rejectionReason: "permission" }]);
       return true;
     }
     const ranges = app.getSelectionRanges();

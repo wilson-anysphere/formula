@@ -1,5 +1,5 @@
 import type { DocumentController } from "../document/documentController.js";
-import { showToast } from "../extensions/ui.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 
@@ -61,25 +61,19 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
   const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
   if (app.isEditing() || globalEditing === true) return true;
   if (typeof app.isReadOnly === "function" && app.isReadOnly()) {
-    const message = (() => {
+    const rejectionKind = (() => {
       switch (id) {
         case "home.cells.insert.insertSheetRows":
-          return "Read-only: you don't have permission to insert rows.";
+          return "insertRows";
         case "home.cells.insert.insertSheetColumns":
-          return "Read-only: you don't have permission to insert columns.";
+          return "insertColumns";
         case "home.cells.delete.deleteSheetRows":
-          return "Read-only: you don't have permission to delete rows.";
+          return "deleteRows";
         case "home.cells.delete.deleteSheetColumns":
-          return "Read-only: you don't have permission to delete columns.";
-        default:
-          return "Read-only: you don't have permission to modify sheet structure.";
+          return "deleteColumns";
       }
     })();
-    try {
-      showToast(message, "warning");
-    } catch {
-      // `showToast` requires a DOM #toast-root; ignore in tests/headless.
-    }
+    showCollabEditRejectedToast([{ rejectionKind, rejectionReason: "permission" }]);
     try {
       app.focus();
     } catch {

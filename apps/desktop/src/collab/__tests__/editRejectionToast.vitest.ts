@@ -173,6 +173,29 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("fill cells");
   });
 
+  it.each([
+    ["cellContents", "edit cell contents"],
+    ["editCells", "edit cells"],
+    ["insertRows", "insert rows"],
+    ["insertColumns", "insert columns"],
+    ["deleteRows", "delete rows"],
+    ["deleteColumns", "delete columns"],
+    ["pageSetup", "page setup"],
+    ["printAreaSet", "set a print area"],
+    ["printAreaClear", "clear the print area"],
+    ["printAreaEdit", "edit the print area"],
+  ] as const)("shows a %s toast for rejected actions", (rejectionKind, expectedText) => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind,
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain(expectedText);
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {

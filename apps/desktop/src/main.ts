@@ -1654,7 +1654,7 @@ function applyFormattingToSelection(
 
   if (isReadOnly) {
     if (!allowReadOnlyBandSelection) {
-      showToast("Read-only: you don't have permission to edit cell contents.", "warning");
+      showCollabEditRejectedToast([{ rejectionKind: "cellContents", rejectionReason: "permission" }]);
       return;
     }
   }
@@ -8582,11 +8582,7 @@ registerDesktopCommands({
     openFind: () => showExclusiveFindReplaceDialog(findDialog as any),
     openReplace: () => {
       if (app.isReadOnly?.() === true) {
-        try {
-          showToast("Read-only: you don't have permission to edit cell contents.", "warning");
-        } catch {
-          // `showToast` requires a #toast-root; ignore in headless contexts/tests.
-        }
+        showCollabEditRejectedToast([{ rejectionKind: "cellContents", rejectionReason: "permission" }]);
         return;
       }
       showExclusiveFindReplaceDialog(replaceDialog as any);
@@ -9129,7 +9125,7 @@ async function handleRibbonPageSetup(): Promise<void> {
     return;
   }
   if (app.isReadOnly?.() === true) {
-    showToast("Read-only: you don't have permission to edit page setup.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "pageSetup", rejectionReason: "permission" }]);
     app.focus();
     return;
   }
@@ -9166,7 +9162,7 @@ async function handleRibbonUpdatePageSetup(patch: (current: PageSetup) => PageSe
     return;
   }
   if (app.isReadOnly?.() === true) {
-    showToast("Read-only: you don't have permission to edit page setup.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "pageSetup", rejectionReason: "permission" }]);
     app.focus();
     return;
   }
@@ -9193,7 +9189,7 @@ async function handleRibbonSetPrintArea(): Promise<void> {
     return;
   }
   if (app.isReadOnly?.() === true) {
-    showToast("Read-only: you don't have permission to set a print area.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "printAreaSet", rejectionReason: "permission" }]);
     app.focus();
     return;
   }
@@ -9228,7 +9224,7 @@ async function handleRibbonClearPrintArea(): Promise<void> {
     return;
   }
   if (app.isReadOnly?.() === true) {
-    showToast("Read-only: you don't have permission to clear the print area.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "printAreaClear", rejectionReason: "permission" }]);
     app.focus();
     return;
   }
@@ -9252,7 +9248,7 @@ async function handleRibbonAddToPrintArea(): Promise<void> {
     return;
   }
   if (app.isReadOnly?.() === true) {
-    showToast("Read-only: you don't have permission to edit the print area.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "printAreaEdit", rejectionReason: "permission" }]);
     app.focus();
     return;
   }

@@ -1,8 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+/**
+ * @vitest-environment jsdom
+ */
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handleHomeCellsInsertDeleteCommand } from "../homeCellsCommands.js";
 
 describe("Home → Cells dropdown commands", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+  });
+
   it("no-ops while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
     const showQuickPick = vi.fn(async () => "shiftRight" as const);
     const showToast = vi.fn();
@@ -193,7 +201,8 @@ describe("Home → Cells dropdown commands", () => {
 
     expect(handled).toBe(true);
     expect(showQuickPick).not.toHaveBeenCalled();
-    expect(showToast).toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
     expect(focus).toHaveBeenCalled();
   });
 });
