@@ -42,6 +42,13 @@ fn utf16be_without_bom(text: &str) -> Vec<u8> {
     out
 }
 
+fn utf8_with_bom(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(3 + text.len());
+    out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    out.extend_from_slice(text.as_bytes());
+    out
+}
+
 #[test]
 fn utf16le_rels_parses_and_diffs_identically_to_utf8() {
     let rels_utf8 = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -56,6 +63,18 @@ fn utf16le_rels_parses_and_diffs_identically_to_utf8() {
 
     let diffs = diff_xml(&utf8, &utf16, Severity::Critical);
     assert!(diffs.is_empty(), "expected no diffs, got {diffs:#?}");
+}
+
+#[test]
+fn utf8_bom_is_stripped_before_parsing() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+    let expected = NormalizedXml::parse("xl/worksheets/sheet1.xml", xml.as_bytes()).unwrap();
+    let actual =
+        NormalizedXml::parse("xl/worksheets/sheet1.xml", &utf8_with_bom(xml)).unwrap();
+
+    assert_eq!(actual, expected);
 }
 
 #[test]
