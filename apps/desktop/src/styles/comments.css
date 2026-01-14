@@ -272,7 +272,7 @@
 
 .comment-thread__reply {
   padding-inline-start: var(--space-4);
-  border-inline-start: 2px solid var(--border);
+  border-inline-start: var(--space-1) solid var(--border);
 }
 
 .comment-thread__reply-body {

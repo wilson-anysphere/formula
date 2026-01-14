@@ -38,8 +38,8 @@ test("grid root + chrome use --formula-grid-* theme tokens", () => {
   assert.ok(cellEditor, "Expected shell.css to define a .cell-editor rule");
   assert.match(
     cellEditor,
-    /border:\s*2px solid var\(--formula-grid-selection-border\b/,
-    "Expected cell editor border to use --formula-grid-selection-border",
+    /border:\s*(?:2px|var\(--space-1\))\s+solid var\(--formula-grid-selection-border\b/,
+    "Expected cell editor border to use --formula-grid-selection-border (and keep the 2px width on the --space-* scale)",
   );
   assert.match(
     cellEditor,
@@ -78,4 +78,3 @@ test("grid root + chrome use --formula-grid-* theme tokens", () => {
     "Expected outline toggle active state to use --formula-grid-scrollbar-track",
   );
 });
-

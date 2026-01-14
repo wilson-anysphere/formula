@@ -172,7 +172,7 @@
   font-size: 12px;
   font-weight: 500;
   padding: var(--space-0) calc(var(--space-4) + var(--space-1));
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--space-1) solid transparent;
   cursor: pointer;
   flex: 0 0 auto;
   line-height: var(--ribbon-tabstrip-height);
