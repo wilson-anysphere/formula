@@ -2259,6 +2259,60 @@ mod tests {
     }
 
     #[test]
+    fn diff_workbooks_respects_ignore_presets() {
+        let expected = make_zip(&[(
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        )]);
+        let actual = make_zip(&[(
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+        )]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            details.counts.total > 0,
+            "expected at least one diff without ignore presets"
+        );
+
+        let args = Args {
+            ignore_presets: vec![xlsx_diff::IgnorePreset::ExcelVolatileIds],
+            ..args
+        };
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 0, "expected diffs suppressed by preset");
+        assert!(details.equal);
+        assert!(details.ignore_paths.is_empty());
+        assert_eq!(details.ignore_presets, vec!["excel-volatile-ids".to_string()]);
+    }
+
+    #[test]
     fn skips_encrypted_workbooks_without_password_and_decrypts_with_password() {
         let password = "secret";
         let encrypted_bytes = encrypt_ooxml_agile(&plain_xlsx_bytes(), password);
