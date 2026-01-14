@@ -275,6 +275,46 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BITAND",
+    description: "Returns a bitwise AND of its arguments.",
+    args: [
+      { name: "number1", type: "value" },
+      { name: "number2", type: "value" },
+    ],
+  },
+  {
+    name: "BITOR",
+    description: "Returns a bitwise OR of its arguments.",
+    args: [
+      { name: "number1", type: "value" },
+      { name: "number2", type: "value" },
+    ],
+  },
+  {
+    name: "BITXOR",
+    description: "Returns a bitwise XOR of its arguments.",
+    args: [
+      { name: "number1", type: "value" },
+      { name: "number2", type: "value" },
+    ],
+  },
+  {
+    name: "BITLSHIFT",
+    description: "Returns a number shifted left by a specified number of bits.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "shift_amount", type: "number" },
+    ],
+  },
+  {
+    name: "BITRSHIFT",
+    description: "Returns a number shifted right by a specified number of bits.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "shift_amount", type: "number" },
+    ],
+  },
+  {
     name: "QUOTIENT",
     description: "Returns the integer portion of a division.",
     args: [
