@@ -590,6 +590,8 @@ function buildBannedResForTauriPluginAlias(root: string): RegExp[] {
 }
 
 describe("tauri/api guardrails", () => {
+  // This is a source scan over the entire desktop renderer tree and can take longer than Vitest's
+  // default 30s timeout in CI / constrained environments.
   it("does not access __TAURI__.event / __TAURI__.window / __TAURI__.dialog.* outside src/tauri/api", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
     const violations = new Set<string>();
@@ -740,5 +742,5 @@ describe("tauri/api guardrails", () => {
         "Found direct __TAURI__ dialog/window/event access outside src/tauri/api:\n" + [...violations].join("\n"),
       );
     }
-  });
+  }, 60_000);
 });
