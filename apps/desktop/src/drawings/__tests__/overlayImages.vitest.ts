@@ -89,17 +89,31 @@ describe("DrawingOverlay images", () => {
     });
     vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
 
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
     const requestRender = vi.fn(async () => {
       throw new Error("boom");
     });
     const overlay = new DrawingOverlay(canvas, images, geom, undefined, requestRender);
 
-    overlay.render([createImageObject(entry.id)], viewport);
+    try {
+      overlay.render([createImageObject(entry.id)], viewport);
 
-    resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
-    await flushMicrotasks();
+      resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
+      await flushMicrotasks();
 
-    expect(requestRender).toHaveBeenCalledTimes(1);
+      // Allow Node a turn to emit any unhandled rejection events.
+      await Promise.resolve();
+
+      expect(requestRender).toHaveBeenCalledTimes(1);
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("swallows async render rejections when image hydration triggers a rerender without requestRender", async () => {
@@ -124,22 +138,35 @@ describe("DrawingOverlay images", () => {
     });
     vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
 
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
     // No requestRender callback => scheduleHydrationRerender falls back to calling `render()` itself.
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    overlay.render([createImageObject(entry.id)], viewport);
+    try {
+      overlay.render([createImageObject(entry.id)], viewport);
 
-    // Simulate a unit test mocking `render()` as async after the initial paint has captured the
-    // last render args (so the hydration rerender will call our stub).
-    const asyncRender = vi.fn(async () => {
-      throw new Error("boom");
-    });
-    (overlay as any).render = asyncRender;
+      // Simulate a unit test mocking `render()` as async after the initial paint has captured the
+      // last render args (so the hydration rerender will call our stub).
+      const asyncRender = vi.fn(async () => {
+        throw new Error("boom");
+      });
+      (overlay as any).render = asyncRender;
 
-    resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
-    await flushMicrotasks();
+      resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
+      await flushMicrotasks();
+      // Allow Node a turn to emit any unhandled rejection events.
+      await Promise.resolve();
 
-    expect(asyncRender).toHaveBeenCalledTimes(1);
+      expect(asyncRender).toHaveBeenCalledTimes(1);
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("renders synchronously and draws the image after decode + requestRender", async () => {
