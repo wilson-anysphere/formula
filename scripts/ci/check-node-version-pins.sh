@@ -20,6 +20,7 @@ release_workflow=".github/workflows/release.yml"
 dry_run_workflow=".github/workflows/desktop-bundle-dry-run.yml"
 bundle_size_workflow=".github/workflows/desktop-bundle-size.yml"
 desktop_perf_platform_matrix_workflow=".github/workflows/desktop-perf-platform-matrix.yml"
+collab_perf_workflow=".github/workflows/collab-perf.yml"
 perf_workflow=".github/workflows/perf.yml"
 security_workflow=".github/workflows/security.yml"
 windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
@@ -175,6 +176,7 @@ release_node_major="$(extract_node_major "$release_workflow")"
 dry_run_node_major="$(extract_node_major "$dry_run_workflow")"
 bundle_node_major="$(extract_node_major "$bundle_size_workflow")"
 desktop_perf_platform_matrix_node_major="$(extract_node_major "$desktop_perf_platform_matrix_workflow")"
+collab_perf_node_major="$(extract_node_major "$collab_perf_workflow")"
 perf_node_major="$(extract_node_major "$perf_workflow")"
 security_node_major="$(extract_node_major "$security_workflow")"
 smoke_node_major="$(extract_node_major "$windows_arm64_smoke_workflow")"
@@ -193,6 +195,10 @@ if [ -z "$bundle_node_major" ]; then
 fi
 if [ -z "$desktop_perf_platform_matrix_node_major" ]; then
   echo "Failed to find NODE_VERSION in ${desktop_perf_platform_matrix_workflow}" >&2
+  exit 1
+fi
+if [ -z "$collab_perf_node_major" ]; then
+  echo "Failed to find NODE_VERSION in ${collab_perf_workflow}" >&2
   exit 1
 fi
 if [ -z "$perf_node_major" ]; then
@@ -226,6 +232,10 @@ if ! [[ "$bundle_node_major" =~ ^[0-9]+$ ]]; then
 fi
 if ! [[ "$desktop_perf_platform_matrix_node_major" =~ ^[0-9]+$ ]]; then
   echo "Expected NODE_VERSION in ${desktop_perf_platform_matrix_workflow} to be a Node major (e.g. 22); got ${desktop_perf_platform_matrix_node_major}" >&2
+  exit 1
+fi
+if ! [[ "$collab_perf_node_major" =~ ^[0-9]+$ ]]; then
+  echo "Expected NODE_VERSION in ${collab_perf_workflow} to be a Node major (e.g. 22); got ${collab_perf_node_major}" >&2
   exit 1
 fi
 if ! [[ "$perf_node_major" =~ ^[0-9]+$ ]]; then
@@ -269,6 +279,14 @@ if [ "$ci_node_major" != "$desktop_perf_platform_matrix_node_major" ]; then
   echo "Fix: update one of the workflows so both use the same Node major." >&2
   exit 1
 fi
+if [ "$ci_node_major" != "$collab_perf_node_major" ]; then
+  echo "Node major pin mismatch between CI and collab perf workflow:" >&2
+  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
+  echo "  ${collab_perf_workflow}: NODE_VERSION=${collab_perf_node_major}" >&2
+  echo "" >&2
+  echo "Fix: update one of the workflows so both use the same Node major." >&2
+  exit 1
+fi
 if [ "$ci_node_major" != "$perf_node_major" ]; then
   echo "Node major pin mismatch between CI and perf workflow:" >&2
   echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
@@ -308,6 +326,7 @@ require_env_pin_usage "$release_workflow"
 require_env_pin_usage "$dry_run_workflow"
 require_env_pin_usage "$bundle_size_workflow"
 require_env_pin_usage "$desktop_perf_platform_matrix_workflow"
+require_env_pin_usage "$collab_perf_workflow"
 require_env_pin_usage "$perf_workflow"
 require_env_pin_usage "$security_workflow"
 require_env_pin_usage "$windows_arm64_smoke_workflow"
