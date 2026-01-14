@@ -78,7 +78,10 @@ jobs:
             scripts/validate-linux-appimage.test.js \
             scripts/validate-linux-rpm.test.js \
             scripts/validate-macos-bundle.test.js \
-            scripts/validate-windows-bundles.test.js
+            scripts/validate-windows-bundles.test.js \
+            scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
+            scripts/__tests__/desktop-bundle-dry-run-windows-bundle-validation.test.js \
+            scripts/__tests__/windows-arm64-smoke-windows-bundle-validation.test.js
 
       - name: "Guard: desktop Linux packaging compliance config (LICENSE/NOTICE/MIME)"
         run: node scripts/ci/check-desktop-compliance-artifacts.mjs

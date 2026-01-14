@@ -62,3 +62,10 @@ test("validate-windows-bundles.ps1 performs best-effort NSIS marker scanning", (
   );
 });
 
+test("validate-windows-bundles.ps1 accepts common Excel ProgId evidence for .xlsx associations", () => {
+  assert.match(
+    text,
+    /Excel\.Sheet\.12/,
+    "Expected validator to accept Excel.Sheet.12-style ProgId evidence for .xlsx associations (Registry fallback).",
+  );
+});
