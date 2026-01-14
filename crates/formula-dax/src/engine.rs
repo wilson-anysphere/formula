@@ -626,14 +626,66 @@ impl DaxEngine {
                 right,
             } => {
                 let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
-                let rhs_values =
-                    self.eval_one_column_table_literal(model, right, filter, row_ctx, env)?;
-                for candidate in rhs_values {
-                    if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
-                        return Ok(Value::Boolean(true));
+                match self.eval_table(model, right, filter, row_ctx, env) {
+                    Ok(table_result) => match table_result {
+                        TableResult::Physical {
+                            table,
+                            rows,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let visible_cols: Vec<usize> = match visible_cols.as_deref() {
+                                Some(cols) => cols.to_vec(),
+                                None => (0..table_ref.columns().len()).collect(),
+                            };
+                            if visible_cols.len() != 1 {
+                                return Err(DaxError::Eval(
+                                    "IN currently only supports one-column tables".into(),
+                                ));
+                            }
+                            let col_idx = visible_cols[0];
+                            for row in rows {
+                                let value =
+                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
+                                    return Ok(Value::Boolean(true));
+                                }
+                            }
+                            Ok(Value::Boolean(false))
+                        }
+                        TableResult::Virtual { columns, rows } => {
+                            if columns.len() != 1 {
+                                return Err(DaxError::Eval(
+                                    "IN currently only supports one-column tables".into(),
+                                ));
+                            }
+                            for row_values in rows {
+                                let value = row_values.get(0).cloned().unwrap_or(Value::Blank);
+                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
+                                    return Ok(Value::Boolean(true));
+                                }
+                            }
+                            Ok(Value::Boolean(false))
+                        }
+                    },
+                    Err(table_err) => {
+                        // Backward-compatible fallback for MVP: allow table constructors on the RHS.
+                        let rhs_values =
+                            self.eval_one_column_table_literal(model, right, filter, row_ctx, env);
+                        let rhs_values = match rhs_values {
+                            Ok(values) => values,
+                            Err(_) => return Err(table_err),
+                        };
+                        for candidate in rhs_values {
+                            if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
+                                return Ok(Value::Boolean(true));
+                            }
+                        }
+                        Ok(Value::Boolean(false))
                     }
                 }
-                Ok(Value::Boolean(false))
             }
             Expr::BinaryOp { op, left, right } => {
                 let left = self.eval_scalar(model, left, filter, row_ctx, env)?;

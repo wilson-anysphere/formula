@@ -1875,6 +1875,16 @@ impl DataModel {
     {
         let from_key = normalize_ident(from_table);
         let to_key = normalize_ident(to_table);
+        let from_display = self
+            .tables
+            .get(&from_key)
+            .map(|t| t.name().to_string())
+            .unwrap_or_else(|| from_table.trim().to_string());
+        let to_display = self
+            .tables
+            .get(&to_key)
+            .map(|t| t.name().to_string())
+            .unwrap_or_else(|| to_table.trim().to_string());
 
         // We intentionally do not treat `from_table == to_table` as a valid path here.
         // Callers like `RELATED`/`RELATEDTABLE` are defined in terms of relationships, and
@@ -1885,9 +1895,10 @@ impl DataModel {
 
         fn dfs<F>(
             model: &DataModel,
-            start_table: &str,
+            start_display: &str,
             current_table: &str,
             target_table: &str,
+            target_display: &str,
             direction: RelationshipPathDirection,
             is_relationship_active: &F,
             visited: &mut HashSet<String>,
@@ -1907,7 +1918,7 @@ impl DataModel {
                         .unwrap_or_else(|| "<unknown>".to_string());
                     let second = table_path.join(" -> ");
                     return Err(DaxError::Eval(format!(
-                        "ambiguous active relationship path between {start_table} and {target_table}: {first}; {second}"
+                        "ambiguous active relationship path between {start_display} and {target_display}: {first}; {second}"
                     )));
                 }
                 *found_path = Some(path.clone());
@@ -1941,13 +1952,20 @@ impl DataModel {
 
                 visited.insert(next_table.to_string());
                 path.push(idx);
-                table_path.push(next_table.to_string());
+                table_path.push(
+                    model
+                        .tables
+                        .get(next_table)
+                        .map(|t| t.name().to_string())
+                        .unwrap_or_else(|| next_table.to_string()),
+                );
 
                 dfs(
                     model,
-                    start_table,
+                    start_display,
                     next_table,
                     target_table,
+                    target_display,
                     direction,
                     is_relationship_active,
                     visited,
@@ -1968,15 +1986,16 @@ impl DataModel {
         let mut visited = HashSet::new();
         visited.insert(from_key.clone());
         let mut path = Vec::new();
-        let mut table_path = vec![from_key.clone()];
+        let mut table_path = vec![from_display.clone()];
         let mut found_path = None;
         let mut found_table_path = None;
 
         dfs(
             self,
-            &from_key,
+            &from_display,
             &from_key,
             &to_key,
+            &to_display,
             direction,
             &is_relationship_active,
             &mut visited,

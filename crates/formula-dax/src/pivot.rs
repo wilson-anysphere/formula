@@ -1927,7 +1927,6 @@ fn pivot_planned_row_group_by(
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
-    let base_table_key = normalize_ident(base_table);
 
     let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
@@ -2005,7 +2004,6 @@ fn pivot_row_scan(
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
-    let base_table_key = normalize_ident(base_table);
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
