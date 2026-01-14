@@ -77,7 +77,8 @@ jobs:
             scripts/check-desktop-url-scheme.test.js \
             scripts/validate-linux-appimage.test.js \
             scripts/validate-linux-rpm.test.js \
-            scripts/validate-macos-bundle.test.js
+            scripts/validate-macos-bundle.test.js \
+            scripts/validate-windows-bundles.test.js
 
       - name: "Guard: desktop Linux packaging compliance config (LICENSE/NOTICE/MIME)"
         run: node scripts/ci/check-desktop-compliance-artifacts.mjs
