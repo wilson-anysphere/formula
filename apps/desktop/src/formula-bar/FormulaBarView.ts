@@ -2261,6 +2261,11 @@ export class FormulaBarView {
     this.#errorPanelReferenceHighlights = null;
     this.model.beginEdit();
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
+    // Best-effort: if we're editing a formula, start loading signature metadata so function
+    // hints can show argument names for the full catalog without blocking initial render.
+    if (this.model.draft.trimStart().startsWith("=") && !isFunctionSignatureCatalogReady()) {
+      void preloadFunctionSignatureCatalog();
+    }
     // Hover overrides are a view-mode affordance and should not leak into editing behavior.
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
@@ -2285,6 +2290,10 @@ export class FormulaBarView {
     }
 
     this.model.updateDraft(value, start, end);
+    // If the user just started typing a formula, begin loading signature metadata in the background.
+    if (value.trimStart().startsWith("=") && !isFunctionSignatureCatalogReady()) {
+      void preloadFunctionSignatureCatalog();
+    }
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
     this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
