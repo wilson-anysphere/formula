@@ -1773,6 +1773,7 @@ fn pivot_planned_row_group_by(
         return Ok(None);
     }
 
+    let base_table_key = normalize_ident(base_table);
     let (table_ref, group_key_accessors) =
         build_group_key_accessors(model, base_table, group_by, filter)?;
 
@@ -1996,6 +1997,7 @@ fn pivot_row_scan(
 ) -> DaxResult<PivotResult> {
     let engine = DaxEngine::new();
 
+    let base_table_key = normalize_ident(base_table);
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
