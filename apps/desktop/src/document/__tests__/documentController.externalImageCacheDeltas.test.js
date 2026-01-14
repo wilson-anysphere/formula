@@ -148,6 +148,26 @@ test("deleting a persisted image clears any cached fallback bytes for the same i
   assert.equal(doc.getImage("img1"), null);
 });
 
+test("setting a persisted image clears any redundant cached bytes for the same id", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { bytes: new Uint8Array([9, 9, 9]), mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+  assert.ok((doc.imageCache ?? new Map()).has("img1"));
+
+  doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+  assert.ok(!doc.imageCache.has("img1"));
+  assert.deepEqual(Array.from(doc.getImage("img1")?.bytes ?? []), [1, 2, 3]);
+});
+
 test("cache deltas do not break mergeKey-based undo merging for user edits", () => {
   const doc = new DocumentController();
 

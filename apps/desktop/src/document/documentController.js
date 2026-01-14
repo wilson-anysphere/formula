@@ -8135,7 +8135,9 @@ export class DocumentController {
     if (Array.isArray(imageDeltas) && imageDeltas.length > 0) {
       for (const delta of imageDeltas) {
         if (!delta) continue;
-        if (delta.after) continue;
+        // If the persisted image store changes (set or delete), drop any ephemeral cached bytes
+        // for the same id to avoid retaining duplicate payloads and to ensure `getImage()` cannot
+        // fall back to stale cached bytes after a delete.
         this.imageCache.delete(delta.imageId);
       }
     }
