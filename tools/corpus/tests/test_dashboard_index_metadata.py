@@ -60,6 +60,70 @@ class DashboardIndexMetadataTests(unittest.TestCase):
             self.assertEqual(summary.get("commit"), "deadbeef")
             self.assertEqual(summary.get("run_url"), "https://example.invalid/run/1")
 
+    def test_dashboard_does_not_fallback_to_env_commit_when_index_commit_unavailable(self) -> None:
+        import tools.corpus.dashboard as dashboard_mod
+
+        with tempfile.TemporaryDirectory(prefix="corpus-dashboard-index-meta-") as td:
+            triage_dir = Path(td) / "triage"
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True)
+
+            (reports_dir / "r.json").write_text(
+                json.dumps(
+                    {
+                        "display_name": "book.xlsx",
+                        "result": {"open_ok": True, "round_trip_ok": True},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            # Index explicitly records unknown commit/run URL (null). This should suppress env-based
+            # fallbacks so regenerated dashboards don't get misleading metadata.
+            (triage_dir / "index.json").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-01-01T00:00:00+00:00",
+                        "commit": None,
+                        "run_url": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out_dir = Path(td) / "out"
+
+            argv = sys.argv
+            try:
+                sys.argv = [
+                    "tools.corpus.dashboard",
+                    "--triage-dir",
+                    str(triage_dir),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+                # Provide env metadata; dashboard should still treat index.json as authoritative.
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "GITHUB_SHA": "envsha",
+                        "GITHUB_SERVER_URL": "https://github.com",
+                        "GITHUB_REPOSITORY": "owner/repo",
+                        "GITHUB_RUN_ID": "123",
+                    },
+                    clear=True,
+                ):
+                    with mock.patch("sys.stdout", new=io.StringIO()):
+                        rc = dashboard_mod.main()
+            finally:
+                sys.argv = argv
+
+            self.assertEqual(rc, 0)
+            summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary.get("timestamp"), "2026-01-01T00:00:00+00:00")
+            self.assertIsNone(summary.get("commit"))
+            self.assertIsNone(summary.get("run_url"))
+
 
 if __name__ == "__main__":
     unittest.main()

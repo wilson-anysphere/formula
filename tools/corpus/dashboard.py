@@ -1262,12 +1262,20 @@ def main() -> int:
             ts = index.get("timestamp")
             if isinstance(ts, str) and ts:
                 summary["timestamp"] = ts
-            commit = index.get("commit")
-            if isinstance(commit, str) and commit:
-                summary["commit"] = commit
-            run_url = index.get("run_url")
-            if isinstance(run_url, str) and run_url:
-                summary["run_url"] = run_url
+            if "commit" in index:
+                commit = index.get("commit")
+                # Treat `index.json` as authoritative (even when the commit is unavailable) so we
+                # don't accidentally attribute a triage artifact to the *current* local git HEAD.
+                if isinstance(commit, str) and commit:
+                    summary["commit"] = commit
+                else:
+                    summary["commit"] = None
+            if "run_url" in index:
+                run_url = index.get("run_url")
+                if isinstance(run_url, str) and run_url:
+                    summary["run_url"] = run_url
+                else:
+                    summary["run_url"] = None
 
     run_url = summary.get("run_url")
     if isinstance(run_url, str) and run_url.startswith("sha256="):
