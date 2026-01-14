@@ -36,7 +36,13 @@ export function distinctColumnValues(
     if (v == null) continue;
     set.add(String(v));
   }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  return Array.from(set).sort((a, b) => {
+    // Match Excel-like ordering where blanks appear last.
+    if (a === "" && b === "") return 0;
+    if (a === "") return 1;
+    if (b === "") return -1;
+    return a.localeCompare(b);
+  });
 }
 
 export function applyAutoFilter(
@@ -68,4 +74,3 @@ export function applySort(sort: SortState, rows: TableViewRow[]): TableViewRow[]
     return dir * String(av).localeCompare(String(bv));
   });
 }
-

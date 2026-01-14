@@ -216,7 +216,13 @@ export function computeUniqueFilterValues(args: {
   for (let row = dataStartRow; row <= range.endRow; row += 1) {
     set.add(args.getValue(row, absCol));
   }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  return Array.from(set).sort((a, b) => {
+    // Match Excel-like ordering where blanks appear last.
+    if (a === "" && b === "") return 0;
+    if (a === "") return 1;
+    if (b === "") return -1;
+    return a.localeCompare(b);
+  });
 }
 
 export function computeFilterHiddenRows(args: {
