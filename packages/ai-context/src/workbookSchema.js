@@ -12,10 +12,32 @@ import { inferColumnType, isLikelyHeaderRow } from "./schema.js";
  */
 function normalizeRect(rect) {
   if (!rect || typeof rect !== "object") return null;
-  const r0 = rect.r0;
-  const c0 = rect.c0;
-  const r1 = rect.r1;
-  const c1 = rect.c1;
+
+  /** @type {any} */
+  let r0 = rect.r0;
+  /** @type {any} */
+  let c0 = rect.c0;
+  /** @type {any} */
+  let r1 = rect.r1;
+  /** @type {any} */
+  let c1 = rect.c1;
+
+  // Some callers use a Range-like shape (startRow/startCol/endRow/endCol).
+  if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) {
+    r0 = rect.startRow;
+    c0 = rect.startCol;
+    r1 = rect.endRow;
+    c1 = rect.endCol;
+  }
+
+  // Some callers use nested { start: {row,col}, end: {row,col} }.
+  if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) {
+    r0 = rect.start?.row;
+    c0 = rect.start?.col;
+    r1 = rect.end?.row;
+    c1 = rect.end?.col;
+  }
+
   if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) return null;
   return {
     r0: Math.min(r0, r1),

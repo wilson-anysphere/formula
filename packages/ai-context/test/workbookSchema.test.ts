@@ -205,6 +205,19 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
   });
 
+  it("accepts range-shaped rects (startRow/startCol/endRow/endCol)", () => {
+    const workbook = {
+      id: "wb-range-rect",
+      sheets: [{ name: "Sheet1", values: [["H1", "H2"], ["A", 1]] }],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0]).toMatchObject({ rangeA1: "Sheet1!A1:B2", rowCount: 1, columnCount: 2 });
+    expect(schema.tables[0].headers).toEqual(["H1", "H2"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
+  });
+
   it("supports Map-like sheets (cells.get)", () => {
     const backing = new Map<string, any>();
     backing.set("0:0", { v: "Name" });
