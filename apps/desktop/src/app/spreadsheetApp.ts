@@ -10756,10 +10756,6 @@ export class SpreadsheetApp {
 
   private onDrawingPointerDownCapture(e: PointerEvent): void {
     if (this.disposed) return;
-    // This capture handler exists to provide basic drawing selection in shared-grid mode
-    // (where pointer events normally target the selection canvas). Legacy mode handles
-    // drawing hit testing/drags in the bubbling `onPointerDown` path instead.
-    if (!this.sharedGrid) return;
     if (e.button !== 0) return;
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
     // Avoid competing with its pointer listeners (especially in legacy mode where it uses
@@ -10825,8 +10821,16 @@ export class SpreadsheetApp {
       this.editor.commit("command");
     }
 
-    e.preventDefault();
-    e.stopPropagation();
+    // In shared-grid mode, pointer events typically target the full-size selection canvas and
+    // would otherwise initiate grid selection. Selecting a drawing should behave like Excel
+    // (the grid selection should not change), so stop propagation in that mode.
+    //
+    // In legacy mode, allow the bubbling `onPointerDown` handler to run so it can start the
+    // existing drag/resize gesture state machine for drawings.
+    if (this.sharedGrid) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
 
     // Drawings and charts should behave like a single selection model; selecting a drawing
     // clears any chart selection so selection handles don't double-render.
