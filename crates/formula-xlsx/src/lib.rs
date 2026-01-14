@@ -61,6 +61,7 @@ pub mod streaming;
 pub mod styles;
 pub mod tables;
 pub mod theme;
+mod package_stream;
 #[cfg(feature = "vba")]
 pub mod vba;
 mod workbook;
@@ -97,7 +98,10 @@ pub use package::{
     MacroPresence, WorkbookKind, WorksheetPartInfo, XlsxError, XlsxPackage, XlsxPackageLimits,
     MAX_XLSX_PACKAGE_PART_BYTES, MAX_XLSX_PACKAGE_TOTAL_BYTES,
 };
-pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
+pub use package_stream::StreamingXlsxPackage;
+pub use patch::{
+    CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches,
+};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
