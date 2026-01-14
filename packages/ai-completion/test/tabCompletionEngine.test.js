@@ -225,6 +225,24 @@ test("Typing =Forecast.Et suggests Forecast.Ets( (segment title-style casing)", 
   );
 });
 
+test("Typing =Foo. suggests Foo.Äbc( (Unicode segment title-style casing)", async () => {
+  const functionRegistry = new FunctionRegistry([{ name: "FOO.ÄBC", args: [] }]);
+  const engine = new TabCompletionEngine({ functionRegistry });
+
+  const currentInput = "=Foo.";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Foo.Äbc("),
+    `Expected a Foo.Äbc suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Zä suggests Zählenwenn( (Unicode title-style casing)", async () => {
   const functionRegistry = new FunctionRegistry([{ name: "ZÄHLENWENN", args: [] }]);
   const engine = new TabCompletionEngine({ functionRegistry });

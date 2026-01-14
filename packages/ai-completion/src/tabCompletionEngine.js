@@ -1878,6 +1878,14 @@ const LETTER_SEGMENT_SPLIT_RE = (() => {
   }
 })();
 
+const UNICODE_SINGLE_LETTER_RE = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return /^[A-Za-z]$/;
+  }
+})();
+
 function applyNameCase(name, typedPrefix) {
   if (!typedPrefix) return name;
   // Support Excel `_xlfn.` function qualifier prefixes by applying casing rules
@@ -1915,14 +1923,13 @@ function applyNameCase(name, typedPrefix) {
     const lowered = name.toLowerCase();
     let out = "";
     let capitalizeNext = true;
-    for (let i = 0; i < lowered.length; i++) {
-      const ch = lowered[i];
-      if (capitalizeNext && ch >= "a" && ch <= "z") {
+    for (const ch of lowered) {
+      if (capitalizeNext && UNICODE_SINGLE_LETTER_RE.test(ch)) {
         out += ch.toUpperCase();
         capitalizeNext = false;
-        continue;
+      } else {
+        out += ch;
       }
-      out += ch;
       if (ch === "." || ch === "_") capitalizeNext = true;
     }
     return out;
