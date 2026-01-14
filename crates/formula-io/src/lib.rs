@@ -2383,8 +2383,8 @@ fn xlsb_error_code_to_model_error(code: u8) -> formula_model::ErrorValue {
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
     use formula_model::{
-        normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem, DefinedNameScope,
-        SheetVisibility, Style, Workbook as ModelWorkbook,
+        normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem,
+        DefinedNameScope, SheetVisibility, Style, Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -2521,6 +2521,19 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                 if let Some(normalized) = normalize_formula_text(&formula) {
                     sheet.set_formula(cell_ref, Some(normalized));
                 }
+            }
+
+            // Best-effort phonetic guide (furigana) extraction. This metadata is stored in XLSB
+            // "wide strings" as a trailing phonetic/extended block that `formula-xlsb` preserves
+            // on the parsed cell record.
+            if let Some(phonetic) = cell
+                .preserved_string
+                .as_ref()
+                .and_then(|s| s.phonetic_text())
+            {
+                let mut model_cell = sheet.cell(cell_ref).cloned().unwrap_or_default();
+                model_cell.phonetic = Some(phonetic);
+                sheet.set_cell(cell_ref, model_cell);
             }
         })?;
     }

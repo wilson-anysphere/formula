@@ -12,8 +12,7 @@ use thiserror::Error;
 
 use crate::rgce::DecodeWarning;
 use crate::strings::{
-    read_xl_wide_string, read_xl_wide_string_impl, read_xl_wide_string_with_flags, FlagsWidth,
-    ParsedXlsbString,
+    read_xl_wide_string, read_xl_wide_string_with_flags, FlagsWidth, ParsedXlsbString,
 };
 
 #[cfg(test)]
@@ -1641,7 +1640,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
     shared_strings: &[String],
     shared_strings_table: Option<&[SharedString]>,
     ctx: &WorkbookContext,
-    preserve_parsed_parts: bool,
+    _preserve_parsed_parts: bool,
     decode_formulas: bool,
     mut on_cell: F,
 ) -> Result<Option<Dimension>, Error> {
@@ -1718,37 +1717,24 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         // When patch-writing we currently emit the simple layout, so the reader
                         // must accept both.
                         let start_offset = rr.offset;
-                        let parsed = if preserve_parsed_parts {
-                            match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
-                                Ok(parsed) => parsed,
-                                Err(Error::UnexpectedEof) => {
-                                    rr.offset = start_offset;
-                                    ParsedXlsbString {
-                                        text: rr.read_utf16_string()?,
-                                        rich: None,
-                                        phonetic: None,
-                                    }
+                        // NOTE: We preserve rich/phonetic extra blocks even when
+                        // `preserve_parsed_parts=false` so downstream consumers (e.g. model export)
+                        // can access metadata like phonetic guides without requiring raw part
+                        // preservation.
+                        let parsed = match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
+                            Ok(parsed) => parsed,
+                            Err(Error::UnexpectedEof) => {
+                                rr.offset = start_offset;
+                                ParsedXlsbString {
+                                    text: rr.read_utf16_string()?,
+                                    rich: None,
+                                    phonetic: None,
                                 }
-                                Err(e) => return Err(e),
                             }
-                        } else {
-                            match read_xl_wide_string_impl(&mut rr, FlagsWidth::U8, false) {
-                                Ok(parsed) => parsed,
-                                Err(Error::UnexpectedEof) => {
-                                    rr.offset = start_offset;
-                                    ParsedXlsbString {
-                                        text: rr.read_utf16_string()?,
-                                        rich: None,
-                                        phonetic: None,
-                                    }
-                                }
-                                Err(e) => return Err(e),
-                            }
+                            Err(e) => return Err(e),
                         };
 
-                        if preserve_parsed_parts
-                            && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                        {
+                        if parsed.rich.is_some() || parsed.phonetic.is_some() {
                             (CellValue::Text(parsed.text.clone()), None, Some(parsed))
                         } else {
                             (CellValue::Text(parsed.text), None, None)
@@ -1859,7 +1845,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         match read_xl_wide_string_with_flags(
                             &mut rr,
                             FlagsWidth::U16,
-                            preserve_parsed_parts,
+                            true,
                         ) {
                             Ok((flags, candidate)) => {
                                 let cce_offset = rr.offset;
@@ -1886,9 +1872,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         }
 
                         let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
-                            if preserve_parsed_parts
-                                && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                            {
+                            if parsed.rich.is_some() || parsed.phonetic.is_some() {
                                 (flags, parsed.text.clone(), Some(parsed))
                             } else {
                                 (flags, parsed.text, None)

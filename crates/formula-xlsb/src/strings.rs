@@ -18,6 +18,154 @@ pub struct ParsedXlsbString {
     pub phonetic: Option<Vec<u8>>,
 }
 
+impl ParsedXlsbString {
+    /// Best-effort decode of the phonetic guide (furigana) text from the opaque phonetic block.
+    ///
+    /// XLSB stores an "extended string"/phonetic payload after the main UTF-16 text when the
+    /// `FLAG_PHONETIC` bit is set. The raw bytes are length-delimited by `cb` in the surrounding
+    /// record and preserved in [`ParsedXlsbString::phonetic`] for round-trip.
+    ///
+    /// The exact binary layout of the phonetic block is not yet implemented here. Empirically it
+    /// appears to embed a length-prefixed UTF-16LE string containing the visible phonetic text,
+    /// along with additional metadata (e.g. run mappings).
+    ///
+    /// This function is intentionally tolerant:
+    /// - If the payload is missing or cannot be decoded, it returns `None`.
+    /// - It does **not** error the workbook parse/export path.
+    ///
+    /// Assumed layout (best-effort):
+    ///
+    /// ```text
+    /// [.. header ..][cch: u16|u32][phonetic_text: UTF-16LE (cch code units)] [.. trailing ..]
+    /// ```
+    ///
+    /// TODO: Replace the heuristic with a spec-backed parser once the relevant MS-XLSB section is
+    /// identified.
+    pub fn phonetic_text(&self) -> Option<String> {
+        let data = self.phonetic.as_deref()?;
+        parse_phonetic_text_best_effort(data)
+    }
+}
+
+fn parse_phonetic_text_best_effort(data: &[u8]) -> Option<String> {
+    // Try to locate a length-prefixed UTF-16LE string inside the phonetic block.
+    //
+    // We scan for common patterns (u16/u32 character counts) near the start of the block.
+    // This is deliberately conservative to avoid decoding arbitrary binary data.
+    let mut best: Option<(i32, usize, String)> = None;
+
+    // Scan a limited window to keep this bounded even if `cb` is large.
+    // The phonetic string header is typically near the beginning.
+    let scan_len = data.len().min(128);
+    for offset in 0..scan_len {
+        // Prefer aligned offsets (UTF-16 structures are usually 2-byte aligned), but still accept
+        // odd offsets for robustness.
+        if let Some(s) = decode_len_prefixed_utf16le_u16(data, offset) {
+            if let Some(score) = score_candidate(&s) {
+                best = pick_better(best, score, offset, s);
+            }
+        }
+        if let Some(s) = decode_len_prefixed_utf16le_u32(data, offset) {
+            if let Some(score) = score_candidate(&s) {
+                best = pick_better(best, score, offset, s);
+            }
+        }
+    }
+
+    best.map(|(_, _, s)| s)
+}
+
+fn pick_better(
+    best: Option<(i32, usize, String)>,
+    score: i32,
+    offset: usize,
+    s: String,
+) -> Option<(i32, usize, String)> {
+    match best {
+        None => Some((score, offset, s)),
+        Some((best_score, best_offset, best_s)) => {
+            // Prefer higher score; if tied, prefer longer strings; if still tied, prefer earlier
+            // offsets.
+            let best_len = best_s.chars().count();
+            let len = s.chars().count();
+            if score > best_score
+                || (score == best_score && len > best_len)
+                || (score == best_score && len == best_len && offset < best_offset)
+            {
+                Some((score, offset, s))
+            } else {
+                Some((best_score, best_offset, best_s))
+            }
+        }
+    }
+}
+
+fn score_candidate(s: &str) -> Option<i32> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut good = 0i32;
+    let mut bad = 0i32;
+    for ch in s.chars() {
+        match ch {
+            // Replacement char produced by lossy UTF-16 decoding; treat as suspicious.
+            '\u{FFFD}' => bad += 3,
+            // NUL is unlikely in visible phonetic text.
+            '\u{0}' => bad += 3,
+            _ if ch.is_control() => bad += 1,
+            _ => good += 1,
+        }
+    }
+
+    if good == 0 {
+        return None;
+    }
+
+    // Penalize candidates with lots of "bad" chars.
+    let score = good.saturating_mul(2).saturating_sub(bad);
+    Some(score)
+}
+
+fn decode_len_prefixed_utf16le_u16(data: &[u8], offset: usize) -> Option<String> {
+    let raw_len: [u8; 2] = data.get(offset..offset + 2)?.try_into().ok()?;
+    let cch = u16::from_le_bytes(raw_len) as usize;
+    if cch == 0 {
+        return None;
+    }
+    let bytes_needed = cch.checked_mul(2)?;
+    let start = offset.checked_add(2)?;
+    let end = start.checked_add(bytes_needed)?;
+    let raw = data.get(start..end)?;
+    decode_utf16le_lossy(raw)
+}
+
+fn decode_len_prefixed_utf16le_u32(data: &[u8], offset: usize) -> Option<String> {
+    let raw_len: [u8; 4] = data.get(offset..offset + 4)?.try_into().ok()?;
+    let cch = u32::from_le_bytes(raw_len) as usize;
+    // Guard against absurd lengths from random data.
+    if cch == 0 || cch > 1_000_000 {
+        return None;
+    }
+    let bytes_needed = cch.checked_mul(2)?;
+    let start = offset.checked_add(4)?;
+    let end = start.checked_add(bytes_needed)?;
+    let raw = data.get(start..end)?;
+    decode_utf16le_lossy(raw)
+}
+
+fn decode_utf16le_lossy(raw: &[u8]) -> Option<String> {
+    if raw.len() % 2 != 0 {
+        return None;
+    }
+    let mut units = Vec::with_capacity(raw.len() / 2);
+    for chunk in raw.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    Some(String::from_utf16_lossy(&units))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlagsWidth {
     U8,
@@ -111,6 +259,29 @@ mod tests {
         s.encode_utf16()
             .flat_map(|u| u.to_le_bytes())
             .collect::<Vec<u8>>()
+    }
+
+    #[test]
+    fn phonetic_text_decodes_utf16_from_synthetic_payload() {
+        // Synthetic layout:
+        //   [reserved: u16][cch: u16][utf16le chars...][trailing bytes...]
+        //
+        // This matches the heuristic parser expectations without requiring a full MS-XLSB spec
+        // implementation.
+        let phonetic = "フリガナ";
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u16.to_le_bytes()); // reserved/marker
+        payload.extend_from_slice(&(phonetic.encode_utf16().count() as u16).to_le_bytes());
+        payload.extend_from_slice(&encode_utf16(phonetic));
+        payload.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // trailing bytes (ignored)
+
+        let s = ParsedXlsbString {
+            text: "Base".to_string(),
+            rich: None,
+            phonetic: Some(payload),
+        };
+
+        assert_eq!(s.phonetic_text(), Some(phonetic.to_string()));
     }
 
     #[test]
