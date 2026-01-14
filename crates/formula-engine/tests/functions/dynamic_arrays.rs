@@ -144,6 +144,34 @@ fn sort_sorts_rich_values_by_display_string() {
 }
 
 #[test]
+fn sort_uses_record_display_field_for_keying() {
+    let mut engine = Engine::new();
+
+    let mut record_a = RecordValue::new("zzz").field("Name", "A");
+    record_a.display_field = Some("Name".to_string());
+    let record_a = Value::Record(record_a);
+
+    let mut record_b = RecordValue::new("aaa").field("Name", "B");
+    record_b.display_field = Some("Name".to_string());
+    let record_b = Value::Record(record_b);
+
+    engine
+        .set_cell_value("Sheet1", "A1", record_a.clone())
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", record_b.clone())
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SORT(A1:A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Sort should use the `Name` field ("A"/"B"), not the fallback `display` string ("zzz"/"aaa").
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), record_a);
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), record_b);
+}
+
+#[test]
 fn sort_is_case_insensitive_for_unicode_text_like_excel() {
     let mut engine = Engine::new();
     engine
@@ -293,6 +321,37 @@ fn unique_by_row_and_column_and_exactly_once() {
     assert_eq!(engine.get_cell_value("Sheet1", "J1"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "I2"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "J2"), Value::Number(4.0));
+}
+
+#[test]
+fn unique_uses_record_display_field_for_deduping() {
+    let mut engine = Engine::new();
+
+    let mut record_a = RecordValue::new("display_a").field("Name", "Same");
+    record_a.display_field = Some("Name".to_string());
+    let record_a = Value::Record(record_a);
+
+    let mut record_b = RecordValue::new("display_b").field("Name", "Same");
+    record_b.display_field = Some("Name".to_string());
+    let record_b = Value::Record(record_b);
+
+    engine
+        .set_cell_value("Sheet1", "A1", record_a.clone())
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", record_b)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=UNIQUE(A1:A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("C1").unwrap());
+
+    // UNIQUE should use the `Name` field value ("Same") to dedupe, keeping the first occurrence.
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), record_a);
 }
 
 #[test]

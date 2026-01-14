@@ -6,7 +6,7 @@ use crate::functions::{
     eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{casefold, Array, ErrorKind, Lambda, Value};
+use crate::value::{casefold, Array, ErrorKind, Lambda, RecordValue, Value};
 
 fn checked_array_cells(rows: usize, cols: usize) -> Result<usize, ErrorKind> {
     let total = rows.checked_mul(cols).ok_or(ErrorKind::Spill)?;
@@ -190,7 +190,7 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Err(e) => return Value::Error(e),
             };
             for col in 0..array.cols {
-                out.push(sort_key(array.get(row_idx, col).unwrap_or(&Value::Blank)));
+                out.push(sort_key(ctx, array.get(row_idx, col).unwrap_or(&Value::Blank)));
             }
             keys.push(out);
         }
@@ -233,7 +233,7 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         };
         for row in 0..array.rows {
-            out.push(sort_key(array.get(row, col_idx).unwrap_or(&Value::Blank)));
+            out.push(sort_key(ctx, array.get(row, col_idx).unwrap_or(&Value::Blank)));
         }
         keys.push(out);
     }
@@ -387,7 +387,7 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 VectorOrientation::Row => key.get(0, idx).unwrap_or(&Value::Blank),
                 VectorOrientation::Column => key.get(idx, 0).unwrap_or(&Value::Blank),
             };
-            out.push(sort_key(v));
+            out.push(sort_key(ctx, v));
         }
         keys.push(out);
     }
@@ -449,15 +449,39 @@ impl SortKeyValue {
     }
 }
 
-pub(super) fn sort_key(value: &Value) -> SortKeyValue {
+fn record_display_key_text(
+    ctx: &dyn FunctionContext,
+    record: &RecordValue,
+) -> Result<Option<String>, ErrorKind> {
+    let display = if let Some(display_field) = record.display_field.as_deref() {
+        if let Some(value) = record.get_field_case_insensitive(display_field) {
+            value.coerce_to_string_with_ctx(ctx)?
+        } else {
+            record.display.clone()
+        }
+    } else {
+        record.display.clone()
+    };
+
+    if display.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(casefold(&display)))
+    }
+}
+
+pub(super) fn sort_key(ctx: &dyn FunctionContext, value: &Value) -> SortKeyValue {
     match value {
         Value::Number(n) => SortKeyValue::Number(*n),
         Value::Text(s) => SortKeyValue::Text(casefold(s)),
         Value::Bool(b) => SortKeyValue::Bool(*b),
         Value::Entity(entity) if entity.display.is_empty() => SortKeyValue::Blank,
         Value::Entity(entity) => SortKeyValue::Text(casefold(&entity.display)),
-        Value::Record(record) if record.display.is_empty() => SortKeyValue::Blank,
-        Value::Record(record) => SortKeyValue::Text(casefold(&record.display)),
+        Value::Record(record) => match record_display_key_text(ctx, record) {
+            Ok(None) => SortKeyValue::Blank,
+            Ok(Some(s)) => SortKeyValue::Text(s),
+            Err(e) => SortKeyValue::Error(e),
+        },
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
         other => {
@@ -543,9 +567,9 @@ fn unique_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     if by_col {
-        unique_columns(array, exactly_once)
+        unique_columns(ctx, array, exactly_once)
     } else {
-        unique_rows(array, exactly_once)
+        unique_rows(ctx, array, exactly_once)
     }
 }
 
@@ -558,7 +582,7 @@ enum UniqueKeyCell {
     Error(ErrorKind),
 }
 
-fn unique_key_cell(value: &Value) -> UniqueKeyCell {
+fn unique_key_cell(ctx: &dyn FunctionContext, value: &Value) -> UniqueKeyCell {
     match value {
         Value::Blank => UniqueKeyCell::Blank,
         Value::Bool(b) => UniqueKeyCell::Bool(*b),
@@ -567,8 +591,11 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Text(s) => UniqueKeyCell::Text(casefold(s)),
         Value::Entity(entity) if entity.display.is_empty() => UniqueKeyCell::Blank,
         Value::Entity(entity) => UniqueKeyCell::Text(casefold(&entity.display)),
-        Value::Record(record) if record.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Record(record) => UniqueKeyCell::Text(casefold(&record.display)),
+        Value::Record(record) => match record_display_key_text(ctx, record) {
+            Ok(None) => UniqueKeyCell::Blank,
+            Ok(Some(s)) => UniqueKeyCell::Text(s),
+            Err(e) => UniqueKeyCell::Error(e),
+        },
         Value::Error(e) => UniqueKeyCell::Error(*e),
         Value::Reference(_)
         | Value::ReferenceUnion(_)
@@ -588,7 +615,7 @@ fn canonical_number_bits(n: f64) -> u64 {
     n.to_bits()
 }
 
-fn unique_rows(array: Array, exactly_once: bool) -> Value {
+fn unique_rows(ctx: &dyn FunctionContext, array: Array, exactly_once: bool) -> Value {
     let mut counts: HashMap<Vec<UniqueKeyCell>, usize> = HashMap::new();
     let mut keys_by_row: Vec<Vec<UniqueKeyCell>> = match try_vec_with_capacity(array.rows) {
         Ok(v) => v,
@@ -602,7 +629,7 @@ fn unique_rows(array: Array, exactly_once: bool) -> Value {
         };
         for col in 0..array.cols {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
-            key.push(unique_key_cell(v));
+            key.push(unique_key_cell(ctx, v));
         }
         *counts.entry(key.clone()).or_insert(0) += 1;
         keys_by_row.push(key);
@@ -646,7 +673,7 @@ fn unique_rows(array: Array, exactly_once: bool) -> Value {
     Value::Array(Array::new(out_rows, array.cols, values))
 }
 
-fn unique_columns(array: Array, exactly_once: bool) -> Value {
+fn unique_columns(ctx: &dyn FunctionContext, array: Array, exactly_once: bool) -> Value {
     let mut counts: HashMap<Vec<UniqueKeyCell>, usize> = HashMap::new();
     let mut keys_by_col: Vec<Vec<UniqueKeyCell>> = match try_vec_with_capacity(array.cols) {
         Ok(v) => v,
@@ -660,7 +687,7 @@ fn unique_columns(array: Array, exactly_once: bool) -> Value {
         };
         for row in 0..array.rows {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
-            key.push(unique_key_cell(v));
+            key.push(unique_key_cell(ctx, v));
         }
         *counts.entry(key.clone()).or_insert(0) += 1;
         keys_by_col.push(key);
