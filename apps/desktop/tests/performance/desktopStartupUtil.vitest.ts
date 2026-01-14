@@ -8,6 +8,7 @@ import {
   mean,
   parseStartupLine,
   repoRoot,
+  installEpipeHandler,
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
@@ -272,6 +273,10 @@ describe('desktopStartupUtil benchmark re-exports', () => {
 
   it('re-exports basic stats helpers', () => {
     expect(typeof mean).toBe('function');
+  });
+
+  it('re-exports installEpipeHandler', () => {
+    expect(typeof installEpipeHandler).toBe('function');
   });
 });
 
