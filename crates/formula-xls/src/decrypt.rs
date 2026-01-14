@@ -163,6 +163,21 @@ pub(crate) fn decrypt_biff_workbook_stream(
     Ok(())
 }
 
+/// Allocating convenience wrapper around [`decrypt_biff_workbook_stream`].
+///
+/// This is retained for test/ergonomics: callers that already own the workbook-stream `Vec<u8>`
+/// should prefer the in-place API to avoid temporarily doubling memory usage for large `.xls`
+/// files.
+#[allow(dead_code)]
+pub(crate) fn decrypt_biff_workbook_stream_allocating(
+    workbook_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, DecryptError> {
+    let mut out = workbook_stream.to_vec();
+    decrypt_biff_workbook_stream(&mut out, password)?;
+    Ok(out)
+}
+
 #[derive(Debug, Clone)]
 struct EncryptionHeader {
     alg_id: u32,
@@ -556,18 +571,32 @@ fn derive_block_key(
     key_len: usize,
 ) -> Zeroizing<Vec<u8>> {
     let block_bytes = block.to_le_bytes();
-    // Per MS-OFFCRYPTO / MS-XLS CryptoAPI RC4, the RC4 key bytes are the first `key_len` bytes of
-    // the per-block digest (`KeySize/8`).
+    // Per MS-OFFCRYPTO / MS-XLS CryptoAPI RC4, the RC4 key bytes are derived from the per-block
+    // digest of:
+    //
+    //   Hash(KeyMaterial + block_le32)
+    //
+    // and (for most key sizes) are the first `KeySize/8` bytes of the digest.
+    //
+    // However, for **40-bit RC4**, Office/WinCrypt uses a 16-byte key where the first 5 bytes are
+    // set and the remaining 11 bytes are zero. Using the raw 5-byte key changes the RC4 KSA and
+    // yields the wrong keystream for real-world `.xls` files.
     let key = match hash_alg {
         CryptoApiHashAlg::Sha1 => {
             let mut digest = sha1_bytes(&[key_material, &block_bytes]);
-            let key = digest[..key_len].to_vec();
+            let mut key = digest[..key_len].to_vec();
+            if key_len == 5 {
+                key.resize(16, 0);
+            }
             digest.zeroize();
             key
         }
         CryptoApiHashAlg::Md5 => {
             let mut digest = md5_bytes(&[key_material, &block_bytes]);
-            let key = digest[..key_len].to_vec();
+            let mut key = digest[..key_len].to_vec();
+            if key_len == 5 {
+                key.resize(16, 0);
+            }
             digest.zeroize();
             key
         }
@@ -689,7 +718,7 @@ mod filepass_tests {
     /// Spec-correct per-block RC4 key derivation for CryptoAPI RC4 (BIFF8 FILEPASS subtype 0x0002).
     ///
     /// This intentionally does **not** call `derive_block_key` so tests catch regressions in the
-    /// key truncation semantics for 40-bit/56-bit key sizes.
+    /// 40-bit padding semantics and key-length handling.
     fn derive_block_key_spec(
         hash_alg: CryptoApiHashAlg,
         key_material: &[u8],
@@ -701,11 +730,19 @@ mod filepass_tests {
         match hash_alg {
             CryptoApiHashAlg::Sha1 => {
                 let digest = sha1_bytes(&[key_material, &block_bytes]);
-                digest[..key_len].to_vec()
+                let mut key = digest[..key_len].to_vec();
+                if key_size_bits == 40 {
+                    key.resize(16, 0);
+                }
+                key
             }
             CryptoApiHashAlg::Md5 => {
                 let digest = md5_bytes(&[key_material, &block_bytes]);
-                digest[..key_len].to_vec()
+                let mut key = digest[..key_len].to_vec();
+                if key_size_bits == 40 {
+                    key.resize(16, 0);
+                }
+                key
             }
         }
     }
@@ -814,17 +851,18 @@ mod filepass_tests {
     }
 
     #[test]
-    fn derive_block_key_truncates_40_bit_rc4_to_5_bytes() {
+    fn derive_block_key_pads_40_bit_rc4_to_16_bytes() {
         let key_material = [0x11u8; 20];
         let block = 0u32;
 
         let block_bytes = block.to_le_bytes();
         let digest = sha1_bytes(&[&key_material, &block_bytes]);
-        let expected = Vec::from(&digest[..5]);
+        let mut expected = Vec::from(&digest[..5]);
+        expected.resize(16, 0);
 
         let got = derive_block_key(CryptoApiHashAlg::Sha1, &key_material, block, 5);
         assert_eq!(got.as_slice(), expected.as_slice());
-        assert_eq!(got.len(), 5);
+        assert_eq!(got.len(), 16);
     }
 
     #[test]
@@ -899,13 +937,16 @@ mod filepass_tests {
             assert_eq!(key.as_slice(), expected_key.as_slice(), "block={block}");
         }
 
-        // 40-bit CryptoAPI RC4 keys are 5 bytes (keySize/8), not padded to 16 bytes.
+        // 40-bit CryptoAPI RC4 keys are expressed as a 16-byte key where the low 40 bits are set
+        // and the remaining 88 bits are zero.
         let key_40 = derive_block_key(CryptoApiHashAlg::Md5, key_material.as_slice(), 0, 5);
+        let mut expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
+        expected_40.resize(16, 0);
         assert_eq!(
             key_40.as_slice(),
-            vec![0x69, 0xBA, 0xDC, 0xAE, 0x24].as_slice()
+            expected_40.as_slice()
         );
-        assert_eq!(key_40.len(), 5);
+        assert_eq!(key_40.len(), 16);
     }
 
     fn decrypts_rc4_cryptoapi_40_bit_impl(header_key_size_bits: u32) {
@@ -935,8 +976,9 @@ mod filepass_tests {
         ];
         let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
 
-        let key0 = derive_block_key_spec(hash_alg, key_material.as_slice(), 0, effective_key_size_bits);
-        assert_eq!(key0.len(), 5, "40-bit RC4 key must be 5 bytes (no padding)");
+        let key0 =
+            derive_block_key_spec(hash_alg, key_material.as_slice(), 0, effective_key_size_bits);
+        assert_eq!(key0.len(), 16, "40-bit RC4 key must be padded to 16 bytes");
 
         let mut rc4 = Rc4::new(&key0);
         let mut encrypted_verifier = verifier_plain;
@@ -975,7 +1017,7 @@ mod filepass_tests {
         filepass_payload.extend_from_slice(&enc_info);
 
         // Plaintext record payload after FILEPASS. Make it >1024 bytes to ensure the decryptor
-        // rekeys (block 1 derivation must also follow the 40-bit key truncation rule).
+        // rekeys (block 1 derivation must also follow the 40-bit padding rule).
         let mut plaintext_payload = vec![0u8; 2048];
         for (i, b) in plaintext_payload.iter_mut().enumerate() {
             *b = (i % 251) as u8;
@@ -1024,7 +1066,7 @@ mod filepass_tests {
     }
 
     #[test]
-    fn decrypts_rc4_cryptoapi_40_bit_by_using_truncated_5_byte_rc4_key() {
+    fn decrypts_rc4_cryptoapi_40_bit_by_using_padded_16_byte_rc4_key() {
         decrypts_rc4_cryptoapi_40_bit_impl(40);
     }
 
@@ -1812,6 +1854,29 @@ mod filepass_tests {
             mask.get(xf_idx as usize).copied().unwrap_or(false),
             "expected A1 XF to be marked as interesting so style import retains it"
         );
+    }
+
+    #[test]
+    fn in_place_decrypt_matches_allocating_decryptor_for_cryptoapi_fixture() {
+        // Ensure the in-place decryptor produces identical bytes to an allocating wrapper for a
+        // real-world RC4 CryptoAPI workbook-stream fixture.
+        const PASSWORD: &str = "correct horse battery staple";
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("encrypted")
+            .join("biff8_rc4_cryptoapi_pw_open.xls");
+        let workbook_stream =
+            crate::biff::read_workbook_stream_from_xls(&path).expect("read Workbook stream");
+
+        let decrypted_alloc =
+            decrypt_biff_workbook_stream_allocating(&workbook_stream, PASSWORD).expect("decrypt");
+
+        let mut decrypted_in_place = workbook_stream.clone();
+        decrypt_biff_workbook_stream(&mut decrypted_in_place, PASSWORD).expect("decrypt in-place");
+
+        assert_eq!(decrypted_in_place, decrypted_alloc);
     }
 
     #[test]
