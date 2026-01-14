@@ -383,6 +383,65 @@ fn tampered_encrypted_hmac_value_fails_integrity_check() {
 }
 
 #[test]
+fn appended_trailing_bytes_fail_integrity_check() {
+    let zip = basic_xlsx_fixture_bytes();
+    let password = "correct horse battery staple";
+
+    let ole = encrypt_package_to_ole(
+        &zip,
+        password,
+        EncryptOptions {
+            spin_count: 10_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    // Append trailing bytes to the EncryptedPackage stream. The decrypter may ignore them for
+    // plaintext recovery, but MS-OFFCRYPTO dataIntegrity HMAC covers the EncryptedPackage stream
+    // bytes, so this must be detected as tampering.
+    let cursor = Cursor::new(&ole);
+    let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole_in
+        .open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole_in
+        .open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    encrypted_package.extend_from_slice(&[0xA5u8; 37]);
+
+    let cursor_out = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor_out).expect("create cfb");
+    ole_out
+        .create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+
+    let tampered = ole_out.into_inner().into_inner();
+
+    let err = decrypt_encrypted_package_ole(&tampered, password).expect_err("expected failure");
+    assert!(
+        matches!(err, OfficeCryptoError::IntegrityCheckFailed),
+        "expected IntegrityCheckFailed, got {err:?}"
+    );
+}
+
+#[test]
 fn tampered_encrypted_hmac_key_fails_integrity_check() {
     let zip = basic_xlsx_fixture_bytes();
     let password = "correct horse battery staple";
