@@ -63,6 +63,14 @@ export type {
 export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula.ts";
 
 export {
+  EXCEL_DEFAULT_CELL_PADDING_PX,
+  EXCEL_DEFAULT_MAX_DIGIT_WIDTH_PX,
+  excelColWidthCharsToPixels,
+  pixelsToExcelColWidthChars,
+  type ExcelColumnWidthConversionOptions,
+} from "./columnWidth.ts";
+
+export {
   engineApplyDeltas,
   engineApplyDocumentChange,
   engineHydrateFromDocument,

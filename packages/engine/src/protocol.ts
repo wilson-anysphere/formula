@@ -531,6 +531,7 @@ export type RpcMethod =
   | "setWorkbookFileMetadata"
   | "setCellStyleId"
   | "setColWidth"
+  | "setColWidthChars"
   | "setColHidden"
   | "internStyle";
 

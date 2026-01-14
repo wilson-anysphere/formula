@@ -470,7 +470,16 @@ type SheetViewState = {
   frozenRows: number;
   frozenCols: number;
   backgroundImageId?: string;
+  /**
+   * Per-column size overrides in **CSS pixels** (zoom-independent base sizes, i.e. `zoom = 1`).
+   *
+   * Note: this is a UI/view concern. The core engine stores column widths in Excel "character"
+   * units (OOXML `col/@width`) for functions like `CELL("width")`.
+   */
   colWidths?: Record<string, number>;
+  /**
+   * Per-row size overrides in **CSS pixels** (zoom-independent base sizes, i.e. `zoom = 1`).
+   */
   rowHeights?: Record<string, number>;
 };
 
@@ -950,6 +959,8 @@ frozen panes + row/col size overrides (and, in desktop, merged ranges + drawings
   drawings: [{ id: "drawing-1", zOrder: 0, kind: { type: "image", imageId: "img-1" }, anchor: { /* ... */ } }]
 }
 ```
+
+`colWidths` / `rowHeights` values are **base CSS pixels** (zoom-independent, i.e. the size at `zoom = 1`).
 
 Compatibility note:
 

@@ -95,6 +95,9 @@ export interface EngineClient {
    * Set (or clear) a column width override.
    *
    * `col` is 0-indexed (engine coordinates). `width=null` clears the override.
+   *
+   * `width` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   * Prefer `setColWidthChars` for an explicit unit name.
    */
   setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
@@ -158,6 +161,13 @@ export interface EngineClient {
    */
   setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void>;
   getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }>;
+
+  /**
+   * Set (or clear) a per-column width override.
+   *
+   * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   */
+  setColWidthChars(sheet: string, col: number, widthChars: number | null, options?: RpcOptions): Promise<void>;
 
   /**
    * Apply an Excel-like structural edit operation (insert/delete rows/cols, move/copy/fill).
@@ -367,6 +377,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),
     getSheetDimensions: async (sheet, rpcOptions) =>
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
+    setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>
+      await withEngine((connected) => connected.setColWidthChars(sheet, col, widthChars, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     rewriteFormulasForCopyDelta: async (requests, rpcOptions) =>
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),

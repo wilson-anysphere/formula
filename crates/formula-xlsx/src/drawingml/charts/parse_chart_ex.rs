@@ -290,8 +290,8 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             }
         }
 
-        // Collect element names that look like chart type containers. This helps debug cases where
-        // producers omit explicit attributes but still include type-like nodes.
+    // Collect element names that look like chart type containers. This helps debug cases where
+    // producers omit explicit attributes but still include type-like nodes.
         let name = node.tag_name().name();
         let lower = name.to_ascii_lowercase();
         if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
@@ -305,7 +305,6 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     out.sort();
     out
 }
-
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     // Prefer explicit known chart-type nodes. Some ChartEx parts contain other
     // `*Chart`-suffixed elements (e.g. style/theme) that can appear before the

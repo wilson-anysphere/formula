@@ -79,6 +79,12 @@ export interface EngineSyncTarget {
   setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
   setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
   setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
+  /**
+   * Set (or clear) a per-column width override for a sheet.
+   *
+   * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   */
+  setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => Promise<void> | void;
 }
 
 export type EngineApplyDocumentChangeOptions = {
@@ -258,7 +264,14 @@ export async function engineHydrateFromDocument(
   //
   // This ensures `CELL("width")` metadata is correct immediately after hydration (e.g. when
   // opening a document that already contains persisted column width overrides).
-  if (typeof engine.setColWidth === "function" && typeof doc?.getSheetView === "function") {
+  const setColWidthChars =
+    typeof engine.setColWidthChars === "function"
+      ? engine.setColWidthChars
+      : typeof engine.setColWidth === "function"
+        ? engine.setColWidth
+        : null;
+
+  if (setColWidthChars && typeof doc?.getSheetView === "function") {
     const sheetIds: string[] =
       typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
     const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
@@ -274,7 +287,7 @@ export async function engineHydrateFromDocument(
         const widthPx = Number(rawWidth);
         if (!Number.isFinite(widthPx) || widthPx <= 0) continue;
         const widthChars = docColWidthPxToExcelChars(widthPx);
-        await engine.setColWidth(sheetId, col, widthChars);
+        await setColWidthChars(sheetId, col, widthChars);
       }
     }
   }
@@ -517,7 +530,14 @@ export async function engineApplyDocumentChange(
   // DocumentController stores widths in base CSS px (zoom=1). The formula engine model stores
   // widths in Excel character units (OOXML `col/@width`).
   let didApplyAnyColWidths = false;
-  if (typeof engine.setColWidth === "function" && sheetViewDeltas.length > 0) {
+  const setColWidthChars =
+    typeof engine.setColWidthChars === "function"
+      ? engine.setColWidthChars
+      : typeof engine.setColWidth === "function"
+        ? engine.setColWidth
+        : null;
+
+  if (setColWidthChars && sheetViewDeltas.length > 0) {
     for (const delta of sheetViewDeltas) {
       const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : "";
       if (!sheetId) continue;
@@ -544,7 +564,7 @@ export async function engineApplyDocumentChange(
 
         didApplyAnyColWidths = true;
         const widthChars = after == null ? null : docColWidthPxToExcelChars(after);
-        await engine.setColWidth(sheetId, col, widthChars);
+        await setColWidthChars(sheetId, col, widthChars);
       }
     }
   }

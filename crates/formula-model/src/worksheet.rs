@@ -113,7 +113,11 @@ pub struct RowProperties {
 /// Per-column overrides.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct ColProperties {
-    /// Column width in Excel "character" units.
+    /// Column width in Excel "character" units (OOXML `col/@width`).
+    ///
+    /// This is the width value shown in Excel's "Column Width" UI and persisted in `.xlsx`
+    /// files. It is **not pixels**; the pixel width depends on the workbook's default font
+    /// (for Excel's default Calibri 11, max digit width is 7px with 5px padding).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f32>,
     /// Whether the column is user-hidden (eg via "Hide column").
@@ -899,6 +903,8 @@ impl Worksheet {
     }
 
     /// Set (or clear) the width override for a column.
+    ///
+    /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
     pub fn set_col_width(&mut self, col: u32, width: Option<f32>) {
         assert!(
             col < crate::cell::EXCEL_MAX_COLS,

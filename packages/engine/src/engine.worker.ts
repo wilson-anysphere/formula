@@ -39,6 +39,7 @@ type WasmWorkbookInstance = {
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
+  setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
   toJson(): string;
 };
 
@@ -532,6 +533,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("getSheetDimensions: not available in this WASM build");
               }
               result = (wb as any).getSheetDimensions(params.sheet);
+              break;
+            case "setColWidthChars":
+              if (typeof (wb as any).setColWidthChars !== "function") {
+                throw new Error("setColWidthChars: not available in this WASM build");
+              }
+              (wb as any).setColWidthChars(params.sheet, params.col, params.widthChars);
+              result = null;
               break;
             case "setCells":
               if (typeof (wb as any).setCells === "function") {

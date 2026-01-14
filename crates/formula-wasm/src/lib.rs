@@ -1,10 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use formula_engine::{
-    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions,
-    RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
-};
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
@@ -13,6 +8,11 @@ use formula_engine::locale::{
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
 use formula_engine::what_if::EngineWhatIfModel;
+use formula_engine::{
+    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
+    EditResult as EngineEditResult, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions,
+    RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+};
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS,
@@ -805,10 +805,14 @@ fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
     }
 }
 
-fn pivot_key_part_model_to_engine(part: &formula_model::pivots::PivotKeyPart) -> pivot_engine::PivotKeyPart {
+fn pivot_key_part_model_to_engine(
+    part: &formula_model::pivots::PivotKeyPart,
+) -> pivot_engine::PivotKeyPart {
     match part {
         formula_model::pivots::PivotKeyPart::Blank => pivot_engine::PivotKeyPart::Blank,
-        formula_model::pivots::PivotKeyPart::Number(bits) => pivot_engine::PivotKeyPart::Number(*bits),
+        formula_model::pivots::PivotKeyPart::Number(bits) => {
+            pivot_engine::PivotKeyPart::Number(*bits)
+        }
         formula_model::pivots::PivotKeyPart::Date(d) => pivot_engine::PivotKeyPart::Date(*d),
         formula_model::pivots::PivotKeyPart::Text(s) => pivot_engine::PivotKeyPart::Text(s.clone()),
         formula_model::pivots::PivotKeyPart::Bool(b) => pivot_engine::PivotKeyPart::Bool(*b),
@@ -825,7 +829,9 @@ fn pivot_sort_order_model_to_engine(
     }
 }
 
-fn pivot_field_model_to_engine(field: &formula_model::pivots::PivotField) -> pivot_engine::PivotField {
+fn pivot_field_model_to_engine(
+    field: &formula_model::pivots::PivotField,
+) -> pivot_engine::PivotField {
     pivot_engine::PivotField {
         source_field: field.source_field.clone(),
         sort_order: pivot_sort_order_model_to_engine(field.sort_order),
@@ -856,7 +862,9 @@ fn pivot_aggregation_model_to_engine(
     }
 }
 
-fn pivot_value_field_model_to_engine(field: &formula_model::pivots::ValueField) -> pivot_engine::ValueField {
+fn pivot_value_field_model_to_engine(
+    field: &formula_model::pivots::ValueField,
+) -> pivot_engine::ValueField {
     pivot_engine::ValueField {
         source_field: field.source_field.clone(),
         name: field.name.clone(),
@@ -868,7 +876,9 @@ fn pivot_value_field_model_to_engine(field: &formula_model::pivots::ValueField) 
     }
 }
 
-fn pivot_filter_field_model_to_engine(field: &formula_model::pivots::FilterField) -> pivot_engine::FilterField {
+fn pivot_filter_field_model_to_engine(
+    field: &formula_model::pivots::FilterField,
+) -> pivot_engine::FilterField {
     pivot_engine::FilterField {
         source_field: field.source_field.clone(),
         allowed: field.allowed.as_ref().map(|allowed| {
@@ -900,9 +910,15 @@ fn pivot_subtotals_model_to_engine(
     }
 }
 
-fn pivot_config_model_to_engine(cfg: &formula_model::pivots::PivotConfig) -> pivot_engine::PivotConfig {
+fn pivot_config_model_to_engine(
+    cfg: &formula_model::pivots::PivotConfig,
+) -> pivot_engine::PivotConfig {
     pivot_engine::PivotConfig {
-        row_fields: cfg.row_fields.iter().map(pivot_field_model_to_engine).collect(),
+        row_fields: cfg
+            .row_fields
+            .iter()
+            .map(pivot_field_model_to_engine)
+            .collect(),
         column_fields: cfg
             .column_fields
             .iter()
@@ -1213,6 +1229,11 @@ struct WorkbookState {
     sheets: BTreeMap<String, BTreeMap<String, JsonValue>>,
     /// Case-insensitive mapping (Excel semantics) from sheet key -> display name.
     sheet_lookup: HashMap<String, String>,
+    /// Per-sheet per-column width overrides in Excel "character" units (OOXML `col/@width`).
+    ///
+    /// This is separate from the calc engine's grid state today; it exists to support worksheet
+    /// information functions like `CELL("width")` and to preserve imported column widths.
+    col_widths_chars: BTreeMap<String, BTreeMap<u32, f32>>,
     /// Spill cells that were cleared by edits since the last recalc.
     ///
     /// `Engine::recalculate_with_value_changes` can only diff values across a recalc tick; when a
@@ -1345,6 +1366,7 @@ impl WorkbookState {
             sheets: BTreeMap::new(),
             sheets_rich: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
+            col_widths_chars: BTreeMap::new(),
             pending_spill_clears: BTreeSet::new(),
             pending_formula_baselines: BTreeMap::new(),
         }
@@ -1380,6 +1402,35 @@ impl WorkbookState {
         self.engine
             .set_sheet_dimensions(&sheet, rows, cols)
             .map_err(|err| js_err(err.to_string()))
+    }
+
+    fn set_col_width_chars_internal(
+        &mut self,
+        name: &str,
+        col: u32,
+        width_chars: Option<f32>,
+    ) -> Result<(), JsValue> {
+        if col >= EXCEL_MAX_COLS {
+            return Err(js_err(format!("col out of Excel bounds: {col}")));
+        }
+        let sheet = self.ensure_sheet(name);
+        match width_chars {
+            Some(width) => {
+                self.col_widths_chars
+                    .entry(sheet)
+                    .or_default()
+                    .insert(col, width);
+            }
+            None => {
+                if let Some(cols) = self.col_widths_chars.get_mut(&sheet) {
+                    cols.remove(&col);
+                    if cols.is_empty() {
+                        self.col_widths_chars.remove(&sheet);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn get_sheet_dimensions_internal(&self, name: &str) -> Result<(u32, u32), JsValue> {
@@ -1453,8 +1504,8 @@ impl WorkbookState {
         let source = self.read_range_values_as_pivot_values(&sheet, &range);
         let cache =
             pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
-        let result =
-            pivot_engine::PivotEngine::calculate(&cache, config).map_err(|err| js_err(err.to_string()))?;
+        let result = pivot_engine::PivotEngine::calculate(&cache, config)
+            .map_err(|err| js_err(err.to_string()))?;
 
         let writes = result.to_cell_writes(pivot_engine::CellRef {
             row: destination.row,
@@ -2868,6 +2919,18 @@ impl WasmWorkbook {
             }
         }
 
+        // Best-effort column width overrides (Excel character units).
+        //
+        // These are persisted in OOXML (`col/@width`) and are needed for workbook info functions
+        // like `CELL("width")`.
+        for sheet in &model.sheets {
+            for (&col, props) in &sheet.col_properties {
+                if let Some(width) = props.width {
+                    wb.set_col_width_chars_internal(&sheet.name, col, Some(width))?;
+                }
+            }
+        }
+
         // Import Excel tables (structured reference metadata) before formulas are compiled so
         // expressions like `Table1[Col]` and `[@Col]` resolve correctly.
         for sheet in &model.sheets {
@@ -2991,6 +3054,40 @@ impl WasmWorkbook {
         object_set(&obj, "rows", &JsValue::from_f64(rows as f64))?;
         object_set(&obj, "cols", &JsValue::from_f64(cols as f64))?;
         Ok(obj.into())
+    }
+
+    /// Set (or clear) a per-column width override for a sheet.
+    ///
+    /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
+    ///
+    /// Prefer [`WasmWorkbook::set_col_width_chars`] for an explicit unit name.
+    ///
+    /// Pass `null`/`undefined` to clear the override.
+    #[wasm_bindgen(js_name = "setColWidth")]
+    pub fn set_col_width(
+        &mut self,
+        sheet_name: String,
+        col: u32,
+        width: Option<f32>,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_col_width_chars_internal(&sheet_name, col, width)
+    }
+
+    /// Set (or clear) a per-column width override for a sheet.
+    ///
+    /// `width_chars` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
+    ///
+    /// Pass `null`/`undefined` to clear the override.
+    #[wasm_bindgen(js_name = "setColWidthChars")]
+    pub fn set_col_width_chars(
+        &mut self,
+        sheet_name: String,
+        col: u32,
+        width_chars: Option<f32>,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_col_width_chars_internal(&sheet_name, col, width_chars)
     }
 
     #[wasm_bindgen(js_name = "toJson")]
@@ -3310,7 +3407,9 @@ impl WasmWorkbook {
             return Err(js_err("targetCell must be a non-empty string"));
         }
         if target_cell_raw.contains('!') {
-            return Err(js_err("targetCell must be an A1 address without a sheet prefix"));
+            return Err(js_err(
+                "targetCell must be an A1 address without a sheet prefix",
+            ));
         }
         let target_cell = CellRef::from_a1(target_cell_raw)
             .map_err(|_| js_err(format!("invalid targetCell address: {target_cell_raw}")))?
@@ -3326,7 +3425,9 @@ impl WasmWorkbook {
             return Err(js_err("changingCell must be a non-empty string"));
         }
         if changing_cell_raw.contains('!') {
-            return Err(js_err("changingCell must be an A1 address without a sheet prefix"));
+            return Err(js_err(
+                "changingCell must be an A1 address without a sheet prefix",
+            ));
         }
         let changing_cell_ref = CellRef::from_a1(changing_cell_raw)
             .map_err(|_| js_err(format!("invalid changingCell address: {changing_cell_raw}")))?;
@@ -3385,9 +3486,9 @@ impl WasmWorkbook {
         let recalc_mode = if recalc_mode_raw.is_undefined() || recalc_mode_raw.is_null() {
             None
         } else {
-            let mode = recalc_mode_raw
-                .as_string()
-                .ok_or_else(|| js_err("recalcMode must be \"singleThreaded\" | \"multiThreaded\""))?;
+            let mode = recalc_mode_raw.as_string().ok_or_else(|| {
+                js_err("recalcMode must be \"singleThreaded\" | \"multiThreaded\"")
+            })?;
             match mode.as_str() {
                 "singleThreaded" => Some(RecalcMode::SingleThreaded),
                 "multiThreaded" => Some(if cfg!(target_arch = "wasm32") {
@@ -3431,7 +3532,11 @@ impl WasmWorkbook {
 
         let out = Object::new();
         object_set(&out, "success", &JsValue::from_bool(result.success()))?;
-        object_set(&out, "status", &JsValue::from_str(&format!("{:?}", result.status)))?;
+        object_set(
+            &out,
+            "status",
+            &JsValue::from_str(&format!("{:?}", result.status)),
+        )?;
         object_set(&out, "solution", &JsValue::from_f64(result.solution))?;
         object_set(
             &out,
@@ -5377,13 +5482,18 @@ mod tests {
             .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Amount"))
             .unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("A")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("A"))
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0))
             .unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("A")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(5.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A4", json!("B")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B4", json!(7.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("A"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(5.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A4", json!("B"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B4", json!(7.0))
+            .unwrap();
 
         // No formulas, but run a recalc to mirror typical usage where pivots reflect calculated
         // values.

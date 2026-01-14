@@ -223,6 +223,7 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     internStyle: (styleObj) => engine.internStyle(styleObj as any),
     setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
     setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
+    setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
   };
 
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);

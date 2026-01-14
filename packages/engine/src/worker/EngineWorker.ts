@@ -575,6 +575,16 @@ export class EngineWorker {
     return (await this.invoke("getSheetDimensions", { sheet }, options)) as { rows: number; cols: number };
   }
 
+  /**
+   * Set (or clear) a per-column width override.
+   *
+   * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   */
+  async setColWidthChars(sheet: string, col: number, widthChars: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setColWidthChars", { sheet, col, widthChars }, options);
+  }
+
   private async scheduleFlush(): Promise<void> {
     if (this.flushPromise) {
       return this.flushPromise;

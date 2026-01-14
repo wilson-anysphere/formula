@@ -5684,7 +5684,7 @@ export class DocumentController {
   }
 
   /**
-   * Set a single column width override for a sheet (base units, zoom=1).
+   * Set a single column width override for a sheet (base units: CSS pixels at zoom=1).
    *
    * @param {string} sheetId
    * @param {number} col
@@ -5728,7 +5728,7 @@ export class DocumentController {
   }
 
   /**
-   * Set a single row height override for a sheet (base units, zoom=1).
+   * Set a single row height override for a sheet (base units: CSS pixels at zoom=1).
    *
    * @param {string} sheetId
    * @param {number} row
