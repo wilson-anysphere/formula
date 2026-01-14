@@ -119,9 +119,7 @@ fn spilled_outputs_use_origin_style_patch() {
             ..StylePatch::default()
         },
     );
-    engine
-        .set_cell_patch_style_id("Sheet1", "A1", 1)
-        .unwrap();
+    engine.set_cell_patch_style_id("Sheet1", "A1", 1).unwrap();
 
     // Spill a 1x2 array from A1 to B1.
     engine
