@@ -7,7 +7,12 @@ import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
 import { chartAnchorToDrawingAnchor } from "../charts/chartAnchorToDrawingAnchor";
 import { ChartCanvasStoreAdapter } from "../charts/chartCanvasStoreAdapter";
-import { chartIdToDrawingId as chartStoreIdToDrawingId, chartRecordToDrawingObject, drawingAnchorToChartAnchor } from "../charts/chartDrawingAdapter";
+import {
+  chartIdToDrawingId as chartStoreIdToDrawingId,
+  chartRecordToDrawingObject,
+  drawingAnchorToChartAnchor,
+  isChartStoreDrawingId,
+} from "../charts/chartDrawingAdapter";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../charts/chartRendererAdapter";
 import type { ChartModel } from "../charts/renderChart";
@@ -7963,12 +7968,9 @@ export class SpreadsheetApp {
     const id = Number.isFinite(drawingId) ? drawingId : null;
     if (id == null) return null;
     // Canvas-chart ids live in a separate negative namespace (see `chartIdToDrawingId`).
-    //
-    // Note: hashed workbook drawing ids produced by `parseDrawingObjectId` also use negative ids,
-    // but are offset by 2^33 to stay disjoint from chart ids. Avoid scanning the chart list for
-    // those far-negative ids.
-    if (id >= 0) return null;
-    if (id <= -0x200000000) return null; // <= -2^33: hashed drawing id namespace (not a chart).
+    // Workbook drawings may also use negative ids when their raw ids are not JS-safe; those hashed
+    // ids live in a disjoint namespace and are *not* charts.
+    if (!isChartStoreDrawingId(id)) return null;
     const objects = this.listCanvasChartDrawingObjectsForSheet(sheetId);
     for (const obj of objects) {
       if (obj.id !== id) continue;

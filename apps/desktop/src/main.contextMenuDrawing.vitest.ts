@@ -331,6 +331,52 @@ describe("Drawing context menu (main wiring helper)", () => {
     }
   });
 
+  it("treats large-magnitude negative ids as workbook drawings (not canvas charts) for z-order gating", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-hashed-id" });
+    const hashedDrawingId = -0x200000000; // 2^33 (see parseDrawingObjectId in drawings/modelAdapters.ts)
+    let selectedId: number | null = hashedDrawingId;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: hashedDrawingId })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      // Topmost-first ordering: ChartStore chart ids are negative 32-bit; hashed drawing ids are
+      // a separate large-magnitude negative namespace and should behave like drawings.
+      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: hashedDrawingId }, { id: 2 }]),
+      isSelectedDrawingImage: vi.fn(() => false),
+      isReadOnly: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-hashed-id"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      // `hashedDrawingId` is the topmost workbook drawing but cannot be moved above charts.
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-hashed-id"]')?.remove();
+    }
+  });
+
   it("disables Bring Forward for the topmost workbook drawing when canvas charts exist", () => {
     const contextMenu = new ContextMenu({ testId: "context-menu-drawing-z-order-with-charts" });
     let selectedId: number | null = 10;

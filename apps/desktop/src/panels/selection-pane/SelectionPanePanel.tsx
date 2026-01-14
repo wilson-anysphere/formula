@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DrawingObject, DrawingObjectId } from "../../drawings/types";
+import { isChartStoreDrawingId } from "../../charts/chartDrawingAdapter";
 
 import { ChartIcon } from "../../ui/icons/ChartIcon";
 import { BringForwardIcon } from "../../ui/icons/BringForwardIcon";
@@ -267,10 +268,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   const canvasChartCount = (() => {
     let count = 0;
     for (const { obj } of items) {
-      // Canvas-chart ids live in a separate negative namespace (see `chartIdToDrawingId`). Hashed
-      // workbook drawing ids produced by `parseDrawingObjectId` also use negative ids, but are
-      // offset by 2^33 to stay disjoint; avoid treating those as charts.
-      if (obj.id < 0 && obj.id > -0x200000000) count += 1;
+      if (isChartStoreDrawingId(obj.id)) count += 1;
     }
     return count;
   })();
@@ -285,7 +283,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         <ul className="selection-pane__list" role="listbox" aria-label="Selection Pane objects">
           {items.map(({ obj, label }, index) => {
             const selected = obj.id === selectedId;
-            const isCanvasChart = obj.id < 0 && obj.id > -0x200000000;
+            const isCanvasChart = isChartStoreDrawingId(obj.id);
             const groupStart = isCanvasChart ? 0 : canvasChartCount;
             const groupSize = isCanvasChart ? canvasChartCount : Math.max(0, items.length - canvasChartCount);
             const groupIndex = index - groupStart;

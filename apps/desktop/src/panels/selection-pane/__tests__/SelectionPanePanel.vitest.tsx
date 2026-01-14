@@ -747,4 +747,68 @@ describe("Selection Pane panel", () => {
 
     act(() => root.unmount());
   });
+
+  it("treats large-magnitude negative ids as workbook drawings (not canvas charts) for arrange gating", async () => {
+    const hashedDrawingId = -0x200000000; // 2^33 (see parseDrawingObjectId in drawings/modelAdapters.ts)
+    const drawings: DrawingObject[] = [
+      {
+        // ChartStore chart id namespace (negative 32-bit).
+        id: -1,
+        kind: { type: "chart", chartId: "chart_1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+      {
+        // Hashed drawing ids are also negative but should behave like workbook drawings.
+        id: hashedDrawingId,
+        kind: { type: "shape", label: "Hashed Drawing" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+      {
+        id: 2,
+        kind: { type: "shape", label: "Other Drawing" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+    ];
+
+    const app = {
+      listDrawingsForSheet: () => drawings,
+      subscribeDrawings: (listener: () => void) => {
+        listener();
+        return () => {};
+      },
+      getSelectedDrawingId: () => null,
+      subscribeDrawingSelection: (listener: (id: number | null) => void) => {
+        listener(null);
+        return () => {};
+      },
+      selectDrawingById: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      isReadOnly: () => false,
+      isEditing: () => false,
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createReactRoot(container);
+
+    await act(async () => {
+      root.render(<SelectionPanePanel app={app as any} />);
+    });
+
+    const bringForward = container.querySelector<HTMLButtonElement>(`[data-testid="selection-pane-bring-forward-${hashedDrawingId}"]`);
+    expect(bringForward).toBeInstanceOf(HTMLButtonElement);
+    // Topmost drawing cannot be brought forward above the chart stack.
+    expect(bringForward!.disabled).toBe(true);
+
+    const sendBackward = container.querySelector<HTMLButtonElement>(`[data-testid="selection-pane-send-backward-${hashedDrawingId}"]`);
+    expect(sendBackward).toBeInstanceOf(HTMLButtonElement);
+    expect(sendBackward!.disabled).toBe(false);
+
+    act(() => root.unmount());
+  });
 });

@@ -1,4 +1,5 @@
 import type { SpreadsheetApp } from "./app/spreadsheetApp";
+import { isChartStoreDrawingId } from "./charts/chartDrawingAdapter";
 import { t } from "./i18n/index.js";
 import type { ContextMenu, ContextMenuItem } from "./menus/contextMenu.js";
 import type { DrawingObjectId } from "./drawings/types";
@@ -58,14 +59,11 @@ export function buildDrawingContextMenuItems(params: {
     const canvasChartCount = (() => {
       let count = 0;
       for (const obj of drawings) {
-        // Canvas-chart ids live in a separate negative namespace (see `chartIdToDrawingId`). Hashed
-        // workbook drawing ids produced by `parseDrawingObjectId` also use negative ids, but are
-        // offset by 2^33 to stay disjoint; avoid treating those as charts.
-        if (typeof obj?.id === "number" && obj.id < 0 && obj.id > -0x200000000) count += 1;
+        if (typeof obj?.id === "number" && isChartStoreDrawingId(obj.id)) count += 1;
       }
       return count;
     })();
-    const isCanvasChart = typeof selectedId === "number" && selectedId < 0 && selectedId > -0x200000000;
+    const isCanvasChart = isChartStoreDrawingId(selectedId);
     const groupStart = isCanvasChart ? 0 : canvasChartCount;
     const groupSize = isCanvasChart ? canvasChartCount : Math.max(0, drawings.length - canvasChartCount);
     const groupIndex = idx - groupStart;

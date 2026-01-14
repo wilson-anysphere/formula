@@ -24,6 +24,21 @@ export function chartIdToDrawingId(chartId: string): number {
   return hashed === 0 ? -1 : -hashed;
 }
 
+/**
+ * Returns true when the provided drawing object id belongs to a ChartStore (canvas) chart.
+ *
+ * ChartStore charts use stable negative 32-bit ids (see `chartIdToDrawingId`). Workbook drawings
+ * may also use negative ids when their raw ids are not JS-safe; those hashed ids live in a
+ * separate, large-magnitude negative namespace (see `parseDrawingObjectId` in
+ * `drawings/modelAdapters.ts`).
+ */
+export function isChartStoreDrawingId(id: number): boolean {
+  // Chart ids are stable negative values derived from a 32-bit hash. Keep the check aligned with
+  // `parseDrawingObjectId` in `drawings/modelAdapters.ts`, which places hashed workbook drawing ids
+  // at `<= -2^33` to avoid collisions.
+  return typeof id === "number" && Number.isFinite(id) && id < 0 && id > -0x200000000;
+}
+
 export function chartAnchorToDrawingAnchor(anchor: ChartAnchor): DrawingAnchor {
   switch (anchor.kind) {
     case "absolute":
