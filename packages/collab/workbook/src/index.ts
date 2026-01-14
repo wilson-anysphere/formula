@@ -34,6 +34,12 @@ function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function normalizeFrozenCount(value: unknown): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
@@ -87,11 +93,34 @@ function axisOverridesEntryCount(value: unknown): number {
 // multi-megabyte strings) when merging duplicate sheet entries.
 const MAX_DRAWING_ID_STRING_CHARS = 4096;
 
+function normalizeDrawingIdValue(value: unknown): string | number | null {
+  const text = getYText(value);
+  if (text) {
+    // Avoid `text.toString()` for oversized ids: it would allocate a large JS string.
+    if (typeof (text as any).length === "number" && (text as any).length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    value = yjsValueToJson(text);
+  }
+
+  if (typeof value === "string") {
+    if (value.length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return trimmed;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) return null;
+    return value;
+  }
+
+  return null;
+}
+
 function sanitizeDrawingsJson(value: unknown): any[] | null {
   if (!Array.isArray(value)) return null;
   const out: any[] = [];
   for (const entry of value) {
-    if (!isRecord(entry)) continue;
+    if (!isPlainObject(entry)) continue;
     const rawId = (entry as any).id;
     let normalizedId: string | number;
     if (typeof rawId === "string") {
@@ -111,7 +140,90 @@ function sanitizeDrawingsJson(value: unknown): any[] | null {
 }
 
 function sanitizeDrawingsValue(value: unknown): any[] | null {
-  return sanitizeDrawingsJson(yjsValueToJson(value));
+  const yArr = getYArray(value);
+  const isArr = Array.isArray(value);
+  if (!yArr && !isArr) return null;
+
+  const len = yArr ? yArr.length : (value as any).length;
+  if (len === 0) return [];
+
+  const out: any[] = [];
+  for (let idx = 0; idx < len; idx += 1) {
+    const entry = yArr ? yArr.get(idx) : (value as any)[idx];
+
+    const map = getYMap(entry);
+    if (map) {
+      const normalizedId = normalizeDrawingIdValue(map.get("id"));
+      if (normalizedId == null) continue;
+
+      const obj: any = { id: normalizedId };
+      const keys = Array.from(map.keys()).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[String(key)] = yjsValueToJson(map.get(key));
+      }
+      out.push(obj);
+      continue;
+    }
+
+    if (isPlainObject(entry)) {
+      const normalizedId = normalizeDrawingIdValue(entry.id);
+      if (normalizedId == null) continue;
+
+      const obj: any = { id: normalizedId };
+      const keys = Object.keys(entry).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[key] = yjsValueToJson((entry as any)[key]);
+      }
+      out.push(obj);
+    }
+  }
+
+  return out;
+}
+
+function sheetViewValueToJsonSafe(rawView: unknown): Record<string, any> | null {
+  const map = getYMap(rawView);
+  if (map) {
+    /** @type {Record<string, any>} */
+    const out: Record<string, any> = {};
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        const sanitized = sanitizeDrawingsValue(map.get(key));
+        if (sanitized != null) out.drawings = sanitized;
+        continue;
+      }
+      try {
+        out[String(key)] = yjsValueToJson(map.get(key));
+      } catch {
+        // Best-effort: skip values that throw during conversion (e.g. malformed Y.Text).
+      }
+    }
+    return out;
+  }
+
+  if (isPlainObject(rawView)) {
+    /** @type {Record<string, any>} */
+    const out: Record<string, any> = {};
+    const keys = Object.keys(rawView).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        const sanitized = sanitizeDrawingsValue((rawView as any)[key]);
+        if (sanitized != null) out.drawings = sanitized;
+        continue;
+      }
+      try {
+        out[key] = yjsValueToJson((rawView as any)[key]);
+      } catch {
+        // Best-effort.
+      }
+    }
+    return out;
+  }
+
+  return null;
 }
 
 export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
@@ -278,27 +390,10 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 if (entryVal !== undefined) {
                   if (key === "drawings") {
                     const sanitized = sanitizeDrawingsValue(entryVal);
-                    winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
+                    if (sanitized != null) winner.set(key, sanitized);
                   } else if (key === "view") {
-                    const viewMap = getYMap(entryVal);
-                    if (viewMap) {
-                      const cloned = cloneYjsValue(entryVal, cloneCtors);
-                      const clonedMap = getYMap(cloned);
-                      if (clonedMap) {
-                        const drawings = clonedMap.get("drawings");
-                        const sanitized = sanitizeDrawingsValue(drawings);
-                        if (sanitized) clonedMap.set("drawings", sanitized);
-                      }
-                      winner.set(key, cloned);
-                    } else {
-                      const json = yjsValueToJson(entryVal);
-                      if (isRecord(json) && Object.prototype.hasOwnProperty.call(json, "drawings")) {
-                        const sanitized = sanitizeDrawingsJson((json as any).drawings);
-                        winner.set(key, sanitized ? { ...json, drawings: sanitized } : json);
-                      } else {
-                        winner.set(key, json);
-                      }
-                    }
+                    const json = sheetViewValueToJsonSafe(entryVal);
+                    if (json != null) winner.set(key, json);
                   } else {
                     winner.set(key, cloneYjsValue(entryVal, cloneCtors));
                   }
@@ -370,21 +465,21 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
             if (winnerViewRaw !== undefined && entryViewRaw !== undefined) {
               const winnerViewMap = getYMap(winnerViewRaw);
               const entryViewMap = getYMap(entryViewRaw);
-              if (winnerViewMap && entryViewMap) {
-                const keys = Array.from(entryViewMap.keys()).sort();
-                for (const k of keys) {
-                  const wv = winnerViewMap.get(k);
-                  const ev = entryViewMap.get(k);
+                if (winnerViewMap && entryViewMap) {
+                  const keys = Array.from(entryViewMap.keys()).sort();
+                  for (const k of keys) {
+                    const wv = winnerViewMap.get(k);
+                    const ev = entryViewMap.get(k);
 
-                  if (wv === undefined) {
-                    if (k === "drawings") {
-                      const sanitized = sanitizeDrawingsValue(ev);
-                      winnerViewMap.set(k, sanitized ?? cloneYjsValue(ev, cloneCtors));
-                    } else {
-                      winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    if (wv === undefined) {
+                      if (k === "drawings") {
+                        const sanitized = sanitizeDrawingsValue(ev);
+                        if (sanitized != null) winnerViewMap.set(k, sanitized);
+                      } else {
+                        winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                      }
+                      continue;
                     }
-                    continue;
-                  }
 
                   if (k === "frozenRows" || k === "frozenCols") {
                     const wNum = normalizeFrozenCount(yjsValueToJson(wv));
@@ -442,16 +537,19 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 }
               } else {
                 // Fall back to JSON merge for non-map view encodings (plain objects).
-                const wJson = yjsValueToJson(winnerViewRaw);
-                const eJson = yjsValueToJson(entryViewRaw);
-                if (isRecord(wJson) && isRecord(eJson)) {
+                const wJson = sheetViewValueToJsonSafe(winnerViewRaw);
+                const eJson = sheetViewValueToJsonSafe(entryViewRaw);
+                if (wJson == null) {
+                  if (eJson != null) winner.set("view", eJson);
+                } else if (eJson != null) {
                   /** @type {Record<string, any>} */
                   const merged = { ...wJson };
                   for (const [k, ev] of Object.entries(eJson)) {
                     const wv = merged[k];
                     if (wv === undefined) {
                       if (k === "drawings") {
-                        merged[k] = sanitizeDrawingsJson(ev) ?? structuredClone(ev);
+                        const sanitized = sanitizeDrawingsValue(ev);
+                        if (sanitized != null) merged[k] = sanitized;
                       } else {
                         merged[k] = structuredClone(ev);
                       }
@@ -487,8 +585,8 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                     }
  
                     if (k === "drawings") {
-                      const wArr = sanitizeDrawingsJson(wv) ?? [];
-                      const eArr = sanitizeDrawingsJson(ev) ?? [];
+                      const wArr = sanitizeDrawingsValue(wv) ?? [];
+                      const eArr = sanitizeDrawingsValue(ev) ?? [];
                       if (wArr.length === 0 && eArr.length > 0) merged[k] = eArr;
                       continue;
                     }
