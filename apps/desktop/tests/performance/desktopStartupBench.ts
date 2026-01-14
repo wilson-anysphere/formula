@@ -57,6 +57,7 @@ import {
   median,
   percentile,
   runDesktopStartupIterations,
+  resolveDesktopStartupTargets,
   resolvePerfHome,
   stdDev,
   type StartupMetrics,
@@ -413,80 +414,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     .map((m) => m.webviewLoadedMs)
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
 
-  // Targets:
-  // - Full startup: preserve existing env var naming (cold/warm targets + legacy fallbacks).
-  // - Shell startup: allow a parallel set of env vars (prefixed with FORMULA_DESKTOP_SHELL_*),
-  //   but fall back to the full targets so CI can start using this without extra configuration.
-  const fullColdWindowTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ??
-        '500',
-    ) || 500;
-  const fullColdFirstRenderTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS ??
-        '500',
-    ) || 500;
-  const fullColdTtiTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_TTI_TARGET_MS ??
-        '1000',
-    ) || 1000;
-
-  const fullWarmWindowTarget =
-    Number(process.env.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS ?? String(fullColdWindowTarget)) ||
-    fullColdWindowTarget;
-  const fullWarmFirstRenderTarget =
-    Number(process.env.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS ?? String(fullColdFirstRenderTarget)) ||
-    fullColdFirstRenderTarget;
-  const fullWarmTtiTarget =
-    Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? String(fullColdTtiTarget)) || fullColdTtiTarget;
-
-  const shellColdWindowTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_COLD_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS ??
-        String(fullColdWindowTarget),
-    ) || fullColdWindowTarget;
-  const shellColdTtiTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ??
-        String(fullColdTtiTarget),
-    ) || fullColdTtiTarget;
-  const shellWarmWindowTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_WARM_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS ??
-        String(shellColdWindowTarget),
-    ) || shellColdWindowTarget;
-  const shellWarmTtiTarget =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ??
-        String(shellColdTtiTarget),
-    ) || shellColdTtiTarget;
-
-  const windowTarget =
-    benchKind === 'shell'
-      ? startupMode === 'warm'
-        ? shellWarmWindowTarget
-        : shellColdWindowTarget
-      : startupMode === 'warm'
-        ? fullWarmWindowTarget
-        : fullColdWindowTarget;
-  const ttiTarget =
-    benchKind === 'shell'
-      ? startupMode === 'warm'
-        ? shellWarmTtiTarget
-        : shellColdTtiTarget
-      : startupMode === 'warm'
-        ? fullWarmTtiTarget
-        : fullColdTtiTarget;
-  const firstRenderTarget = startupMode === 'warm' ? fullWarmFirstRenderTarget : fullColdFirstRenderTarget;
+  const targets = resolveDesktopStartupTargets({ benchKind, mode: startupMode });
+  const windowTarget = targets.windowVisibleTargetMs;
+  const ttiTarget = targets.ttiTargetMs;
+  const firstRenderTarget = targets.firstRenderTargetMs;
 
   const metricPrefix = benchKind === 'shell' ? 'desktop.shell_startup' : 'desktop.startup';
   const memoryPrefix = benchKind === 'shell' ? 'desktop.shell_memory' : 'desktop.memory';
@@ -551,14 +482,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   // For now we only publish `webview_loaded_ms` as a cold-start metric (to keep the metric set
   // small and comparable over time), matching the historical behavior.
   if (startupMode === 'cold') {
-    const webviewLoadedTarget =
-      benchKind === 'shell'
-        ? Number(
-            process.env.FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS ??
-              process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ??
-              '800',
-          ) || 800
-        : Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? '800') || 800;
+    const webviewLoadedTarget = targets.webviewLoadedTargetMs;
     const minValidFraction = 0.8;
     const minValidRuns = Math.ceil(runs * minValidFraction);
     if (webviewLoaded.length === 0) {

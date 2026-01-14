@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseStartupLine } from './desktopStartupUtil.ts';
+import { parseStartupLine, resolveDesktopStartupTargets } from './desktopStartupUtil.ts';
 
 describe('desktopStartupUtil parseStartupLine', () => {
   it('parses the legacy startup metrics line (no first_render_ms)', () => {
@@ -66,3 +66,80 @@ describe('desktopStartupUtil parseStartupLine', () => {
   });
 });
 
+describe('desktopStartupUtil resolveDesktopStartupTargets', () => {
+  it('uses default targets when env is empty (full/cold)', () => {
+    expect(
+      resolveDesktopStartupTargets({ benchKind: 'full', mode: 'cold', env: {} }),
+    ).toEqual({
+      windowVisibleTargetMs: 500,
+      webviewLoadedTargetMs: 800,
+      firstRenderTargetMs: 500,
+      ttiTargetMs: 1000,
+    });
+  });
+
+  it('respects full warm overrides (falling back to cold when missing)', () => {
+    expect(
+      resolveDesktopStartupTargets({
+        benchKind: 'full',
+        mode: 'warm',
+        env: {
+          FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS: '111',
+          FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS: '222',
+          FORMULA_DESKTOP_COLD_TTI_TARGET_MS: '333',
+          // warm TTI missing -> fall back to cold
+          FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS: '444',
+          FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS: '555',
+          FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS: '666',
+        },
+      }),
+    ).toEqual({
+      windowVisibleTargetMs: 222,
+      webviewLoadedTargetMs: 666,
+      firstRenderTargetMs: 555,
+      ttiTargetMs: 333,
+    });
+  });
+
+  it('uses shell targets (falling back to full targets)', () => {
+    expect(
+      resolveDesktopStartupTargets({
+        benchKind: 'shell',
+        mode: 'cold',
+        env: {
+          FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS: '111',
+          FORMULA_DESKTOP_COLD_TTI_TARGET_MS: '222',
+          FORMULA_DESKTOP_SHELL_COLD_WINDOW_VISIBLE_TARGET_MS: '333',
+          FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS: '444',
+          FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS: '555',
+          // shell webview target missing -> fall back to full
+        },
+      }),
+    ).toEqual({
+      windowVisibleTargetMs: 333,
+      webviewLoadedTargetMs: 555,
+      firstRenderTargetMs: 500,
+      ttiTargetMs: 444,
+    });
+  });
+
+  it('ignores invalid/zero targets and falls back to defaults', () => {
+    expect(
+      resolveDesktopStartupTargets({
+        benchKind: 'full',
+        mode: 'cold',
+        env: {
+          FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS: '0',
+          FORMULA_DESKTOP_COLD_TTI_TARGET_MS: '-1',
+          FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS: 'wat',
+          FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS: '',
+        },
+      }),
+    ).toEqual({
+      windowVisibleTargetMs: 500,
+      webviewLoadedTargetMs: 800,
+      firstRenderTargetMs: 500,
+      ttiTargetMs: 1000,
+    });
+  });
+});

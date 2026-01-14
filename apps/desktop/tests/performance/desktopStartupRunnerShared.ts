@@ -15,12 +15,21 @@ export type StartupMetrics = {
 
 export type DesktopStartupMode = 'cold' | 'warm';
 
+export type DesktopStartupBenchKind = 'full' | 'shell';
+
 export type DesktopStartupProgress = {
   phase: 'warmup' | 'run';
   mode: DesktopStartupMode;
   iteration: number;
   total: number;
   profileDir: string;
+};
+
+export type DesktopStartupTargets = {
+  windowVisibleTargetMs: number;
+  webviewLoadedTargetMs: number;
+  firstRenderTargetMs: number;
+  ttiTargetMs: number;
 };
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
@@ -33,6 +42,116 @@ export function resolvePerfHome(): string {
     return resolve(repoRoot, fromEnv);
   }
   return resolve(repoRoot, 'target', 'perf-home');
+}
+
+function parsePositiveNumber(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function firstPositiveNumber(env: NodeJS.ProcessEnv, ...names: string[]): number | null {
+  for (const name of names) {
+    const val = parsePositiveNumber(env[name]);
+    if (val !== null) return val;
+  }
+  return null;
+}
+
+/**
+ * Resolve environment-based target budgets for desktop startup metrics.
+ *
+ * This centralizes the env var naming + fallback behavior so standalone runners and integrated
+ * benchmark harnesses don't drift.
+ */
+export function resolveDesktopStartupTargets(options: {
+  benchKind: DesktopStartupBenchKind;
+  mode: DesktopStartupMode;
+  /**
+   * Override env vars for tests.
+   *
+   * Defaults to `process.env`.
+   */
+  env?: NodeJS.ProcessEnv;
+}): DesktopStartupTargets {
+  const env = options.env ?? process.env;
+
+  const fullColdWindowTarget =
+    firstPositiveNumber(
+      env,
+      'FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS',
+      'FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS',
+    ) ?? 500;
+  const fullColdFirstRenderTarget =
+    firstPositiveNumber(
+      env,
+      'FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS',
+      'FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS',
+    ) ?? 500;
+  const fullColdTtiTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_COLD_TTI_TARGET_MS', 'FORMULA_DESKTOP_TTI_TARGET_MS') ??
+    1000;
+
+  const fullWarmWindowTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS') ?? fullColdWindowTarget;
+  const fullWarmFirstRenderTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS') ?? fullColdFirstRenderTarget;
+  const fullWarmTtiTarget = firstPositiveNumber(env, 'FORMULA_DESKTOP_WARM_TTI_TARGET_MS') ?? fullColdTtiTarget;
+
+  const shellColdWindowTarget =
+    firstPositiveNumber(
+      env,
+      'FORMULA_DESKTOP_SHELL_COLD_WINDOW_VISIBLE_TARGET_MS',
+      'FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS',
+    ) ?? fullColdWindowTarget;
+  const shellColdTtiTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS', 'FORMULA_DESKTOP_SHELL_TTI_TARGET_MS') ??
+    fullColdTtiTarget;
+  const shellWarmWindowTarget =
+    firstPositiveNumber(
+      env,
+      'FORMULA_DESKTOP_SHELL_WARM_WINDOW_VISIBLE_TARGET_MS',
+      'FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS',
+    ) ?? shellColdWindowTarget;
+  const shellWarmTtiTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS', 'FORMULA_DESKTOP_SHELL_TTI_TARGET_MS') ??
+    shellColdTtiTarget;
+
+  const fullWebviewLoadedTarget = firstPositiveNumber(env, 'FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS') ?? 800;
+  const shellWebviewLoadedTarget =
+    firstPositiveNumber(env, 'FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS') ?? fullWebviewLoadedTarget;
+
+  const windowVisibleTargetMs =
+    options.benchKind === 'shell'
+      ? options.mode === 'warm'
+        ? shellWarmWindowTarget
+        : shellColdWindowTarget
+      : options.mode === 'warm'
+        ? fullWarmWindowTarget
+        : fullColdWindowTarget;
+
+  const ttiTargetMs =
+    options.benchKind === 'shell'
+      ? options.mode === 'warm'
+        ? shellWarmTtiTarget
+        : shellColdTtiTarget
+      : options.mode === 'warm'
+        ? fullWarmTtiTarget
+        : fullColdTtiTarget;
+
+  const firstRenderTargetMs = options.mode === 'warm' ? fullWarmFirstRenderTarget : fullColdFirstRenderTarget;
+
+  const webviewLoadedTargetMs = options.benchKind === 'shell' ? shellWebviewLoadedTarget : fullWebviewLoadedTarget;
+
+  return {
+    windowVisibleTargetMs,
+    webviewLoadedTargetMs,
+    firstRenderTargetMs,
+    ttiTargetMs,
+  };
 }
 
 function isSubpath(parentDir: string, maybeChild: string): boolean {

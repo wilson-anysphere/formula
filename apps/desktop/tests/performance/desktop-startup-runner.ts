@@ -5,6 +5,7 @@ import {
   defaultDesktopBinPath,
   percentile,
   runDesktopStartupIterations,
+  resolveDesktopStartupTargets,
   resolvePerfHome,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
@@ -96,57 +97,6 @@ function parseArgs(argv: string[]): {
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
 
-  // Targets follow the benchmark harness naming:
-  // - Full startup: FORMULA_DESKTOP_{COLD,WARM}_* (with legacy fallbacks)
-  // - Shell startup: FORMULA_DESKTOP_SHELL_{COLD,WARM}_* (falling back to full targets)
-  const fullColdWindowTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ??
-        "",
-    ) || 500;
-  const fullColdFirstRenderTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS ??
-        "",
-    ) || 500;
-  const fullColdTtiTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_COLD_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_TTI_TARGET_MS ?? "",
-    ) || 1000;
-
-  const fullWarmWindowTargetMs =
-    Number(process.env.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS ?? "") || fullColdWindowTargetMs;
-  const fullWarmFirstRenderTargetMs =
-    Number(process.env.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS ?? "") || fullColdFirstRenderTargetMs;
-  const fullWarmTtiTargetMs = Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? "") || fullColdTtiTargetMs;
-
-  const shellColdWindowTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_COLD_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS ??
-        "",
-    ) || fullColdWindowTargetMs;
-  const shellColdTtiTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ?? "",
-    ) || fullColdTtiTargetMs;
-  const shellWarmWindowTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_WARM_WINDOW_VISIBLE_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_WINDOW_VISIBLE_TARGET_MS ??
-        "",
-    ) || shellColdWindowTargetMs;
-  const shellWarmTtiTargetMs =
-    Number(
-      process.env.FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ?? "",
-    ) || shellColdTtiTargetMs;
-
-  const fullWebviewLoadedTargetMs = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? "") || 800;
-  const shellWebviewLoadedTargetMs =
-    Number(process.env.FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS ?? "") || fullWebviewLoadedTargetMs;
-
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
 
   const envKind = parseBenchKindFromEnv();
@@ -200,32 +150,11 @@ function parseArgs(argv: string[]): {
     else if (arg === "--full") out.benchKind = "full";
   }
 
-  const resolveWindowTarget = (kind: StartupBenchKind): number =>
-    kind === "shell"
-      ? mode === "warm"
-        ? shellWarmWindowTargetMs
-        : shellColdWindowTargetMs
-      : mode === "warm"
-        ? fullWarmWindowTargetMs
-        : fullColdWindowTargetMs;
-  const resolveTtiTarget = (kind: StartupBenchKind): number =>
-    kind === "shell"
-      ? mode === "warm"
-        ? shellWarmTtiTargetMs
-        : shellColdTtiTargetMs
-      : mode === "warm"
-        ? fullWarmTtiTargetMs
-        : fullColdTtiTargetMs;
-  const resolveFirstRenderTarget = (): number =>
-    mode === "warm" ? fullWarmFirstRenderTargetMs : fullColdFirstRenderTargetMs;
-  const resolveWebviewLoadedTarget = (kind: StartupBenchKind): number =>
-    kind === "shell" ? shellWebviewLoadedTargetMs : fullWebviewLoadedTargetMs;
-
-  out.windowTargetMs = windowTargetMsOverride ?? Math.max(1, resolveWindowTarget(out.benchKind));
-  out.firstRenderTargetMs = firstRenderTargetMsOverride ?? Math.max(1, resolveFirstRenderTarget());
-  out.webviewLoadedTargetMs =
-    webviewLoadedTargetMsOverride ?? Math.max(1, resolveWebviewLoadedTarget(out.benchKind));
-  out.ttiTargetMs = ttiTargetMsOverride ?? Math.max(1, resolveTtiTarget(out.benchKind));
+  const targets = resolveDesktopStartupTargets({ benchKind: out.benchKind, mode: out.mode });
+  out.windowTargetMs = windowTargetMsOverride ?? Math.max(1, targets.windowVisibleTargetMs);
+  out.firstRenderTargetMs = firstRenderTargetMsOverride ?? Math.max(1, targets.firstRenderTargetMs);
+  out.webviewLoadedTargetMs = webviewLoadedTargetMsOverride ?? Math.max(1, targets.webviewLoadedTargetMs);
+  out.ttiTargetMs = ttiTargetMsOverride ?? Math.max(1, targets.ttiTargetMs);
 
   return out;
 }
