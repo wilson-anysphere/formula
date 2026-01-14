@@ -323,44 +323,7 @@ jobs:
 
       - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
         shell: bash
-        run: |
-          set -euo pipefail
-          manifest="apps/desktop/src-tauri/Cargo.toml"
-
-          # Validate the lockfile for each desktop release target. This fails if
-          # Cargo would modify Cargo.lock during the build.
-          for target in \
-            x86_64-unknown-linux-gnu \
-            aarch64-unknown-linux-gnu \
-            x86_64-pc-windows-msvc \
-            aarch64-pc-windows-msvc \
-            x86_64-apple-darwin \
-            aarch64-apple-darwin; do
-            echo "Checking Cargo.lock for target: $target"
-            if ! cargo metadata \
-              --locked \
-              --format-version=1 \
-              --manifest-path "$manifest" \
-              --features desktop \
-              --filter-platform "$target" \
-              >/dev/null; then
-              echo "::error::Cargo.lock is out of date for desktop release target ${target}. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
-              exit 1
-            fi
-          done
-
-          # The desktop app also bundles a WASM engine (`crates/formula-wasm`), built via wasm-pack.
-          # Validate the workspace lockfile for wasm32 as well so we fail early if `Cargo.lock` is out
-          # of date for the engine dependency graph.
-          echo "Checking Cargo.lock for target: wasm32-unknown-unknown"
-          if ! cargo metadata \
-            --locked \
-            --format-version=1 \
-            --filter-platform wasm32-unknown-unknown \
-            >/dev/null; then
-            echo "::error::Cargo.lock is out of date for wasm32-unknown-unknown. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
-            exit 1
-          fi
+        run: bash scripts/ci/check-cargo-lock-reproducible.sh
   check-ci-status:
     name: Verify tagged commit has successful CI run
     needs: preflight

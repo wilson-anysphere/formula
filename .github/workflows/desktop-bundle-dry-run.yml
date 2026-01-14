@@ -112,16 +112,7 @@ jobs:
 
       - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
         shell: bash
-        run: |
-          set -euo pipefail
-          if ! cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null; then
-            echo "::error::Cargo.lock is out of date for the desktop bundle graph. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
-            exit 1
-          fi
-          if ! cargo metadata --locked --format-version=1 --filter-platform wasm32-unknown-unknown >/dev/null; then
-            echo "::error::Cargo.lock is out of date for wasm32-unknown-unknown. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
-            exit 1
-          fi
+        run: bash scripts/ci/check-cargo-lock-reproducible.sh
 
   build:
     name: Build (${{ matrix.label }})
