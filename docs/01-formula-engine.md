@@ -155,7 +155,9 @@ If no `ExternalValueProvider` is configured, all external workbook references ev
 
 The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, addr)`:
 
-* **Internal sheet access** (same workbook): `sheet` is the plain worksheet name, e.g. `"Sheet1"`.
+* **Internal sheet access** (same workbook): `sheet` is the workbook’s **stable sheet key** (the
+  identifier used to address a sheet in `Engine` APIs), e.g. `"Sheet1"` by default. This may differ
+  from the user-visible sheet tab name when the host uses `Engine::set_sheet_display_name(...)`.
 * **External workbook access**: `sheet` is a **path-qualified, workbook-prefixed** key:
   * **Canonical external sheet key:** `"[workbook]sheet"`
     * Example: `"[Book.xlsx]Sheet1"`
@@ -182,7 +184,8 @@ sheet prefix. The engine unescapes this and passes the literal quote through in 
 
 `ExternalValueProvider::get` return semantics:
 
-* For **local sheet names** (e.g. `"Sheet1"`), returning `None` is treated as a blank cell (`Value::Blank`).
+* For **local sheets** (where `sheet` is a stable sheet key like `"Sheet1"`), returning `None` is
+  treated as a blank cell (`Value::Blank`).
 * For **external sheet keys** (e.g. `"[Book.xlsx]Sheet1"`), returning `None` is treated as an unresolved external link and
   evaluates to `#REF!`. Providers should return `Some(Value::Blank)` to represent a blank cell in an external workbook.
 * `addr` is 0-indexed (`A1` = `CellAddr { row: 0, col: 0 }`).
@@ -196,8 +199,8 @@ Implementation notes:
   (e.g. internal caching, lock-free reads, etc.).
 * The provider is also used as a **fallback for local sheets** when a cell is not present in the
   engine’s internal grid storage (useful for streaming/virtualized worksheets). In that case the
-  engine calls `get` with the plain local sheet name (e.g. `"Sheet1"`), not a `"[workbook]sheet"`
-  key.
+  engine calls `get` with the workbook’s stable sheet key (e.g. `"Sheet1"` by default), not a
+  `"[workbook]sheet"` key.
   * Because provider-backed values may exist for addresses that are not present in the engine’s
     internal cell storage, enabling an `ExternalValueProvider` can force the evaluator to use
     **dense** iteration for local range functions (e.g. `SUM(A:A)`), which may have performance
