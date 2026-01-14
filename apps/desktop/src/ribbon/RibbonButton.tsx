@@ -316,7 +316,9 @@ export const RibbonButton = React.memo(function RibbonButton({
               // disabling (e.g. editing-mode guards), not re-enable schema-disabled items.
               Boolean(item.disabled) || disabledById?.[item.id] === true;
             const itemShortcut = shortcutById?.[item.id];
-            const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
+            // Prefer the rendered label (including any `labelById` overrides) for the tooltip so
+            // localized ribbon labels don't show English-only tooltips.
+            const itemTitle = formatTooltipTitle(menuItemLabel, itemShortcut);
             const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
 
             return (
