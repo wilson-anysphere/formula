@@ -384,17 +384,51 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
   let j = i;
   while (j < input.length) {
     const ch = input[j] ?? "";
-    if (ch === "[") depth += 1;
-    else if (ch === "]") {
+    if (ch === "[") {
+      depth += 1;
+      j += 1;
+      continue;
+    }
+    if (ch === "]") {
+      // Excel escapes `]` inside structured reference items (column names) by doubling: `]]`.
+      // We need to disambiguate between:
+      //   - an escaped literal `]` inside a bracket group, and
+      //   - adjacent closing brackets from nested groups (`]` to close an item, then `]` to close the outer group).
+      //
+      // Heuristic:
+      // - `]]]` (or more) implies at least one escaped `]` inside the group.
+      // - For `]]`, treat it as an escaped `]` when the next non-whitespace character is not a delimiter
+      //   that normally follows a closed structured reference group (`,`, `]`, `)`, `;`).
+      if (input[j + 1] === "]") {
+        if (input[j + 2] === "]") {
+          // `]]]...` -> consume the escaped `]]` and keep the group open.
+          j += 2;
+          continue;
+        }
+
+        let k = j + 2;
+        while (k < input.length && isWhitespace(input[k] ?? "")) k += 1;
+        const after = input[k] ?? "";
+        const isDelimiterAfterClose = after === "" || after === "," || after === "]" || after === ")" || after === ";";
+        if (!isDelimiterAfterClose) {
+          // Treat as escaped `]` inside the group.
+          j += 2;
+          continue;
+        }
+      }
+
       depth -= 1;
+      j += 1;
       if (depth === 0) {
-        const end = j + 1;
+        const end = j;
         const text = input.slice(start, end);
         // Only claim this token when it matches a supported structured ref pattern.
         if (!parseStructuredReferenceText(text)) return null;
         return { text, end };
       }
+      continue;
     }
+
     j += 1;
   }
 

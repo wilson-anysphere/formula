@@ -142,4 +142,15 @@ describe("tokenizeFormula", () => {
       .map((t) => t.text);
     expect(refs).toEqual(["Table1[#All]", "Table1[#Headers]", "Table1[#Data]", "Table1[#Totals]"]);
   });
+
+  it("tokenizes structured references with escaped closing brackets in column names as single tokens", () => {
+    const input = "=COUNTA(Table1[[#Headers],[A]]B]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference");
+    expect(refs.map((t) => t.text)).toEqual(["Table1[[#Headers],[A]]B]]"]);
+    expect(refs[0]).toMatchObject({
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#Headers],[A]]B]]".length,
+    });
+  });
 });

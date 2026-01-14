@@ -278,6 +278,36 @@ describe("extractFormulaReferences", () => {
     expect(totalsRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 3, startCol: 1, endRow: 3, endCol: 1 });
   });
 
+  it("extracts structured table references with escaped closing brackets in column names", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "A]B"]
+        }
+      ]
+    ]);
+
+    // Excel escapes `]` inside structured reference items by doubling it: `]]`.
+    const input = "=COUNTA(Table1[[#Headers],[A]]B]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[[#Headers],[A]]B]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 0, endCol: 1 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#Headers],[A]]B]]".length
+    });
+  });
+
   it("extracts structured table specifiers like #All/#Headers/#Data", () => {
     const tables = new Map([
       [

@@ -9,6 +9,11 @@ export type ParsedStructuredReference = {
   selector: string | null;
 };
 
+function unescapeStructuredRefItem(text: string): string {
+  // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
+  return text.replaceAll("]]", "]");
+}
+
 export function parseStructuredReferenceText(text: string): ParsedStructuredReference | null {
   const firstBracket = text.indexOf("[");
   if (firstBracket <= 0) return null;
@@ -22,14 +27,25 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
   //   TableName[[#All],[ColumnName]]
   //   TableName[[#Data],[ColumnName]]
   //   TableName[[#Headers],[ColumnName]]
-  const qualifiedMatch = /^\[\[\s*(#[A-Za-z]+)\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i.exec(suffix);
+  //
+  // Column names may include escaped closing brackets: `]` is encoded as `]]`.
+  const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
+  const qualifiedRe = new RegExp(`^\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`, "i");
+  const qualifiedMatch = qualifiedRe.exec(suffix);
   if (qualifiedMatch) {
-    return { tableName, selector: qualifiedMatch[1]!, columnName: qualifiedMatch[2]! };
+    const selector = unescapeStructuredRefItem(qualifiedMatch[1]!.trim());
+    if (!selector.startsWith("#")) return null;
+    const columnName = unescapeStructuredRefItem(qualifiedMatch[2]!.trim());
+    return { tableName, selector, columnName };
   }
 
-  const simpleMatch = /^\[\s*([^\[\]]+?)\s*\]$/.exec(suffix);
+  // Avoid mis-parsing nested bracket groups like `[[#All],[Amount]]` as a single item.
+  if (suffix.startsWith("[[")) return null;
+
+  const simpleRe = new RegExp(`^\\[\\s*${escapedItem}\\s*\\]$`);
+  const simpleMatch = simpleRe.exec(suffix);
   if (simpleMatch) {
-    return { tableName, selector: null, columnName: simpleMatch[1]! };
+    return { tableName, selector: null, columnName: unescapeStructuredRefItem(simpleMatch[1]!.trim()) };
   }
 
   return null;
