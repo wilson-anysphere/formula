@@ -659,3 +659,113 @@ fn userelationship_override_works_with_m2m_for_columnar_fact() {
         100.0.into()
     );
 }
+
+#[test]
+fn insert_row_resolves_blank_member_for_inactive_userelationship_with_columnar_fact() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    // Unmatched for KeyB (relationship B below), but still matched for KeyA (relationship A).
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    // Active relationship A (RI enforced).
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Inactive relationship B (RI disabled) so we can test the virtual blank member via USERELATIONSHIP.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Insert a Dim row that resolves the previously-unmatched KeyB value.
+    model
+        .insert_row("Dim", vec![3.into(), 999.into(), "New".into()])
+        .unwrap();
+
+    // The virtual blank member should disappear for relationship B under USERELATIONSHIP.
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
+        Value::Blank
+    );
+    let new_attr = FilterContext::empty().with_column_equals("Dim", "Attr", "New".into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &new_attr).unwrap(),
+        7.0.into()
+    );
+}
