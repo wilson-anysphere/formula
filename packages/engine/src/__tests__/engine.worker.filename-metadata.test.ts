@@ -242,6 +242,39 @@ describe("engine.worker workbook file metadata integration", () => {
     }
   });
 
+  it('uses the reference sheet name in CELL("filename", reference) without quoting', async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [{ address: "A1", value: '=CELL("filename",\'Other Sheet\'!A1)', sheet: "Sheet1" }],
+        },
+      });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setWorkbookFileMetadata",
+        params: { directory: "/tmp", filename: "book.xlsx" },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "recalculate", params: {} });
+
+      const resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      // The output should include the referenced sheet display name without Excel quoting.
+      expect(resp.result.value).toBe("/tmp/[book.xlsx]Other Sheet");
+    } finally {
+      dispose();
+    }
+  });
+
   it('updates CELL("filename") results after setWorkbookFileMetadata', async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
