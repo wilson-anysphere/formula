@@ -324,6 +324,8 @@ export class CellStructuralConflictMonitor {
     /** @type {string[]} */
     const localDeletes = [];
     let sawAdd = false;
+    /** @type {Set<string>} */
+    const addedIds = new Set();
     for (const [opId, change] of event.changes.keys.entries()) {
       if (change.action === "delete") {
         this._opRecords.delete(opId);
@@ -336,6 +338,7 @@ export class CellStructuralConflictMonitor {
   
       if (change.action !== "add") continue;
       sawAdd = true;
+      addedIds.add(String(opId));
       const record = this._ops.get(opId);
       if (!record) continue;
       this._ingestOpRecord(record);
@@ -347,7 +350,11 @@ export class CellStructuralConflictMonitor {
     }
 
     if (sawAdd) {
-      this._pruneOpLogByAge();
+      // Conservative safety: avoid pruning op records in the same transaction
+      // they were added. This prevents us from deleting late-arriving (offline)
+      // records immediately, which could cause other clients to miss the entry
+      // before they've had a chance to ingest it and compare for conflicts.
+      this._pruneOpLogByAge({ excludeIds: addedIds });
     }
   }
  
@@ -407,7 +414,7 @@ export class CellStructuralConflictMonitor {
    * numeric `createdAt` timestamp and is safe under concurrent clients (the log
    * is metadata-only).
    *
-   * @param {{ force?: boolean }} [opts]
+   * @param {{ force?: boolean, excludeIds?: Set<string> }} [opts]
    */
   _pruneOpLogByAge(opts = {}) {
     const maxAgeMs = this._maxOpRecordAgeMs;
@@ -423,10 +430,11 @@ export class CellStructuralConflictMonitor {
     this._lastAgePruneAt = now;
 
     const cutoff = now - ageMs;
- 
+  
     /** @type {string[]} */
     const toDelete = [];
     this._ops.forEach((record, id) => {
+      if (opts.excludeIds?.has(String(id))) return;
       if (!record || typeof record !== "object") return;
       const createdAt = Number(record.createdAt);
       if (!Number.isFinite(createdAt)) return;

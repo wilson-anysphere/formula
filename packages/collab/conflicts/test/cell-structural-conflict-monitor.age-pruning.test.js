@@ -34,7 +34,26 @@ test("CellStructuralConflictMonitor prunes old op records opportunistically on o
     });
   });
 
+  // Conservative behavior: newly-added records are not pruned in the same
+  // transaction they arrive (even if createdAt is old).
+  assert.equal(ops.has(oldId), true);
+
+  // Next op-log write triggers pruning of the previously-added old record.
+  monitor._lastAgePruneAt = 0;
+  const freshId = "op-fresh-write";
+  doc.transact(() => {
+    ops.set(freshId, {
+      id: freshId,
+      kind: "edit",
+      userId: "remote",
+      createdAt: now,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
   assert.equal(ops.has(oldId), false);
+  assert.equal(ops.has(freshId), true);
 
   monitor.dispose();
   doc.destroy();
