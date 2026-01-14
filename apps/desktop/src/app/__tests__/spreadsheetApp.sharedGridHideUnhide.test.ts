@@ -169,7 +169,7 @@ describe("SpreadsheetApp shared-grid hide/unhide", () => {
     }
   });
 
-  it("does not leak user-hidden rows across sheets", () => {
+  it("does not leak user-hidden rows/cols across sheets", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -190,29 +190,39 @@ describe("SpreadsheetApp shared-grid hide/unhide", () => {
       const sharedGrid = (app as any).sharedGrid;
       const renderer = sharedGrid.renderer;
       const headerRows = 1;
+      const headerCols = 1;
       const gridRow = headerRows + 0; // doc row 0
+      const gridCol = headerCols + 0; // doc col 0
       const hiddenSize = 2 * renderer.getZoom();
       const defaultRowHeight = renderer.getRowHeight(gridRow);
+      const defaultColWidth = renderer.getColWidth(gridCol);
 
-      // Hide row 1 (doc row 0) on Sheet1.
+      // Hide row 1 (doc row 0) and col A (doc col 0) on Sheet1.
       const sheet1 = app.getCurrentSheetId();
       app.hideRows([0]);
+      app.hideCols([0]);
 
       const provider1 = (app as any).usedRangeProvider();
       expect(provider1.isRowHidden(0)).toBe(true);
+      expect(provider1.isColHidden(0)).toBe(true);
       expect(renderer.getRowHeight(gridRow)).toBeCloseTo(hiddenSize, 6);
+      expect(renderer.getColWidth(gridCol)).toBeCloseTo(hiddenSize, 6);
 
       // Switching sheets should not inherit hidden state.
       app.activateSheet("Sheet2");
       const provider2 = (app as any).usedRangeProvider();
       expect(provider2.isRowHidden(0)).toBe(false);
+      expect(provider2.isColHidden(0)).toBe(false);
       expect(renderer.getRowHeight(gridRow)).toBeCloseTo(defaultRowHeight, 6);
+      expect(renderer.getColWidth(gridCol)).toBeCloseTo(defaultColWidth, 6);
 
       // Switching back should restore Sheet1's hidden row.
       app.activateSheet(sheet1);
       const provider3 = (app as any).usedRangeProvider();
       expect(provider3.isRowHidden(0)).toBe(true);
+      expect(provider3.isColHidden(0)).toBe(true);
       expect(renderer.getRowHeight(gridRow)).toBeCloseTo(hiddenSize, 6);
+      expect(renderer.getColWidth(gridCol)).toBeCloseTo(hiddenSize, 6);
 
       app.destroy();
       root.remove();

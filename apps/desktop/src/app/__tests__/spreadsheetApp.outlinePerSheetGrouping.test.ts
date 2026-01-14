@@ -135,11 +135,16 @@ describe("SpreadsheetApp outline state", () => {
     const sheet1 = app.getCurrentSheetId();
     const sheet2 = "Sheet2";
 
-    // Create a simple outline group on Sheet2 and collapse it (rows 2-4 under summary row 5).
+    // Create a simple outline group on Sheet2 and collapse it:
+    // - rows 2-4 under summary row 5
+    // - cols 2-4 under summary col 5
     const outline2 = (app as any).getOutlineForSheet(sheet2) as any;
     outline2.groupRows(2, 4);
     outline2.toggleRowGroup(5);
+    outline2.groupCols(2, 4);
+    outline2.toggleColGroup(5);
     expect(outline2.rows.entry(2).hidden.outline).toBe(true);
+    expect(outline2.cols.entry(2).hidden.outline).toBe(true);
 
     // Switching to Sheet2 should apply the collapsed outline hidden rows to the legacy caches.
     app.activateSheet(sheet2);
@@ -151,6 +156,14 @@ describe("SpreadsheetApp outline state", () => {
     expect(rowToVisual2.has(2)).toBe(false);
     expect(rowToVisual2.has(3)).toBe(false);
 
+    const colIndexByVisual2 = (app as any).colIndexByVisual as number[];
+    const colToVisual2 = (app as any).colToVisual as Map<number, number>;
+    expect(colIndexByVisual2[0]).toBe(0);
+    expect(colIndexByVisual2[1]).toBe(4); // cols 2-4 hidden => next visible is col 5 (0-based 4)
+    expect(colToVisual2.has(1)).toBe(false);
+    expect(colToVisual2.has(2)).toBe(false);
+    expect(colToVisual2.has(3)).toBe(false);
+
     // Switching back to Sheet1 should *not* inherit the outline hidden state from Sheet2.
     app.activateSheet(sheet1);
     const rowIndexByVisual1 = (app as any).rowIndexByVisual as number[];
@@ -158,13 +171,19 @@ describe("SpreadsheetApp outline state", () => {
     expect(rowIndexByVisual1[0]).toBe(0);
     expect(rowToVisual1.has(1)).toBe(true); // row 2 visible on Sheet1
 
+    const colIndexByVisual1 = (app as any).colIndexByVisual as number[];
+    const colToVisual1 = (app as any).colToVisual as Map<number, number>;
+    expect(colIndexByVisual1[0]).toBe(0);
+    expect(colToVisual1.has(1)).toBe(true); // col B visible on Sheet1
+
     // And switching again to Sheet2 should retain its own collapsed state.
     app.activateSheet(sheet2);
     const rowIndexByVisual2b = (app as any).rowIndexByVisual as number[];
     expect(rowIndexByVisual2b[1]).toBe(4);
+    const colIndexByVisual2b = (app as any).colIndexByVisual as number[];
+    expect(colIndexByVisual2b[1]).toBe(4);
 
     app.destroy();
     root.remove();
   });
 });
-

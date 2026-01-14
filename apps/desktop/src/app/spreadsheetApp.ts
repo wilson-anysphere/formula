@@ -1773,6 +1773,17 @@ export class SpreadsheetApp {
         },
         callbacks: {
           onScroll: (scroll, viewport) => {
+            // DesktopSharedGrid batches viewport change notifications through `requestAnimationFrame`.
+            // In unit tests, `requestAnimationFrame` is often stubbed to fire synchronously, which
+            // means we can receive `onScroll` callbacks during SpreadsheetApp construction (before
+            // overlays like `drawingOverlay` are initialized). Defer overlay rendering until the
+            // app is fully mounted (`uiReady=true`), but still keep scroll state in sync.
+            if (!this.uiReady) {
+              this.scrollX = scroll.x;
+              this.scrollY = scroll.y;
+              return;
+            }
+
             let effectiveViewport = viewport;
             const prevZoom = this.sharedGridZoom;
             const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;

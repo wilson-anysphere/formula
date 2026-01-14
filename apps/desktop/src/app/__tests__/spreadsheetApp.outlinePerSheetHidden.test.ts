@@ -135,27 +135,40 @@ describe("SpreadsheetApp outline state", () => {
     const sheet1 = app.getCurrentSheetId();
     const sheet2 = "Sheet2";
 
-    // Hide row 1 (0-based row 0) in Sheet1.
+    // Hide row 1 (0-based row 0) and col A (0-based col 0) in Sheet1.
     app.hideRows([0]);
+    app.hideCols([0]);
 
     const outline1 = (app as any).getOutlineForSheet(sheet1) as any;
     expect(outline1.rows.entry(1).hidden.user).toBe(true);
+    expect(outline1.cols.entry(1).hidden.user).toBe(true);
 
     const rowIndexByVisual = (app as any).rowIndexByVisual as number[];
     const rowToVisual = (app as any).rowToVisual as Map<number, number>;
     expect(rowToVisual.has(0)).toBe(false);
     expect(rowIndexByVisual[0]).toBe(1);
 
+    const colIndexByVisual = (app as any).colIndexByVisual as number[];
+    const colToVisual = (app as any).colToVisual as Map<number, number>;
+    expect(colToVisual.has(0)).toBe(false);
+    expect(colIndexByVisual[0]).toBe(1);
+
     // Switching to Sheet2 should not carry the hidden row with it.
     app.activateSheet(sheet2);
 
     const outline2 = (app as any).getOutlineForSheet(sheet2) as any;
     expect(outline2.rows.entry(1).hidden.user).toBe(false);
+    expect(outline2.cols.entry(1).hidden.user).toBe(false);
 
     const rowIndexByVisual2 = (app as any).rowIndexByVisual as number[];
     const rowToVisual2 = (app as any).rowToVisual as Map<number, number>;
     expect(rowToVisual2.has(0)).toBe(true);
     expect(rowIndexByVisual2[0]).toBe(0);
+
+    const colIndexByVisual2 = (app as any).colIndexByVisual as number[];
+    const colToVisual2 = (app as any).colToVisual as Map<number, number>;
+    expect(colToVisual2.has(0)).toBe(true);
+    expect(colIndexByVisual2[0]).toBe(0);
 
     // Switching back to Sheet1 should preserve its hidden state.
     app.activateSheet(sheet1);
@@ -164,6 +177,11 @@ describe("SpreadsheetApp outline state", () => {
     const rowToVisual3 = (app as any).rowToVisual as Map<number, number>;
     expect(rowToVisual3.has(0)).toBe(false);
     expect(rowIndexByVisual3[0]).toBe(1);
+
+    const colIndexByVisual3 = (app as any).colIndexByVisual as number[];
+    const colToVisual3 = (app as any).colToVisual as Map<number, number>;
+    expect(colToVisual3.has(0)).toBe(false);
+    expect(colIndexByVisual3[0]).toBe(1);
 
     app.destroy();
     root.remove();
