@@ -232,6 +232,26 @@ test("Typing =LOO suggests LOOKUP( and a modern XLOOKUP( alternative", async () 
   );
 });
 
+test("Typing =loo suggests lookup( and a modern xlookup( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=loo",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=lookup("),
+    `Expected a lookup( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=xlookup("),
+    `Expected an xlookup( alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =MAT suggests MATCH( and a modern XMATCH( alternative", async () => {
   const engine = new TabCompletionEngine();
 
@@ -252,6 +272,26 @@ test("Typing =MAT suggests MATCH( and a modern XMATCH( alternative", async () =>
   );
 });
 
+test("Typing =mat suggests match( and a modern xmatch( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=mat",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=match("),
+    `Expected a match( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=xmatch("),
+    `Expected an xmatch( alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -265,6 +305,10 @@ test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=Vlookup("),
     `Expected a Vlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=Xlookup("),
+    `Expected a title-case Xlookup modern alternative, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -402,6 +446,10 @@ test("Typing =vlo suggests vlookup(", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=vlookup("),
     `Expected a vlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=xlookup("),
+    `Expected a lowercase xlookup modern alternative, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

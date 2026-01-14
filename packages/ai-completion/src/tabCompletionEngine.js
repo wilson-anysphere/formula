@@ -406,34 +406,25 @@ export class TabCompletionEngine {
       });
 
       // Provide lightweight "modern alternative" suggestions for some legacy functions.
+      const suggestModernAlternative = (targetName) => {
+        const completedTarget = applyNameCase(targetName, prefix);
+        const call = `${completedTarget}(`;
+        suggestions.push({
+          text: replaceSpan(input, token.start, token.end, call),
+          displayText: call,
+          type: "formula",
+          confidence: 0.35,
+        });
+      };
+
       if (spec.name === "VLOOKUP") {
-        suggestions.push({
-          text: replaceSpan(input, token.start, token.end, "XLOOKUP("),
-          displayText: "XLOOKUP(",
-          type: "formula",
-          confidence: 0.35,
-        });
+        suggestModernAlternative("XLOOKUP");
       } else if (spec.name === "HLOOKUP") {
-        suggestions.push({
-          text: replaceSpan(input, token.start, token.end, "XLOOKUP("),
-          displayText: "XLOOKUP(",
-          type: "formula",
-          confidence: 0.35,
-        });
+        suggestModernAlternative("XLOOKUP");
       } else if (spec.name === "LOOKUP") {
-        suggestions.push({
-          text: replaceSpan(input, token.start, token.end, "XLOOKUP("),
-          displayText: "XLOOKUP(",
-          type: "formula",
-          confidence: 0.35,
-        });
+        suggestModernAlternative("XLOOKUP");
       } else if (spec.name === "MATCH") {
-        suggestions.push({
-          text: replaceSpan(input, token.start, token.end, "XMATCH("),
-          displayText: "XMATCH(",
-          type: "formula",
-          confidence: 0.35,
-        });
+        suggestModernAlternative("XMATCH");
       }
     }
 
