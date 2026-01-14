@@ -713,6 +713,12 @@ async function main() {
       args: [path.join(repoRoot, "scripts", "check-desktop-url-scheme.mjs")],
     },
     {
+      id: "desktop-compliance",
+      title: "Check desktop compliance artifacts (LICENSE/NOTICE)",
+      command: process.execPath,
+      args: [path.join(repoRoot, "scripts", "ci", "check-desktop-compliance-artifacts.mjs")],
+    },
+    {
       id: "release-assets",
       title: "Verify GitHub release assets + manifests",
       command: process.execPath,

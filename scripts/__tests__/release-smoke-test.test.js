@@ -38,6 +38,7 @@ test("release-smoke-test: runs required steps and can forward --help to verifier
     `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
   );
   assert.match(child.stdout, /Check desktop URL scheme \+ file associations/i);
+  assert.match(child.stdout, /Check desktop compliance artifacts/i);
   assert.match(child.stdout, /Release smoke test PASSED/i);
 });
 
