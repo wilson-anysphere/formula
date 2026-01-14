@@ -47,6 +47,9 @@ class CompatScorecardTests(unittest.TestCase):
                     "includeTags": ["add", "sub"],
                     "excludeTags": [],
                     "maxCases": 0,
+                    "casesSha256": "0123456789abcdef",
+                    "expectedPath": "expected.json",
+                    "actualPath": "actual.json",
                 },
             }
             oracle_path.write_text(
@@ -81,6 +84,9 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertIn("includeTags: add, sub", md)
             self.assertIn("excludeTags: <none>", md)
             self.assertIn("maxCases: all", md)
+            self.assertIn("casesSha256: `01234567`", md)
+            self.assertIn("expected: `expected.json`", md)
+            self.assertIn("actual: `actual.json`", md)
             self.assertIn("| L1 | Read (corpus open) | PASS | 100.00% | 10 / 10 |", md)
             # 1 mismatch out of 1000 => 99.9% pass rate.
             self.assertIn("| L2 | Calculate (Excel oracle) | PASS | 99.90% | 999 / 1000 |", md)
@@ -100,6 +106,9 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertEqual(payload["inputs"]["oracle"]["includeTags"], ["add", "sub"])
             self.assertEqual(payload["inputs"]["oracle"]["excludeTags"], [])
             self.assertEqual(payload["inputs"]["oracle"]["maxCases"], 0)
+            self.assertEqual(payload["inputs"]["oracle"]["casesSha256"], "0123456789abcdef")
+            self.assertEqual(payload["inputs"]["oracle"]["expectedPath"], "expected.json")
+            self.assertEqual(payload["inputs"]["oracle"]["actualPath"], "actual.json")
 
     def test_falls_back_to_counts_when_rates_are_missing(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"

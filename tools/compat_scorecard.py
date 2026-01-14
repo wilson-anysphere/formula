@@ -127,6 +127,9 @@ class OracleMetrics:
     include_tags: list[str] | None
     exclude_tags: list[str] | None
     max_cases: int | None
+    cases_sha256: str | None
+    expected_path: str | None
+    actual_path: str | None
 
 
 def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
@@ -242,6 +245,10 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
     if max_cases_raw is not None:
         max_cases = _as_nonneg_int(max_cases_raw, label="summary.maxCases", path=path)
 
+    cases_sha = _as_str_or_none(summary.get("casesSha256"))
+    expected_path = _as_str_or_none(summary.get("expectedPath"))
+    actual_path = _as_str_or_none(summary.get("actualPath"))
+
     return OracleMetrics(
         path=path,
         total_cases=total,
@@ -251,6 +258,9 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
         include_tags=include_tags,
         exclude_tags=exclude_tags,
         max_cases=max_cases,
+        cases_sha256=cases_sha,
+        expected_path=expected_path,
+        actual_path=actual_path,
     )
 
 
@@ -472,9 +482,15 @@ def main() -> int:
         oracle_meta_parts: list[str] = []
         oracle_meta_parts.append(f"cases: {oracle.total_cases}")
         oracle_meta_parts.append(f"mismatches: {oracle.mismatches}")
+        if oracle.cases_sha256:
+            oracle_meta_parts.append(f"casesSha256: `{oracle.cases_sha256[:8]}`")
         oracle_meta_parts.append(f"includeTags: {_fmt_tags(oracle.include_tags, empty_text='<all>')}")
         oracle_meta_parts.append(f"excludeTags: {_fmt_tags(oracle.exclude_tags, empty_text='<none>')}")
         oracle_meta_parts.append(f"maxCases: {_fmt_max_cases(oracle.max_cases)}")
+        if oracle.expected_path:
+            oracle_meta_parts.append(f"expected: `{oracle.expected_path}`")
+        if oracle.actual_path:
+            oracle_meta_parts.append(f"actual: `{oracle.actual_path}`")
         extra = f" ({', '.join(oracle_meta_parts)})" if oracle_meta_parts else ""
         lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`{extra}")
     else:
@@ -564,6 +580,9 @@ def main() -> int:
                     "includeTags": oracle.include_tags if oracle else None,
                     "excludeTags": oracle.exclude_tags if oracle else None,
                     "maxCases": oracle.max_cases if oracle else None,
+                    "casesSha256": oracle.cases_sha256 if oracle else None,
+                    "expectedPath": oracle.expected_path if oracle else None,
+                    "actualPath": oracle.actual_path if oracle else None,
                 },
             },
             "metrics": {
