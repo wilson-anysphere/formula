@@ -1522,7 +1522,9 @@ fn getpivotdata_from_registry(
         if field_trimmed.is_empty() {
             return Err(ErrorKind::Value);
         }
-        let field_key = crate::value::casefold(field_trimmed);
+        let field_key = crate::value::casefold(
+            crate::pivot_registry::normalize_pivot_cache_field_name(field_trimmed).as_ref(),
+        );
         let idx = entry
             .field_indices
             .get(&field_key)
@@ -1563,7 +1565,9 @@ fn getpivotdata_from_registry(
         .iter()
         .filter_map(|filter| {
             let allowed = filter.allowed.as_ref()?;
-            let key = crate::value::casefold(filter.source_field.canonical_name().as_ref());
+            let field_name = filter.source_field.canonical_name();
+            let field_name = crate::pivot_registry::normalize_pivot_cache_field_name(field_name.as_ref());
+            let key = crate::value::casefold(field_name.as_ref());
             let idx = entry.field_indices.get(&key).copied()?;
             Some((idx, allowed))
         })

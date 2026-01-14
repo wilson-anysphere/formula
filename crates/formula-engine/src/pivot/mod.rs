@@ -252,6 +252,24 @@ impl PivotCache {
         // Best-effort: match Data Model refs against cache field captions. Caches may store
         // measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`), and may
         // store column refs with or without quoted table names.
+        match field {
+            PivotFieldRef::DataModelMeasure(name) => {
+                if let Some(idx) = self.field_index(name) {
+                    return Some(idx);
+                }
+            }
+            PivotFieldRef::DataModelColumn { table, column } => {
+                // Some producers store unquoted `Table[Column]` captions even when DAX would
+                // normally require quoting (e.g. `Dim Product[Category]` instead of
+                // `'Dim Product'[Category]`).
+                let unquoted = format!("{table}[{column}]");
+                if let Some(idx) = self.field_index(&unquoted) {
+                    return Some(idx);
+                }
+            }
+            PivotFieldRef::CacheFieldName(_) => {}
+        }
+
         let label = pivot_field_ref_name(field);
         if let Some(idx) = self.field_index(label.as_ref()) {
             return Some(idx);
@@ -3262,6 +3280,24 @@ impl FieldIndices {
             let field_name = pivot_field_ref_name(field);
             if let Some(idx) = source.field_index(field_name.as_ref()) {
                 return Ok(idx);
+            }
+
+            // Best-effort: match Data Model refs against cache field captions. Caches may store
+            // measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`), and may
+            // store column refs with or without quoted table names.
+            match field {
+                PivotFieldRef::DataModelMeasure(name) => {
+                    if let Some(idx) = source.field_index(name) {
+                        return Ok(idx);
+                    }
+                }
+                PivotFieldRef::DataModelColumn { table, column } => {
+                    let unquoted = format!("{table}[{column}]");
+                    if let Some(idx) = source.field_index(&unquoted) {
+                        return Ok(idx);
+                    }
+                }
+                PivotFieldRef::CacheFieldName(_) => {}
             }
 
             // Best-effort fallback: try the `Display` rendering (used by some Data Model producers).

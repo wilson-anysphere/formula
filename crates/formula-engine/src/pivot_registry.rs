@@ -19,7 +19,7 @@ pub enum PivotRegistryError {
     MissingField(String),
 }
 
-fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
+pub(crate) fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
     if let Some(measure) = parse_dax_measure_ref(name) {
         return Cow::Owned(format!("[{measure}]"));
     }
@@ -219,7 +219,9 @@ impl PivotRegistryEntry {
             Vec::with_capacity(pivot.config.value_fields.len());
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
             value_field_indices.insert(crate::value::casefold(&vf.name), idx);
-            let key = crate::value::casefold(vf.source_field.canonical_name().as_ref());
+            let field_name = vf.source_field.canonical_name();
+            let field_name = normalize_pivot_cache_field_name(field_name.as_ref());
+            let key = crate::value::casefold(field_name.as_ref());
             let (cache_idx, _cache_name) = resolve_cache_field(&vf.source_field, &key)?;
             value_field_source_indices.push(cache_idx);
         }

@@ -115,8 +115,8 @@ impl ValueResolver for FuzzResolver {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
-        None
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
+        Ok(Vec::new())
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<ResolvedName> {

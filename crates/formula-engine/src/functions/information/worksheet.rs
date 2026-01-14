@@ -101,10 +101,19 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
             }
         }
         InfoType::Origin => {
-            let origin = ctx
-                .sheet_origin_cell(ctx.current_sheet_id())
-                .unwrap_or(CellAddr { row: 0, col: 0 });
-            Value::Text(abs_a1(origin))
+            // `INFO("origin")` is UI/view-state driven in Excel (the top-left visible cell).
+            //
+            // Prefer structured view metadata when provided by the host, but fall back to the
+            // legacy string-based `EngineInfo.origin`/`origin_by_sheet` plumbing for compatibility.
+            if let Some(origin) = ctx.sheet_origin_cell(ctx.current_sheet_id()) {
+                return Value::Text(abs_a1(origin));
+            }
+            if let Some(origin) = ctx.info_origin().filter(|s| !s.is_empty()) {
+                return Value::Text(origin.to_string());
+            }
+
+            // Excel defaults to the top-left visible cell when no origin is provided.
+            Value::Text(abs_a1(CellAddr { row: 0, col: 0 }))
         }
         InfoType::OSVersion => ctx
             .info_osversion()
@@ -216,7 +225,6 @@ fn resolve_horizontal_alignment(
     ctx.cell_horizontal_alignment(sheet_id, addr)
         .unwrap_or(HorizontalAlignment::General)
 }
-
 fn resolve_number_format<'a>(
     ctx: &'a dyn FunctionContext,
     sheet_id: &SheetId,
