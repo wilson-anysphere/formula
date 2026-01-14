@@ -1049,24 +1049,34 @@ function highlightFormula(input: string): HighlightSpan[] {
 }
 
 function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]): HighlightSpan[] {
-  const filtered: EngineFormulaToken[] = [];
+  // In the steady state, engine tokens are already sorted by span start and include a single trailing `Eof`.
+  // Avoid allocating a filtered/copy array on every keystroke; only fall back to sorting when we detect
+  // out-of-order spans.
   let sorted = true;
   let lastStart = -Infinity;
   for (const token of tokens) {
     if (token.kind === "Eof") continue;
-    filtered.push(token);
-    if (token.span.start < lastStart) sorted = false;
+    if (token.span.start < lastStart) {
+      sorted = false;
+      break;
+    }
     lastStart = token.span.start;
   }
-  if (!sorted) filtered.sort((a, b) => a.span.start - b.span.start);
 
+  const ordered = sorted ? tokens : tokens.filter((t) => t.kind !== "Eof").sort((a, b) => a.span.start - b.span.start);
+  return highlightFromEngineTokensSorted(formula, ordered);
+}
+
+function highlightFromEngineTokensSorted(formula: string, tokens: readonly EngineFormulaToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
   let pos = 0;
   // Best-effort: treat an identifier immediately followed by "(" (ignoring whitespace) as a function name.
   // Instead of building a separate index (Set) with a second pass, mutate the already-emitted identifier
   // span when we later observe the "(" token.
   let lastNonWhitespaceSpanIndex: number | null = null;
-  for (const token of filtered) {
+
+  for (const token of tokens) {
+    if (token.kind === "Eof") continue;
     const start = Math.max(0, Math.min(token.span.start, formula.length));
     const end = Math.max(0, Math.min(token.span.end, formula.length));
     if (end < start) continue;
