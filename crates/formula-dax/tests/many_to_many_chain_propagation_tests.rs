@@ -306,3 +306,145 @@ fn bidirectional_middle_table_filter_propagates_both_ways_columnar() {
         1.into()
     );
 }
+
+#[test]
+fn single_direction_does_not_propagate_from_a_to_c() {
+    let model = build_m2m_chain_model(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("A", "AAttr", "a1".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+}
+
+#[test]
+fn single_direction_does_not_propagate_from_a_to_c_columnar() {
+    let model = build_m2m_chain_model_columnar(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("A", "AAttr", "a1".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+}
+
+#[test]
+fn single_direction_middle_table_filter_propagates_only_to_a() {
+    let model = build_m2m_chain_model(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("B", "BAttr", "b1b".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+}
+
+#[test]
+fn single_direction_middle_table_filter_propagates_only_to_a_columnar() {
+    let model = build_m2m_chain_model_columnar(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("B", "BAttr", "b1b".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        3.into()
+    );
+}
+
+#[test]
+fn bidirectional_conflicting_filters_converge_to_empty() {
+    let model = build_m2m_chain_model(CrossFilterDirection::Both);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty()
+        .with_column_equals("A", "AAttr", "a1".into())
+        .with_column_equals("C", "CAttr", "c2".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+}
+
+#[test]
+fn bidirectional_conflicting_filters_converge_to_empty_columnar() {
+    let model = build_m2m_chain_model_columnar(CrossFilterDirection::Both);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty()
+        .with_column_equals("A", "AAttr", "a1".into())
+        .with_column_equals("C", "CAttr", "c2".into());
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(C)", &filter, &RowContext::default(),)
+            .unwrap(),
+        0.into()
+    );
+}
