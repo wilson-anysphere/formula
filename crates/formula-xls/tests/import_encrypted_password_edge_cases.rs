@@ -120,6 +120,30 @@ fn rc4_cryptoapi_does_not_truncate_password_to_15_chars() {
 }
 
 #[test]
+fn decrypts_rc4_cryptoapi_with_empty_password() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_rc4_cryptoapi_pw_open_empty_password.xls");
+
+    let result = formula_xls::import_xls_path_with_password(&fixture_path, Some(""))
+        .expect("decrypt and import with empty password");
+    let sheet1 = result.workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    let err = formula_xls::import_xls_path_with_password(&fixture_path, Some("not-empty"))
+        .expect_err("expected wrong password to fail");
+    assert!(
+        matches!(&err, formula_xls::ImportError::InvalidPassword),
+        "expected ImportError::InvalidPassword, got {err:?}"
+    );
+
+    let err = formula_xls::import_xls_path(&fixture_path).expect_err("expected encrypted workbook");
+    assert!(matches!(err, formula_xls::ImportError::EncryptedWorkbook));
+}
+
+#[test]
 fn decrypts_xor_with_empty_password() {
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")

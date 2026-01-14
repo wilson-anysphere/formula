@@ -12,6 +12,14 @@ fn legacy_fixture_path() -> PathBuf {
         .join("biff8_rc4_cryptoapi_legacy_unicode_emoji_pw_open.xls")
 }
 
+fn legacy_empty_password_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_rc4_cryptoapi_legacy_pw_open_empty_password.xls")
+}
+
 #[test]
 fn decrypts_rc4_cryptoapi_legacy_biff8_xls_with_unicode_emoji_password() {
     let result = formula_xls::import_xls_path_with_password(
@@ -21,6 +29,22 @@ fn decrypts_rc4_cryptoapi_legacy_biff8_xls_with_unicode_emoji_password() {
     .expect("expected decrypt + import to succeed");
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
     assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+}
+
+#[test]
+fn decrypts_rc4_cryptoapi_legacy_biff8_xls_with_empty_password() {
+    let result = formula_xls::import_xls_path_with_password(legacy_empty_password_fixture_path(), Some(""))
+        .expect("expected decrypt + import to succeed");
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+}
+
+#[test]
+fn rc4_cryptoapi_legacy_empty_password_wrong_password_errors() {
+    let err =
+        formula_xls::import_xls_path_with_password(legacy_empty_password_fixture_path(), Some("not-empty"))
+            .expect_err("expected wrong password error");
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]
@@ -43,4 +67,3 @@ fn rc4_cryptoapi_legacy_unicode_emoji_password_different_normalization_fails() {
         .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
-

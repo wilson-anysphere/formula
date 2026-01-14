@@ -1584,6 +1584,13 @@ fn regenerate_encrypted_xls_fixtures() {
         panic!("write encrypted fixture {cryptoapi_path:?} failed: {err}");
     });
 
+    // Empty-password CryptoAPI fixture (some writers can emit this; Excel UI may refuse to create it).
+    let cryptoapi_empty_path = fixtures_dir.join("biff8_rc4_cryptoapi_pw_open_empty_password.xls");
+    let cryptoapi_empty_bytes = build_cryptoapi_encrypted_xls_bytes("");
+    std::fs::write(&cryptoapi_empty_path, cryptoapi_empty_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {cryptoapi_empty_path:?} failed: {err}");
+    });
+
     // Decryptable BIFF8 RC4 CryptoAPI fixture using MD5 for password hashing / verifier hashing.
     let cryptoapi_md5_path = fixtures_dir.join("biff8_rc4_cryptoapi_md5_pw_open.xls");
     let cryptoapi_md5_bytes = build_cryptoapi_md5_encrypted_xls_bytes("password");
@@ -1617,6 +1624,13 @@ fn regenerate_encrypted_xls_fixtures() {
     )
     .unwrap_or_else(|err| {
         panic!("write encrypted fixture {cryptoapi_legacy_unicode_emoji_path:?} failed: {err}");
+    });
+
+    let cryptoapi_legacy_empty_path =
+        fixtures_dir.join("biff8_rc4_cryptoapi_legacy_pw_open_empty_password.xls");
+    let cryptoapi_legacy_empty_bytes = build_cryptoapi_legacy_encrypted_xls_bytes("");
+    std::fs::write(&cryptoapi_legacy_empty_path, cryptoapi_legacy_empty_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {cryptoapi_legacy_empty_path:?} failed: {err}");
     });
 
     // Non-ASCII password fixture used to validate Unicode password handling.
