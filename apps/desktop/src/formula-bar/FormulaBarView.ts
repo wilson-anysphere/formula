@@ -679,6 +679,17 @@ class FormulaBarFunctionAutocompleteController {
       return;
     }
 
+    // If the caret is inside a reference token (A1 ref, named range, structured ref),
+    // suppress function autocomplete so Escape/Tab keep their reference-editing semantics.
+    //
+    // Note: FormulaBarView registers its own input/selection listeners *before*
+    // constructing this controller, so `model.activeReferenceIndex()` is up-to-date
+    // by the time we handle the same DOM event.
+    if (this.#formulaBar.model.activeReferenceIndex() != null) {
+      this.close();
+      return;
+    }
+
     const input = this.#textarea.value;
     const ctx = findCompletionContext(input, start);
     if (!ctx) {
