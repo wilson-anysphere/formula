@@ -394,7 +394,7 @@ describe("engine sync helpers", () => {
     expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
   });
 
-  it("syncs sheet view column width overrides into the engine (CELL width metadata)", async () => {
+  it("engineApplyDocumentChange syncs sheet view column width overrides into the engine (CELL width metadata)", async () => {
     const doc = new DocumentController();
     let payload: any = null;
     const unsubscribe = doc.on("change", (p: any) => {
@@ -413,6 +413,45 @@ describe("engine sync helpers", () => {
     // 120px -> Excel character width (default Calibri 11 metrics).
     expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.43 }]);
     // Column resizes should trigger a recalc even though DocumentController emits `recalc: false`.
+    expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
+  it("engineApplyDocumentChange triggers a recalc tick for sheet renames (sheet meta deltas)", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+
+    doc.renameSheet("Sheet1", "Renamed");
+    unsubscribe();
+
+    expect(Array.isArray(payload?.sheetMetaDeltas)).toBe(true);
+    expect(payload.sheetMetaDeltas).toHaveLength(1);
+    expect(payload.recalc).toBe(false);
+
+    const engine = new FakeEngine([]);
+    await engineApplyDocumentChange(engine, payload);
+
+    expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
+  it("engineApplyDocumentChange triggers a recalc tick for formatting-only cell deltas", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+
+    doc.setRangeFormat("Sheet1", "C1", { font: { italic: true } });
+    unsubscribe();
+    expect(payload?.recalc).toBe(false);
+
+    const engine = new FakeEngine([]);
+    await engineApplyDocumentChange(engine, payload);
+
+    // Formatting-only changes should still advance the engine's recalculation tick so
+    // metadata/volatile functions update.
     expect(engine.recalcCalls).toEqual([undefined]);
   });
 });

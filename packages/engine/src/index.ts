@@ -80,6 +80,7 @@ export type {
   DocumentCellDelta,
   DocumentCellState,
   EngineApplyDocumentChangeOptions,
+  DocumentControllerChangePayload,
   EngineCellScalar,
   EngineSyncTarget,
   EngineWorkbookJson,

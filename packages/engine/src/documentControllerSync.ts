@@ -223,6 +223,20 @@ async function resolveEngineStyleIdForDocStyleId(
   }
 }
 
+export type DocumentControllerChangePayload = {
+  deltas: readonly DocumentCellDelta[];
+  sheetViewDeltas: readonly unknown[];
+  formatDeltas: readonly unknown[];
+  rowStyleDeltas: readonly unknown[];
+  colStyleDeltas: readonly unknown[];
+  sheetStyleDeltas: readonly unknown[];
+  rangeRunDeltas: readonly unknown[];
+  sheetMetaDeltas: readonly unknown[];
+  sheetOrderDelta: unknown | null;
+  source?: string;
+  recalc?: boolean;
+};
+
 function parseRowColKey(key: string): { row: number; col: number } | null {
   const [rowStr, colStr] = key.split(",");
   const row = Number(rowStr);
@@ -554,6 +568,8 @@ export async function engineApplyDocumentChange(
   const sheetViewDeltas: Array<{ sheetId: string; before: any; after: any }> = Array.isArray(payload?.sheetViewDeltas)
     ? payload.sheetViewDeltas
     : [];
+  const rangeRunDeltas: unknown[] = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
+  const sheetMetaDeltas: unknown[] = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
 
   // If the caller supplied `getStyleById`, seed a style sync context so both
   // `engineApplyDeltas` (cell styles) and the row/col/sheet helpers can resolve
@@ -562,6 +578,7 @@ export async function engineApplyDocumentChange(
   const canResolveNonZeroStyles = Boolean(engine.internStyle && ctx);
 
   const didApplyCellInputs = deltas.some((d) => cellStateToEngineInput(d.before) !== cellStateToEngineInput(d.after));
+  const hasFormattingOnlyCellDeltas = !didApplyCellInputs && deltas.some((d) => d.before.styleId !== d.after.styleId);
   const didApplyCellStyles =
     Boolean(engine.setCellStyleId) &&
     deltas.some((d) => d.before.styleId !== d.after.styleId && (d.after.styleId === 0 || canResolveNonZeroStyles));
@@ -665,16 +682,24 @@ export async function engineApplyDocumentChange(
   const recalcFlag = typeof payload?.recalc === "boolean" ? (payload.recalc as boolean) : undefined;
   let shouldRecalculate = options.recalculate ?? recalcFlag ?? true;
 
-  // Column resizes can affect worksheet information functions like `CELL("width")`, but
-  // DocumentController emits view deltas with `recalc: false`. Override so width-dependent
-  // formulas update when the user resizes columns.
-  if (didApplyAnyColWidths && options.recalculate !== false) {
+  const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+  const hasViews = sheetViewDeltas.length > 0;
+  const hasRangeRuns = rangeRunDeltas.length > 0;
+  const hasSheetMeta = sheetMetaDeltas.length > 0;
+
+  const hasMetadataDeltas = hasStyles || hasViews || hasRangeRuns || hasSheetMeta || hasFormattingOnlyCellDeltas;
+
+  // DocumentController emits `recalc: false` for many metadata-only edits (formatting, view deltas,
+  // sheet meta renames). Volatile worksheet-info functions like `CELL()`/`INFO()` must observe the
+  // updated metadata after such edits, so force a recalculation tick unless the caller explicitly
+  // disabled it.
+  if (hasMetadataDeltas && options.recalculate !== false) {
     shouldRecalculate = true;
   }
 
   if (!shouldRecalculate) return [];
 
   const didApplyAnyUpdates = didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyColWidths;
-  if (!didApplyAnyUpdates && recalcFlag !== true && options.recalculate !== true) return [];
+  if (!didApplyAnyUpdates && !hasMetadataDeltas && recalcFlag !== true && options.recalculate !== true) return [];
   return await engine.recalculate();
 }

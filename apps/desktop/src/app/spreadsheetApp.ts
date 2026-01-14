@@ -6507,108 +6507,110 @@ export class SpreadsheetApp {
           } finally {
             unsubscribeInit();
           }
+ 
+           this.wasmEngine = engine;
+           this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
+             if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
-          this.wasmEngine = engine;
-          this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
-            if (!this.wasmEngine || this.wasmSyncSuspended) return;
+             const source = typeof payload?.source === "string" ? payload.source : "";
 
-            const source = typeof payload?.source === "string" ? payload.source : "";
+             if (source === "applyState") {
+               this.clearComputedValuesByCoord();
+               void this.enqueueWasmSync(async (worker) => {
+                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                   workbookFileMetadata: this.workbookFileMetadata,
+                 });
+                 this.applyComputedChanges(changes);
+               });
+               return;
+             }
 
-            if (source === "applyState") {
-              this.clearComputedValuesByCoord();
-              void this.enqueueWasmSync(async (worker) => {
-                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                  workbookFileMetadata: this.workbookFileMetadata,
-                });
-                this.applyComputedChanges(changes);
-              });
-              return;
-            }
+             const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+             const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
+               if (!delta) return false;
+               // Sheet add/delete.
+               if (delta.before == null || delta.after == null) return true;
+               // Sheet rename.
+               const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
+               const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
+               return beforeName !== afterName;
+             });
 
-            const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
-            const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
-              if (!delta) return false;
-              // Sheet add/delete.
-              if (delta.before == null || delta.after == null) return true;
-              // Sheet rename.
-              const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
-              const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
-              return beforeName !== afterName;
-            });
+             if (sheetMetaRequiresHydrate) {
+               this.clearComputedValuesByCoord();
+               void this.enqueueWasmSync(async (worker) => {
+                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                   workbookFileMetadata: this.workbookFileMetadata,
+                 });
+                 this.applyComputedChanges(changes);
+               });
+               return;
+             }
 
-            if (sheetMetaRequiresHydrate) {
-              this.clearComputedValuesByCoord();
-              void this.enqueueWasmSync(async (worker) => {
-                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                  workbookFileMetadata: this.workbookFileMetadata,
-                });
-                this.applyComputedChanges(changes);
-              });
-              return;
-            }
+             const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+             const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
+             const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
+             const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
+             const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+             const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
+             const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+             const hasViews = sheetViewDeltas.length > 0;
+             const hasRangeRuns = rangeRunDeltas.length > 0;
 
-            const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-            const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
-            const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
-            const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
-            const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-            const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
-            const hasViews = sheetViewDeltas.length > 0;
+             const recalc = payload?.recalc;
+             const wantsRecalc = recalc === true;
 
-            const recalc = payload?.recalc;
-            const wantsRecalc = recalc === true;
+             // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
+             // task unless the payload can impact calculation results.
+             if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns) {
+               if (wantsRecalc) {
+                 void this.enqueueWasmSync(async (worker) => {
+                   const changes = await worker.recalculate();
+                   this.applyComputedChanges(changes);
+                 });
+               }
+               return;
+             }
 
-            // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
-            // task unless the payload can impact calculation results.
-            if (deltas.length === 0 && !hasStyles && !hasViews) {
-              if (wantsRecalc) {
-                void this.enqueueWasmSync(async (worker) => {
-                  const changes = await worker.recalculate();
-                  this.applyComputedChanges(changes);
-                });
-              }
-              return;
-            }
+             const sheetNameCache = new Map<string, string>();
+             const sheetIdToSheet = (sheetId: string): string => {
+               const key = String(sheetId ?? "").trim();
+               if (!key) return "Sheet1";
+               const cached = sheetNameCache.get(key);
+               if (cached) return cached;
 
-            const sheetNameCache = new Map<string, string>();
-            const sheetIdToSheet = (sheetId: string): string => {
-              const key = String(sheetId ?? "").trim();
-              if (!key) return "Sheet1";
-              const cached = sheetNameCache.get(key);
-              if (cached) return cached;
+               const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
+               const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
+               const resolved = metaName || key;
+               sheetNameCache.set(key, resolved);
+               return resolved;
+             };
 
-              const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
-              const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
-              const resolved = metaName || key;
-              sheetNameCache.set(key, resolved);
-              return resolved;
-            };
+             void this.enqueueWasmSync(async (worker) => {
+               const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
+                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
+                 sheetIdToSheet,
+               });
+               this.applyComputedChanges(changes);
+             });
+           });
 
-            void this.enqueueWasmSync(async (worker) => {
-              const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
-                getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
-                sheetIdToSheet,
-              });
-              this.applyComputedChanges(changes);
-            });
-          });
-
-          // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
-          // interactions) before the `document.on("change")` listener is installed. If the
-          // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
-          // deltas could be missed, leaving the worker with an incomplete view of inputs.
-          //
-          // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the
-          // latest DocumentController state before incremental deltas begin flowing.
-          //
-          // Note: do not `await` inside this init chain (it would deadlock by waiting on the
-          // promise chain we're currently building).
-          postInitHydrate = this.enqueueWasmSync(async (worker) => {
-            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-              workbookFileMetadata: this.workbookFileMetadata,
-            });
-            this.applyComputedChanges(changes);
-          });
+           // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
+           // interactions) before the `document.on("change")` listener is installed. If the
+           // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
+           // deltas could be missed, leaving the worker with an incomplete view of inputs.
+           //
+           // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the
+           // latest DocumentController state before incremental deltas begin flowing.
+           //
+           // Note: do not `await` inside this init chain (it would deadlock by waiting on the
+           // promise chain we're currently building).
+           postInitHydrate = this.enqueueWasmSync(async (worker) => {
+             const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+               workbookFileMetadata: this.workbookFileMetadata,
+             });
+             this.applyComputedChanges(changes);
+           });
           } catch {
             // Ignore initialization failures (e.g. missing WASM bundle).
             engine?.terminate();
