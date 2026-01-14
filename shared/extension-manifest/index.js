@@ -75,17 +75,21 @@ function assertObject(value, label) {
 }
 
 function assertString(value, label) {
-  if (typeof value !== "string" || value.trim().length === 0) {
+  if (typeof value !== "string") {
     throw new ManifestError(`${label} must be a non-empty string`);
   }
-  return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new ManifestError(`${label} must be a non-empty string`);
+  }
+  return trimmed;
 }
 
 function assertOptionalString(value, label) {
   if (value === undefined) return undefined;
   if (value === null) return undefined;
   if (typeof value !== "string") throw new ManifestError(`${label} must be a string`);
-  return value;
+  return value.trim();
 }
 
 function assertArray(value, label) {
@@ -99,121 +103,167 @@ function assertArray(value, label) {
 function validateCommands(commands) {
   const list = assertArray(commands, "contributes.commands");
   const seen = new Set();
+  const normalized = [];
   for (const [idx, cmd] of list.entries()) {
     assertObject(cmd, `contributes.commands[${idx}]`);
     const id = assertString(cmd.command, `contributes.commands[${idx}].command`);
     if (seen.has(id)) throw new ManifestError(`Duplicate command id: ${id}`);
     seen.add(id);
-    assertString(cmd.title, `contributes.commands[${idx}].title`);
-    assertOptionalString(cmd.category, `contributes.commands[${idx}].category`);
-    assertOptionalString(cmd.icon, `contributes.commands[${idx}].icon`);
-    assertOptionalString(cmd.description, `contributes.commands[${idx}].description`);
+    const title = assertString(cmd.title, `contributes.commands[${idx}].title`);
+    const category = assertOptionalString(cmd.category, `contributes.commands[${idx}].category`);
+    const icon = assertOptionalString(cmd.icon, `contributes.commands[${idx}].icon`);
+    const description = assertOptionalString(cmd.description, `contributes.commands[${idx}].description`);
 
-    const keywords = assertArray(cmd.keywords, `contributes.commands[${idx}].keywords`);
-    for (const [kIdx, keyword] of keywords.entries()) {
-      assertString(keyword, `contributes.commands[${idx}].keywords[${kIdx}]`);
-    }
+    const keywordsRaw = cmd.keywords;
+    const keywords = keywordsRaw === undefined ? undefined : assertArray(keywordsRaw, `contributes.commands[${idx}].keywords`);
+    const normalizedKeywords =
+      keywords === undefined
+        ? undefined
+        : keywords.map((keyword, kIdx) =>
+            assertString(keyword, `contributes.commands[${idx}].keywords[${kIdx}]`),
+          );
+
+    const normalizedCommand = { ...cmd, command: id, title };
+    if (category !== undefined) normalizedCommand.category = category;
+    if (icon !== undefined) normalizedCommand.icon = icon;
+    if (description !== undefined) normalizedCommand.description = description;
+    if (normalizedKeywords !== undefined) normalizedCommand.keywords = normalizedKeywords;
+    normalized.push(normalizedCommand);
   }
-  return list;
+  return normalized;
 }
 
 function validatePanels(panels) {
   const list = assertArray(panels, "contributes.panels");
   const seen = new Set();
+  const normalized = [];
   for (const [idx, panel] of list.entries()) {
     assertObject(panel, `contributes.panels[${idx}]`);
     const id = assertString(panel.id, `contributes.panels[${idx}].id`);
     if (seen.has(id)) throw new ManifestError(`Duplicate panel id: ${id}`);
     seen.add(id);
-    assertString(panel.title, `contributes.panels[${idx}].title`);
-    assertOptionalString(panel.icon, `contributes.panels[${idx}].icon`);
+    const title = assertString(panel.title, `contributes.panels[${idx}].title`);
+    const icon = assertOptionalString(panel.icon, `contributes.panels[${idx}].icon`);
+    const normalizedPanel = { ...panel, id, title };
+    if (icon !== undefined) normalizedPanel.icon = icon;
+    normalized.push(normalizedPanel);
   }
-  return list;
+  return normalized;
 }
 
 function validateKeybindings(keybindings) {
   const list = assertArray(keybindings, "contributes.keybindings");
+  const normalized = [];
   for (const [idx, kb] of list.entries()) {
     assertObject(kb, `contributes.keybindings[${idx}]`);
-    assertString(kb.command, `contributes.keybindings[${idx}].command`);
-    assertString(kb.key, `contributes.keybindings[${idx}].key`);
-    assertOptionalString(kb.mac, `contributes.keybindings[${idx}].mac`);
-    assertOptionalString(kb.when, `contributes.keybindings[${idx}].when`);
+    const command = assertString(kb.command, `contributes.keybindings[${idx}].command`);
+    const key = assertString(kb.key, `contributes.keybindings[${idx}].key`);
+    const mac = assertOptionalString(kb.mac, `contributes.keybindings[${idx}].mac`);
+    const when = assertOptionalString(kb.when, `contributes.keybindings[${idx}].when`);
+    const normalizedKb = { ...kb, command, key };
+    if (mac !== undefined) normalizedKb.mac = mac;
+    if (when !== undefined) normalizedKb.when = when;
+    normalized.push(normalizedKb);
   }
-  return list;
+  return normalized;
 }
 
 function validateMenus(menus) {
   if (menus === undefined) return {};
   const obj = assertObject(menus, "contributes.menus");
+  const normalizedMenus = {};
   for (const [menuId, items] of Object.entries(obj)) {
     const list = assertArray(items, `contributes.menus.${menuId}`);
+    const normalizedItems = [];
     for (const [idx, item] of list.entries()) {
       assertObject(item, `contributes.menus.${menuId}[${idx}]`);
-      assertString(item.command, `contributes.menus.${menuId}[${idx}].command`);
-      assertOptionalString(item.when, `contributes.menus.${menuId}[${idx}].when`);
-      assertOptionalString(item.group, `contributes.menus.${menuId}[${idx}].group`);
+      const command = assertString(item.command, `contributes.menus.${menuId}[${idx}].command`);
+      const when = assertOptionalString(item.when, `contributes.menus.${menuId}[${idx}].when`);
+      const group = assertOptionalString(item.group, `contributes.menus.${menuId}[${idx}].group`);
+      const normalizedItem = { ...item, command };
+      if (when !== undefined) normalizedItem.when = when;
+      if (group !== undefined) normalizedItem.group = group;
+      normalizedItems.push(normalizedItem);
     }
+    normalizedMenus[menuId] = normalizedItems;
   }
-  return obj;
+  return normalizedMenus;
 }
 
 function validateCustomFunctions(customFunctions) {
   const list = assertArray(customFunctions, "contributes.customFunctions");
   const seen = new Set();
+  const normalized = [];
   for (const [idx, fn] of list.entries()) {
     assertObject(fn, `contributes.customFunctions[${idx}]`);
     const name = assertString(fn.name, `contributes.customFunctions[${idx}].name`);
     if (seen.has(name)) throw new ManifestError(`Duplicate custom function name: ${name}`);
     seen.add(name);
-    assertOptionalString(fn.description, `contributes.customFunctions[${idx}].description`);
+    const description = assertOptionalString(fn.description, `contributes.customFunctions[${idx}].description`);
 
     const params = assertArray(fn.parameters, `contributes.customFunctions[${idx}].parameters`);
+    const normalizedParams = [];
     for (const [pIdx, p] of params.entries()) {
       assertObject(p, `contributes.customFunctions[${idx}].parameters[${pIdx}]`);
-      assertString(p.name, `contributes.customFunctions[${idx}].parameters[${pIdx}].name`);
-      assertString(p.type, `contributes.customFunctions[${idx}].parameters[${pIdx}].type`);
-      assertOptionalString(
+      const paramName = assertString(p.name, `contributes.customFunctions[${idx}].parameters[${pIdx}].name`);
+      const paramType = assertString(p.type, `contributes.customFunctions[${idx}].parameters[${pIdx}].type`);
+      const paramDescription = assertOptionalString(
         p.description,
-        `contributes.customFunctions[${idx}].parameters[${pIdx}].description`
+        `contributes.customFunctions[${idx}].parameters[${pIdx}].description`,
       );
+      const normalizedParam = { ...p, name: paramName, type: paramType };
+      if (paramDescription !== undefined) normalizedParam.description = paramDescription;
+      normalizedParams.push(normalizedParam);
     }
 
     assertObject(fn.result, `contributes.customFunctions[${idx}].result`);
-    assertString(fn.result.type, `contributes.customFunctions[${idx}].result.type`);
+    const resultType = assertString(fn.result.type, `contributes.customFunctions[${idx}].result.type`);
+    const normalizedFn = { ...fn, name, parameters: normalizedParams, result: { ...fn.result, type: resultType } };
+    if (description !== undefined) normalizedFn.description = description;
+    normalized.push(normalizedFn);
   }
-  return list;
+  return normalized;
 }
 
 function validateDataConnectors(dataConnectors) {
   const list = assertArray(dataConnectors, "contributes.dataConnectors");
   const seen = new Set();
+  const normalized = [];
   for (const [idx, connector] of list.entries()) {
     assertObject(connector, `contributes.dataConnectors[${idx}]`);
     const id = assertString(connector.id, `contributes.dataConnectors[${idx}].id`);
     if (seen.has(id)) throw new ManifestError(`Duplicate dataConnector id: ${id}`);
     seen.add(id);
-    assertString(connector.name, `contributes.dataConnectors[${idx}].name`);
-    assertOptionalString(connector.icon, `contributes.dataConnectors[${idx}].icon`);
+    const name = assertString(connector.name, `contributes.dataConnectors[${idx}].name`);
+    const icon = assertOptionalString(connector.icon, `contributes.dataConnectors[${idx}].icon`);
+    const normalizedConnector = { ...connector, id, name };
+    if (icon !== undefined) normalizedConnector.icon = icon;
+    normalized.push(normalizedConnector);
   }
-  return list;
+  return normalized;
 }
 
 function validateConfiguration(configuration) {
   if (configuration === undefined) return undefined;
   const obj = assertObject(configuration, "contributes.configuration");
-  assertOptionalString(obj.title, "contributes.configuration.title");
+  const title = assertOptionalString(obj.title, "contributes.configuration.title");
 
   const properties = obj.properties ?? obj.settings;
   const props = assertObject(properties, "contributes.configuration.properties");
 
+  const normalizedProps = {};
   for (const [key, prop] of Object.entries(props)) {
     assertObject(prop, `contributes.configuration.properties.${key}`);
-    assertString(prop.type, `contributes.configuration.properties.${key}.type`);
-    assertOptionalString(prop.description, `contributes.configuration.properties.${key}.description`);
+    const type = assertString(prop.type, `contributes.configuration.properties.${key}.type`);
+    const description = assertOptionalString(prop.description, `contributes.configuration.properties.${key}.description`);
+    const normalizedProp = { ...prop, type };
+    if (description !== undefined) normalizedProp.description = description;
+    normalizedProps[key] = normalizedProp;
   }
 
-  return { ...obj, properties: props };
+  const normalizedConfiguration = { ...obj, properties: normalizedProps };
+  if (title !== undefined) normalizedConfiguration.title = title;
+  return normalizedConfiguration;
 }
 
 function validatePermissions(permissions) {
@@ -236,11 +286,15 @@ function validatePermissions(permissions) {
           `permissions[${idx}] must be a permission string or an object with a single permission key`
         );
       }
-      const key = String(keys[0]);
+      const rawKey = keys[0];
+      const key = String(rawKey).trim();
+      if (key.length === 0) {
+        throw new ManifestError(`Invalid permission: ${key}`);
+      }
       if (!VALID_PERMISSIONS.has(key)) {
         throw new ManifestError(`Invalid permission: ${key}`);
       }
-      normalized.push(key);
+      normalized.push({ [key]: perm[rawKey] });
       continue;
     }
 
@@ -256,21 +310,26 @@ function validateActivationEvents(activationEvents, contributes) {
   const knownCustomFunctions = new Set((contributes.customFunctions ?? []).map((f) => f.name));
   const knownDataConnectors = new Set((contributes.dataConnectors ?? []).map((c) => c.id));
 
+  const normalized = [];
   for (const [idx, event] of list.entries()) {
     const ev = assertString(event, `activationEvents[${idx}]`);
-    if (ev === "onStartupFinished") continue;
+    if (ev === "onStartupFinished") {
+      normalized.push(ev);
+      continue;
+    }
 
     if (ev.startsWith("onCommand:")) {
-      const id = ev.slice("onCommand:".length);
+      const id = ev.slice("onCommand:".length).trim();
       if (!knownCommands.has(id)) {
         throw new ManifestError(`activationEvents references unknown command: ${id}`);
       }
+      normalized.push(`onCommand:${id}`);
       continue;
     }
 
     if (ev.startsWith("onView:")) {
-      const id = ev.slice("onView:".length);
-      if (id.trim().length === 0) {
+      const id = ev.slice("onView:".length).trim();
+      if (id.length === 0) {
         throw new ManifestError("activationEvents references empty view/panel id");
       }
       // `onView:*` is used to activate an extension when its own contributed panel/view is opened.
@@ -279,29 +338,32 @@ function validateActivationEvents(activationEvents, contributes) {
       if (!knownPanels.has(id)) {
         throw new ManifestError(`activationEvents references unknown view/panel: ${id}`);
       }
+      normalized.push(`onView:${id}`);
       continue;
     }
 
     if (ev.startsWith("onCustomFunction:")) {
-      const name = ev.slice("onCustomFunction:".length);
+      const name = ev.slice("onCustomFunction:".length).trim();
       if (!knownCustomFunctions.has(name)) {
         throw new ManifestError(`activationEvents references unknown custom function: ${name}`);
       }
+      normalized.push(`onCustomFunction:${name}`);
       continue;
     }
 
     if (ev.startsWith("onDataConnector:")) {
-      const id = ev.slice("onDataConnector:".length);
+      const id = ev.slice("onDataConnector:".length).trim();
       if (!knownDataConnectors.has(id)) {
         throw new ManifestError(`activationEvents references unknown data connector: ${id}`);
       }
+      normalized.push(`onDataConnector:${id}`);
       continue;
     }
 
     throw new ManifestError(`Unsupported activation event: ${ev}`);
   }
 
-  return list;
+  return normalized;
 }
 
 function validateExtensionManifest(manifest, options = {}) {
@@ -309,42 +371,42 @@ function validateExtensionManifest(manifest, options = {}) {
 
   const obj = assertObject(manifest, "manifest");
 
-  assertString(obj.name, "name");
-  assertString(obj.version, "version");
-  assertString(obj.publisher, "publisher");
-  assertString(obj.main, "main");
+  const name = assertString(obj.name, "name");
+  const version = assertString(obj.version, "version");
+  const publisher = assertString(obj.publisher, "publisher");
+  const main = assertString(obj.main, "main");
   const moduleEntry = assertOptionalString(obj.module, "module");
   const browserEntry = assertOptionalString(obj.browser, "browser");
 
-  assertEntrypointExtension(obj.main, "main", MAIN_ENTRYPOINT_EXTS);
+  assertEntrypointExtension(main, "main", MAIN_ENTRYPOINT_EXTS);
   if (moduleEntry !== undefined) {
-    if (moduleEntry.trim().length === 0) {
+    if (moduleEntry.length === 0) {
       throw new ManifestError("module must be a non-empty string");
     }
     assertEntrypointExtension(moduleEntry, "module", ESM_ENTRYPOINT_EXTS);
   }
   if (browserEntry !== undefined) {
-    if (browserEntry.trim().length === 0) {
+    if (browserEntry.length === 0) {
       throw new ManifestError("browser must be a non-empty string");
     }
     assertEntrypointExtension(browserEntry, "browser", ESM_ENTRYPOINT_EXTS);
   }
 
-  if (!isValidSemver(obj.version.trim())) {
-    throw new ManifestError(`Invalid version: ${obj.version}`);
+  if (!isValidSemver(version)) {
+    throw new ManifestError(`Invalid version: ${version}`);
   }
 
   const engines = assertObject(obj.engines, "engines");
-  assertString(engines.formula, "engines.formula");
+  const formulaRange = assertString(engines.formula, "engines.formula");
 
   if (enforceEngine) {
     if (typeof engineVersion !== "string" || engineVersion.trim().length === 0) {
       throw new ManifestError("engineVersion is required when enforceEngine is true");
     }
 
-    if (!satisfies(engineVersion, engines.formula)) {
+    if (!satisfies(engineVersion, formulaRange)) {
       throw new ManifestError(
-        `Extension engine mismatch: formula ${engineVersion} does not satisfy ${engines.formula}`
+        `Extension engine mismatch: formula ${engineVersion} does not satisfy ${formulaRange}`
       );
     }
   }
@@ -368,12 +430,21 @@ function validateExtensionManifest(manifest, options = {}) {
     configuration,
   };
 
-  validateActivationEvents(obj.activationEvents, validatedContributes);
-  validatePermissions(obj.permissions);
+  const activationEvents = validateActivationEvents(obj.activationEvents, validatedContributes);
+  const permissions = validatePermissions(obj.permissions);
 
   return {
     ...obj,
+    name,
+    version,
+    publisher,
+    main,
+    engines: { ...engines, formula: formulaRange },
     contributes: validatedContributes,
+    activationEvents,
+    permissions,
+    ...(moduleEntry !== undefined ? { module: moduleEntry } : {}),
+    ...(browserEntry !== undefined ? { browser: browserEntry } : {}),
   };
 }
 

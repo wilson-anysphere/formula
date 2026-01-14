@@ -331,3 +331,56 @@ test("manifest validation: main entrypoint must be CommonJS (.js/.cjs)", () => {
     /main entrypoint must end with/i
   );
 });
+
+test("manifest validation: trims canonical string fields (ids, entrypoints, activation events, permissions)", () => {
+  const validated = validateExtensionManifest(
+    {
+      name: " x ",
+      version: " 1.0.0 ",
+      publisher: " p ",
+      main: " ./dist/extension.js ",
+      engines: { formula: " ^1.0.0 " },
+      activationEvents: [" onCommand: test.cmd "],
+      permissions: [" ui.commands "],
+      contributes: {
+        commands: [
+          {
+            command: " test.cmd ",
+            title: " Test Command ",
+            keywords: [" hello ", " world "]
+          }
+        ]
+      }
+    },
+    { engineVersion: "1.0.0", enforceEngine: true }
+  );
+
+  assert.equal(validated.name, "x");
+  assert.equal(validated.version, "1.0.0");
+  assert.equal(validated.publisher, "p");
+  assert.equal(validated.main, "./dist/extension.js");
+  assert.deepEqual(validated.activationEvents, ["onCommand:test.cmd"]);
+  assert.deepEqual(validated.permissions, ["ui.commands"]);
+  assert.equal(validated.engines.formula, "^1.0.0");
+
+  assert.equal(validated.contributes.commands.length, 1);
+  assert.equal(validated.contributes.commands[0].command, "test.cmd");
+  assert.equal(validated.contributes.commands[0].title, "Test Command");
+  assert.deepEqual(validated.contributes.commands[0].keywords, ["hello", "world"]);
+});
+
+test("manifest validation: trims permission object keys (while preserving values)", () => {
+  const validated = validateExtensionManifest(
+    {
+      name: "x",
+      version: "1.0.0",
+      publisher: "p",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      permissions: [{ " network ": { mode: "allowlist", hosts: ["example.com"] } }]
+    },
+    { enforceEngine: false }
+  );
+
+  assert.deepEqual(validated.permissions, [{ network: { mode: "allowlist", hosts: ["example.com"] } }]);
+});
