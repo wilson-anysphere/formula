@@ -221,12 +221,14 @@ export class FilePersistence {
   private scheduleCompaction(docName: string, doc: YTypes.Doc) {
     if (this.compactTimers.has(docName)) return;
 
-    const timer = setTimeout(() => {
-      this.compactTimers.delete(docName);
-      if (!this.shouldPersist(docName)) return;
-      if (this.disabledDocs.has(docName)) return;
-      void this.compactNow(docName, doc);
-    }, 250);
+      const timer = setTimeout(() => {
+        this.compactTimers.delete(docName);
+        if (!this.shouldPersist(docName)) return;
+        if (this.disabledDocs.has(docName)) return;
+        void this.compactNow(docName, doc).catch(() => {
+          // Best-effort: compaction should not surface as an unhandled rejection when triggered from a timer.
+        });
+      }, 250);
 
     this.compactTimers.set(docName, timer);
   }
