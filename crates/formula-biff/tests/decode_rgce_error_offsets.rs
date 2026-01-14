@@ -91,3 +91,77 @@ fn decode_rgce_reports_offset_for_truncated_ptgarray_header() {
         "expected UnexpectedEof at offset 0 for ptg=0x20, got {err:?}"
     );
 }
+
+#[test]
+fn decode_rgce_reports_offset_for_unknown_function_id() {
+    // PtgFuncVar with an unknown function id should report its offset/ptg.
+    let err = decode_rgce(&[0x22, 0x00, 0xFF, 0xFF]).expect_err("expected unknown function id");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::UnknownFunctionId {
+                offset: 0,
+                ptg: 0x22,
+                func_id: 0xFFFF
+            }
+        ),
+        "expected UnknownFunctionId at offset 0 for ptg=0x22, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_invalid_utf16() {
+    // Prefix to make the failing token offset non-zero.
+    // PtgStr(cch=1, unit=0xD800) is invalid (unpaired surrogate).
+    let rgce = [0x1E, 0x01, 0x00, 0x17, 0x01, 0x00, 0x00, 0xD8];
+    let err = decode_rgce(&rgce).expect_err("expected invalid utf16");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::InvalidUtf16 {
+                offset: 3,
+                ptg: 0x17
+            }
+        ),
+        "expected InvalidUtf16 at offset 3 for ptg=0x17, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_unsupported_token_after_prefix() {
+    // Prefix the failing token with a 3-byte PtgInt so the unsupported token offset is non-zero.
+    let rgce = [0x1E, 0x01, 0x00, 0xFF];
+    let err = decode_rgce(&rgce).expect_err("expected unsupported token");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::UnsupportedToken {
+                offset: 3,
+                ptg: 0xFF
+            }
+        ),
+        "expected UnsupportedToken at offset 3 for ptg=0xFF, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_error_messages_include_ptg_and_offset() {
+    // Keep this test intentionally broad: we just want to ensure the Display strings always
+    // include enough context for diagnostics tooling (ptg + rgce offset).
+    let cases = [
+        decode_rgce(&[0xFF]).unwrap_err(),                      // UnsupportedToken
+        decode_rgce(&[0x17]).unwrap_err(),                      // UnexpectedEof
+        decode_rgce(&[0x03]).unwrap_err(),                      // StackUnderflow
+        decode_rgce(&[0x22, 0x00, 0xFF, 0xFF]).unwrap_err(),    // UnknownFunctionId
+        decode_rgce(&[0x17, 0x01, 0x00, 0x00, 0xD8]).unwrap_err(), // InvalidUtf16
+        decode_rgce(&[0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00]).unwrap_err(), // StackNotSingular
+    ];
+
+    for err in cases {
+        let msg = err.to_string();
+        assert!(
+            msg.contains("ptg=0x") && msg.contains("offset"),
+            "expected error message to contain ptg and offset, got: {msg}"
+        );
+    }
+}
