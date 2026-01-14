@@ -3391,6 +3391,15 @@ impl FieldIndices {
                     if let Some(idx) = source.field_index(&quoted) {
                         return Ok(idx);
                     }
+
+                    // Rare: quoted table name but raw (unescaped) column name.
+                    let quoted_table = dax_quoted_table_name(table);
+                    let quoted_unescaped = format!("'{quoted_table}'[{column}]");
+                    if quoted_unescaped != quoted {
+                        if let Some(idx) = source.field_index(&quoted_unescaped) {
+                            return Ok(idx);
+                        }
+                    }
                 }
                 PivotFieldRef::CacheFieldName(_) => {}
             }
@@ -3765,6 +3774,52 @@ mod tests {
         assert_eq!(
             result.data[0][0],
             PivotValue::Text("Sales Table[Region]".to_string())
+        );
+    }
+
+    #[test]
+    fn pivot_header_resolves_quoted_table_with_unescaped_brackets_in_column_caption() {
+        let data = vec![
+            pv_row(&["'Sales Table'[A]B]".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: PivotFieldRef::DataModelColumn {
+                    table: "Sales Table".to_string(),
+                    column: "A]B".to_string(),
+                },
+                sort_order: SortOrder::default(),
+                manual_sort: None,
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data[0][0],
+            PivotValue::Text("Sales Table[A]]B]".to_string())
         );
     }
 
