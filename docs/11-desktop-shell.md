@@ -451,7 +451,7 @@ list and verification commands, see `docs/release.md` (“Verifying a release”
 Notable keys:
 
 - `bundle.fileAssociations` registers spreadsheet file types with the OS:
-  `.xlsx`, `.xls`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
+  `.xlsx`, `.xls`, `.xlt`, `.xla`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
   - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
 - `plugins.deep-link.desktop.schemes` registers **URL schemes** (deep links) with the OS at **bundle/install time**.
   - In this repo we use the `formula://...` scheme for OAuth redirects; ensure `schemes` includes `"formula"`.
@@ -728,7 +728,7 @@ In addition to drag & drop, the desktop shell supports opening workbooks via:
 Implementation notes:
 
 - `apps/desktop/src-tauri/src/open_file.rs` extracts supported spreadsheet paths from argv-style inputs (and also supports `file://...` URLs used by macOS open-document events).
-  - Extension-based support is case-insensitive: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (+ `parquet` when compiled with the `parquet` feature).
+  - Extension-based support is case-insensitive: `xlsx`, `xls`, `xlt`, `xla`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (+ `parquet` when compiled with the `parquet` feature).
   - If the extension is missing or unsupported, it falls back to a lightweight content sniff (`file_io::looks_like_workbook`) so “downloaded/renamed” workbooks can still be opened from OS open-file events.
 - `main.rs` uses a small in-memory queue (`OpenFileState`, implemented in `apps/desktop/src-tauri/src/open_file_ipc.rs`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
   - Backend emits: `open-file` (payload: `string[]` paths)
