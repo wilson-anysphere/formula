@@ -1159,7 +1159,23 @@ impl<'a> FragmentCursor<'a> {
             match ptg {
                 // PtgExp / PtgTbl: shared/array formula tokens.
                 0x01 | 0x02 => {
-                    let bytes = self.read_bytes(4)?;
+                    // Canonical BIFF8 payload is 4 bytes (`[rw:u16][col:u16]`).
+                    //
+                    // Best-effort: some producers emit wider coordinates (e.g. `[rw:u32][col:u16]`
+                    // or `[rw:u32][col:u32]`) even in `.xls` files. Those appear as *non-canonical*
+                    // token stream lengths where the entire `rgce` is just `PtgExp`/`PtgTbl`:
+                    //   cce = 1 + payload_len
+                    //
+                    // Preserve the normal fixed-width behavior so subsequent tokens (e.g. `PtgStr`)
+                    // stay aligned and we can still skip continuation flags.
+                    let remaining = cce.saturating_sub(out.len());
+                    let payload_len = match (out.len(), remaining) {
+                        // Non-standard payload widths: treat the whole stream as a single token.
+                        (1, 6) | (1, 8) => remaining,
+                        // Canonical BIFF8.
+                        _ => 4.min(remaining),
+                    };
+                    let bytes = self.read_bytes(payload_len)?;
                     out.extend_from_slice(&bytes);
                 }
                 // Binary operators.

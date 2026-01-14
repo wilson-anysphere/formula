@@ -19,6 +19,11 @@ fn imports_shared_formula_with_wide_ptgexp_payload() {
     // SHRFMLA definition and decode the correct shifted formula.
     let bytes = xls_fixture_builder::build_shared_formula_ptgexp_u32_row_u16_col_fixture_xls();
     let result = import_fixture(&bytes);
+    assert!(
+        result.warnings.is_empty(),
+        "unexpected import warnings: {:?}",
+        result.warnings
+    );
 
     let sheet = result
         .workbook
@@ -30,4 +35,3 @@ fn imports_shared_formula_with_wide_ptgexp_payload() {
     assert_eq!(formula, "A3*2");
     assert_parseable_formula(formula);
 }
-

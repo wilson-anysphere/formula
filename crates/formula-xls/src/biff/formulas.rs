@@ -1081,9 +1081,23 @@ pub(crate) fn materialize_biff8_rgce_from_base(
 
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
     // BIFF8 PtgExp: [0x01][rw: u16][col: u16]
+    //
+    // Best-effort: some producers emit a non-standard 6-byte payload (BIFF12-style coordinate
+    // widths) even in BIFF8 `.xls` files:
+    //   [0x01][rw: u32][col: u16]
     if rgce.first().copied()? != 0x01 {
         return None;
     }
+
+    // Non-standard "wide" payload layout: [rw:u32][col:u16] (7 bytes total).
+    if rgce.len() == 7 {
+        let row = u32::from_le_bytes([rgce[1], rgce[2], rgce[3], rgce[4]]);
+        let col = u16::from_le_bytes([rgce[5], rgce[6]]) as u32;
+        if row <= BIFF8_MAX_ROW0 as u32 && col <= BIFF8_MAX_COL0 as u32 {
+            return Some((row, col));
+        }
+    }
+
     if rgce.len() < 5 {
         return None;
     }
