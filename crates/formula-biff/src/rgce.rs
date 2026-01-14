@@ -29,6 +29,13 @@ pub enum DecodeRgceError {
     /// Failed to decode a UTF-16 string literal payload.
     #[error("invalid utf16 string payload decoding ptg=0x{ptg:02X} at rgce offset {offset}")]
     InvalidUtf16 { offset: usize, ptg: u8 },
+    /// Decoding exceeded the maximum output size derived from the input length.
+    #[error("formula decode exceeded max_len={max_len} decoding ptg=0x{ptg:02X} at rgce offset {offset}")]
+    OutputTooLarge {
+        offset: usize,
+        ptg: u8,
+        max_len: usize,
+    },
     /// After decoding, the expression stack didn't contain exactly one item.
     #[error("formula decoded with stack_len={stack_len} at rgce offset {offset} (ptg=0x{ptg:02X}, expected 1)")]
     StackNotSingular {
@@ -46,6 +53,7 @@ impl DecodeRgceError {
             DecodeRgceError::StackUnderflow { offset, .. } => offset,
             DecodeRgceError::UnknownFunctionId { offset, .. } => offset,
             DecodeRgceError::InvalidUtf16 { offset, .. } => offset,
+            DecodeRgceError::OutputTooLarge { offset, .. } => offset,
             DecodeRgceError::StackNotSingular { offset, .. } => offset,
         }
     }
@@ -57,6 +65,7 @@ impl DecodeRgceError {
             DecodeRgceError::StackUnderflow { ptg, .. } => Some(ptg),
             DecodeRgceError::UnknownFunctionId { ptg, .. } => Some(ptg),
             DecodeRgceError::InvalidUtf16 { ptg, .. } => Some(ptg),
+            DecodeRgceError::OutputTooLarge { ptg, .. } => Some(ptg),
             DecodeRgceError::StackNotSingular { ptg, .. } => Some(ptg),
         }
     }
@@ -733,6 +742,20 @@ fn decode_rgce_impl(
     if rgce.is_empty() {
         return Ok(String::new());
     }
+
+    // Prevent pathological output expansion (e.g. from malformed tokens, or from future token
+    // support that expands to workbook-context-backed names).
+    const MAX_OUTPUT_FACTOR: usize = 10;
+    // Clamp the decoded output to a conservative upper bound to avoid allocating huge strings.
+    const MAX_OUTPUT_LEN: usize = 1_000_000;
+    // Some ptgs (notably `PtgArray`) reference additional data stored in the trailing `rgcb`
+    // buffer. Include it when deriving an upper bound so we don't reject legitimate array
+    // constants whose `rgce` stream is tiny but `rgcb` is not.
+    let max_len = rgce
+        .len()
+        .saturating_add(rgcb.map_or(0, |b| b.len()))
+        .saturating_mul(MAX_OUTPUT_FACTOR)
+        .min(MAX_OUTPUT_LEN);
 
     let mut i = 0usize;
     let mut rgcb_pos = 0usize;
@@ -1751,6 +1774,14 @@ fn decode_rgce_impl(
                     ptg,
                 })
             }
+        }
+
+        if stack.last().is_some_and(|s| s.text.len() > max_len) {
+            return Err(DecodeRgceError::OutputTooLarge {
+                offset: ptg_offset,
+                ptg,
+                max_len,
+            });
         }
     }
 
