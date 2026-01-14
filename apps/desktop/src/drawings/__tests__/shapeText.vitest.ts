@@ -104,6 +104,33 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("1. First\n2. Second");
   });
 
+  it("supports alpha/roman buAutoNum formats (parenBoth)", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr><a:buAutoNum type="alphaLcParenBoth" startAt="1"/></a:pPr>
+            <a:r><a:t>First</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:pPr><a:buAutoNum type="alphaLcParenBoth" startAt="1"/></a:pPr>
+            <a:r><a:t>Second</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:pPr><a:buAutoNum type="romanUcParenBoth" startAt="3"/></a:pPr>
+            <a:r><a:t>Third</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("(a) First\n(b) Second\n(III) Third");
+  });
+
   it("decodes numeric XML entities (including code points > 0xFFFF)", () => {
     const rawXml = `
       <xdr:sp>

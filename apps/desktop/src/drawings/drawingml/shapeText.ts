@@ -89,6 +89,8 @@ function formatAutoNumber(type: string, num: number): string {
       return `${n})`;
     case "arabicParenBoth":
       return `(${n})`;
+    case "arabicPlain":
+      return `${n}`;
     case "alphaLcPeriod":
       return `${alphaIndex(n, false)}.`;
     case "alphaUcPeriod":
@@ -97,6 +99,10 @@ function formatAutoNumber(type: string, num: number): string {
       return `${alphaIndex(n, false)})`;
     case "alphaUcParenR":
       return `${alphaIndex(n, true)})`;
+    case "alphaLcParenBoth":
+      return `(${alphaIndex(n, false)})`;
+    case "alphaUcParenBoth":
+      return `(${alphaIndex(n, true)})`;
     case "romanLcPeriod":
       return `${romanNumeral(n).toLowerCase()}.`;
     case "romanUcPeriod":
@@ -105,6 +111,10 @@ function formatAutoNumber(type: string, num: number): string {
       return `${romanNumeral(n).toLowerCase()})`;
     case "romanUcParenR":
       return `${romanNumeral(n)})`;
+    case "romanLcParenBoth":
+      return `(${romanNumeral(n).toLowerCase()})`;
+    case "romanUcParenBoth":
+      return `(${romanNumeral(n)})`;
     default:
       return `${n}.`;
   }
