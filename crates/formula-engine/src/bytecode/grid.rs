@@ -133,6 +133,10 @@ pub trait Grid: Sync {
     /// This is used by volatile reference functions like `INDIRECT` that parse sheet names at
     /// runtime. Multi-sheet backends (like the engine) should override this. Single-sheet
     /// backends can rely on the default implementation, which does not resolve any names.
+    ///
+    /// Expected semantics: match Excel's Unicode-aware sheet name comparison by applying Unicode
+    /// NFKC (compatibility normalization) and then Unicode uppercasing (see
+    /// [`formula_model::sheet_name_eq_case_insensitive`]).
     #[inline]
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
         None
