@@ -1515,6 +1515,76 @@ impl Engine {
         &mut self,
         pivot_id: PivotTableId,
     ) -> Result<PivotRefreshOutput, PivotRefreshError> {
+        // `refresh_pivot` uses per-cell write/clear calls. In automatic calculation mode, those
+        // would trigger recalculation repeatedly, which is prohibitively expensive for large pivot
+        // outputs. Temporarily force manual mode so we can recalculate at most once at the end.
+        let previous = self.calc_settings.clone();
+        let forced_manual = previous.calculation_mode != CalculationMode::Manual;
+        if forced_manual {
+            let mut manual = previous.clone();
+            manual.calculation_mode = CalculationMode::Manual;
+            self.set_calc_settings(manual);
+        }
+
+        let result = self.refresh_pivot_table_internal(pivot_id);
+
+        if forced_manual {
+            self.set_calc_settings(previous.clone());
+            // Best-effort: the refresh may have partially written output before returning an error.
+            // Recalculate once so downstream formulas see a coherent state.
+            if previous.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
+            }
+        }
+
+        result
+    }
+
+    /// Refresh all pivot tables in deterministic workbook order, writing their outputs into the
+    /// destination worksheets.
+    pub fn refresh_all_pivots(
+        &mut self,
+    ) -> Result<Vec<(PivotTableId, PivotRefreshOutput)>, PivotRefreshError> {
+        // Determine refresh order before mutating the pivot map.
+        let tab_index = self.workbook.tab_index_by_sheet_id();
+        let mut ids: Vec<PivotTableId> = self.workbook.pivots.keys().copied().collect();
+        ids.sort_by_key(|id| {
+            let Some(pivot) = self.workbook.pivots.get(id) else {
+                return (usize::MAX, u32::MAX, u32::MAX, *id);
+            };
+            let sheet_id = self.workbook.sheet_id(&pivot.destination.sheet).unwrap_or(usize::MAX);
+            let tab = tab_index.get(sheet_id).copied().unwrap_or(usize::MAX);
+            (tab, pivot.destination.cell.row, pivot.destination.cell.col, *id)
+        });
+
+        let previous = self.calc_settings.clone();
+        let forced_manual = previous.calculation_mode != CalculationMode::Manual;
+        if forced_manual {
+            let mut manual = previous.clone();
+            manual.calculation_mode = CalculationMode::Manual;
+            self.set_calc_settings(manual);
+        }
+
+        let mut outputs = Vec::with_capacity(ids.len());
+        for id in ids {
+            let out = self.refresh_pivot_table_internal(id)?;
+            outputs.push((id, out));
+        }
+
+        if forced_manual {
+            self.set_calc_settings(previous.clone());
+            if previous.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
+            }
+        }
+
+        Ok(outputs)
+    }
+
+    fn refresh_pivot_table_internal(
+        &mut self,
+        pivot_id: PivotTableId,
+    ) -> Result<PivotRefreshOutput, PivotRefreshError> {
         let mut def = self
             .workbook
             .pivots
