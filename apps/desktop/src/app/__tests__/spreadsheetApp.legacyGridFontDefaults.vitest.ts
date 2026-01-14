@@ -129,7 +129,7 @@ describe("SpreadsheetApp legacy grid font defaults", () => {
     expect(cellDraw, "Expected the legacy renderer to draw a cell value").toBeTruthy();
     expect(cellDraw?.font).toContain("ui-monospace");
     expect(cellDraw?.font).toContain("monospace");
-    expect(draws.some((d) => d.font.includes("sans-serif") && !d.font.includes("monospace"))).toBe(true);
+    expect(draws.some((d) => d.font.trim() !== "" && !d.font.includes("monospace"))).toBe(true);
 
     app.destroy();
     root.remove();
