@@ -115,4 +115,27 @@ test.describe("focus cycling (Excel-style F6)", () => {
     await dispatchF6(page, { shiftKey: true });
     await expect(page.getByTestId("command-palette-input")).toBeFocused();
   });
+
+  test("F6 does not cycle focus while a ribbon dropdown menu (keybinding barrier) is open", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const viewTab = page.getByTestId("ribbon-tab-view");
+    await expect(viewTab).toBeVisible();
+    await viewTab.click();
+
+    const themeSelector = page.getByTestId("theme-selector");
+    await expect(themeSelector).toBeVisible();
+    await themeSelector.click();
+
+    // Menu open signal.
+    await expect(page.getByTestId("theme-option-dark")).toBeVisible();
+
+    await expect(themeSelector).toBeFocused();
+
+    await dispatchF6(page);
+    await expect(themeSelector).toBeFocused();
+
+    await dispatchF6(page, { shiftKey: true });
+    await expect(themeSelector).toBeFocused();
+  });
 });
