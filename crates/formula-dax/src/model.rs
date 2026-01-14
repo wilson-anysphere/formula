@@ -884,7 +884,14 @@ impl DataModel {
             }
         }
 
-        let mut to_index_updates = Vec::new();
+        // Collect updates to relationship indexes. We stage these so we can validate referential
+        // integrity / uniqueness before mutating any relationship state.
+        //
+        // Each entry is:
+        // - relationship index
+        // - inserted key value on the `to_table` side
+        // - whether that key was already present in the relationship's `to_index` before insert
+        let mut to_index_updates: Vec<(usize, Value, bool)> = Vec::new();
         for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
             let rel = &rel_info.rel;
             if rel.to_table == table {
