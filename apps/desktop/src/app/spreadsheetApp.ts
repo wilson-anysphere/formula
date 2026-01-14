@@ -2625,61 +2625,61 @@ export class SpreadsheetApp {
       return value;
     };
 
-       // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
-       // chart models only when the chart count decreases to avoid allocating on every drag tick.
-       let chartCountForCanvasModelPrune = 0;
-       this.chartStore = new ChartStore({
+    // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
+    // chart models only when the chart count decreases to avoid allocating on every drag tick.
+    let chartCountForCanvasModelPrune = 0;
+    this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
       getCellValue: getChartCellValue,
       // Creating/removing charts should not force a full data re-scan for *every* existing chart.
       // `renderCharts(false)` updates chart positioning and ensures newly-created charts have a
       // cached ChartModel. Data refreshes happen only for charts marked dirty by cell/computed
-         // changes (see `dirtyChartIds`).
-         onChange: () => {
-           // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
-           // (Without this, deleting many charts over a long session can leave their cached models alive
-           // indefinitely because the adapter is only queried for charts that are still rendered.)
-           const charts = this.chartStore.listCharts();
-           const prevCount = chartCountForCanvasModelPrune;
-           const countChanged = charts.length !== prevCount;
-            if (charts.length < prevCount) {
-              // Keep memory bounded: prune any cached per-chart metadata for charts that were deleted.
-              let keep: Set<string> | null = null;
-              try {
-                keep = new Set(charts.map((chart) => chart.id));
-                this.chartCanvasStoreAdapter.pruneEntries(keep);
-              } catch {
-                // Best-effort: ignore pruning failures.
-              }
+      // changes (see `dirtyChartIds`).
+      onChange: () => {
+        // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
+        // (Without this, deleting many charts over a long session can leave their cached models alive
+        // indefinitely because the adapter is only queried for charts that are still rendered.)
+        const charts = this.chartStore.listCharts();
+        const prevCount = chartCountForCanvasModelPrune;
+        const countChanged = charts.length !== prevCount;
+        if (charts.length < prevCount) {
+          // Keep memory bounded: prune any cached per-chart metadata for charts that were deleted.
+          let keep: Set<string> | null = null;
+          try {
+            keep = new Set(charts.map((chart) => chart.id));
+            this.chartCanvasStoreAdapter.pruneEntries(keep);
+          } catch {
+            // Best-effort: ignore pruning failures.
+          }
 
-              // `markChartsDirtyFromDeltas` caches per-chart range rects; keep it bounded as charts are deleted.
-              if (keep) {
-                for (const id of this.chartRangeRectsCache.keys()) {
-                  if (!keep.has(id)) this.chartRangeRectsCache.delete(id);
-                }
-                for (const id of this.chartHasFormulaCells.keys()) {
-                  if (!keep.has(id)) this.chartHasFormulaCells.delete(id);
-                }
-                for (const id of this.dirtyChartIds) {
-                  if (!keep.has(id)) this.dirtyChartIds.delete(id);
-                }
-              }
+          // `markChartsDirtyFromDeltas` caches per-chart range rects; keep it bounded as charts are deleted.
+          if (keep) {
+            for (const id of this.chartRangeRectsCache.keys()) {
+              if (!keep.has(id)) this.chartRangeRectsCache.delete(id);
             }
-           chartCountForCanvasModelPrune = charts.length;
-
-            if (this.useCanvasCharts) {
-              this.renderDrawings();
-              // When canvas charts are enabled (default) ChartStore charts are rendered as drawing objects, so
-              // consumers like Selection Pane + split view need a drawings-changed signal when
-              // charts are created or deleted (but *not* for per-tick anchor updates).
-              if (countChanged) this.dispatchDrawingsChanged();
-              else this.scheduleDrawingsChangedWindowEvent();
-            } else {
-              this.renderCharts(false);
+            for (const id of this.chartHasFormulaCells.keys()) {
+              if (!keep.has(id)) this.chartHasFormulaCells.delete(id);
+            }
+            for (const id of this.dirtyChartIds) {
+              if (!keep.has(id)) this.dirtyChartIds.delete(id);
             }
           }
-        });
+        }
+        chartCountForCanvasModelPrune = charts.length;
+
+        if (this.useCanvasCharts) {
+          this.renderDrawings();
+          // When canvas charts are enabled (default), ChartStore charts are rendered as drawing objects, so
+          // consumers like Selection Pane + split view need a drawings-changed signal when
+          // charts are created or deleted (but *not* for per-tick anchor updates).
+          if (countChanged) this.dispatchDrawingsChanged();
+          else this.scheduleDrawingsChangedWindowEvent();
+        } else {
+          this.renderCharts(false);
+        }
+      },
+    });
     chartCountForCanvasModelPrune = this.chartStore.listCharts().length;
 
     this.chartCanvasStoreAdapter = new ChartCanvasStoreAdapter({
