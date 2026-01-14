@@ -69,3 +69,11 @@ test("validate-windows-bundles.ps1 accepts common Excel ProgId evidence for .xls
     "Expected validator to accept Excel.Sheet.12-style ProgId evidence for .xlsx associations (Registry fallback).",
   );
 });
+
+test("validate-windows-bundles.ps1 prefers validating the stable formula:// scheme when multiple schemes exist", () => {
+  assert.match(
+    text,
+    /-contains\s+\"formula\"/,
+    "Expected validator to explicitly prefer validating the 'formula' URL scheme when it exists in the configured scheme list.",
+  );
+});
