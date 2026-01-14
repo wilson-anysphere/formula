@@ -234,7 +234,15 @@
   color: inherit;
 }
 
+.formula-table-filter-dropdown .formula-sort-filter__row:hover {
+  background: var(--formula-grid-scrollbar-track, var(--bg-hover));
+}
+
 .formula-table-filter-dropdown .formula-sort-filter__row:focus-within {
+  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__checkbox:focus-visible {
   outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
 }
 
@@ -242,6 +250,14 @@
   background: var(--formula-grid-bg, var(--bg-primary));
   color: inherit;
   border-color: var(--formula-grid-line, var(--border));
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__button:not(.formula-sort-filter__button--primary):hover:not(:disabled) {
+  background: var(--formula-grid-scrollbar-track, var(--bg-hover));
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__button:not(.formula-sort-filter__button--primary):active:not(:disabled) {
+  background: var(--formula-grid-scrollbar-track, var(--bg-active));
 }
 
 .formula-table-filter-dropdown .formula-sort-filter__button:focus-visible {
