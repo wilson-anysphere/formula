@@ -5,10 +5,10 @@ use base64::Engine as _;
 use digest::Digest as _;
 
 use crate::offcrypto::{
-    decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key, hash_password, AesCbcDecryptError,
-    decode_base64_field_limited, extract_encryption_info_xml, HashAlgorithm, OffCryptoError,
-    ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
-    VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
+    decode_base64_field_limited, decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key,
+    derive_segment_iv, extract_encryption_info_xml, hash_password, AesCbcDecryptError, HashAlgorithm,
+    OffCryptoError, ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK,
+    VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
 };
 use super::encryption_info::decode_encryption_info_xml_text;
 
@@ -707,48 +707,6 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
     })
 }
 
-fn derive_segment_iv(
-    salt: &[u8],
-    segment_index: u32,
-    hash_alg: HashAlgorithm,
-    iv_len: usize,
-) -> [u8; AES_BLOCK_SIZE] {
-    debug_assert_eq!(
-        iv_len, AES_BLOCK_SIZE,
-        "Agile keyData.blockSize must match AES block size"
-    );
-
-    let idx = segment_index.to_le_bytes();
-    let mut iv = [0u8; AES_BLOCK_SIZE];
-    match hash_alg {
-        HashAlgorithm::Sha1 => {
-            let mut h = sha1::Sha1::new();
-            h.update(salt);
-            h.update(&idx);
-            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
-        }
-        HashAlgorithm::Sha256 => {
-            let mut h = sha2::Sha256::new();
-            h.update(salt);
-            h.update(&idx);
-            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
-        }
-        HashAlgorithm::Sha384 => {
-            let mut h = sha2::Sha384::new();
-            h.update(salt);
-            h.update(&idx);
-            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
-        }
-        HashAlgorithm::Sha512 => {
-            let mut h = sha2::Sha512::new();
-            h.update(salt);
-            h.update(&idx);
-            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
-        }
-    }
-    iv
-}
-
 /// Decrypt an MS-OFFCRYPTO Agile `EncryptedPackage` stream given the decrypted package key.
 pub fn decrypt_agile_encrypted_package_stream_with_key(
     encrypted_package_stream: &[u8],
@@ -841,9 +799,9 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
         let iv = derive_segment_iv(
             &key_data.salt_value,
             segment_index,
-            key_data.hash_algorithm,
             key_data.block_size as usize,
-        );
+            key_data.hash_algorithm,
+        )?;
         let mut decrypted = ciphertext[offset..offset + seg_len].to_vec();
         decrypt_aes_cbc_no_padding_in_place(package_key, &iv, &mut decrypted).map_err(|err| match err {
             AesCbcDecryptError::UnsupportedKeyLength(key_len) => OffCryptoError::InvalidAttribute {
@@ -1203,7 +1161,8 @@ mod tests {
 
         let padded_plaintext = zero_pad(plaintext.clone());
         for (i, chunk) in padded_plaintext.chunks(0x1000).enumerate() {
-            let iv = derive_segment_iv(&key_data_salt, i as u32, key_data_hash_alg, AES_BLOCK_SIZE);
+            let iv =
+                derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
             let ct = encrypt_aes_cbc_no_padding(&package_key, &iv, chunk);
             encrypted_package.extend_from_slice(&ct);
         }
