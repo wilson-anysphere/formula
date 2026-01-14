@@ -67,6 +67,7 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     let mut style_table = workbook.styles.clone();
     let mut styles_part = StylesPart::parse_or_default(None, &mut style_table)
         .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+
     let style_ids = workbook.sheets.iter().flat_map(|sheet| {
         sheet
             .iter_cells()
@@ -94,7 +95,6 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     // remap per-sheet `cfRule/@dxfId` values during worksheet writing.
     let cf_dxfs = ConditionalFormattingDxfAggregation::from_worksheets(&workbook.sheets);
     styles_part.set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
-
     let styles_xml = styles_part.to_xml_bytes();
 
     // Root relationships
@@ -1508,6 +1508,35 @@ fn sheet_xml(
     if !merges.is_empty() {
         xml = crate::merge_cells::update_worksheet_xml(&xml, &merges)
             .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    }
+
+    if !sheet.conditional_formatting_rules.is_empty() {
+        if let Some(local_to_global_dxf) = local_to_global_dxf {
+            let mapped_rules: Vec<formula_model::CfRule> = sheet
+                .conditional_formatting_rules
+                .iter()
+                .cloned()
+                .map(|mut rule| {
+                    if let Some(dxf_id) = rule.dxf_id {
+                        // Best-effort: if the rule references an out-of-bounds local dxf_id, drop
+                        // the attribute rather than emitting an invalid global reference.
+                        rule.dxf_id = local_to_global_dxf.get(dxf_id as usize).copied();
+                    }
+                    rule
+                })
+                .collect();
+            xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
+                &xml,
+                &mapped_rules,
+            )
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+        } else {
+            xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
+                &xml,
+                &sheet.conditional_formatting_rules,
+            )
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+        }
     }
 
     // Generate a safe set of hyperlink relationship IDs for this sheet.
