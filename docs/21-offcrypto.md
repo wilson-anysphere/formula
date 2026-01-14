@@ -109,8 +109,9 @@ Current state in this repo (important nuance):
 - Decryption primitives exist in multiple crates:
   - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an Agile encryption writer:
     `crates/formula-office-crypto`
-  - Standard/CryptoAPI parsing + password key derivation + `EncryptedPackage` helpers:
+  - MS-OFFCRYPTO parsing + decrypt helpers (Standard + Agile):
     `crates/formula-offcrypto`
+    - Note: Agile `dataIntegrity` verification is optional there (`DecryptOptions.verify_integrity`).
   - Agile (4.4) parsing + decryption + `dataIntegrity` HMAC verification:
     `crates/formula-xlsx::offcrypto`
 - The high-level `formula-io` open path always provides **detection + error classification**
