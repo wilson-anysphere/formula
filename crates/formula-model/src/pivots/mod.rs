@@ -290,48 +290,6 @@ pub enum ShowAsType {
     RankDescending,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    #[default]
-    Tabular,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    #[default]
-    None,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    /// Show the grand total row at the bottom of the pivot table.
-    #[serde(default = "default_true")]
-    pub rows: bool,
-    /// Show the grand total column at the right edge of the pivot table.
-    #[serde(default = "default_true")]
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
 /// Configuration for a pivot table value field.
 ///
 /// This struct is part of the canonical pivot model (IPC/serialization friendly).
@@ -350,44 +308,6 @@ pub struct ValueField {
     pub base_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
-}
-
-/// Configuration for a pivot table filter ("Report Filter" in Excel UI).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// When set, only the specified item keys are included in the pivot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
-/// Canonical (serde-friendly) pivot table configuration schema.
-///
-/// This is shared by:
-/// - worksheet pivots (`formula-engine`)
-/// - Data Model pivots (`formula-dax`)
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    #[serde(default)]
-    pub row_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub column_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub value_fields: Vec<ValueField>,
-    #[serde(default)]
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    #[serde(default)]
-    pub layout: Layout,
-    #[serde(default)]
-    pub subtotals: SubtotalPosition,
-    #[serde(default)]
-    pub grand_totals: GrandTotals,
 }
 
 impl From<&str> for ScalarValue {
