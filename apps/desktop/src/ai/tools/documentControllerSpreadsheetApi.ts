@@ -424,6 +424,25 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const COORD_COL_STRIDE = 16_384;
     const memoBySheet = new Map<string, Map<number, SpreadsheetValue>>();
     const stackBySheet = new Map<string, Set<number>>();
+    const sheetNameResolver = this.sheetNameResolver;
+    const resolveSheetIdOrNull = (sheet: string): string | null => {
+      const name = String(sheet ?? "").trim();
+      if (!name) return null;
+      if (sheetNameResolver) {
+        try {
+          const resolved = sheetNameResolver.getSheetIdByName(name);
+          if (resolved) return resolved;
+        } catch {
+          // ignore
+        }
+      }
+
+      // Allow stable sheet ids to pass through.
+      const knownSheetIds = controller.getSheetIds();
+      const candidates = knownSheetIds.length > 0 ? knownSheetIds : ["Sheet1"];
+      const match = candidates.find((id) => id.toLowerCase() === name.toLowerCase());
+      return match ?? null;
+    };
 
     const coerceScalar = (raw: unknown): SpreadsheetValue => {
       if (raw == null) return null;
@@ -468,6 +487,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         const formulaText = typeof cellState?.formula === "string" ? cellState.formula : null;
         let result: SpreadsheetValue;
         if (formulaText) {
+          // If the host stored a cached computed value alongside the formula (e.g. import snapshots),
+          // prefer it over local evaluation (which is best-effort and not Excel-complete).
+          if (cellState?.value != null) {
+            result = coerceScalar(cellState.value);
+            memo.set(key, result);
+            return result;
+          }
           const getCellValue = (address: string): SpreadsheetValue => {
             // EvaluateFormula passes sheet-qualified refs as `Sheet!A1` (sheet name is unquoted).
             // Treat unqualified refs as being on the same (stable-id) sheet.
@@ -475,7 +501,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
               const bang = address.lastIndexOf("!");
               const rawSheet = bang === -1 ? sheetId : address.slice(0, bang).trim();
               const cellRef = bang === -1 ? address : address.slice(bang + 1);
-              const resolvedSheetId = bang === -1 ? sheetId : this.resolveSheetIdOrNull(rawSheet);
+              const resolvedSheetId = bang === -1 ? sheetId : resolveSheetIdOrNull(rawSheet);
               if (!resolvedSheetId) return "#REF!";
               // A1 refs are 1-based; convert to 0-based coords.
               const match = /^\$?([A-Za-z]{1,3})\$?([1-9]\d*)$/.exec(String(cellRef).trim());
