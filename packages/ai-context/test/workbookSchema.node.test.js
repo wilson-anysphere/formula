@@ -255,6 +255,26 @@ test("extractWorkbookSchema: unwraps typed value encodings for schema inference 
   assert.deepStrictEqual(schema.tables[0].inferredColumnTypes, ["number", "boolean", "empty", "string"]);
 });
 
+test("extractWorkbookSchema: treats rich text + in-cell image values as strings for header/type inference", () => {
+  const workbook = {
+    id: "wb-rich-values",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [
+          [{ text: "Product", runs: [{ start: 0, end: 7, style: { bold: true } }] }, { type: "image", value: { imageId: "img_1", altText: "Photo" } }, "Qty"],
+          ["Alpha", { type: "image", value: { imageId: "img_2" } }, 10],
+        ],
+      },
+    ],
+    tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 2 } }],
+  };
+
+  const schema = extractWorkbookSchema(workbook);
+  assert.deepStrictEqual(schema.tables[0].headers, ["Product", "Photo", "Qty"]);
+  assert.deepStrictEqual(schema.tables[0].inferredColumnTypes, ["string", "string", "number"]);
+});
+
 test("extractWorkbookSchema: quotes sheet names in generated A1 ranges (tables + named ranges)", () => {
   const workbook = {
     id: "wb-quoted",
@@ -451,4 +471,3 @@ test("extractWorkbookSchema: includes tables even when sheet cell data is unavai
   assert.deepStrictEqual(schema.tables[0].headers, []);
   assert.deepStrictEqual(schema.tables[0].inferredColumnTypes, []);
 });
-

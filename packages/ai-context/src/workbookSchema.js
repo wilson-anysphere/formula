@@ -143,6 +143,49 @@ function isTypedValue(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) && typeof value.t === "string";
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseImageValue(value) {
+  if (!isPlainObject(value)) return null;
+  const obj = /** @type {any} */ (value);
+
+  let payload = null;
+  // DocumentController-style "in-cell image" envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    // Direct payload / legacy shapes.
+    payload = obj;
+  }
+
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+  return { imageId, altText };
+}
+
+function valueToScalar(value) {
+  let out = value;
+  if (isTypedValue(out)) out = typedValueToScalar(out);
+
+  // DocumentController rich text values: `{ text, runs }`.
+  if (isPlainObject(out) && typeof /** @type {any} */ (out).text === "string") {
+    return /** @type {any} */ (out).text;
+  }
+
+  const image = parseImageValue(out);
+  if (image) return image.altText ?? "[Image]";
+
+  return out;
+}
+
 /**
  * @param {unknown} value
  * @returns {unknown}
@@ -166,7 +209,14 @@ function typedValueToScalar(value) {
       // something non-empty and stable for type inference.
       return "[array]";
     default:
-      return Object.prototype.hasOwnProperty.call(v, "v") ? v.v ?? null : String(value);
+      // Defensive: unknown typed values should never leak `[object Object]` into schema inference.
+      // Prefer the embedded `v` payload when present, and otherwise fall back to a stable JSON string.
+      if (Object.prototype.hasOwnProperty.call(v, "v")) return v.v ?? null;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
   }
 }
 
@@ -231,9 +281,14 @@ function getCellRaw(sheet, row, col) {
  */
 function cellToScalar(raw) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    // Normalize DocumentController-style rich values (rich text, in-cell images) into scalars
+    // so header/type inference can treat them like normal strings.
+    const direct = valueToScalar(raw);
+    if (direct !== raw) return direct;
+
     // Formula-engine typed values can appear directly in cell matrices; unwrap them
     // so header/type inference behaves as expected.
-    if (isTypedValue(raw)) return typedValueToScalar(raw);
+    if (isTypedValue(raw)) return valueToScalar(raw);
 
     // Treat `{}` as an empty cell; it's a common sparse representation (notably from
     // `packages/ai-rag` normalization and some SpreadsheetApi adapters).
@@ -246,7 +301,7 @@ function cellToScalar(raw) {
         const trimmed = formula.trim();
         if (trimmed) return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
       }
-      return typedValueToScalar(raw.v ?? null);
+      return valueToScalar(raw.v ?? null);
     }
     // Alternate shape: { value, formula }
     if (Object.prototype.hasOwnProperty.call(raw, "value") || Object.prototype.hasOwnProperty.call(raw, "formula")) {
@@ -255,7 +310,7 @@ function cellToScalar(raw) {
         const trimmed = formula.trim();
         if (trimmed) return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
       }
-      return typedValueToScalar(raw.value ?? null);
+      return valueToScalar(raw.value ?? null);
     }
     if (raw instanceof Date) return raw;
   }
