@@ -6,29 +6,51 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-test("numberFormat resolution does not use nullish fallback to snake_case number_format", () => {
-  const files = [
-    {
-      name: "SpreadsheetApp",
-      file: path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts"),
-    },
-    {
-      name: "desktop main.ts",
-      file: path.join(__dirname, "..", "src", "main.ts"),
-    },
-  ];
+test("numberFormat resolution does not fall back to snake_case number_format (null/undefined should override)", () => {
+  const srcRoot = path.join(__dirname, "..", "src");
+
+  /** @type {string[]} */
+  const files = [];
+  collectSourceFiles(srcRoot, files);
 
   // When `numberFormat` is explicitly set to `null` we want that to override any imported
-  // `number_format` value (e.g. XLSX date formats). Using `??` will incorrectly fall back.
-  const legacyFallbackRe = /\bnumberFormat\s*\?\?\s*[^;\n]*\bnumber_format\b/;
+  // `number_format` value (e.g. XLSX date formats). Using `??` or `||` will incorrectly
+  // fall back when the key is present but cleared.
+  const legacyNullishFallbackRe = /\bnumberFormat\s*\?\?\s*[^;\n]*\bnumber_format\b/;
+  const legacyOrFallbackRe = /\bnumberFormat\s*\|\|\s*[^;\n]*\bnumber_format\b/;
 
-  for (const { name, file } of files) {
+  for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
+    const rel = path.relative(srcRoot, file);
     assert.doesNotMatch(
       text,
-      legacyFallbackRe,
-      `${name} should use getStyleNumberFormat (hasOwn semantics) instead of \`numberFormat ?? number_format\``,
+      legacyNullishFallbackRe,
+      `${rel} should use getStyleNumberFormat (hasOwn semantics) instead of \`numberFormat ?? number_format\``,
+    );
+    assert.doesNotMatch(
+      text,
+      legacyOrFallbackRe,
+      `${rel} should use getStyleNumberFormat (hasOwn semantics) instead of \`numberFormat || number_format\``,
     );
   }
 });
 
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+function collectSourceFiles(dir, out) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectSourceFiles(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (entry.name.endsWith(".d.ts") || entry.name.endsWith(".d.tsx")) continue;
+    const ext = path.extname(entry.name);
+    if (ext !== ".ts" && ext !== ".tsx" && ext !== ".js" && ext !== ".jsx") continue;
+    out.push(full);
+  }
+}
