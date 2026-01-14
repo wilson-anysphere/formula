@@ -1,7 +1,7 @@
 use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, Relationship, RowContext,
-    Table, Value,
+    Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
+    RowContext, Table, Value,
 };
 use pretty_assertions::assert_eq;
 
@@ -651,6 +651,125 @@ fn blank_foreign_keys_in_m2m_flow_to_blank_dimension_member_when_allowed() {
         model.evaluate_measure("Total Amount", &attr_a).unwrap(),
         10.0.into()
     );
+}
+
+#[test]
+fn enforced_referential_integrity_rejects_unmatched_fact_keys_for_columnar_dim() {
+    // When RI is enforced, non-BLANK fact keys must exist on the dimension side; otherwise
+    // relationship creation should fail.
+    //
+    // This variant uses a columnar-backed dimension table to exercise the `ToIndex::KeySet` path.
+    let mut model = DataModel::new();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key"]);
+    fact.push_row(vec![1.into(), 1.into()]).unwrap();
+    fact.push_row(vec![2.into(), 999.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    let err = model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap_err();
+
+    match err {
+        DaxError::ReferentialIntegrityViolation { relationship, value, .. } => {
+            assert_eq!(relationship, "Fact_Dim");
+            assert_eq!(value, 999.into());
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn enforced_referential_integrity_rejects_unmatched_fact_keys_for_columnar_fact() {
+    // Same RI enforcement regression, but with a columnar-backed fact table (covers the columnar
+    // `unmatched_fact_rows` construction path).
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    let err = model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap_err();
+
+    match err {
+        DaxError::ReferentialIntegrityViolation { relationship, value, .. } => {
+            assert_eq!(relationship, "Fact_Dim");
+            assert_eq!(value, 999.into());
+        }
+        other => panic!("unexpected error: {other}"),
+    }
 }
 
 #[test]
