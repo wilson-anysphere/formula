@@ -13,6 +13,10 @@ export type BuiltinKeybinding = {
 // Spreadsheet-affecting shortcuts should fail closed when the focus/edit context keys
 // are missing during startup. Prefer explicit `== true/false` checks over `!foo`.
 const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextInput == false";
+// Comment creation/editing should be gated by explicit comment permissions (viewer vs commenter).
+// Note: `spreadsheet.isReadOnly` is not sufficient because the `commenter` role is read-only for
+// cell edits but can still comment.
+const WHEN_CAN_COMMENT = "spreadsheet.canComment == true";
 const WHEN_SHEET_NAVIGATION =
   "focus.inSheetTabRename == false && (focus.inTextInput == false || spreadsheet.formulaBarFormulaEditing == true)";
 const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
@@ -448,7 +452,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "comments.addComment",
     key: "shift+f2",
     mac: "shift+f2",
-    when: WHEN_SPREADSHEET_READY,
+    when: `${WHEN_SPREADSHEET_READY} && ${WHEN_CAN_COMMENT}`,
   },
   {
     command: "ui.openContextMenu",

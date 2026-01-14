@@ -4449,6 +4449,16 @@ if (
       commentsPanelVisible: app.isCommentsPanelVisible(),
       cellHasComment: app.activeCellHasComment(),
       "spreadsheet.isReadOnly": app.isReadOnly?.() === true,
+      // Some roles (e.g. `commenter`) are read-only for cell edits but can still create comments.
+      // Expose a dedicated key so shortcuts (Shift+F2) can be gated without relying on
+      // `spreadsheet.isReadOnly`.
+      "spreadsheet.canComment": (() => {
+        try {
+          return app.getCollabSession()?.canComment() ?? true;
+        } catch {
+          return true;
+        }
+      })(),
       gridArea: currentGridArea,
       isRowHeader: currentGridArea === "rowHeader",
       isColHeader: currentGridArea === "colHeader",

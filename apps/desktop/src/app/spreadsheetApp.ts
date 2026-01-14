@@ -6805,6 +6805,9 @@ export class SpreadsheetApp {
    * Best-effort focus for the "new comment" input.
    */
   focusNewCommentInput(): void {
+    // Viewer roles can open the comments panel to read, but should not be routed
+    // into disabled composer UI.
+    if (!this.canUserComment()) return;
     try {
       const input =
         this.root.querySelector<HTMLInputElement>('[data-testid="new-comment-input"]') ??
