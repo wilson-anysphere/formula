@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::serde_defaults::default_true;
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
 /// Canonical reference to a field used by a pivot configuration.
