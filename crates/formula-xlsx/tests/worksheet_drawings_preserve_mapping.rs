@@ -74,6 +74,22 @@ fn assert_two_drawing_markers(bytes: &[u8]) {
         drawing2.contains("Picture 2"),
         "expected drawing2.xml to contain marker text"
     );
+
+    // Also assert the drawing relationship parts stay attached to the correct drawing numbers.
+    // This catches regressions where the `drawingN.xml.rels` targets are swapped while the drawing
+    // XML (and worksheet -> drawing relationship) remain stable.
+    let drawing1_rels =
+        zip_part_string(bytes, "xl/drawings/_rels/drawing1.xml.rels").expect("drawing1.xml.rels");
+    let drawing2_rels =
+        zip_part_string(bytes, "xl/drawings/_rels/drawing2.xml.rels").expect("drawing2.xml.rels");
+    assert!(
+        drawing1_rels.contains("image1.png"),
+        "expected drawing1.xml.rels to target image1.png"
+    );
+    assert!(
+        drawing2_rels.contains("image2.png"),
+        "expected drawing2.xml.rels to target image2.png"
+    );
 }
 
 fn build_two_sheet_drawing_workbook() -> Vec<u8> {
