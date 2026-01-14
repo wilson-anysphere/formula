@@ -157,3 +157,40 @@ fn in_operator_calculate_filter_rhs_physical_mask_same_table() {
         .unwrap();
     assert_eq!(value, Value::from(5i64));
 }
+
+#[test]
+fn in_operator_scalar_rhs_physical_mask() {
+    // Similar to `in_operator_calculate_filter_rhs_physical_mask`, but exercises the scalar
+    // evaluation path for `IN` directly (not through CALCULATE filter parsing).
+    let mut model = DataModel::new();
+
+    let mut keys = Table::new("Keys", vec!["Value"]);
+    for i in 1..=256 {
+        keys.push_row(vec![i.into()]).unwrap();
+    }
+    model.add_table(keys).unwrap();
+
+    let engine = DaxEngine::new();
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "1 IN FILTER(Keys, Keys[Value] <= 200)",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from(true)
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "250 IN FILTER(Keys, Keys[Value] <= 200)",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from(false)
+    );
+}
