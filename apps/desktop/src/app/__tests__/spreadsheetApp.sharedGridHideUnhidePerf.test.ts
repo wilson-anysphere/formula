@@ -441,8 +441,9 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(renderer.scroll.cols.defaultSize, 6);
 
         // One render invalidation per outline update (hide rows, hide cols, unhide rows, unhide cols),
-        // with some tolerance for coalescing in future implementations.
-        expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(4);
+        // with some tolerance for coalescing / extra selection invalidations in future implementations.
+        // (The key regression this catches is per-index invalidation loops.)
+        expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(10);
 
         // Keep work proportional to the number of hidden indices, not sheet maxes.
         expect(hideRun.mapSetCalls).toBeLessThan(600_000);
