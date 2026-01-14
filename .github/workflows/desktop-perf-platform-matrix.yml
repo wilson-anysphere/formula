@@ -220,10 +220,19 @@ jobs:
           node - <<'NODE'
           const fs = require("node:fs");
           const path = require("node:path");
+          const { execSync } = require("node:child_process");
           
           function readJsonMaybe(p) {
             try {
               return JSON.parse(fs.readFileSync(p, "utf8"));
+            } catch {
+              return null;
+            }
+          }
+
+          function tryExec(command) {
+            try {
+              return execSync(command, { encoding: "utf8" }).trim();
             } catch {
               return null;
             }
@@ -258,6 +267,10 @@ jobs:
             },
             toolchain: {
               node: process.version,
+              pnpm: tryExec("pnpm --version"),
+              rustc: tryExec("rustc --version"),
+              cargo: tryExec("cargo --version"),
+              wasmPack: tryExec("wasm-pack --version"),
             },
             startupCold,
             startupWarm,
