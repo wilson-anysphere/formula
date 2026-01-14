@@ -1276,6 +1276,10 @@ export class FormulaBarView {
   #lastErrorShowRangesPressed: boolean | null = null;
   #lastErrorShowRangesText: string | null = null;
   #referenceElsByIndex: Array<HTMLElement[] | undefined> | null = null;
+  #lastSyncedScrollTop = 0;
+  #lastSyncedScrollLeft = 0;
+  #scrollSyncDirty = false;
+  #scrollSyncLastIsEditing: boolean | null = null;
   #lastAdjustedHeightDraft: string | null = null;
   #lastAdjustedHeightIsEditing = false;
   #lastAdjustedHeightIsExpanded = false;
@@ -3502,6 +3506,9 @@ export class FormulaBarView {
       if (highlightChanged) {
         this.#highlightEl.innerHTML = highlightHtml;
         this.#referenceElsByIndex = null;
+        // Re-rendering the <pre> can reset scroll positions; ensure we resync to the textarea
+        // even when the user hasn't scrolled since the last render.
+        this.#scrollSyncDirty = true;
       }
       if (!isFormulaEditing || coloredReferences.length === 0) {
         this.#referenceElsByIndex = null;
@@ -3900,8 +3907,41 @@ export class FormulaBarView {
     const highlightEl = this.#highlightEl as HTMLElement;
     const nextTop = this.textarea.scrollTop;
     const nextLeft = this.textarea.scrollLeft;
+    const isEditing = this.model.isEditing;
+
+    // When transitioning into edit mode, force one scroll sync so the textarea and
+    // highlight overlay remain aligned even if view-mode scrolling changed the <pre>.
+    if (this.#scrollSyncLastIsEditing !== isEditing) {
+      this.#scrollSyncLastIsEditing = isEditing;
+      if (isEditing) {
+        this.#scrollSyncDirty = true;
+      }
+    }
+
+    if (isEditing) {
+      // Cursor/selection renders are frequent and usually don't involve scrolling. Avoid
+      // reading `highlightEl.scrollTop/Left` (which can force layout) when we know we've
+      // already synced to the same textarea scroll position.
+      if (
+        !this.#scrollSyncDirty &&
+        nextTop === this.#lastSyncedScrollTop &&
+        nextLeft === this.#lastSyncedScrollLeft
+      ) {
+        return;
+      }
+
+      this.#scrollSyncDirty = false;
+      this.#lastSyncedScrollTop = nextTop;
+      this.#lastSyncedScrollLeft = nextLeft;
+      highlightEl.scrollTop = nextTop;
+      highlightEl.scrollLeft = nextLeft;
+      return;
+    }
+
+    // In view mode, allow the highlight <pre> to be scrolled independently (e.g. to read
+    // long formulas) while still keeping it aligned with the textarea when renders occur.
     // Writing scroll positions can trigger additional work in the browser; only sync when
-    // the underlying values changed (or when a highlight re-render reset scroll state).
+    // the underlying values changed.
     if (highlightEl.scrollTop !== nextTop) highlightEl.scrollTop = nextTop;
     if (highlightEl.scrollLeft !== nextLeft) highlightEl.scrollLeft = nextLeft;
   }
