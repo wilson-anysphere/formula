@@ -1621,6 +1621,18 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
     }
 }
 
+fn pivot_field_ref_from_ipc(raw: String) -> PivotFieldRef {
+    // Keep behavior consistent with `PivotFieldRef`'s serde `Deserialize` implementation:
+    // DAX-looking strings become structured refs; everything else stays a cache field name.
+    if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(&raw) {
+        return PivotFieldRef::DataModelMeasure(measure);
+    }
+    if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(&raw) {
+        return PivotFieldRef::DataModelColumn { table, column };
+    }
+    PivotFieldRef::CacheFieldName(raw)
+}
+
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
