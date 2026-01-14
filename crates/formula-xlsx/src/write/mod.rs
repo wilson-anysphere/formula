@@ -7426,17 +7426,7 @@ fn ensure_content_types_default(
         // Avoid synthesizing a full file for existing packages.
         return Ok(());
     };
-
-    // Fast path: if the extension already exists, avoid rewriting the file to keep roundtrip
-    // output stable.
-    //
-    // Match exact `Extension="{ext}"` occurrences to avoid false positives
-    // (e.g. `Extension="xpng"`).
-    let xml = std::str::from_utf8(&existing)
-        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    if xml.contains(&format!(r#"Extension="{ext}""#)) {
-        return Ok(());
-    }
+    let ext = ext.trim();
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
@@ -7507,7 +7497,13 @@ fn ensure_content_types_default(
                 }
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"Extension" && attr.unescape_value()?.as_ref() == ext {
+                    if attr.key.as_ref() == b"Extension"
+                        && attr
+                            .unescape_value()?
+                            .as_ref()
+                            .trim()
+                            .eq_ignore_ascii_case(ext)
+                    {
                         saw_ext = true;
                         break;
                     }
@@ -7521,7 +7517,13 @@ fn ensure_content_types_default(
                 }
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"Extension" && attr.unescape_value()?.as_ref() == ext {
+                    if attr.key.as_ref() == b"Extension"
+                        && attr
+                            .unescape_value()?
+                            .as_ref()
+                            .trim()
+                            .eq_ignore_ascii_case(ext)
+                    {
                         saw_ext = true;
                         break;
                     }

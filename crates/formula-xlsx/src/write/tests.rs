@@ -593,6 +593,30 @@ fn ensure_content_types_default_expands_self_closing_prefix_only_root() {
     );
 }
 
+#[test]
+fn ensure_content_types_default_treats_existing_extension_case_insensitively() {
+    let ct_xml = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="PNG" ContentType="image/png"/>"#,
+        r#"</Types>"#
+    );
+
+    let mut parts = BTreeMap::new();
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
+
+    let before = parts.get("[Content_Types].xml").cloned().unwrap();
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("no-op");
+    let after = parts.get("[Content_Types].xml").cloned().unwrap();
+    assert_eq!(
+        before, after,
+        "expected helper to detect existing PNG extension case-insensitively"
+    );
+}
+
 fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
