@@ -148,6 +148,69 @@ function normalizeFormulaFallbackText(input) {
   let inString = false;
   let inQuotedSheet = false;
 
+  const findMatchingBracketEnd = (start) => {
+    // Excel structured references and external workbook references can include literal `]`
+    // characters inside `[...]` segments by escaping them as `]]`. That makes naive depth counting
+    // incorrect when trying to find the end of a bracket span.
+    //
+    // We use a small backtracking matcher:
+    // - On `[` increase depth.
+    // - On `]]`, prefer treating it as an escape (consume both, depth unchanged), but remember
+    //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+    //   `]]` as a real closing bracket.
+    if (input[start] !== "[") return null;
+
+    let i = start;
+    let depth = 0;
+    /** @type {Array<{ i: number; depth: number }>} */
+    const escapeChoices = [];
+
+    const backtrack = () => {
+      const choice = escapeChoices.pop();
+      if (!choice) return false;
+      i = choice.i;
+      depth = choice.depth;
+      // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+      depth -= 1;
+      i += 1;
+      return true;
+    };
+
+    while (true) {
+      if (i >= input.length) {
+        if (!backtrack()) return null;
+        if (depth === 0) return i;
+        continue;
+      }
+
+      const ch = input[i];
+      if (ch === "[") {
+        depth += 1;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "]") {
+        if (input[i + 1] === "]" && depth > 0) {
+          escapeChoices.push({ i, depth });
+          i += 2;
+          continue;
+        }
+
+        depth -= 1;
+        i += 1;
+        if (depth === 0) return i;
+        if (depth < 0) {
+          if (!backtrack()) return null;
+          if (depth === 0) return i;
+        }
+        continue;
+      }
+
+      i += 1;
+    }
+  };
+
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
 
@@ -177,7 +240,7 @@ function normalizeFormulaFallbackText(input) {
         }
       } else {
         // Sheet names are case-insensitive, but whitespace is significant.
-        out += ch.toUpperCase();
+      out += ch.toUpperCase();
       }
       continue;
     }
@@ -191,6 +254,21 @@ function normalizeFormulaFallbackText(input) {
     if (ch === "'") {
       inQuotedSheet = true;
       out += ch;
+      continue;
+    }
+
+    if (ch === "[") {
+      const end = findMatchingBracketEnd(i);
+      if (!end) {
+        // Unterminated bracket span. Be conservative: preserve the remaining contents (including
+        // whitespace) since it may be part of a structured reference item name.
+        out += input.slice(i).toUpperCase();
+        break;
+      }
+      // Preserve whitespace inside bracket spans because it can be significant in structured
+      // reference item names (e.g. `Table1[Total Amount]`).
+      out += input.slice(i, end).toUpperCase();
+      i = end - 1;
       continue;
     }
 
