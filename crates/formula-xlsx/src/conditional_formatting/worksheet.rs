@@ -59,6 +59,21 @@ pub fn update_worksheet_conditional_formatting_xml(
     sheet_xml: &str,
     rules: &[CfRule],
 ) -> Result<String, XlsxError> {
+    // Preserve the original API for callers outside the writer. A fixed seed still guarantees
+    // deterministic output given the same input rules.
+    update_worksheet_conditional_formatting_xml_with_seed(sheet_xml, rules, 0)
+}
+
+/// Update worksheet conditional formatting to match `rules`, generating deterministic ids for
+/// x14 rules using `seed`.
+///
+/// This is identical to [`update_worksheet_conditional_formatting_xml`], but allows callers (e.g.
+/// the workbook writer) to incorporate worksheet identity into the generated ids (recommended).
+pub fn update_worksheet_conditional_formatting_xml_with_seed(
+    sheet_xml: &str,
+    rules: &[CfRule],
+    seed: u128,
+) -> Result<String, XlsxError> {
     let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
 
     // x14 conditional formatting requires `cfRule/@id` so the base rule can link to the x14
@@ -77,10 +92,7 @@ pub fn update_worksheet_conditional_formatting_xml(
             .map(|r| r.id.as_deref().filter(|s| !s.is_empty()).is_some())
             .collect();
 
-        // We don't have a stable worksheet identity here, so we use a fixed seed. Callers that
-        // care about per-sheet uniqueness can call `ensure_rule_ids` themselves with a
-        // sheet-derived seed before invoking this function.
-        super::ensure_rule_ids(&mut owned, 0);
+        super::ensure_rule_ids(&mut owned, seed);
 
         for (rule, had_id) in owned.iter_mut().zip(had_id) {
             if rule.schema != CfRuleSchema::X14 && !had_id {

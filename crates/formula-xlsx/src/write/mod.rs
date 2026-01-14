@@ -1096,10 +1096,12 @@ fn build_parts(
                     .dxf_id
                     .and_then(|local| local_to_global_dxf.and_then(|m| m.get(local as usize).copied()));
             }
-            sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
-                &sheet_xml,
-                &rules,
-            )?;
+            sheet_xml =
+                crate::conditional_formatting::update_worksheet_conditional_formatting_xml_with_seed(
+                    &sheet_xml,
+                    &rules,
+                    sheet_meta.sheet_id as u128,
+                )?;
         }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
