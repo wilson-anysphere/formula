@@ -2287,12 +2287,24 @@ impl DaxEngine {
             Ok(())
         }
 
-        for arg in filter_args {
+        fn apply_filter_arg(
+            engine: &DaxEngine,
+            model: &DataModel,
+            arg: &Expr,
+            eval_filter: &FilterContext,
+            row_ctx: &RowContext,
+            env: &mut VarEnv,
+            keep_filters: bool,
+            clear_tables: &mut HashSet<String>,
+            clear_columns: &mut HashSet<(String, String)>,
+            row_filters: &mut Vec<(String, HashSet<usize>)>,
+            column_filters: &mut Vec<((String, String), HashSet<Value>)>,
+        ) -> DaxResult<()> {
             // `KEEPFILTERS` wraps a normal filter argument, but changes its semantics from
             // replacement (clear existing filters on the target table/column) to intersection.
             // We implement that by evaluating the inner argument as usual, but skipping any
             // additions to `clear_tables` / `clear_columns`.
-            let (arg, keep_filters) = match arg {
+            let (arg, arg_keep_filters) = match arg {
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("KEEPFILTERS") => {
                     let [inner] = args.as_slice() else {
                         return Err(DaxError::Eval(
@@ -2303,10 +2315,36 @@ impl DaxEngine {
                 }
                 _ => (arg, false),
             };
+            let keep_filters = keep_filters || arg_keep_filters;
 
             match arg {
-                Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => {}
-                Expr::Call { name, .. } if name.eq_ignore_ascii_case("CROSSFILTER") => {}
+                Expr::Let { bindings, body } => {
+                    env.push_scope();
+                    let result = (|| -> DaxResult<()> {
+                        for (name, binding_expr) in bindings {
+                            let value =
+                                engine.eval_var_value(model, binding_expr, eval_filter, row_ctx, env)?;
+                            env.define(name, value);
+                        }
+                        apply_filter_arg(
+                            engine,
+                            model,
+                            body,
+                            eval_filter,
+                            row_ctx,
+                            env,
+                            keep_filters,
+                            clear_tables,
+                            clear_columns,
+                            row_filters,
+                            column_filters,
+                        )
+                    })();
+                    env.pop_scope();
+                    result
+                }
+                Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => Ok(()),
+                Expr::Call { name, .. } if name.eq_ignore_ascii_case("CROSSFILTER") => Ok(()),
                 Expr::Call { name, args }
                     if name.eq_ignore_ascii_case("ALL")
                         || name.eq_ignore_ascii_case("REMOVEFILTERS") =>
@@ -2329,17 +2367,17 @@ impl DaxEngine {
                             if !keep_filters {
                                 clear_tables.insert(table.clone());
                             }
+                            Ok(())
                         }
                         Expr::ColumnRef { table, column } => {
                             if !keep_filters {
                                 clear_columns.insert((table.clone(), column.clone()));
                             }
+                            Ok(())
                         }
-                        other => {
-                            return Err(DaxError::Type(format!(
-                                "{function_name} expects a table name or column reference, got {other:?}"
-                            )))
-                        }
+                        other => Err(DaxError::Type(format!(
+                            "{function_name} expects a table name or column reference, got {other:?}"
+                        ))),
                     }
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("ALLNOBLANKROW") => {
@@ -2362,6 +2400,7 @@ impl DaxEngine {
                                 table.clone(),
                                 (0..table_ref.row_count()).collect::<HashSet<_>>(),
                             ));
+                            Ok(())
                         }
                         Expr::ColumnRef { table, column } => {
                             let key = (table.clone(), column.clone());
@@ -2372,15 +2411,14 @@ impl DaxEngine {
                             let mut base_filter = eval_filter.clone();
                             base_filter.clear_column_filter(table, column);
                             let mut values =
-                                self.distinct_column_values(model, inner, &base_filter)?;
+                                engine.distinct_column_values(model, inner, &base_filter)?;
                             values.retain(|v| !v.is_blank());
                             column_filters.push((key, values));
+                            Ok(())
                         }
-                        other => {
-                            return Err(DaxError::Type(format!(
+                        other => Err(DaxError::Type(format!(
                             "ALLNOBLANKROW expects a table name or column reference, got {other:?}"
-                        )))
-                        }
+                        ))),
                     }
                 }
                 // Boolean filter expressions like:
@@ -2391,32 +2429,32 @@ impl DaxEngine {
                     op: BinaryOp::And | BinaryOp::Or,
                     ..
                 } => apply_boolean_filter_expr(
-                    self,
+                    engine,
                     model,
                     arg,
-                    &eval_filter,
+                    eval_filter,
                     row_ctx,
                     keep_filters,
-                    &mut clear_columns,
-                    &mut row_filters,
+                    clear_columns,
+                    row_filters,
                     env,
-                )?,
+                ),
                 Expr::Call { name, .. }
                     if name.eq_ignore_ascii_case("NOT")
                         || name.eq_ignore_ascii_case("AND")
                         || name.eq_ignore_ascii_case("OR") =>
                 {
                     apply_boolean_filter_expr(
-                        self,
+                        engine,
                         model,
                         arg,
-                        &eval_filter,
+                        eval_filter,
                         row_ctx,
                         keep_filters,
-                        &mut clear_columns,
-                        &mut row_filters,
+                        clear_columns,
+                        row_filters,
                         env,
-                    )?
+                    )
                 }
                 Expr::BinaryOp { op, left, right } => {
                     let Expr::ColumnRef { table, column } = left.as_ref() else {
@@ -2432,25 +2470,27 @@ impl DaxEngine {
 
                     match op {
                         BinaryOp::In => {
-                            let values = self.eval_one_column_table_literal(
+                            let values = engine.eval_one_column_table_literal(
                                 model,
                                 right,
-                                &eval_filter,
+                                eval_filter,
                                 row_ctx,
                                 env,
                             )?;
                             column_filters.push((key, values.into_iter().collect()));
+                            Ok(())
                         }
                         BinaryOp::Equals => {
-                            let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
+                            let rhs = engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
                             column_filters.push((key, HashSet::from([rhs])));
+                            Ok(())
                         }
                         BinaryOp::NotEquals
                         | BinaryOp::Less
                         | BinaryOp::LessEquals
                         | BinaryOp::Greater
                         | BinaryOp::GreaterEquals => {
-                            let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
+                            let rhs = engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
                             let mut base_filter = eval_filter.clone();
                             base_filter.column_filters.remove(&key);
                             let candidate_rows = resolve_table_rows(model, &base_filter, table)?;
@@ -2468,7 +2508,7 @@ impl DaxEngine {
                             let mut allowed = HashSet::new();
                             for row in candidate_rows {
                                 let lhs = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                let keep = match self.eval_binary(op, lhs.clone(), rhs.clone())? {
+                                let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())? {
                                     Value::Boolean(b) => b,
                                     other => {
                                         return Err(DaxError::Type(format!(
@@ -2483,12 +2523,11 @@ impl DaxEngine {
                             }
 
                             column_filters.push((key, allowed));
+                            Ok(())
                         }
-                        _ => {
-                            return Err(DaxError::Eval(format!(
-                                "unsupported CALCULATE filter operator {op:?}"
-                            )))
-                        }
+                        _ => Err(DaxError::Eval(format!(
+                            "unsupported CALCULATE filter operator {op:?}"
+                        ))),
                     }
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("TREATAS") => {
@@ -2529,9 +2568,9 @@ impl DaxEngine {
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
-                    let values =
-                        self.distinct_column_values(model, source_col_expr, &eval_filter)?;
+                    let values = engine.distinct_column_values(model, source_col_expr, eval_filter)?;
                     column_filters.push((key, values));
+                    Ok(())
                 }
                 Expr::Call { name, args }
                     if (name.eq_ignore_ascii_case("VALUES")
@@ -2545,31 +2584,45 @@ impl DaxEngine {
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
-                    let values = self.distinct_column_values(model, &args[0], &eval_filter)?;
+                    let values = engine.distinct_column_values(model, &args[0], eval_filter)?;
                     column_filters.push((key, values));
+                    Ok(())
                 }
                 Expr::Call { .. } | Expr::TableName(_) => {
-                    let table_filter = self.eval_table(model, arg, &eval_filter, row_ctx, env)?;
+                    let table_filter = engine.eval_table(model, arg, eval_filter, row_ctx, env)?;
                     match table_filter {
                         TableResult::Physical { table, rows, .. } => {
                             if !keep_filters {
                                 clear_tables.insert(table.clone());
                             }
                             row_filters.push((table, rows.into_iter().collect()));
+                            Ok(())
                         }
-                        TableResult::Virtual { .. } => {
-                            return Err(DaxError::Eval(
-                                "CALCULATE table filter must be a physical table expression".into(),
-                            ))
-                        }
+                        TableResult::Virtual { .. } => Err(DaxError::Eval(
+                            "CALCULATE table filter must be a physical table expression".into(),
+                        )),
                     }
                 }
-                other => {
-                    return Err(DaxError::Eval(format!(
-                        "unsupported CALCULATE filter argument {other:?}"
-                    )))
-                }
+                other => Err(DaxError::Eval(format!(
+                    "unsupported CALCULATE filter argument {other:?}"
+                ))),
             }
+        }
+
+        for arg in filter_args {
+            apply_filter_arg(
+                self,
+                model,
+                arg,
+                &eval_filter,
+                row_ctx,
+                env,
+                false,
+                &mut clear_tables,
+                &mut clear_columns,
+                &mut row_filters,
+                &mut column_filters,
+            )?;
         }
 
         for table in clear_tables {

@@ -246,6 +246,43 @@ fn var_is_visible_in_calculate_boolean_filter_arguments() {
 }
 
 #[test]
+fn calculate_supports_var_return_inside_boolean_filter_argument() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Medium Sales via Local Var",
+            "CALCULATE(SUM(Orders[Amount]), VAR low = 7 RETURN Orders[Amount] > low && Orders[Amount] < 20)",
+        )
+        .unwrap();
+
+    // Orders[Amount] in (7, 20) => 10 + 8 = 18.
+    let value = model
+        .evaluate_measure("Medium Sales via Local Var", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 18.0.into());
+}
+
+#[test]
+fn calculate_supports_var_return_inside_table_filter_argument() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Big Sales via Local Table Var",
+            "CALCULATE([Total Sales], VAR t = FILTER(Orders, Orders[Amount] > 10) RETURN t)",
+        )
+        .unwrap();
+
+    // Only Orders[Amount] > 10 => 20.
+    let value = model
+        .evaluate_measure("Big Sales via Local Table Var", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 20.0.into());
+}
+
+#[test]
 fn calculate_can_reference_scalar_var_in_expression_argument() {
     let mut model = build_model();
     model
