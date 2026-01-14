@@ -32,6 +32,9 @@ if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
       "Notes:",
       "  - Additional args are treated as substring filters over test file paths.",
       "  - pnpm forwards a literal `--` delimiter; this script strips it automatically.",
+      "  - You can override the node:test reporter via env vars:",
+      "      FORMULA_NODE_TEST_REPORTER=dot",
+      "      FORMULA_NODE_TEST_REPORTER_DESTINATION=stdout",
       "",
       "Examples:",
       "  pnpm test:node collab",
@@ -225,6 +228,17 @@ let testConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? en
 const maxTestConcurrency = Math.min(16, os.availableParallelism?.() ?? 4);
 testConcurrency = Math.max(1, Math.min(testConcurrency, maxTestConcurrency));
 
+/**
+ * Optional node:test reporter configuration.
+ *
+ * `node --test` supports `--test-reporter` and `--test-reporter-destination`, but our
+ * runner doesn't currently forward arbitrary CLI args. Provide a safe escape hatch
+ * via env vars so CI/agents can reduce output volume (e.g. `dot`) without changing
+ * developer defaults.
+ */
+const testReporter = (process.env.FORMULA_NODE_TEST_REPORTER ?? "").trim();
+const testReporterDestination = (process.env.FORMULA_NODE_TEST_REPORTER_DESTINATION ?? "").trim();
+
 // `.e2e.test.js` suites tend to start background services (sync-server, sandbox
 // workers, etc). Even with a low global `--test-concurrency`, running those files
 // in parallel with unrelated unit tests can still create enough load to cause
@@ -269,7 +283,12 @@ for (const file of nonExtensionHostTestFiles) {
 async function runTestBatch(files, concurrency) {
   if (files.length === 0) return 0;
 
-  const nodeArgs = [...baseNodeArgs, `--test-concurrency=${concurrency}`, "--test", ...files];
+  /** @type {string[]} */
+  const reporterArgs = [];
+  if (testReporter) reporterArgs.push(`--test-reporter=${testReporter}`);
+  if (testReporterDestination) reporterArgs.push(`--test-reporter-destination=${testReporterDestination}`);
+
+  const nodeArgs = [...baseNodeArgs, `--test-concurrency=${concurrency}`, ...reporterArgs, "--test", ...files];
   const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
   return await new Promise((resolve) => {
     child.on("exit", (code, signal) => {
