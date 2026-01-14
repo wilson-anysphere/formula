@@ -67,7 +67,11 @@ async function ensureCatalogByName(): Promise<Map<string, CatalogFunction> | nul
  * hints can invoke this when the user starts editing a formula.
  */
 export function preloadFunctionSignatureCatalog(): Promise<void> {
-  return ensureCatalogByName().then(() => {});
+  return ensureCatalogByName()
+    .then(() => {})
+    .catch(() => {
+      // Best-effort: preloading is opportunistic; callers should treat failures as a no-op.
+    });
 }
 
 export function isFunctionSignatureCatalogReady(): boolean {

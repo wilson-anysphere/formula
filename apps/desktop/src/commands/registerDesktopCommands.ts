@@ -1196,7 +1196,11 @@ export function registerDesktopCommands(params: {
       const result = openFormatCells();
       // Support async openers (even though desktop currently uses a sync dialog).
       if (result && typeof (result as any)?.then === "function") {
-        void (result as Promise<void>).then(() => focusAlignmentSection());
+        void (result as Promise<void>)
+          .then(() => focusAlignmentSection())
+          .catch(() => {
+            // Best-effort: focus follow-up should never surface as an unhandled rejection.
+          });
       } else {
         focusAlignmentSection();
       }

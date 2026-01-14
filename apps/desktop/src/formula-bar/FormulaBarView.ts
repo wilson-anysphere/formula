@@ -2878,10 +2878,14 @@ export class FormulaBarView {
     this.#functionPickerSelectedIndex = 0;
 
     // Best-effort: load signature metadata in the background so the picker can show richer hints.
-    void preloadFunctionSignatureCatalog().then(() => {
-      if (!this.#functionPickerOpen) return;
-      this.#renderFunctionPickerResults();
-    });
+    void preloadFunctionSignatureCatalog()
+      .then(() => {
+        if (!this.#functionPickerOpen) return;
+        this.#renderFunctionPickerResults();
+      })
+      .catch(() => {
+        // Best-effort: ignore catalog preload failures.
+      });
 
     this.#positionFunctionPicker();
     this.#renderFunctionPickerResults();

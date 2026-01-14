@@ -492,13 +492,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     // Best-effort: warm the function signature catalog in the background so function results can
     // show signatures/summaries shortly after the palette opens.
     if (!isFunctionSignatureCatalogReady()) {
-      void preloadFunctionSignatureCatalog().then(() => {
-        if (!isOpen) return;
-        if (!isFunctionSignatureCatalogReady()) return;
-        if (!query.trim()) return;
-        // Re-render to populate signatures for catalog-only functions.
-        renderResults("async");
-      });
+      void preloadFunctionSignatureCatalog()
+        .then(() => {
+          if (!isOpen) return;
+          if (!isFunctionSignatureCatalogReady()) return;
+          if (!query.trim()) return;
+          // Re-render to populate signatures for catalog-only functions.
+          renderResults("async");
+        })
+        .catch(() => {
+          // Best-effort: ignore catalog prefetch failures.
+        });
     }
 
     renderResults("sync");
