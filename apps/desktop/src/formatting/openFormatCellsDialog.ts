@@ -423,7 +423,8 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
         const trimmed = raw.trim();
         // Treat empty/"General" (Excel semantics) as clearing the number format.
         if (!trimmed || trimmed.toLowerCase() === "general") return null;
-        return trimmed;
+        // Preserve exact user input; avoid trimming away intentional whitespace in format codes.
+        return raw;
       }
       return preset ? NUMBER_FORMAT_CODE_BY_PRESET[preset] ?? null : null;
     })();

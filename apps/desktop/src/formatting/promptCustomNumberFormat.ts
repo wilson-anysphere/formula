@@ -31,8 +31,10 @@ export async function promptAndApplyCustomNumberFormat(options: {
   // Avoid applying formatting if the user started editing while the prompt was open.
   if (options.isEditing()) return;
 
+  // Preserve the exact user-entered format code. (Excel number formats can contain spaces,
+  // so avoid trimming beyond what we need for "empty"/"General" detection.)
   const trimmed = input.trim();
-  const desired = !trimmed || trimmed.toLowerCase() === "general" ? null : trimmed;
+  const desired = !trimmed || trimmed.toLowerCase() === "general" ? null : input;
 
   options.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
     let applied = true;
@@ -43,4 +45,3 @@ export async function promptAndApplyCustomNumberFormat(options: {
     return applied;
   });
 }
-
