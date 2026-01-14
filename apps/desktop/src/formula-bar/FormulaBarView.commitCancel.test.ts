@@ -32,6 +32,34 @@ function queryFunctionAutocomplete(host: HTMLElement): HTMLElement {
 }
 
 describe("FormulaBarView commit/cancel UX", () => {
+  it("is resilient if onCommit throws (edit mode still exits first)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn(() => {
+      throw new Error("commit failure");
+    });
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "boom";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // The handler will throw (synchronously) after it updates internal state.
+    try {
+      view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    } catch {
+      // expected
+    }
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("boom");
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+
+    host.remove();
+  });
+
   it("ignores commit/cancel actions while not editing", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
