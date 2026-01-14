@@ -181,4 +181,63 @@ describe("DesktopSharedGrid a11y", () => {
 
     grid.destroy();
   });
+
+  it("restores pre-existing container ARIA attributes on destroy", () => {
+    const container = document.createElement("div");
+    container.tabIndex = 0;
+    container.setAttribute("role", "region");
+    container.setAttribute("aria-rowcount", "999");
+    container.setAttribute("aria-colcount", "888");
+    container.setAttribute("aria-multiselectable", "false");
+    container.setAttribute("aria-describedby", "existing-desc-1 existing-desc-2");
+    container.style.touchAction = "pan-x";
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas"),
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div"),
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars,
+    });
+
+    // DesktopSharedGrid should overwrite grid ARIA attrs, but preserve existing described-by references.
+    expect(container.getAttribute("role")).toBe("grid");
+    expect(container.getAttribute("aria-rowcount")).toBe("10");
+    expect(container.getAttribute("aria-colcount")).toBe("10");
+    expect(container.getAttribute("aria-multiselectable")).toBe("true");
+    const describedBy = container.getAttribute("aria-describedby") ?? "";
+    expect(describedBy).toContain("existing-desc-1");
+    expect(describedBy).toContain("existing-desc-2");
+    const statusEl = container.querySelector('[data-testid="canvas-grid-a11y-status"]') as HTMLElement | null;
+    expect(statusEl).not.toBeNull();
+    expect(describedBy).toContain(statusEl?.id);
+    expect(container.style.touchAction).toBe("none");
+
+    grid.destroy();
+
+    // Destroy should restore the container's original non-grid semantics.
+    expect(container.getAttribute("role")).toBe("region");
+    expect(container.getAttribute("aria-rowcount")).toBe("999");
+    expect(container.getAttribute("aria-colcount")).toBe("888");
+    expect(container.getAttribute("aria-multiselectable")).toBe("false");
+    expect(container.getAttribute("aria-describedby")).toBe("existing-desc-1 existing-desc-2");
+    expect(container.style.touchAction).toBe("pan-x");
+  });
 });
