@@ -4,6 +4,10 @@
 **/target-cargo/
 /target-cargo-home/
 **/target-cargo-home/
+/target-check/
+**/target-check/
+/target-test/
+**/target-test/
 
 apps/desktop/.turbo/
 apps/**/src-tauri/gen/
