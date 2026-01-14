@@ -1,4 +1,5 @@
 use desktop::sql::{self, SqlDataType};
+use desktop::ipc_limits;
 use sqlx::Connection;
 use sqlx::Executor;
 use serde_json::json;
@@ -84,6 +85,122 @@ async fn sqlserver_connections_return_clear_error() {
     assert!(
         err.to_string().contains("SQL Server connections are not supported"),
         "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn sql_query_rejects_oversized_sql_text() {
+    let sql_text = "a".repeat(ipc_limits::MAX_SQL_QUERY_TEXT_BYTES + 1);
+    let err = sql::sql_query(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        sql_text,
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected oversized sql text to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_TEXT_BYTES"),
+        "expected error to mention the limit, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn sql_query_rejects_too_many_params() {
+    let params = vec![json!(1); ipc_limits::MAX_SQL_QUERY_PARAMS + 1];
+    let err = sql::sql_query(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        "SELECT 1".to_string(),
+        params,
+        None,
+    )
+    .await
+    .expect_err("expected too many params to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_PARAMS"),
+        "expected error to mention the limit, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn sql_query_rejects_oversized_json_param() {
+    // JSON string serialization adds 2 bytes for the surrounding quotes, so a string of
+    // `MAX_SQL_QUERY_PARAM_BYTES` chars is guaranteed to exceed the limit.
+    let oversized = json!("a".repeat(ipc_limits::MAX_SQL_QUERY_PARAM_BYTES));
+    let err = sql::sql_query(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        "SELECT 1".to_string(),
+        vec![oversized],
+        None,
+    )
+    .await
+    .expect_err("expected oversized param to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_PARAM_BYTES"),
+        "expected error to mention the limit, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn sql_query_rejects_oversized_connection_descriptor() {
+    let connection = json!({
+        "kind": "sqlite",
+        "inMemory": true,
+        "padding": "a".repeat(ipc_limits::MAX_SQL_QUERY_CONNECTION_BYTES)
+    });
+    let err = sql::sql_query(connection, "SELECT 1".to_string(), Vec::new(), None)
+        .await
+        .expect_err("expected oversized connection descriptor to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_CONNECTION_BYTES"),
+        "expected error to mention the limit, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn sql_query_rejects_oversized_credentials() {
+    let credentials = json!({
+        "password": "a".repeat(ipc_limits::MAX_SQL_QUERY_CREDENTIALS_BYTES)
+    });
+    let err = sql::sql_query(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        Some(credentials),
+    )
+    .await
+    .expect_err("expected oversized credentials to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_CREDENTIALS_BYTES"),
+        "expected error to mention the limit, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn sql_get_schema_rejects_oversized_sql_text() {
+    let sql_text = "a".repeat(ipc_limits::MAX_SQL_QUERY_TEXT_BYTES + 1);
+    let err = sql::sql_get_schema(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        sql_text,
+        None,
+    )
+    .await
+    .expect_err("expected oversized sql text to error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("MAX_SQL_QUERY_TEXT_BYTES"),
+        "expected error to mention the limit, got: {msg}"
     );
 }
 

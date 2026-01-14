@@ -8,6 +8,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::ipc_limits::{
+    enforce_json_byte_size, MAX_SQL_QUERY_CONNECTION_BYTES, MAX_SQL_QUERY_CREDENTIALS_BYTES,
+    MAX_SQL_QUERY_PARAM_BYTES, MAX_SQL_QUERY_PARAMS, MAX_SQL_QUERY_TEXT_BYTES,
+};
+
 // Resource limits for `sql_query`.
 //
 // These are backend-enforced guards to prevent compromised/buggy webviews (or accidental queries
@@ -922,6 +927,43 @@ pub async fn sql_query(
     params: Vec<JsonValue>,
     credentials: Option<JsonValue>,
 ) -> Result<SqlQueryResult> {
+    if sql.as_bytes().len() > MAX_SQL_QUERY_TEXT_BYTES {
+        return Err(anyhow!(
+            "SQL query text exceeds MAX_SQL_QUERY_TEXT_BYTES ({MAX_SQL_QUERY_TEXT_BYTES} bytes)"
+        ));
+    }
+    if params.len() > MAX_SQL_QUERY_PARAMS {
+        return Err(anyhow!(
+            "SQL query has too many parameters: {} (max MAX_SQL_QUERY_PARAMS = {MAX_SQL_QUERY_PARAMS})",
+            params.len()
+        ));
+    }
+    for (idx, value) in params.iter().enumerate() {
+        enforce_json_byte_size(
+            value,
+            MAX_SQL_QUERY_PARAM_BYTES,
+            &format!("SQL query parameter[{idx}]"),
+            "MAX_SQL_QUERY_PARAM_BYTES",
+        )
+        .map_err(|e| anyhow!(e))?;
+    }
+    enforce_json_byte_size(
+        &connection,
+        MAX_SQL_QUERY_CONNECTION_BYTES,
+        "SQL connection descriptor",
+        "MAX_SQL_QUERY_CONNECTION_BYTES",
+    )
+    .map_err(|e| anyhow!(e))?;
+    if let Some(credentials) = credentials.as_ref() {
+        enforce_json_byte_size(
+            credentials,
+            MAX_SQL_QUERY_CREDENTIALS_BYTES,
+            "SQL credentials",
+            "MAX_SQL_QUERY_CREDENTIALS_BYTES",
+        )
+        .map_err(|e| anyhow!(e))?;
+    }
+
     let kind = connection_kind(&connection)?;
 
     match kind.as_str() {
@@ -1083,6 +1125,28 @@ pub async fn sql_get_schema(
     sql: String,
     credentials: Option<JsonValue>,
 ) -> Result<SqlSchemaResult> {
+    if sql.as_bytes().len() > MAX_SQL_QUERY_TEXT_BYTES {
+        return Err(anyhow!(
+            "SQL query text exceeds MAX_SQL_QUERY_TEXT_BYTES ({MAX_SQL_QUERY_TEXT_BYTES} bytes)"
+        ));
+    }
+    enforce_json_byte_size(
+        &connection,
+        MAX_SQL_QUERY_CONNECTION_BYTES,
+        "SQL connection descriptor",
+        "MAX_SQL_QUERY_CONNECTION_BYTES",
+    )
+    .map_err(|e| anyhow!(e))?;
+    if let Some(credentials) = credentials.as_ref() {
+        enforce_json_byte_size(
+            credentials,
+            MAX_SQL_QUERY_CREDENTIALS_BYTES,
+            "SQL credentials",
+            "MAX_SQL_QUERY_CREDENTIALS_BYTES",
+        )
+        .map_err(|e| anyhow!(e))?;
+    }
+
     let kind = connection_kind(&connection)?;
 
     with_sql_query_timeout("SQL schema discovery", async move {
