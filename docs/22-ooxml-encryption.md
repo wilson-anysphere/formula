@@ -87,13 +87,21 @@ levels of validation:
   - `cipherChaining == ChainingModeCBC`
   - password key-encryptor present (and will reject certificate-only encryption with an explicit
     “unsupported key encryptor” error)
-- `crates/formula-offcrypto`’s Agile parser currently **ignores** `cipherAlgorithm` /
-  `cipherChaining` attributes (it assumes AES-CBC) and will treat missing password key-encryptor
-  data as a structural error (e.g. “missing password `<encryptedKey>` element”).
+- `crates/formula-offcrypto`’s Agile `EncryptionInfo` parser is also strict about the dominant
+  Excel scheme:
+  - it validates `keyData.cipherAlgorithm == AES` / `keyData.cipherChaining == ChainingModeCBC`
+    (and the same attributes on the password `encryptedKey` element), returning
+    `formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(..)` on mismatch.
+  - if **no password key-encryptor** is present (e.g. the file only contains certificate
+    key-encryptors), it returns
+    `formula_offcrypto::OffcryptoError::UnsupportedKeyEncryptor { available: Vec<String> }`.
+    (If a password key-encryptor is present but its required `<encryptedKey>` data is missing, that
+    remains a structural `InvalidEncryptionInfo`.)
 
 If you add new decryption entrypoints on top of `formula-offcrypto`, make sure to validate the
-declared cipher/chaining/key-encryptor parameters so unsupported files don’t get misreported as
-“corrupt” or “wrong password”.
+declared cipher/chaining/key-encryptor parameters (or preserve `formula-offcrypto`’s
+`UnsupportedAlgorithm` / `UnsupportedKeyEncryptor { available }` errors) so unsupported files don’t
+get misreported as “corrupt” or “wrong password”.
 
 ## The `EncryptionInfo` stream (Agile 4.4)
 
