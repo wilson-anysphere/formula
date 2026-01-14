@@ -1209,6 +1209,12 @@ export class DocumentCellProvider implements CellProvider {
         const sheetId = this.options.getSheetId();
         const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
         const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+        const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
+          ? payload.imageDeltas
+          : Array.isArray(payload?.imagesDeltas)
+            ? payload.imagesDeltas
+            : [];
+        const hasImageDeltas = imageDeltas.length > 0;
         let mergedRangesChangedForVisibleSheet = false;
         if (sheetViewDeltas.length > 0) {
           for (const delta of sheetViewDeltas) {
@@ -1319,6 +1325,15 @@ export class DocumentCellProvider implements CellProvider {
 
         // No cell deltas + no formatting deltas: preserve the sheet-view optimization.
         if (deltas.length === 0 && !hasFormatLayerDeltas) {
+          // Image bytes updates should cause a redraw (to refresh in-cell image placeholders),
+          // but they do not affect any cell values, formulas, or formatting layers. Avoid
+          // evicting the provider caches for those cases; the renderer can re-read the same
+          // CellData while resolving updated image bytes.
+          if (hasImageDeltas && sheetViewDeltas.length === 0 && !recalc) {
+            for (const listener of this.listeners) listener({ type: "invalidateAll" });
+            return;
+          }
+
           // Sheet view deltas (frozen panes, row/col sizes, etc.) do not affect cell contents.
           // Avoid evicting the provider cache in those cases; the renderer will be updated by
           // the view sync code (e.g. `syncFrozenPanes` / shared grid axis sync).
