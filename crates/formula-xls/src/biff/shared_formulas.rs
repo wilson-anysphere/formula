@@ -88,7 +88,6 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
 }
 
 fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<SharedFormulaDef> {
-    let data = record.data.as_ref();
     // SHRFMLA [MS-XLS 2.4.255]
     //
     // Producers in the wild appear to vary slightly in their record layout. Try a small set of
@@ -109,14 +108,12 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
         col_last: u16,
     }
 
-    fn parse_refu(data: &[u8]) -> Option<RangeHeader> {
-        if data.len() < 6 {
-            return None;
-        }
-        let row_first = u16::from_le_bytes([data[0], data[1]]);
-        let row_last = u16::from_le_bytes([data[2], data[3]]);
-        let col_first = data[4] as u16;
-        let col_last = data[5] as u16;
+    fn parse_refu_range(data: &[u8]) -> Option<RangeHeader> {
+        let chunk = data.get(0..6)?;
+        let row_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let row_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+        let col_first = chunk[4] as u16;
+        let col_last = chunk[5] as u16;
         Some(RangeHeader {
             row_first,
             row_last,
@@ -125,14 +122,12 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
         })
     }
 
-    fn parse_ref8(data: &[u8]) -> Option<RangeHeader> {
-        if data.len() < 8 {
-            return None;
-        }
-        let row_first = u16::from_le_bytes([data[0], data[1]]);
-        let row_last = u16::from_le_bytes([data[2], data[3]]);
-        let col_first = u16::from_le_bytes([data[4], data[5]]) & 0x3FFF;
-        let col_last = u16::from_le_bytes([data[6], data[7]]) & 0x3FFF;
+    fn parse_ref8_range(data: &[u8]) -> Option<RangeHeader> {
+        let chunk = data.get(0..8)?;
+        let row_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let row_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+        let col_first = u16::from_le_bytes([chunk[4], chunk[5]]) & 0x3FFF;
+        let col_last = u16::from_le_bytes([chunk[6], chunk[7]]) & 0x3FFF;
         Some(RangeHeader {
             row_first,
             row_last,
@@ -140,17 +135,62 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
             col_last,
         })
     }
-
-    let headers = [parse_refu(data), parse_ref8(data)];
-    let header = headers
-        .into_iter()
-        .flatten()
-        .find(|header| header.row_first <= header.row_last && header.col_first <= header.col_last)?;
 
     let parsed = super::worksheet_formulas::parse_biff8_shrfmla_record(record).ok()?;
     if parsed.rgce.is_empty() {
         return None;
     }
+
+    // Try to identify the correct SHRFMLA header layout by matching the `cce` value stored in the
+    // record body against the length of the parsed rgce stream. This avoids misidentifying Ref8
+    // headers (which use u16 column fields) as RefU when the shared range starts in column A.
+    let data = record.data.as_ref();
+    let expected_cce = parsed.rgce.len();
+    let header = {
+        let mut out: Option<RangeHeader> = None;
+        let set_if_matches =
+            |header: Option<RangeHeader>, cce_offset: usize, data: &[u8], out: &mut Option<RangeHeader>| {
+                let Some(header) = header else {
+                    return;
+                };
+                if header.row_first > header.row_last || header.col_first > header.col_last {
+                    return;
+                }
+                let cce_bytes = match data.get(cce_offset..cce_offset + 2) {
+                    Some(v) => v,
+                    None => return,
+                };
+                let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
+                if cce == expected_cce {
+                    *out = Some(header);
+                }
+            };
+
+        // Match the parsing order used by `worksheet_formulas::parse_biff8_shrfmla_record`.
+        // Layout A: RefU (6) + cUse (2) + cce (2).
+        set_if_matches(parse_refu_range(data), 8, data, &mut out);
+        // Layout B: Ref8 (8) + cUse (2) + cce (2).
+        if out.is_none() {
+            set_if_matches(parse_ref8_range(data), 10, data, &mut out);
+        }
+        // Layout C: RefU (6) + cce (2) (cUse omitted).
+        if out.is_none() {
+            set_if_matches(parse_refu_range(data), 6, data, &mut out);
+        }
+        // Layout D: Ref8 (8) + cce (2) (cUse omitted).
+        if out.is_none() {
+            set_if_matches(parse_ref8_range(data), 8, data, &mut out);
+        }
+
+        out
+    }
+    // Fallback to the old heuristic if we fail to match a header layout.
+    .or_else(|| {
+        [parse_refu_range(data), parse_ref8_range(data)]
+            .into_iter()
+            .flatten()
+            .find(|header| header.row_first <= header.row_last && header.col_first <= header.col_last)
+    })?;
 
     Some(SharedFormulaDef {
         row_first: header.row_first,
