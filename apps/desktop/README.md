@@ -346,6 +346,12 @@ Optional: override the binary path explicitly (useful when multiple `target/**/r
 pnpm -C apps/desktop check:coi -- --no-build --bin <path-to-formula-desktop>
 ```
 
+Optional (Linux/CI): if the app occasionally hangs in headless environments, you can tune the outer timeout used by the check:
+
+```bash
+FORMULA_COI_TIMEOUT_SECS=60 pnpm -C apps/desktop check:coi -- --no-build
+```
+
 CI note: the desktop release workflow runs this check on Linux (and, by default, macOS/Windows) **after** the Tauri build step,
 reusing the already-built artifacts (`--no-build`). To temporarily skip the check on macOS/Windows (while keeping the Linux signal),
 set the GitHub Actions variable `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`).
