@@ -1590,6 +1590,39 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "NORMDIST",
+    description: "Returns the normal cumulative distribution for the specified mean and standard deviation (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "NORMSDIST",
+    description: "Returns the standard normal cumulative distribution function (legacy).",
+    args: [
+      { name: "z", type: "value" },
+    ],
+  },
+  {
+    name: "NORMINV",
+    description: "Returns the inverse of the normal cumulative distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "NORMSINV",
+    description: "Returns the inverse of the standard normal cumulative distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+    ],
+  },
+  {
     name: "POISSON",
     description: "Returns the Poisson distribution.",
     args: [
