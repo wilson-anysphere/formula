@@ -29,20 +29,18 @@ export function createRibbonActionsFromCommands(params: {
    * a toast (best-effort) and log a warning.
    */
   onUnknownCommand?: (commandId: string) => void | Promise<void>;
-   /**
-    * Fallback handler for unregistered toggle commands.
-    *
-    * Toggle buttons should invoke `onToggle(id, pressed)` only.
-    *
-     * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
-     * immediately after `onToggle`, the bridge will suppress the follow-up
-     * `onCommand` callback to avoid double-executing toggle actions / showing
-     * duplicate fallback toasts.
-     *
-     * To opt into the normal unknown-command fallback behavior for unknown toggles
-     * (i.e. call `onUnknownCommand`, or show the default toast when omitted), return
-     * `false` synchronously.
-     */
+  /**
+   * Fallback handler for unregistered toggle commands.
+   *
+   * Toggle buttons should invoke `onToggle(id, pressed)` only.
+   *
+   * For backwards compatibility with legacy hosts that invoke `onCommand(id)` immediately
+   * after `onToggle`, the bridge will suppress the follow-up `onCommand` callback to avoid
+   * double-executing toggle actions / showing duplicate fallback toasts.
+   *
+   * To opt into the normal unknown-command fallback behavior for unknown toggles (i.e. call
+   * `onUnknownCommand`, or show the default toast when omitted), return `false` synchronously.
+   */
   onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
   const {
@@ -83,10 +81,15 @@ export function createRibbonActionsFromCommands(params: {
   const pendingToggleSuppress = new Set<string>();
   const scheduleMicrotask =
     typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
+  // Prefer a macrotask boundary so the suppression survives follow-up `onCommand` calls that are
+  // scheduled via microtasks (e.g. Promise/queueMicrotask). A microtask cleanup could run before
+  // such a follow-up `onCommand`, defeating the suppression.
+  const scheduleToggleSuppressCleanup =
+    typeof setTimeout === "function" ? (cb: () => void) => void setTimeout(cb, 0) : scheduleMicrotask;
   const markToggleHandled = (commandId: string): void => {
     pendingToggleSuppress.add(commandId);
     // Ensure we don't leak memory if the host only calls `onToggle` (tests/custom hosts).
-    scheduleMicrotask(() => pendingToggleSuppress.delete(commandId));
+    scheduleToggleSuppressCleanup(() => pendingToggleSuppress.delete(commandId));
   };
 
   const run = (commandId: string, fn: () => void | Promise<void>): void => {
