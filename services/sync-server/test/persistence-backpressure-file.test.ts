@@ -55,7 +55,15 @@ test("FilePersistence backpressure disables a doc when the per-doc queue depth i
   persistence.bindState(docName, doc);
 
   doc.getText("t").insert(0, "a");
-  await new Promise((r) => setImmediate(r));
+  // Give the async persistence task time to reach the (patched) `fs.appendFile` call.
+  // On some Node/platform combinations, this can take more than a single tick because the
+  // persistence path awaits an async `fs.mkdir(...)` first.
+  const start = Date.now();
+  while (appendCalls === 0 && Date.now() - start < 1000) {
+    // Use a timer tick (instead of only `setImmediate`) to give async fs work time to complete
+    // on slower/contended environments.
+    await new Promise((r) => setTimeout(r, 1));
+  }
   assert.equal(appendCalls, 1);
 
   // Second update would exceed queue depth=1, so the doc is disabled + overload callback fired.
@@ -70,4 +78,3 @@ test("FilePersistence backpressure disables a doc when the per-doc queue depth i
   await new Promise((r) => setImmediate(r));
   assert.equal(appendCalls, 1);
 });
-

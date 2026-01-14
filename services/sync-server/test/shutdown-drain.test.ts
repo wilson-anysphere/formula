@@ -93,7 +93,8 @@ function getMetricValue(body: string, name: string, labels?: Record<string, stri
         .join("[^}]*")}[^}]*\\}`
     : "(?:\\{[^}]*\\})?";
   const match = body.match(
-    new RegExp(`^${name}${labelFragment}\\s+(-?\\\\d+(?:\\\\.\\\\d+)?(?:e[+-]?\\\\d+)?)$`, "m")
+    // Allow default labels (e.g. `{service="sync-server"}`) while keeping the matcher simple.
+    new RegExp(`^${name}${labelFragment}\\s+(-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?)$`, "m")
   );
   if (!match) return null;
   const value = Number(match[1]);
