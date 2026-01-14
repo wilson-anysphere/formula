@@ -63,7 +63,13 @@ async function tryInvoke(invoke: TauriInvoke, cmd: string, args?: any): Promise<
   try {
     // Tauri invokes should be fast; keep them bounded so best-effort startup instrumentation
     // can't hang forever if the bridge wedges.
-    await withTimeout(Promise.resolve().then(() => invoke(cmd, args)), HOST_INVOKE_CALL_TIMEOUT_MS);
+    const call = () => {
+      // Avoid passing `undefined` as an explicit second argument; it changes the invocation
+      // signature and complicates test assertions/mocks.
+      if (typeof args === "undefined") return invoke(cmd);
+      return invoke(cmd, args);
+    };
+    await withTimeout(Promise.resolve().then(call), HOST_INVOKE_CALL_TIMEOUT_MS);
     return true;
   } catch {
     return false;
