@@ -18,7 +18,12 @@ ORIG_PWD="$(pwd)"
 TMPDIR=""
 
 die() {
-  echo "${SCRIPT_NAME}: error: $*" >&2
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    # Emit a GitHub Actions error annotation when running in CI.
+    echo "::error::validate-linux-appimage: $*" >&2
+  else
+    echo "${SCRIPT_NAME}: error: $*" >&2
+  fi
   exit 1
 }
 
@@ -206,7 +211,7 @@ validate_appimage() {
       echo "${SCRIPT_NAME}: error: AppImage extraction failed for: $appimage_path" >&2
       echo "${SCRIPT_NAME}: error: Output (tail):" >&2
       tail -200 "$extract_log" >&2 || true
-      exit 1
+      die "AppImage extraction failed for: $appimage_path"
     fi
   )
 
