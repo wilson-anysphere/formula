@@ -331,19 +331,39 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
 
     // Derive spun password hash + block 0 key.
     let spun = standard_rc4_spun_password_hash(hash_alg, password, &salt);
+    match hash_alg {
+        Rc4HashAlgorithm::Sha1 => assert_eq!(
+            spun,
+            hex_decode("1b5972284eab6481eb6565a0985b334b3e65e041"),
+            "SHA1 spun password hash vector mismatch"
+        ),
+        Rc4HashAlgorithm::Md5 => assert_eq!(
+            spun,
+            hex_decode("2079476089fda784c3a3cfeb98102c7e"),
+            "MD5 spun password hash vector mismatch"
+        ),
+    }
 
     // Test vectors (lock down derivation for both SHA1 and MD5).
     if hash_alg == Rc4HashAlgorithm::Sha1 {
         let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
         let expected = match key_bits {
             40 => hex_decode("6ad7dedf2d"),
             128 => hex_decode("6ad7dedf2da3514b1d85eabee069d47d"),
             _ => panic!("no SHA1 test vector for keyBits={key_bits}"),
         };
         assert_eq!(key0, expected, "SHA1 block0 key vector mismatch");
+        let expected1 = match key_bits {
+            40 => hex_decode("2ed4e8825c"),
+            128 => hex_decode("2ed4e8825cd48aa4a47994cda7415b4a"),
+            _ => panic!("no SHA1 test vector for keyBits={key_bits}"),
+        };
+        assert_eq!(key1, expected1, "SHA1 block1 key vector mismatch");
     }
     if hash_alg == Rc4HashAlgorithm::Md5 {
         let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
         let expected = match key_bits {
             40 => hex_decode("69badcae24"),
             128 => hex_decode("69badcae244868e209d4e053ccd2a3bc"),
@@ -354,6 +374,12 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
             expected,
             "MD5 block0 key vector mismatch"
         );
+        let expected1 = match key_bits {
+            40 => hex_decode("6f4d502ab3"),
+            128 => hex_decode("6f4d502ab37700ffdab5704160455b47"),
+            _ => panic!("no MD5 test vector for keyBits={key_bits}"),
+        };
+        assert_eq!(key1, expected1, "MD5 block1 key vector mismatch");
     }
 
     let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
@@ -361,6 +387,14 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         assert_eq!(key0.len(), 5, "40-bit RC4 key must be 5 bytes");
         let mut padded = vec![0u8; 16];
         padded[..5].copy_from_slice(&key0);
+        let expected_padded = match hash_alg {
+            Rc4HashAlgorithm::Sha1 => hex_decode("6ad7dedf2d0000000000000000000000"),
+            Rc4HashAlgorithm::Md5 => hex_decode("69badcae240000000000000000000000"),
+        };
+        assert_eq!(
+            padded, expected_padded,
+            "40-bit CryptoAPI RC4 key must be padded to 16 bytes with zeros"
+        );
         padded
     } else {
         key0.clone()
@@ -390,7 +424,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     // EncryptionInfo header.
     let version_major = 4u16;
     let version_minor = 2u16;
-    let flags = 0x0000_0000u32;
+    let flags = 0x0000_0040u32;
     // MS-OFFCRYPTO Standard `EncryptionHeader.Flags`:
     // - fCryptoAPI must be set for CryptoAPI (Standard) encryption.
     // - fAES must be unset for RC4.
