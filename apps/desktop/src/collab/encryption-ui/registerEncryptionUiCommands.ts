@@ -215,8 +215,12 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
             );
             return;
           }
-        } catch {
-          // Best-effort; fall through to the existing-key-lookup-failed warning prompt below.
+        } catch (err) {
+          // If we can't read encrypted range metadata, we must not generate/store key material
+          // (it could create orphaned keys or key conflicts).
+          const message = err instanceof Error ? err.message : String(err);
+          showToast(`Encrypted range metadata is in an unsupported format: ${message}`, "error");
+          return;
         }
 
         // Also guard against reusing an existing `keyId` that already appears in encrypted cell payloads
