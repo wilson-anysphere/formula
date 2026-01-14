@@ -2757,6 +2757,11 @@ export class FormulaBarView {
         text: string
       ): string => {
         const extraClass = span.className;
+        // Whitespace spans don't receive styling and are never hover targets; avoid wrapping them
+        // in <span> tags to keep long, formatted formulas lighter to render.
+        if (span.kind === "whitespace" && !extraClass) {
+          return text;
+        }
 
         if (!isFormulaEditing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
