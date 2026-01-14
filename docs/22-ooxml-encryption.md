@@ -506,7 +506,7 @@ Strings change over time, but these are the common ones you’ll see in logs/bug
 
 ## Debugging workflow (triage cookbook)
 
-When investigating a bug report (“Formula can’t open my password-protected `.xlsx`”), it helps to
+When investigating a bug report (“Formula can’t open my password-protected `.xlsx`/`.xlsm`/`.xlsb`”), it helps to
 follow a consistent flow:
 
 1. **Classify the file quickly**
