@@ -309,7 +309,10 @@ fn spawn_post_window_visible_init(app: &tauri::AppHandle) {
     // background thread.
     let trust_shared = app.state::<SharedMacroTrustStore>().inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut trust_store = trust_shared.lock().unwrap();
+        let mut trust_store = match trust_shared.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         trust_store.ensure_loaded();
     });
 }
@@ -334,7 +337,10 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
     // `PageLoadEvent::Finished` mark.
     let shared = state.inner().clone();
     let (window_visible_ms, webview_loaded_ms, snapshot) = {
-        let mut metrics = shared.lock().unwrap();
+        let mut metrics = match shared.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let window_visible_ms = metrics.record_window_visible();
         let webview_loaded_ms = metrics.record_webview_loaded();
         let snapshot = metrics.snapshot();
@@ -352,7 +358,10 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
 fn report_startup_first_render(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
     let shared = state.inner().clone();
     let (first_render_ms, snapshot) = {
-        let mut metrics = shared.lock().unwrap();
+        let mut metrics = match shared.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         // If we somehow never recorded a window-visible timestamp (e.g. we missed the window
         // event), fall back to "at least by first render the window was visible".
         metrics.record_window_visible();
@@ -371,7 +380,10 @@ fn report_startup_first_render(app: tauri::AppHandle, state: State<'_, SharedSta
 fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
     let shared = state.inner().clone();
     let (tti_ms, snapshot, should_spawn_post_window_visible_init) = {
-        let mut metrics = shared.lock().unwrap();
+        let mut metrics = match shared.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         // If we somehow never recorded a window-visible timestamp (e.g. the webview
         // never called `report_startup_webview_loaded`), fall back to "at least by
         // the time we became interactive the window was visible".
@@ -1804,7 +1816,10 @@ fn main() {
                 if window.label() == "main" {
                     let startup = window.state::<SharedStartupMetrics>().inner().clone();
                     let (should_emit_window_visible, window_visible_ms, snapshot, should_spawn_post_window_visible_init) = {
-                        let mut metrics = startup.lock().unwrap();
+                        let mut metrics = match startup.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
                         // This is the authoritative "window became visible" signal; overwrite any
                         // provisional timestamp that might have been recorded by early frontend
                         // startup reporting.
