@@ -8,7 +8,7 @@ use crate::styles::StylesPart;
 
 use super::{PivotCacheDefinition, PivotTableDefinition};
 
-use formula_model::pivots::{AggregationType, ValueField};
+use formula_model::pivots::{AggregationType, PivotFieldRef, ValueField};
 
 /// Convert the `<dataFields>` section of a parsed pivot table definition into
 /// model `ValueField` entries.
@@ -47,7 +47,7 @@ pub fn pivot_table_to_model_value_fields(
                 .and_then(|id| resolve_pivot_num_fmt_id(id, styles));
 
             Some(ValueField {
-                source_field,
+                source_field: PivotFieldRef::CacheFieldName(source_field),
                 name,
                 aggregation,
                 number_format,
@@ -117,4 +117,3 @@ fn aggregation_display_name(agg: AggregationType) -> &'static str {
         AggregationType::VarP => "VarP",
     }
 }
-

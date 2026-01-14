@@ -18,7 +18,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::{
     AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    PivotField, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition, ValueField,
+    PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition,
+    ValueField,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -466,23 +467,27 @@ impl CreatePivotTableRequest {
             value_fields: self
                 .value_fields
                 .into_iter()
-                .map(|vf| ValueField {
-                    name: vf
-                        .name
-                        .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, vf.field)),
-                    source_field: vf.field,
-                    aggregation: vf.aggregation,
-                    number_format: None,
-                    show_as: None,
-                    base_field: None,
-                    base_item: None,
+                .map(|vf| {
+                    let field = vf.field;
+                    let name =
+                        vf.name
+                            .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, field));
+                    ValueField {
+                        name,
+                        source_field: PivotFieldRef::CacheFieldName(field),
+                        aggregation: vf.aggregation,
+                        number_format: None,
+                        show_as: None,
+                        base_field: None,
+                        base_item: None,
+                    }
                 })
                 .collect(),
             filter_fields: self
                 .filter_fields
                 .into_iter()
                 .map(|f| FilterField {
-                    source_field: f.field,
+                    source_field: PivotFieldRef::CacheFieldName(f.field),
                     allowed: f
                         .allowed
                         .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
@@ -1360,12 +1365,12 @@ impl PivotEngine {
     ) -> Option<CalculatedItemPlacement> {
         cfg.row_fields
             .iter()
-            .position(|f| f.source_field == field)
+            .position(|f| matches!(&f.source_field, PivotFieldRef::CacheFieldName(name) if name == field))
             .map(CalculatedItemPlacement::Row)
             .or_else(|| {
                 cfg.column_fields
                     .iter()
-                    .position(|f| f.source_field == field)
+                    .position(|f| matches!(&f.source_field, PivotFieldRef::CacheFieldName(name) if name == field))
                     .map(CalculatedItemPlacement::Column)
             })
     }
@@ -1645,7 +1650,7 @@ impl PivotEngine {
             }
             Layout::Outline | Layout::Tabular => {
                 for f in &cfg.row_fields {
-                    row.push(PivotValue::Text(f.source_field.clone()));
+                    row.push(PivotValue::Text(f.source_field.to_string()));
                 }
             }
         }
@@ -1995,11 +2000,11 @@ impl PivotEngine {
                     );
                 }
                 ShowAsType::RunningTotal => {
-                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() {
+                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_ref() {
                         if let Some(base_row_pos) = cfg
                             .row_fields
                             .iter()
-                            .position(|f| f.source_field == base_field)
+                            .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
                                 Self::group_ids_excluding_pos(row_keys, base_row_pos);
@@ -2013,7 +2018,7 @@ impl PivotEngine {
                         } else if let Some(base_col_pos) = cfg
                             .column_fields
                             .iter()
-                            .position(|f| f.source_field == base_field)
+                            .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
                                 Self::group_ids_excluding_pos(col_keys, base_col_pos);
@@ -2033,11 +2038,11 @@ impl PivotEngine {
                 }
                 ShowAsType::RankAscending | ShowAsType::RankDescending => {
                     let descending = show_as == ShowAsType::RankDescending;
-                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() {
+                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_ref() {
                         if let Some(base_row_pos) = cfg
                             .row_fields
                             .iter()
-                            .position(|f| f.source_field == base_field)
+                            .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
                                 Self::group_ids_excluding_pos(row_keys, base_row_pos);
@@ -2052,7 +2057,7 @@ impl PivotEngine {
                         } else if let Some(base_col_pos) = cfg
                             .column_fields
                             .iter()
-                            .position(|f| f.source_field == base_field)
+                            .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
                                 Self::group_ids_excluding_pos(col_keys, base_col_pos);
@@ -2072,7 +2077,7 @@ impl PivotEngine {
                     }
                 }
                 ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
-                    let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() else {
+                    let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_ref() else {
                         continue;
                     };
                     let Some(base_item) = cfg.value_fields[vf_idx].base_item.as_deref() else {
@@ -2088,7 +2093,7 @@ impl PivotEngine {
                     if let Some(base_row_pos) = cfg
                         .row_fields
                         .iter()
-                        .position(|f| f.source_field == base_field)
+                        .position(|f| &f.source_field == base_field)
                     {
                         let Some(base_part) = row_keys.iter().find_map(|rk| {
                             rk.0.get(base_row_pos)
@@ -2117,7 +2122,7 @@ impl PivotEngine {
                     } else if let Some(base_col_pos) = cfg
                         .column_fields
                         .iter()
-                        .position(|f| f.source_field == base_field)
+                        .position(|f| &f.source_field == base_field)
                     {
                         let Some(base_part) = col_keys.iter().find_map(|ck| {
                             ck.0.get(base_col_pos)
@@ -3122,33 +3127,45 @@ impl FieldIndices {
     fn new<S: PivotRecordSource + ?Sized>(source: &S, cfg: &PivotConfig) -> Result<Self, PivotError> {
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
+            let Some(source_field) = f.source_field.as_cache_field_name() else {
+                return Err(PivotError::MissingField(f.source_field.to_string()));
+            };
             row_indices.push(
                 source
-                    .field_index(&f.source_field)
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+                    .field_index(source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
+            let Some(source_field) = f.source_field.as_cache_field_name() else {
+                return Err(PivotError::MissingField(f.source_field.to_string()));
+            };
             col_indices.push(
                 source
-                    .field_index(&f.source_field)
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+                    .field_index(source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
+            let Some(source_field) = f.source_field.as_cache_field_name() else {
+                return Err(PivotError::MissingField(f.source_field.to_string()));
+            };
             value_indices.push(
                 source
-                    .field_index(&f.source_field)
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+                    .field_index(source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
+            let Some(source_field) = f.source_field.as_cache_field_name() else {
+                return Err(PivotError::MissingField(f.source_field.to_string()));
+            };
             let idx = source
-                .field_index(&f.source_field)
-                .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?;
+                .field_index(source_field)
+                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             filter_indices.push((idx, f.allowed.clone()));
         }
         Ok(Self {

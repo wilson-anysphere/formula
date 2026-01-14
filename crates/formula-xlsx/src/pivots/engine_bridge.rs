@@ -7,7 +7,8 @@
 use chrono::NaiveDate;
 use formula_engine::pivot::{
     AggregationType, CalculatedField, FilterField, GrandTotals, Layout, PivotCache, PivotConfig,
-    PivotField, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition, ValueField,
+    PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition,
+    ValueField,
 };
 use formula_model::pivots::ScalarValue;
 use std::collections::HashSet;
@@ -223,7 +224,7 @@ where
     };
 
     FilterField {
-        source_field: field,
+        source_field: PivotFieldRef::CacheFieldName(field),
         allowed,
     }
 }
@@ -262,7 +263,7 @@ pub fn timeline_selection_to_engine_filter(
     }
 
     Some(FilterField {
-        source_field: field,
+        source_field: PivotFieldRef::CacheFieldName(field),
         allowed: Some(allowed),
     })
 }
@@ -401,7 +402,7 @@ pub fn pivot_table_to_engine_config(
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
-                    .map(|f| f.name.clone())
+                    .map(|f| PivotFieldRef::CacheFieldName(f.name.clone()))
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
@@ -422,7 +423,7 @@ pub fn pivot_table_to_engine_config(
                     )))
                 });
             Some(ValueField {
-                source_field,
+                source_field: PivotFieldRef::CacheFieldName(source_field),
                 name,
                 aggregation,
                 number_format: None,
@@ -458,7 +459,7 @@ pub fn pivot_table_to_engine_config(
             });
 
             Some(FilterField {
-                source_field,
+                source_field: PivotFieldRef::CacheFieldName(source_field),
                 allowed,
             })
         })

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::collections::HashSet;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
@@ -19,6 +20,27 @@ pub enum PivotFieldRef {
     DataModelColumn { table: String, column: String },
     /// A Data Model measure identified by its name (without brackets).
     DataModelMeasure(String),
+}
+
+impl PivotFieldRef {
+    /// Returns the underlying cache/header field name when this ref points at a worksheet/pivot
+    /// cache field.
+    pub fn as_cache_field_name(&self) -> Option<&str> {
+        match self {
+            PivotFieldRef::CacheFieldName(name) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for PivotFieldRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PivotFieldRef::CacheFieldName(name) => f.write_str(name),
+            PivotFieldRef::DataModelColumn { table, column } => write!(f, "{table}[{column}]"),
+            PivotFieldRef::DataModelMeasure(name) => write!(f, "[{name}]"),
+        }
+    }
 }
 
 impl Serialize for PivotFieldRef {

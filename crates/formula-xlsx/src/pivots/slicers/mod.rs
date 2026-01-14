@@ -6,6 +6,7 @@ use crate::sheet_metadata::parse_workbook_sheets;
 use crate::DateSystem;
 use chrono::{Datelike, NaiveDate};
 use formula_engine::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::pivot::PivotFieldRef;
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
 use formula_model::pivots::ScalarValue;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
@@ -116,7 +117,7 @@ pub fn slicer_selection_to_engine_filter_field_with_resolver(
     };
 
     formula_engine::pivot::FilterField {
-        source_field: field.into(),
+        source_field: PivotFieldRef::CacheFieldName(field.into()),
         allowed,
     }
 }
@@ -132,7 +133,7 @@ pub fn timeline_selection_to_engine_filter_field(
     _selection: &TimelineSelectionState,
 ) -> formula_engine::pivot::FilterField {
     formula_engine::pivot::FilterField {
-        source_field: field.into(),
+        source_field: PivotFieldRef::CacheFieldName(field.into()),
         allowed: None,
     }
 }

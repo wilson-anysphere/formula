@@ -1553,7 +1553,10 @@ fn getpivotdata_from_registry(
             let Some(allowed) = &filter.allowed else {
                 continue;
             };
-            let key = crate::value::casefold(&filter.source_field);
+            let Some(source_field) = filter.source_field.as_cache_field_name() else {
+                continue;
+            };
+            let key = crate::value::casefold(source_field);
             let Some(idx) = entry.field_indices.get(&key).copied() else {
                 continue;
             };
