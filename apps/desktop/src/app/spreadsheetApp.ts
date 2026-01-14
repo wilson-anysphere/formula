@@ -16,6 +16,7 @@ import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawingsInto, type HitTestIndex } from "../drawings/hitTest";
 import {
   DrawingInteractionController,
+  patchDrawingXmlForResize,
   patchDrawingXmlForMove,
   resizeAnchor,
   shiftAnchor,
@@ -8271,6 +8272,35 @@ export class SpreadsheetApp {
     }
     if (rawIdsToUpdate.size === 0) rawIdsToUpdate.add(uiId);
 
+    // DrawingInteractionController can patch preserved DrawingML payloads at commit time
+    // (e.g. `kind.rawXml` for shapes/unknown drawings). Persist those patches back to the
+    // document when possible so export/roundtrip stays faithful.
+    const patchedKindXml: string | null = (() => {
+      const afterKind: any = (after as any).kind;
+      if (!afterKind || typeof afterKind !== "object") return null;
+      const rawXml = afterKind.rawXml ?? afterKind.raw_xml;
+      return typeof rawXml === "string" ? rawXml : null;
+    })();
+
+    const patchRawXmlInKind = (kind: any, xml: string): any => {
+      if (!kind || typeof kind !== "object") return kind;
+      const seen = new Set<any>();
+      const visit = (node: any, depth: number) => {
+        if (!node || typeof node !== "object") return;
+        if (seen.has(node)) return;
+        seen.add(node);
+        if (typeof (node as any).rawXml === "string") (node as any).rawXml = xml;
+        if (typeof (node as any).raw_xml === "string") (node as any).raw_xml = xml;
+        // Keep the recursion shallow; drawing kind payloads are JSON-serializable.
+        if (depth >= 5) return;
+        for (const value of Object.values(node)) {
+          if (value && typeof value === "object") visit(value, depth + 1);
+        }
+      };
+      visit(kind, 0);
+      return kind;
+    };
+
     const applyDrawingPatch = (drawing: any): any => {
       if (!drawing || typeof drawing !== "object") return drawing;
       const stableId = (drawing as any).id;
@@ -8300,6 +8330,14 @@ export class SpreadsheetApp {
       if ((after as any).preserved !== undefined) {
         if (after.preserved) next.preserved = after.preserved;
         else if ("preserved" in next) delete next.preserved;
+      }
+
+      if (patchedKindXml != null) {
+        try {
+          next.kind = patchRawXmlInKind((next as any).kind, patchedKindXml);
+        } catch {
+          // ignore
+        }
       }
 
       // Keep the extracted `size` field (when present) aligned with the anchor size.
@@ -16733,37 +16771,78 @@ export class SpreadsheetApp {
 
       const objects = this.listDrawingObjectsForSheet();
       const base = objects.find((obj) => obj.id === gesture.objectId) ?? null;
-
-      const docAny: any = this.document as any;
-      const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
-
-      if (base) {
-        const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
-        this.renderDrawings();
-
-        if (shouldCommit) {
-          // Persist drawing edits back to the DocumentController so pointer-driven drawing
-          // interactions behave consistently with DrawingInteractionController (and so tests
-          // can observe the committed anchor updates).
-          const canPersist =
-            typeof docAny.updateDrawing === "function" ||
-            (typeof docAny.getSheetDrawings === "function" && typeof docAny.setSheetDrawings === "function");
-          if (canPersist) {
-            const before: DrawingObject = { ...base, anchor: gesture.startAnchor };
-            const after: DrawingObject = { ...base, anchor: nextAnchor };
-            const kind: DrawingInteractionCommit["kind"] = gesture.mode === "resize" ? "resize" : "move";
-            this.commitDrawingInteraction({ kind, id: base.id, before, after });
-          }
-        } else {
-          // Cancel gesture: revert the live preview back to the start anchor.
-          const revertedObjects = objects.map((obj) =>
-            obj.id === gesture.objectId ? { ...obj, anchor: gesture.startAnchor } : obj,
-          );
-          this.drawingObjectsCache = { sheetId: this.sheetId, objects: revertedObjects, source: drawingsGetter };
-          this.renderDrawings();
+      if (!base) {
+        this.drawingGesture = null;
+        try {
+          this.root.releasePointerCapture(e.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
         }
+        this.renderSelection();
+        return;
       }
+
+      const anchorsEqual = (a: DrawingObject["anchor"], b: DrawingObject["anchor"]): boolean => {
+        if (a.type !== b.type) return false;
+        if (a.type === "absolute") {
+          const bb = b as any;
+          return a.pos.xEmu === bb.pos.xEmu && a.pos.yEmu === bb.pos.yEmu && a.size.cx === bb.size.cx && a.size.cy === bb.size.cy;
+        }
+        if (a.type === "oneCell") {
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.size.cx === bb.size.cx &&
+            a.size.cy === bb.size.cy
+          );
+        }
+        // twoCell
+        const bb = b as any;
+        return (
+          a.from.cell.row === bb.from.cell.row &&
+          a.from.cell.col === bb.from.cell.col &&
+          a.from.offset.xEmu === bb.from.offset.xEmu &&
+          a.from.offset.yEmu === bb.from.offset.yEmu &&
+          a.to.cell.row === bb.to.cell.row &&
+          a.to.cell.col === bb.to.cell.col &&
+          a.to.offset.xEmu === bb.to.offset.xEmu &&
+          a.to.offset.yEmu === bb.to.offset.yEmu
+        );
+      };
+      if (anchorsEqual(nextAnchor, gesture.startAnchor)) {
+        this.drawingGesture = null;
+        try {
+          this.root.releasePointerCapture(e.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+        }
+        this.renderSelection();
+        return;
+      }
+
+      const before = { ...base, anchor: gesture.startAnchor };
+      let after: DrawingObject = { ...base, anchor: nextAnchor };
+
+      // Commit-time patching: keep preserved DrawingML fragments aligned with the updated anchor so
+      // export/roundtrip doesn't snap shapes/pictures back to their original positions.
+      const beforeRect = anchorToRectPx(gesture.startAnchor, this.drawingGeom, zoom);
+      const afterRect = anchorToRectPx(nextAnchor, this.drawingGeom, zoom);
+      const dxEmu = pxToEmu((afterRect.x - beforeRect.x) / zoom);
+      const dyEmu = pxToEmu((afterRect.y - beforeRect.y) / zoom);
+      const cxEmu = pxToEmu(afterRect.width / zoom);
+      const cyEmu = pxToEmu(afterRect.height / zoom);
+
+      if (gesture.mode === "resize") {
+        after = patchDrawingXmlForResize(after, cxEmu, cyEmu);
+      }
+      if (dxEmu !== 0 || dyEmu !== 0) {
+        after = patchDrawingXmlForMove(after, dxEmu, dyEmu);
+      }
+
+      const finalObjects = objects.map((obj) => (obj.id === gesture.objectId ? after : obj));
 
       this.drawingGesture = null;
       try {
@@ -16772,37 +16851,11 @@ export class SpreadsheetApp {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
 
-      // Persist the interaction to the DocumentController when supported (so drag/resize is undoable
-      // and survives cache invalidation). This mirrors DrawingInteractionController's commit flow.
-      const after = nextObjects.find((obj) => obj.id === gesture.objectId);
-      if (after) {
-        const kind = gesture.mode === "resize" ? "resize" : "move";
-        this.commitDrawingInteraction({ kind, id: gesture.objectId, after });
-      }
+      this.commitDrawingInteraction({ kind: gesture.mode === "resize" ? "resize" : "move", id: gesture.objectId, before, after, objects: finalObjects });
 
+      this.renderDrawings();
       // Ensure selection handles reflect the final position.
       this.renderSelection();
-
-      // Persist the final drawing position/size back to the DocumentController.
-      //
-      // In legacy mode, we update `drawingObjectsCache` during pointermove for live preview but
-      // only commit to the document once per gesture (on pointerup) so the operation is undoable
-      // as a single step.
-      //
-      // When the dedicated DrawingInteractionController is enabled, it owns commit semantics
-      // (including undo batching). Avoid double-committing in that case.
-      if (!this.drawingInteractionController) {
-        const moved = nextObjects.find((obj) => obj.id === gesture.objectId) ?? null;
-        if (moved) {
-          const before = { ...moved, anchor: gesture.startAnchor };
-          const kind: DrawingInteractionCommitKind = gesture.mode === "resize" ? "resize" : "move";
-          try {
-            this.commitDrawingInteraction({ kind, id: gesture.objectId, before, after: moved, objects: nextObjects });
-          } catch {
-            // Best-effort: drawing commits should never crash pointerup handling.
-          }
-        }
-      }
       return;
     }
 

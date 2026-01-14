@@ -1080,7 +1080,7 @@ function anchorSizeEmu(anchor: DrawingObject["anchor"], geom: GridGeometry, zoom
   }
 }
 
-function patchDrawingXmlForResize(obj: DrawingObject, cxEmu: number, cyEmu: number): DrawingObject {
+export function patchDrawingXmlForResize(obj: DrawingObject, cxEmu: number, cyEmu: number): DrawingObject {
   return patchDrawingInnerXml(obj, (xml) => patchXfrmExt(xml, cxEmu, cyEmu));
 }
 
