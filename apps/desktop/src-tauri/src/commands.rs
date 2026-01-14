@@ -2131,6 +2131,97 @@ fn parse_cryptoapi_hash(alg_id_hash: u32) -> Option<String> {
 }
 
 #[cfg(any(feature = "desktop", test))]
+fn is_nul_heavy(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let zeros = bytes.iter().filter(|&&b| b == 0).count();
+    zeros > bytes.len() / 8
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&last, rest)) = bytes.split_last() {
+        if last == 0 {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn decode_utf16_xml(mut bytes: &[u8]) -> Result<String, String> {
+    // Trim trailing UTF-16 NUL terminators / padding.
+    while bytes.len() >= 2 {
+        let n = bytes.len();
+        if bytes[n - 2] == 0 && bytes[n - 1] == 0 {
+            bytes = &bytes[..n - 2];
+        } else {
+            break;
+        }
+    }
+
+    let mut big_endian = false;
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        bytes = &bytes[2..];
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        bytes = &bytes[2..];
+        big_endian = true;
+    }
+
+    bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+    let mut units = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        units.push(if big_endian {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        });
+    }
+
+    let mut xml = String::from_utf16(&units)
+        .map_err(|_| "agile EncryptionInfo descriptor is not valid UTF-16".to_string())?;
+    if let Some(stripped) = xml.strip_prefix('\u{FEFF}') {
+        xml = stripped.to_string();
+    }
+    while xml.ends_with('\0') {
+        xml.pop();
+    }
+    Ok(xml)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn decode_agile_encryption_xml(xml_bytes: &[u8]) -> Result<String, String> {
+    // Primary: treat the remainder as UTF-8 XML (trim UTF-8 BOM, trim trailing NUL padding).
+    let utf8_bytes = trim_trailing_nul_bytes(xml_bytes);
+    let utf8_bytes = strip_utf8_bom(utf8_bytes);
+    if let Ok(xml) = std::str::from_utf8(utf8_bytes) {
+        return Ok(xml.strip_prefix('\u{FEFF}').unwrap_or(xml).to_string());
+    }
+
+    // Some producers store the EncryptionInfo XML as UTF-16LE (sometimes with a BOM).
+    //
+    // Important: do **not** trim single trailing NUL bytes before UTF-16 decoding; ASCII UTF-16LE
+    // encodings end in `0x00` for the final code unit.
+    if xml_bytes.starts_with(&[0xFF, 0xFE])
+        || xml_bytes.starts_with(&[0xFE, 0xFF])
+        || (xml_bytes.len() >= 2 && xml_bytes[0] == b'<' && xml_bytes[1] == 0)
+        || is_nul_heavy(xml_bytes)
+    {
+        return decode_utf16_xml(xml_bytes);
+    }
+
+    Err("agile EncryptionInfo descriptor is not valid UTF-8".to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
 fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, String> {
     if bytes.len() < 8 {
         return Err("EncryptionInfo stream is too short".to_string());
@@ -2140,17 +2231,9 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
 
     match (major, minor) {
         (4, 4) => {
-            // Agile: version (4 bytes) + flags (4 bytes) + UTF-8 XML encryption descriptor.
-            let mut xml_bytes = &bytes[8..];
-            while xml_bytes.last().is_some_and(|b| *b == 0) {
-                xml_bytes = &xml_bytes[..xml_bytes.len().saturating_sub(1)];
-            }
-            if xml_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                xml_bytes = &xml_bytes[3..];
-            }
-            let xml = std::str::from_utf8(xml_bytes)
-                .map_err(|e| format!("agile EncryptionInfo descriptor is not valid UTF-8: {e}"))?;
-            let doc = roxmltree::Document::parse(xml)
+            // Agile: version (4 bytes) + flags (4 bytes) + XML encryption descriptor.
+            let xml = decode_agile_encryption_xml(&bytes[8..])?;
+            let doc = roxmltree::Document::parse(&xml)
                 .map_err(|e| format!("agile EncryptionInfo descriptor is not valid XML: {e}"))?;
 
             let mut hash_algorithm = None;
@@ -2256,6 +2339,7 @@ pub fn inspect_workbook_encryption(
     use std::io::{Read, Seek};
 
     const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    const MAX_ENCRYPTION_INFO_BYTES: u64 = 1024 * 1024;
 
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -2278,12 +2362,20 @@ pub fn inspect_workbook_encryption(
         return Ok(None);
     }
 
-    let mut stream = ole
+    let stream = ole
         .open_stream("EncryptionInfo")
         .or_else(|_| ole.open_stream("/EncryptionInfo"))
         .map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    stream
+        .take(MAX_ENCRYPTION_INFO_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_ENCRYPTION_INFO_BYTES {
+        return Err(format!(
+            "EncryptionInfo stream is too large (max {MAX_ENCRYPTION_INFO_BYTES} bytes)"
+        ));
+    }
     Ok(Some(parse_ooxml_encryption_info(&bytes)?))
 }
 
@@ -9699,6 +9791,57 @@ mod tests {
         let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
             path.to_string_lossy().to_string(),
         ))
+            .expect("inspect_workbook_encryption should succeed")
+            .expect("expected encryption summary");
+
+        assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
+        assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
+        assert_eq!(summary.spin_count, Some(100000));
+        assert_eq!(summary.key_bits, Some(256));
+    }
+
+    #[test]
+    fn inspect_workbook_encryption_returns_summary_for_encrypted_ooxml_utf16le() {
+        use std::io::{Cursor, Write as _};
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-encrypted-ooxml-utf16")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+
+        let mut xml_utf16 = Vec::new();
+        // UTF-16LE BOM.
+        xml_utf16.extend_from_slice(&[0xFF, 0xFE]);
+        for unit in xml.encode_utf16() {
+            xml_utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        // A trailing UTF-16 NUL terminator.
+        xml_utf16.extend_from_slice(&[0, 0]);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor (agile)
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMinor (agile)
+            bytes.extend_from_slice(&0x40u32.to_le_bytes()); // Flags
+            bytes.extend_from_slice(&xml_utf16);
+            stream.write_all(&bytes).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
             .expect("inspect_workbook_encryption should succeed")
             .expect("expected encryption summary");
 
