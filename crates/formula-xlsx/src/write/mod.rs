@@ -2442,9 +2442,13 @@ fn render_sheet_format_pr(settings: SheetFormatSettings, prefix: Option<&str>) -
         out.push_str(&format!(r#" baseColWidth="{base}""#));
     }
     if let Some(width) = settings.default_col_width {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let width = if width == 0.0 { 0.0 } else { width };
         out.push_str(&format!(r#" defaultColWidth="{width}""#));
     }
     if let Some(height) = settings.default_row_height {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let height = if height == 0.0 { 0.0 } else { height };
         out.push_str(&format!(r#" defaultRowHeight="{height}""#));
     }
 
@@ -2540,21 +2544,23 @@ fn write_sheet_format_pr_element(
             b"defaultRowHeight" if settings.default_row_height.is_some() => {
                 wrote_default_row_height = true;
                 writer.get_mut().extend_from_slice(
-                    settings
-                        .default_row_height
-                        .expect("checked is_some")
-                        .to_string()
-                        .as_bytes(),
+                    {
+                        let height = settings.default_row_height.expect("checked is_some");
+                        let height = if height == 0.0 { 0.0 } else { height };
+                        height.to_string()
+                    }
+                    .as_bytes(),
                 );
             }
             b"defaultColWidth" if settings.default_col_width.is_some() => {
                 wrote_default_col_width = true;
                 writer.get_mut().extend_from_slice(
-                    settings
-                        .default_col_width
-                        .expect("checked is_some")
-                        .to_string()
-                        .as_bytes(),
+                    {
+                        let width = settings.default_col_width.expect("checked is_some");
+                        let width = if width == 0.0 { 0.0 } else { width };
+                        width.to_string()
+                    }
+                    .as_bytes(),
                 );
             }
             b"baseColWidth" if settings.base_col_width.is_some() => {
@@ -2587,6 +2593,7 @@ fn write_sheet_format_pr_element(
     if let Some(width) = settings.default_col_width {
         if !wrote_default_col_width {
             writer.get_mut().extend_from_slice(br#" defaultColWidth=""#);
+            let width = if width == 0.0 { 0.0 } else { width };
             writer.get_mut().extend_from_slice(width.to_string().as_bytes());
             writer.get_mut().push(b'"');
         }
@@ -2594,6 +2601,7 @@ fn write_sheet_format_pr_element(
     if let Some(height) = settings.default_row_height {
         if !wrote_default_row_height {
             writer.get_mut().extend_from_slice(br#" defaultRowHeight=""#);
+            let height = if height == 0.0 { 0.0 } else { height };
             writer.get_mut().extend_from_slice(height.to_string().as_bytes());
             writer.get_mut().push(b'"');
         }
@@ -6239,6 +6247,8 @@ fn render_col_range(
     let max = end_col_1;
     s.push_str(&format!(r#"<{col_tag} min="{min}" max="{max}""#));
     if let Some(width) = props.width {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let width = if width == 0.0 { 0.0 } else { width };
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
     }
@@ -6477,6 +6487,8 @@ fn render_sheet_data(
         out.push_str(&format!(r#"<row r="{row_1_based}""#));
         if let Some(row_props) = row_props {
             if let Some(height) = row_props.height {
+                // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+                let height = if height == 0.0 { 0.0 } else { height };
                 out.push_str(&format!(r#" ht="{height}""#));
                 out.push_str(r#" customHeight="1""#);
             }
@@ -6643,6 +6655,8 @@ fn render_sheet_data_columnar(
         let mut row_attrs = String::new();
         if let Some(row_props) = row_props {
             if let Some(height) = row_props.height {
+                // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+                let height = if height == 0.0 { 0.0 } else { height };
                 row_attrs.push_str(&format!(r#" ht="{height}""#));
                 row_attrs.push_str(r#" customHeight="1""#);
             }
