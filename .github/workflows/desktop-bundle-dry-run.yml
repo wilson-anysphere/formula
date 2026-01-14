@@ -478,7 +478,7 @@ jobs:
           $msis = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '\\release\\bundle\\msi\\' }
           $exes = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\release\\bundle\\nsis\\' }
+            Where-Object { $_.FullName -match '\\release\\bundle\\(nsis|nsis-web)\\' }
 
           if (-not $msis -and -not $exes) {
             throw "windows-validate: ERROR: No Windows installer bundles found (.msi or NSIS .exe)."
