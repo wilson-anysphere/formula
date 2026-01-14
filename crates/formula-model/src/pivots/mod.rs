@@ -67,6 +67,7 @@ pub struct GrandTotals {
 
 impl Default for GrandTotals {
     fn default() -> Self {
+        // Match Excel defaults.
         Self {
             rows: true,
             columns: true,
