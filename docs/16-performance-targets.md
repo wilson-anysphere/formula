@@ -195,7 +195,7 @@ Also reported (installer artifacts) on Linux PRs/main (informational by default)
 which builds the Linux desktop bundles and uploads a JSON size report artifact for debugging.
 
 Lightweight PR size gating (desktop binary + `apps/desktop/dist`; disabled by default):
- 
+
 - `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
 - `FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB=<budget>`
   (enforced by `scripts/desktop_size_report.py` when set; CI passes these via GitHub Actions Variables)
@@ -205,6 +205,7 @@ Rust desktop binary size breakdown (cargo-bloat; informational by default):
 - `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
 - `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (or `true`/`yes`/`on`) to make the size breakdown step fail when the binary exceeds the budget
   (reported by `scripts/desktop_binary_size_report.py`)
+
 Frontend asset download size gating (web/desktop Vite `dist/assets`):
 
 - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10` (default: 10MB total)
