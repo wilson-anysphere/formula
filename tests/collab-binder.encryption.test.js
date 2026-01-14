@@ -281,6 +281,56 @@ test("Yjs↔DocumentController binder refuses writes when encryption key id does
   assert.equal(JSON.stringify(cellMap.toJSON()).includes("hacked"), false);
 });
 
+test("Yjs↔DocumentController binder refuses writes when enc payload schema is unsupported", async (t) => {
+  const docId = "collab-binder-encryption-test-doc-unsupported-payload";
+  const doc = new Y.Doc({ guid: docId });
+
+  // Simulate a future encryption payload version that this binder cannot decrypt.
+  doc.transact(() => {
+    const cells = doc.getMap("cells");
+    const cell = new Y.Map();
+    cell.set("enc", {
+      v: 2,
+      alg: "AES-256-GCM",
+      keyId: "k-range-1",
+      ivBase64: "AA==",
+      tagBase64: "AA==",
+      ciphertextBase64: "AA==",
+    });
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const controller = new DocumentController();
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = () => ({ keyId: "k-range-1", keyBytes });
+
+  const binder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController: controller,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+    encryption: { keyForCell: keyForA1 },
+    maskCellValue: (value) => value,
+  });
+
+  t.after(() => {
+    binder.destroy();
+    doc.destroy();
+  });
+
+  await waitForCondition(() => controller.getCell("Sheet1", "A1").value === "###", 10_000);
+
+  // Attempt to overwrite. This should be rejected to avoid clobbering ciphertext
+  // written by a newer client with an unknown schema.
+  controller.setCellValue("Sheet1", "A1", "hacked");
+  await waitForCondition(() => controller.getCell("Sheet1", "A1").value === "###", 10_000);
+
+  const cellMap = doc.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cellMap, "expected Yjs cell map to exist");
+  assert.equal(cellMap.get("enc").v, 2);
+  assert.equal(JSON.stringify(cellMap.toJSON()).includes("hacked"), false);
+});
+
 test("Yjs↔DocumentController binder prefers encrypted payloads over plaintext duplicates across legacy key encodings", async (t) => {
   const docId = "collab-binder-encryption-test-doc-legacy-keys";
   const docA = new Y.Doc({ guid: docId });
