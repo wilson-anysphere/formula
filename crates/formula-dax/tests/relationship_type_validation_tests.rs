@@ -126,3 +126,77 @@ fn valid_relationships_still_work() {
         .unwrap();
 }
 
+#[test]
+fn columnar_relationship_allows_numeric_like_join_types() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+
+    let dim_schema = vec![ColumnSchema {
+        name: "Id".to_string(),
+        column_type: ColumnType::DateTime,
+    }];
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[formula_columnar::Value::DateTime(1)]);
+    dim.append_row(&[formula_columnar::Value::DateTime(2)]);
+
+    let fact_schema = vec![ColumnSchema {
+        name: "Id".to_string(),
+        column_type: ColumnType::Number,
+    }];
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[formula_columnar::Value::Number(1.0)]);
+    fact.append_row(&[formula_columnar::Value::Number(2.0)]);
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+}
+
+#[test]
+fn in_memory_relationship_skips_validation_when_one_side_is_all_blank() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Id"]);
+    dim.push_row(vec![formula_dax::Value::Blank]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    fact.push_row(vec![1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    // Even though there is no non-BLANK value on the dimension side to infer a type from,
+    // relationship creation should succeed (type validation is skipped).
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+}

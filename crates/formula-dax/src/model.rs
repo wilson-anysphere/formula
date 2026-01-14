@@ -1060,6 +1060,21 @@ impl DataModel {
         Ok(())
     }
 
+    /// Add a relationship between two tables.
+    ///
+    /// Relationship join columns must have compatible types.
+    ///
+    /// Tabular/Power Pivot relationships with mismatched join column types typically fail
+    /// silently (filters don't propagate and functions like `RELATED`/`RELATEDTABLE` appear to
+    /// return no matches). To avoid confusing runtime behavior, `formula-dax` performs a
+    /// best-effort type compatibility check when relationships are added:
+    ///
+    /// - **Columnar tables**: use the declared [`formula_columnar::ColumnType`] for each join
+    ///   column and compare their *join kind* (Numeric/Text/Boolean). Numeric-like columnar
+    ///   types (`Number`, `DateTime`, `Currency`, `Percentage`) are considered compatible.
+    /// - **In-memory tables**: scan up to 1k rows for the first non-BLANK value in each join
+    ///   column and compare the [`Value`] variant. If either side is all BLANKs in the scan
+    ///   window, validation is skipped.
     pub fn add_relationship(&mut self, relationship: Relationship) -> DaxResult<()> {
         let from_table = self
             .tables
