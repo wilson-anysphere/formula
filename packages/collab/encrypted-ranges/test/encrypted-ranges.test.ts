@@ -371,6 +371,45 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe("k1");
   });
 
+  it("manager normalization rewrites legacy sheetName entries to stable sheet ids when possible", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map<unknown>();
+    sheet.set("id", "sheet-123");
+    sheet.set("name", "Budget");
+    sheets.push([sheet]);
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<Y.Map<unknown>>();
+    const r1 = new Y.Map<unknown>();
+    r1.set("id", "r1");
+    // Legacy shape: sheet display name, not sheet id.
+    r1.set("sheetName", "Budget");
+    r1.set("startRow", 0);
+    r1.set("startCol", 0);
+    r1.set("endRow", 0);
+    r1.set("endCol", 0);
+    r1.set("keyId", "k1");
+    ranges.push([r1]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    // Trigger normalization via a tracked mutation.
+    mgr.update("r1", { endCol: 1 });
+
+    const storedRanges = metadata.get("encryptedRanges") as any;
+    const stored = storedRanges?.get?.(0);
+    expect(stored && typeof stored.get === "function").toBe(true);
+    expect(stored.get("id")).toBe("r1");
+    expect(stored.get("sheetId")).toBe("sheet-123");
+    expect(stored.get("endCol")).toBe(1);
+  });
+
   it("manager normalization dedupes identical ranges across different ids (e.g. from concurrent inserts)", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });

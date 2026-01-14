@@ -56,6 +56,44 @@ function coerceString(value: unknown): string | null {
   return String(value);
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name: string): string {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics used elsewhere in the codebase (desktop SheetNameResolver).
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
+function createSheetIdResolverFromWorkbook(doc: Y.Doc): (ref: string) => string | null {
+  const sheets = getWorkbookRoots(doc).sheets;
+  const idsByCi = new Map<string, string>();
+  const idsByNameCi = new Map<string, string>();
+
+  const entries = typeof (sheets as any)?.toArray === "function" ? (sheets as any).toArray() : [];
+  for (const entry of entries) {
+    const map = getYMap(entry);
+    const obj = map ? null : entry && typeof entry === "object" ? (entry as any) : null;
+    const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
+    const id = coerceString(get("id"))?.trim() ?? "";
+    if (!id) continue;
+    idsByCi.set(id.toLowerCase(), id);
+    const name = coerceString(get("name"))?.trim() ?? "";
+    if (name) {
+      idsByNameCi.set(normalizeSheetNameForCaseInsensitiveCompare(name), id);
+    }
+  }
+
+  return (ref: string): string | null => {
+    const trimmed = String(ref ?? "").trim();
+    if (!trimmed) return null;
+    const direct = idsByCi.get(trimmed.toLowerCase());
+    if (direct) return direct;
+    return idsByNameCi.get(normalizeSheetNameForCaseInsensitiveCompare(trimmed)) ?? null;
+  };
+}
+
 function parseNonNegativeInt(value: unknown, field: string): number {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
   if (!Number.isFinite(n) || !Number.isSafeInteger(n) || Math.floor(n) !== n) {
@@ -395,6 +433,8 @@ export class EncryptedRangeManager {
     const existing = this.metadata.get(METADATA_KEY);
     if (existing == null) return;
 
+    const resolveSheetId = createSheetIdResolverFromWorkbook(this.doc);
+
     // Fast-path: already the canonical local schema *and* does not require cleanup.
     const existingArr = getYArray(existing);
     if (existingArr && existingArr instanceof Y.Array) {
@@ -476,7 +516,8 @@ export class EncryptedRangeManager {
     const cloneRangeToLocal = (parsed: EncryptedRange): Y.Map<unknown> => {
       const out = new Y.Map<unknown>();
       out.set("id", parsed.id);
-      out.set("sheetId", parsed.sheetId);
+      const resolvedSheetId = resolveSheetId(parsed.sheetId);
+      out.set("sheetId", resolvedSheetId ?? parsed.sheetId);
       out.set("startRow", parsed.startRow);
       out.set("startCol", parsed.startCol);
       out.set("endRow", parsed.endRow);
