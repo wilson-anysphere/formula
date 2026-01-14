@@ -365,6 +365,51 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
     let page = table.page_size_rows();
     let rhs_bits = canonical_f64_bits(rhs);
 
+    if let Some(stats) = table.stats(col) {
+        let nulls = stats.null_count as usize;
+        if nulls == rows {
+            return Ok(BitVec::with_len_all_false(rows));
+        }
+
+        if let (Some(Value::Number(min)), Some(Value::Number(max))) = (&stats.min, &stats.max) {
+            match op {
+                CmpOp::Eq if !rhs.is_nan() => {
+                    // If `rhs` is outside the observed range it can't match any non-null value.
+                    if rhs < *min || rhs > *max {
+                        return Ok(BitVec::with_len_all_false(rows));
+                    }
+                }
+                CmpOp::Ne if !rhs.is_nan() => {
+                    // If `rhs` is outside the observed range then all non-null values are != rhs.
+                    if rhs < *min || rhs > *max {
+                        return eval_filter_is_null(table, col, false);
+                    }
+                }
+                CmpOp::Lt => {
+                    if *min >= rhs {
+                        return Ok(BitVec::with_len_all_false(rows));
+                    }
+                }
+                CmpOp::Lte => {
+                    if *min > rhs {
+                        return Ok(BitVec::with_len_all_false(rows));
+                    }
+                }
+                CmpOp::Gt => {
+                    if *max <= rhs {
+                        return Ok(BitVec::with_len_all_false(rows));
+                    }
+                }
+                CmpOp::Gte => {
+                    if *max < rhs {
+                        return Ok(BitVec::with_len_all_false(rows));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     let mut out = BitVec::with_capacity_bits(rows);
     for (chunk_idx, chunk) in chunks.iter().enumerate() {
         let base = chunk_idx * page;
@@ -436,6 +481,40 @@ fn eval_filter_bool(
         .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
     let rows = table.row_count();
     let page = table.page_size_rows();
+
+    if let Some(stats) = table.stats(col) {
+        let nulls = stats.null_count as usize;
+        if nulls == rows {
+            return Ok(BitVec::with_len_all_false(rows));
+        }
+        if let Some(sum) = stats.sum {
+            let true_count = sum.round().max(0.0) as usize;
+            let non_null = rows.saturating_sub(nulls);
+            let want = match op {
+                CmpOp::Eq => rhs,
+                CmpOp::Ne => !rhs,
+                _ => rhs,
+            };
+
+            // Use the true-count statistics to quickly answer fully-satisfied or fully-unsatisfied
+            // predicates without scanning encoded chunks.
+            if want {
+                if true_count == 0 {
+                    return Ok(BitVec::with_len_all_false(rows));
+                }
+                if true_count == non_null {
+                    return eval_filter_is_null(table, col, false);
+                }
+            } else {
+                if true_count == 0 {
+                    return eval_filter_is_null(table, col, false);
+                }
+                if true_count == non_null {
+                    return Ok(BitVec::with_len_all_false(rows));
+                }
+            }
+        }
+    }
 
     let mut out = BitVec::with_capacity_bits(rows);
     for (chunk_idx, chunk) in chunks.iter().enumerate() {
