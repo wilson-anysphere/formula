@@ -725,11 +725,6 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
       addToPrintArea: () => {},
       exportPdf: () => {},
     },
-    sheetStructureHandlers: {
-      openOrganizeSheets: () => {},
-      insertSheet: () => {},
-      deleteSheet: () => {},
-    },
     findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
     workbenchFileHandlers: {
       newWorkbook: () => {},
