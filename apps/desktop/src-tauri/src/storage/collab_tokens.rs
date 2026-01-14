@@ -64,7 +64,26 @@ impl<P: KeychainProvider> CollabTokenStore<P> {
         Ok(self.storage.ensure_encrypted()?)
     }
 
+    fn store_file_exists(&self) -> Result<bool, CollabTokenStoreError> {
+        match std::fs::metadata(self.storage.file_path()) {
+            Ok(meta) => Ok(meta.is_file()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(CollabTokenStoreError::Encryption(
+                DesktopStorageEncryptionError::Io(err),
+            )),
+        }
+    }
+
     pub fn get(&self, token_key: &str) -> Result<Option<CollabTokenEntry>, CollabTokenStoreError> {
+        // Avoid creating a keyring + encrypted store file on read when no store exists yet.
+        //
+        // The token store is only needed once a user joins a collaborative session; creating
+        // keychain entries during startup just because we *checked* for a token can be an
+        // undesirable side effect (especially on platforms where keychain access may prompt).
+        if !self.store_file_exists()? {
+            return Ok(None);
+        }
+
         self.ensure_encrypted()?;
         let Some(value) = self.storage.load_document(token_key)? else {
             return Ok(None);
@@ -99,6 +118,12 @@ impl<P: KeychainProvider> CollabTokenStore<P> {
     }
 
     pub fn delete(&self, token_key: &str) -> Result<(), CollabTokenStoreError> {
+        // If the store doesn't exist yet, do nothing. This prevents `delete` calls made during
+        // best-effort expiry cleanup from creating keychain entries or writing empty store files.
+        if !self.store_file_exists()? {
+            return Ok(());
+        }
+
         self.ensure_encrypted()?;
         Ok(self.storage.delete_document(token_key)?)
     }
@@ -116,6 +141,7 @@ mod tests {
 
     use crate::storage::encryption::DesktopStorageEncryption;
     use crate::storage::encryption::InMemoryKeychainProvider;
+    use crate::storage::encryption::KeychainProvider;
 
     #[test]
     fn tokens_are_encrypted_at_rest_and_can_be_deleted() {
@@ -146,6 +172,39 @@ mod tests {
 
         store.delete("token-key").expect("delete");
         assert!(store.get("token-key").expect("get after delete").is_none());
+    }
+
+    #[test]
+    fn get_and_delete_do_not_create_store_when_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("collab_tokens.json");
+        let keychain = InMemoryKeychainProvider::default();
+        let store = CollabTokenStore::new(file_path.clone(), keychain.clone());
+
+        assert!(
+            !file_path.exists(),
+            "expected store file to be absent before any tokens are persisted"
+        );
+
+        assert!(store.get("missing-key").expect("get missing").is_none());
+        assert!(
+            !file_path.exists(),
+            "expected get() to avoid creating the encrypted store file"
+        );
+
+        store.delete("missing-key").expect("delete missing");
+        assert!(
+            !file_path.exists(),
+            "expected delete() to avoid creating the encrypted store file"
+        );
+
+        let secret = keychain
+            .get_secret(COLLAB_TOKEN_KEYCHAIN_SERVICE, COLLAB_TOKEN_KEYCHAIN_ACCOUNT)
+            .expect("keychain secret lookup");
+        assert!(
+            secret.is_none(),
+            "expected get/delete to avoid writing keyring secrets to the keychain"
+        );
     }
 
     #[test]
