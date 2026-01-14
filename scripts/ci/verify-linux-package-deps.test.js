@@ -248,6 +248,45 @@ test("verify-linux-package-deps guardrails validate identifier-derived MIME XML 
   assert.match(script, /contains path separators/i);
 });
 
+test("verify-linux-package-deps fails when tauri identifier contains path separators (Parquet configured)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-verify-linux-package-deps-"));
+  const binDir = path.join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeToolchain(binDir);
+
+  const tauriConfPath = path.join(tmp, "tauri.conf.json");
+  writeFileSync(
+    tauriConfPath,
+    JSON.stringify(
+      {
+        version: expectedVersion,
+        mainBinaryName: expectedMainBinary,
+        identifier: "com/example.formula.desktop",
+        bundle: {
+          fileAssociations: [
+            {
+              ext: ["parquet"],
+              mimeType: "application/vnd.apache.parquet",
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const proc = runVerifier({
+    env: {
+      PATH: `${binDir}:${process.env.PATH}`,
+      FORMULA_TAURI_CONF_PATH: tauriConfPath,
+    },
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /path separators/i);
+});
+
 test(
   "verify-linux-package-deps fails when Parquet association is configured but tauri identifier is missing",
   { skip: !hasBash },
