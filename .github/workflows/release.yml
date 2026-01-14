@@ -29,6 +29,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+
 # Prevent multiple runs for the same tag/ref from racing while uploading GitHub Release
 # assets (including Tauri updater manifests like `latest.json`). Without this,
 # manual re-runs or tag updates can overlap and clobber/partially overwrite the
