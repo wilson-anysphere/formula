@@ -1442,6 +1442,56 @@ fn isformula_records_dynamic_dependencies_for_indirect_reference_arg() {
 }
 
 #[test]
+fn formulatext_self_reference_does_not_create_self_edge_in_dynamic_dep_tracing() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 0.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=LEN(FORMULATEXT(A1))+INDIRECT("B1")"#)
+        .unwrap();
+    engine.recalculate();
+
+    // FORMULATEXT(A1) should not introduce a self-edge in the dependency graph even when dynamic
+    // dependency tracing is enabled by INDIRECT.
+    let formula = r#"=LEN(FORMULATEXT(A1))+INDIRECT("B1")"#;
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(formula.len() as f64)
+    );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }, // B1
+        }]
+    );
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert_eq!(engine.circular_reference_count(), 0);
+}
+
+#[test]
+fn isformula_self_reference_does_not_create_self_edge_in_dynamic_dep_tracing() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=IF(ISFORMULA(A1),1,0)+INDIRECT("B1")"#)
+        .unwrap();
+    engine.recalculate();
+
+    // ISFORMULA(A1) should not introduce a self-edge in the dependency graph even when dynamic
+    // dependency tracing is enabled by INDIRECT.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }, // B1
+        }]
+    );
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert_eq!(engine.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_format_without_reference_does_not_create_self_edge_in_dynamic_dep_tracing() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
