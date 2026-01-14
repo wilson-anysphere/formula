@@ -2845,12 +2845,12 @@ export class SpreadsheetApp {
         if (source === "applyState") {
           this.drawingOverlay.clearImageCache();
         }
-          const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
+        const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
           ? payload.imageDeltas
           : Array.isArray(payload?.imagesDeltas)
             ? payload.imagesDeltas
             : [];
-        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId) ?? null;
+        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId);
         let activeBackgroundNeedsReload = false;
 
         for (const delta of imageDeltas) {
@@ -11706,7 +11706,8 @@ export class SpreadsheetApp {
     }
 
     // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
-    if (Array.isArray(payload?.imagesDeltas) || Array.isArray(payload?.imageDeltas)) return true;
+    if (Array.isArray(payload?.imagesDeltas) && payload.imagesDeltas.length > 0) return true;
+    if (Array.isArray(payload?.imageDeltas) && payload.imageDeltas.length > 0) return true;
 
     if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
 
