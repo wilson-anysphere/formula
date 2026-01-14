@@ -98,7 +98,12 @@ function dispatchPointerEvent(
     return new MouseEvent(type, base);
   })();
   // Ensure pointer-only fields exist even when the environment shims PointerEvent with MouseEvent.
-  Object.assign(event, { pointerId });
+  // `pointerId` is readonly on real PointerEvent implementations, so set it best-effort.
+  try {
+    (event as any).pointerId = pointerId;
+  } catch {
+    // ignore
+  }
   target.dispatchEvent(event);
 }
 
