@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
  * - The engine's canonical function catalog (`shared/functionCatalog.json`)
  * - Locale-specific translation sources (`crates/formula-engine/src/locale/data/sources/*.json`)
  *
+ * The translation sources should come from a real Microsoft Excel install via:
+ *   tools/excel-oracle/extract-function-translations.ps1
+ * whenever possible (especially for `es-ES`). Missing translations silently fall back to the
+ * canonical (English) name in the generated TSVs.
+ *
  * The output TSVs intentionally contain exactly one entry per canonical function name.
  * Any missing translation (or translation that equals canonical) is emitted as an identity mapping.
  *
