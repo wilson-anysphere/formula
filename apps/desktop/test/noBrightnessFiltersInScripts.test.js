@@ -52,21 +52,24 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
   /** @type {{ re: RegExp, kind: string }[]} */
   const patterns = [
     // CSS style strings (e.g. `style: "filter: brightness(0.9);"`).
-    { re: /\bfilter\s*:\s*(?<value>[^;"'`]*)/gi, kind: "filter" },
+    { re: /\b(?:filter|backdrop-filter)\s*:\s*(?<value>[^;"'`]*)/gi, kind: "filter" },
     // React style objects (e.g. `{ filter: "brightness(0.9)" }`).
-    { re: /\bfilter\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "filter (style object)" },
+    { re: /\b(?:filter|backdropFilter)\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "filter (style object)" },
     // DOM style assignment (e.g. `el.style.filter = "brightness(0.9)"`)
-    { re: /\.style\.filter\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
+    { re: /\.style\.(?:filter|backdropFilter)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
     // DOM style assignment via bracket notation (e.g. `el.style["filter"] = "brightness(0.9)"`)
-    { re: /\.style\s*\[\s*(?:["'`])filter(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style[filter]" },
-    // setProperty("filter", "brightness(0.9)")
     {
-      re: /\.style\.setProperty\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style\s*\[\s*(?:["'`])(?:filter|backdropFilter)(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+      kind: "style[filter]",
+    },
+    // setProperty("filter", "brightness(0.9)") / setProperty("backdrop-filter", "brightness(0.9)")
+    {
+      re: /\.style\.setProperty\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[filter]",
     },
     // setAttribute("style", "filter: brightness(0.9)")
