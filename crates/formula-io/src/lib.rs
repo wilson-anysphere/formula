@@ -1235,8 +1235,32 @@ pub fn open_workbook_model_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+    match try_decrypt_ooxml_encrypted_package_from_path(path, password) {
+        Ok(Some(bytes)) => return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes),
+        Ok(None) => {}
+        Err(err) => {
+            // `try_decrypt_ooxml_encrypted_package_from_path` attempts real decryption and can surface
+            // `UnsupportedOoxmlEncryption` for malformed encrypted containers. For the
+            // password-aware APIs, prefer the more user-actionable `InvalidPassword` error when the
+            // container claims a supported encryption version but decryption is not possible.
+            if password.is_some() {
+                if let Error::UnsupportedOoxmlEncryption {
+                    version_major,
+                    version_minor,
+                    ..
+                } = &err
+                {
+                    let supported = (*version_major, *version_minor) == (4, 4)
+                        || (*version_minor == 2 && matches!(*version_major, 2 | 3 | 4));
+                    if supported {
+                        return Err(Error::InvalidPassword {
+                            path: path.to_path_buf(),
+                        });
+                    }
+                }
+            }
+            return Err(err);
+        }
     }
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
@@ -1302,8 +1326,28 @@ pub fn open_workbook_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-        return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
+    match try_decrypt_ooxml_encrypted_package_from_path(path, password) {
+        Ok(Some(bytes)) => return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes),
+        Ok(None) => {}
+        Err(err) => {
+            if password.is_some() {
+                if let Error::UnsupportedOoxmlEncryption {
+                    version_major,
+                    version_minor,
+                    ..
+                } = &err
+                {
+                    let supported = (*version_major, *version_minor) == (4, 4)
+                        || (*version_minor == 2 && matches!(*version_major, 2 | 3 | 4));
+                    if supported {
+                        return Err(Error::InvalidPassword {
+                            path: path.to_path_buf(),
+                        });
+                    }
+                }
+            }
+            return Err(err);
+        }
     }
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
