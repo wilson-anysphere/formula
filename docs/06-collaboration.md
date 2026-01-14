@@ -721,6 +721,10 @@ const binder = bindYjsToDocumentController({
   userId,
   permissions,
   encryption: session.getEncryptionConfig(),
+
+  // Optional: opt into write semantics needed for conflict monitors (preserve `formula=null`
+  // markers and empty cell maps on clears so delete-vs-overwrite causality is detectable).
+  // formulaConflictsMode: "formula+value",
 });
 
 // Later:
@@ -744,6 +748,8 @@ const binder = await bindCollabSessionToDocumentController({
   userId,
   // Optional: also clear per-cell formatting for masked cells.
   // maskCellFormat: true,
+  // Optional: opt into conflict-monitor-compatible binder writes.
+  // formulaConflictsMode: "formula+value",
 
   // Optional: override how DocumentController-driven writes are transacted into Yjs.
   //
@@ -755,7 +761,7 @@ const binder = await bindCollabSessionToDocumentController({
 });
 ```
 
-`bindCollabSessionToDocumentController` passes `maskCellFormat` through to the underlying binder.
+`bindCollabSessionToDocumentController` passes `maskCellFormat` and `formulaConflictsMode` through to the underlying binder.
 
 Implementation:
 
