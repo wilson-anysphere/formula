@@ -94,6 +94,17 @@ fn rgce_ptgref_with_ptgarray_byte_sequence_in_row() -> Vec<u8> {
     vec![0x24, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00]
 }
 
+fn ptg_str_literal(s: &str) -> Vec<u8> {
+    // PtgStr: [ptg=0x17][cch: u16][utf16 chars...]
+    let mut out = vec![0x17];
+    let units: Vec<u16> = s.encode_utf16().collect();
+    out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+    for unit in units {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -300,4 +311,69 @@ fn patch_sheet_bin_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_p
     assert_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
     assert_patch_does_not_require_rgcb(rgce_str_literal_with_ptgarray_byte_sequence());
     assert_patch_does_not_require_rgcb(rgce_ptgref_with_ptgarray_byte_sequence_in_row());
+}
+
+#[test]
+fn patch_sheet_bin_rejects_brt_fmla_string_update_that_requires_rgcb_without_new_rgcb() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_str(0, 0, "Hello", ptg_str_literal("Hello"));
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(fixture_builder::rgce::array_placeholder()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let err = patch_sheet_bin(&sheet_bin, &edits)
+        .expect_err("expected InvalidInput when updating formula string without rgcb");
+    match err {
+        Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "unexpected error message: {io_err}"
+            );
+        }
+        other => panic!("expected Error::Io, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_brt_fmla_string_update_that_requires_rgcb_without_new_rgcb() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_str(0, 0, "Hello", ptg_str_literal("Hello"));
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(fixture_builder::rgce::array_placeholder()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut out, &edits)
+        .expect_err("expected InvalidInput when streaming update formula string without rgcb");
+    match err {
+        Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "unexpected error message: {io_err}"
+            );
+        }
+        other => panic!("expected Error::Io, got {other:?}"),
+    }
 }
