@@ -4,7 +4,7 @@ use formula_engine::structured_refs::{
     resolve_structured_ref, StructuredColumn, StructuredColumns, StructuredRefItem,
 };
 use formula_engine::{Engine, Value};
-use formula_model::table::{AutoFilter, FilterColumn, TableColumn};
+use formula_model::table::{AutoFilter, FilterColumn, SortCondition, SortState, TableColumn};
 use formula_model::{Range, Table, TableError};
 
 fn table_fixture_single_col() -> Table {
@@ -168,6 +168,7 @@ fn setup_engine_with_table_and_autofilter(filter_col_ids: &[u32]) -> Engine {
 
     let mut tables: Vec<Table> = engine.get_sheet_tables("Sheet1").expect("tables").to_vec();
     assert_eq!(tables.len(), 1);
+    let table_range = tables[0].range;
 
     let filter_columns = filter_col_ids
         .iter()
@@ -182,12 +183,37 @@ fn setup_engine_with_table_and_autofilter(filter_col_ids: &[u32]) -> Engine {
         .collect();
 
     tables[0].auto_filter = Some(AutoFilter {
-        range: Range::from_a1("A1:D1").unwrap(),
+        range: table_range,
         filter_columns,
         sort_state: None,
         raw_xml: Vec::new(),
     });
 
+    engine.set_sheet_tables("Sheet1", tables);
+    engine
+}
+
+fn setup_engine_with_table_and_autofilter_and_sort(
+    filter_col_ids: &[u32],
+    sort_range: &str,
+) -> Engine {
+    let mut engine = setup_engine_with_table_and_autofilter(filter_col_ids);
+    let mut tables: Vec<Table> = engine
+        .get_sheet_tables("Sheet1")
+        .expect("tables")
+        .to_vec();
+    assert_eq!(tables.len(), 1);
+
+    let auto_filter = tables[0]
+        .auto_filter
+        .as_mut()
+        .expect("expected autofilter");
+    auto_filter.sort_state = Some(SortState {
+        conditions: vec![SortCondition {
+            range: Range::from_a1(sort_range).unwrap(),
+            descending: true,
+        }],
+    });
     engine.set_sheet_tables("Sheet1", tables);
     engine
 }
@@ -886,13 +912,28 @@ fn insert_cols_inside_table_updates_table_autofilter_metadata() {
     assert_eq!(table.range, Range::from_a1("A1:E4").unwrap());
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
-    assert_eq!(auto_filter.range, Range::from_a1("A1:E1").unwrap());
-    let col_ids: Vec<u32> = auto_filter
-        .filter_columns
-        .iter()
-        .map(|c| c.col_id)
-        .collect();
+    assert_eq!(auto_filter.range, Range::from_a1("A1:E4").unwrap());
+    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
     assert_eq!(col_ids, vec![0, 3]);
+}
+
+#[test]
+fn insert_cols_inside_table_updates_table_sort_state_ranges() {
+    let mut engine = setup_engine_with_table_and_autofilter_and_sort(&[], "C2:C4");
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Insert inside the table (between Col1 and Col2).
+            count: 1,
+        })
+        .expect("insert cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    let table = &tables[0];
+    let auto_filter = table.auto_filter.as_ref().expect("autofilter");
+    let sort_state = auto_filter.sort_state.as_ref().expect("sortState");
+    assert_eq!(sort_state.conditions.len(), 1);
+    assert_eq!(sort_state.conditions[0].range, Range::from_a1("D2:D4").unwrap());
 }
 
 #[test]
@@ -928,6 +969,39 @@ fn delete_cols_removing_referenced_column_yields_ref_error() {
 }
 
 #[test]
+fn delete_cols_overlapping_table_updates_table_sort_state_ranges() {
+    let mut engine = setup_engine_with_table_and_autofilter_and_sort(&[], "C2:C4");
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Delete Col2.
+            count: 1,
+        })
+        .expect("delete cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    let table = &tables[0];
+    let auto_filter = table.auto_filter.as_ref().expect("autofilter");
+    let sort_state = auto_filter.sort_state.as_ref().expect("sortState");
+    assert_eq!(sort_state.conditions.len(), 1);
+    assert_eq!(sort_state.conditions[0].range, Range::from_a1("B2:B4").unwrap());
+
+    // If the sorted column is deleted, the sort condition should be dropped.
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Delete the remaining sorted column (now Col3 -> B).
+            count: 1,
+        })
+        .expect("delete cols 2");
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    let table = &tables[0];
+    let auto_filter = table.auto_filter.as_ref().expect("autofilter");
+    let sort_state = auto_filter.sort_state.as_ref().expect("sortState");
+    assert!(sort_state.conditions.is_empty());
+}
+
+#[test]
 fn delete_cols_overlapping_table_updates_table_autofilter_metadata() {
     let mut engine = setup_engine_with_table_and_autofilter(&[1, 3]);
     engine
@@ -944,12 +1018,8 @@ fn delete_cols_overlapping_table_updates_table_autofilter_metadata() {
     assert_eq!(table.range, Range::from_a1("A1:C4").unwrap());
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
-    assert_eq!(auto_filter.range, Range::from_a1("A1:C1").unwrap());
-    let col_ids: Vec<u32> = auto_filter
-        .filter_columns
-        .iter()
-        .map(|c| c.col_id)
-        .collect();
+    assert_eq!(auto_filter.range, Range::from_a1("A1:C4").unwrap());
+    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
     assert_eq!(col_ids, vec![2]);
 }
 

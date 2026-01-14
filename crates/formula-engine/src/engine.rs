@@ -9148,6 +9148,65 @@ fn insert_default_table_columns(table: &mut Table, insert_idx: usize, count: u32
     table.columns.splice(idx..idx, inserted);
 }
 
+fn adjust_range_for_insert_cols(mut range: Range, col: u32, count: u32) -> Range {
+    if count == 0 {
+        return range;
+    }
+
+    if col <= range.start.col {
+        range.start.col = range.start.col.saturating_add(count);
+        range.end.col = range.end.col.saturating_add(count);
+    } else if col <= range.end.col {
+        range.end.col = range.end.col.saturating_add(count);
+    }
+
+    range
+}
+
+fn adjust_range_for_delete_cols(range: Range, col: u32, count: u32) -> Option<Range> {
+    if count == 0 {
+        return Some(range);
+    }
+
+    let del_end = col.saturating_add(count.saturating_sub(1));
+
+    if range.end.col < col {
+        return Some(range);
+    }
+
+    if range.start.col > del_end {
+        return Some(Range::new(
+            CellRef::new(range.start.row, range.start.col.saturating_sub(count)),
+            CellRef::new(range.end.row, range.end.col.saturating_sub(count)),
+        ));
+    }
+
+    // Deletion overlaps the range's columns.
+    let new_start_col = if range.start.col >= col {
+        col
+    } else {
+        range.start.col
+    };
+    let new_end_col = if range.end.col > del_end {
+        range.end.col.saturating_sub(count)
+    } else {
+        // The deletion wipes out the right edge of the range; it becomes empty.
+        if col == 0 {
+            return None;
+        }
+        col - 1
+    };
+
+    if new_start_col > new_end_col {
+        return None;
+    }
+
+    Some(Range::new(
+        CellRef::new(range.start.row, new_start_col),
+        CellRef::new(range.end.row, new_end_col),
+    ))
+}
+
 fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
     if count == 0 {
         return;
@@ -9177,9 +9236,9 @@ fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
         }
 
         if let Some(auto_filter) = table.auto_filter.as_mut() {
-            // Keep table-backed autofilter ranges in sync with the table's columns.
-            auto_filter.range.start.col = table.range.start.col;
-            auto_filter.range.end.col = table.range.end.col;
+            // Best-effort keep AutoFilter metadata in sync with the table range.
+            auto_filter.range = table.range;
+            let filter_range = auto_filter.range;
 
             // Shift filter column ids for inserts that land within the table's column span.
             if col >= start_col && col <= end_col.saturating_add(1) {
@@ -9189,6 +9248,15 @@ fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
                         filter_column.col_id = filter_column.col_id.saturating_add(count);
                     }
                 }
+            }
+
+            if let Some(sort_state) = auto_filter.sort_state.as_mut() {
+                for condition in &mut sort_state.conditions {
+                    condition.range = adjust_range_for_insert_cols(condition.range, col, count);
+                }
+                sort_state
+                    .conditions
+                    .retain(|cond| cond.range.intersects(&filter_range));
             }
         }
 
@@ -9214,8 +9282,18 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
             table.range.start.col = start_col.saturating_sub(count);
             table.range.end.col = end_col.saturating_sub(count);
             if let Some(auto_filter) = table.auto_filter.as_mut() {
-                auto_filter.range.start.col = table.range.start.col;
-                auto_filter.range.end.col = table.range.end.col;
+                auto_filter.range = table.range;
+                let filter_range = auto_filter.range;
+                if let Some(sort_state) = auto_filter.sort_state.as_mut() {
+                    sort_state.conditions.retain_mut(|cond| {
+                        let Some(updated) = adjust_range_for_delete_cols(cond.range, col, count)
+                        else {
+                            return false;
+                        };
+                        cond.range = updated;
+                        cond.range.intersects(&filter_range)
+                    });
+                }
             }
             normalize_table_columns(table);
             return true;
@@ -9224,8 +9302,18 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
         if col > end_col {
             // Deleting strictly after the table does not affect it.
             if let Some(auto_filter) = table.auto_filter.as_mut() {
-                auto_filter.range.start.col = table.range.start.col;
-                auto_filter.range.end.col = table.range.end.col;
+                auto_filter.range = table.range;
+                let filter_range = auto_filter.range;
+                if let Some(sort_state) = auto_filter.sort_state.as_mut() {
+                    sort_state.conditions.retain_mut(|cond| {
+                        let Some(updated) = adjust_range_for_delete_cols(cond.range, col, count)
+                        else {
+                            return false;
+                        };
+                        cond.range = updated;
+                        cond.range.intersects(&filter_range)
+                    });
+                }
             }
             normalize_table_columns(table);
             return true;
@@ -9259,8 +9347,8 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
         table.range.end.col = table.range.start.col.saturating_add(new_width - 1);
 
         if let Some(auto_filter) = table.auto_filter.as_mut() {
-            auto_filter.range.start.col = table.range.start.col;
-            auto_filter.range.end.col = table.range.end.col;
+            auto_filter.range = table.range;
+            let filter_range = auto_filter.range;
 
             // Shift or drop filter column ids so they remain aligned with the table's columns.
             let rel_start = overlap_start.saturating_sub(start_col);
@@ -9275,6 +9363,16 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
                 filter_column.col_id = filter_column.col_id.saturating_sub(overlap_count);
                 true
             });
+
+            if let Some(sort_state) = auto_filter.sort_state.as_mut() {
+                sort_state.conditions.retain_mut(|cond| {
+                    let Some(updated) = adjust_range_for_delete_cols(cond.range, col, count) else {
+                        return false;
+                    };
+                    cond.range = updated;
+                    cond.range.intersects(&filter_range)
+                });
+            }
         }
 
         normalize_table_columns(table);
