@@ -625,7 +625,6 @@ impl DaxEngine {
                 left,
                 right,
             } => {
-                let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
                 match self.eval_table(model, right, filter, row_ctx, env) {
                     Ok(table_result) => match table_result {
                         TableResult::Physical {
@@ -645,6 +644,7 @@ impl DaxEngine {
                                     "IN currently only supports one-column tables".into(),
                                 ));
                             }
+                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
                             let col_idx = visible_cols[0];
                             for row in rows {
                                 let value =
@@ -661,6 +661,7 @@ impl DaxEngine {
                                     "IN currently only supports one-column tables".into(),
                                 ));
                             }
+                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
                             for row_values in rows {
                                 let value = row_values.get(0).cloned().unwrap_or(Value::Blank);
                                 if compare_values(&BinaryOp::Equals, &lhs, &value)? {
@@ -678,6 +679,7 @@ impl DaxEngine {
                             Ok(values) => values,
                             Err(_) => return Err(table_err),
                         };
+                        let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
                         for candidate in rhs_values {
                             if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
                                 return Ok(Value::Boolean(true));
