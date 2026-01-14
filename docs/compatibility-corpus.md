@@ -83,6 +83,9 @@ As a defense-in-depth safety net, `tools/corpus/sanitize.py` also includes a **l
 (`scan_xlsx_bytes_for_leaks`) that can be used to fail CI if sanitized outputs still match high-risk
 patterns (emails, URLs, AWS keys, JWTs) or known plaintext strings.
 
+Sanitized outputs are also written with **deterministic ZIP metadata** (stable timestamps) so re-sanitizing the same
+input does not create noisy diffs or leak ingest time.
+
 The design constraint: triage reports must not leak plaintext cell values.
 
 ---
