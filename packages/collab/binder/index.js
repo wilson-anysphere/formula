@@ -335,11 +335,12 @@ function sameNormalizedCell(a, b) {
  *    * sheet-level formatting defaults, etc) are allowed to be persisted into the Yjs
   *    * document.
   *    *
-  *    * In non-edit collab roles (viewer/commenter), the UI should generally disable
-  *    * workbook mutations (including sheet view state / formatting defaults). This
-  *    * hook is defense-in-depth: it prevents any DocumentController-emitted shared
-  *    * state deltas (startup races, programmatic calls, etc) from being written into
-  *    * the shared CRDT.
+  *    * In non-edit collab roles (viewer/commenter), some UI interactions may still
+  *    * emit "shared state" deltas (sheet view state, formatting defaults, etc). When
+  *    * this hook returns false, the binder prevents those deltas from being written
+  *    * into the shared CRDT. UIs can still allow these mutations to remain local-only
+  *    * (e.g. freeze panes / row/col sizing / formatting defaults), while true cell
+  *    * edits remain blocked via `canEditCell`.
   *    *
   *    * Defaults to `true`.
   *    *\/
@@ -2539,15 +2540,35 @@ export function bindYjsToDocumentController(options) {
 
     // In read-only roles, do not persist shared-state mutations (sheet view / formatting) into Yjs.
     //
-    // Note: In addition to skipping persistence, we also revert these mutations back out of the local
-    // DocumentController to avoid "local-only" divergence when a non-edit user triggers an edit
-    // through an unexpected UI path (extensions, scripts, etc).
+    // Note: Unlike cell edits, some shared-state mutations are *intentionally* allowed to remain
+    // local-only (e.g. freeze panes, row/col sizing, and formatting defaults applied to full
+    // row/col/sheet selections). UIs are responsible for gating these interactions. The binder
+    // simply prevents them from being written into shared Yjs state.
     const formatDeltas = allowSharedStateWrites ? formatDeltasRaw : [];
     const rangeRunDeltas = allowSharedStateWrites ? rangeRunDeltasRaw : [];
 
     if (allowSharedStateWrites && sheetViewDeltas.length > 0) {
       enqueueSheetViewWrite(sheetViewDeltas);
     }
+
+    const stripAllowedReadOnlySheetViewFields = (view) => {
+      if (!isRecord(view)) return {};
+      /** @type {Record<string, any>} */
+      const out = {};
+      for (const [key, value] of Object.entries(view)) {
+        // Allow these view-only fields to remain local-only in read-only roles.
+        if (key === "frozenRows" || key === "frozenCols" || key === "colWidths" || key === "rowHeights") continue;
+        // Treat `undefined` as absent so missing-vs-undefined does not look like a change.
+        if (value === undefined) continue;
+        out[key] = value;
+      }
+      return out;
+    };
+    const isAllowedReadOnlySheetViewDelta = (delta) => {
+      const before = stripAllowedReadOnlySheetViewFields(delta?.before);
+      const after = stripAllowedReadOnlySheetViewFields(delta?.after);
+      return stableStringify(before) === stableStringify(after);
+    };
 
     /** @type {any[]} */
     const deniedInverseSheetViews = [];
@@ -2557,6 +2578,9 @@ export function bindYjsToDocumentController(options) {
     const deniedInverseRangeRuns = [];
     if (!allowSharedStateWrites) {
       for (const delta of sheetViewDeltas) {
+        // Only revert sheet-view keys that we do *not* support as local-only view state.
+        // Freeze panes + row/col sizing are allowed to diverge locally.
+        if (isAllowedReadOnlySheetViewDelta(delta)) continue;
         const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
         if (!sheetId) continue;
         deniedInverseSheetViews.push({
@@ -2565,20 +2589,7 @@ export function bindYjsToDocumentController(options) {
           after: delta.before,
         });
       }
-      for (const delta of formatDeltasRaw) {
-        const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
-        if (!sheetId) continue;
-        const layer = delta?.layer;
-        if (layer !== "sheet" && layer !== "row" && layer !== "col") continue;
-        const inv = {
-          sheetId,
-          layer,
-          beforeStyleId: delta.afterStyleId,
-          afterStyleId: delta.beforeStyleId,
-        };
-        if (delta.index != null) inv.index = delta.index;
-        deniedInverseFormats.push(inv);
-      }
+      // Layered formatting defaults (sheet/row/col) are allowed to be local-only in read-only roles.
       for (const delta of rangeRunDeltasRaw) {
         const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
         if (!sheetId) continue;
@@ -2645,8 +2656,9 @@ export function bindYjsToDocumentController(options) {
     const rejected = [];
     /** @type {any[]} */
     const deniedInverse = [];
-    // `deniedInverseFormats` and `deniedInverseRangeRuns` are pre-populated for read-only shared-state
-    // reverts. Additional entries may be appended below when per-range permissions deny a write.
+    // `deniedInverseRangeRuns` (and sometimes `deniedInverseSheetViews`) can be pre-populated when
+    // `canWriteSharedState()` is false. Additional entries may be appended below when per-range
+    // permissions deny a write.
 
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };

@@ -160,7 +160,7 @@ class DocumentControllerStub {
   }
 }
 
-test("binder reverts local sheet view / format / range-run mutations when canWriteSharedState is false", async () => {
+test("binder skips persisting shared-state writes when canWriteSharedState is false (while allowing local view + formatting defaults)", async () => {
   const ydoc = new Y.Doc();
   const dc = new DocumentControllerStub();
 
@@ -171,22 +171,26 @@ test("binder reverts local sheet view / format / range-run mutations when canWri
     canWriteSharedState: () => false,
   });
 
-  // Sheet view (freeze panes) should snap back immediately.
+  const before = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+
+  // Sheet view (freeze panes) should remain as a local-only preference (not snapped back).
   assert.deepEqual(dc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
   dc.setFrozen("Sheet1", 1, 0);
-  assert.deepEqual(dc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+  assert.deepEqual(dc.getSheetView("Sheet1"), { frozenRows: 1, frozenCols: 0 });
 
-  // Layered formatting should also be reverted (prevent local-only format changes).
+  // Layered formatting defaults should also remain local-only (not reverted).
   assert.equal(dc.getSheetDefaultStyleId("Sheet1"), 0);
   dc.setSheetDefaultStyleId("Sheet1", 123);
-  assert.equal(dc.getSheetDefaultStyleId("Sheet1"), 0);
+  assert.equal(dc.getSheetDefaultStyleId("Sheet1"), 123);
 
-  // Range-run formatting deltas should be reverted.
+  // Range-run formatting is not a "formatting defaults" surface; it should be reverted.
   assert.deepEqual(dc.getRangeRuns("Sheet1", 0), []);
   dc.setRangeRuns("Sheet1", 0, [{ startRow: 0, endRowExclusive: 10, styleId: 1 }]);
   assert.deepEqual(dc.getRangeRuns("Sheet1", 0), []);
 
+  // None of the above local-only mutations should have been persisted into Yjs.
+  assert.deepEqual(Buffer.from(Y.encodeStateAsUpdate(ydoc)), before);
+
   binder.destroy();
   ydoc.destroy();
 });
-
