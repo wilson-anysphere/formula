@@ -162,6 +162,53 @@ fn standard_rc4_ignores_trailing_encrypted_package_bytes() {
 }
 
 #[test]
+fn standard_aes_ignores_trailing_encrypted_package_bytes() {
+    let password = "Password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes = encrypt_standard_ooxml_ole(plaintext, password);
+
+    // Append junk to the EncryptedPackage stream to simulate OLE sector slack / producer quirks.
+    let cursor = Cursor::new(ole_bytes);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+    encrypted_package.extend_from_slice(&[0xA5u8; 37]);
+
+    // Re-wrap into a fresh CFB container with the modified stream.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole_out
+        .create_stream("EncryptionInfo")
+        .expect("create stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("EncryptedPackage")
+        .expect("create stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let ole_bytes = ole_out.into_inner().into_inner();
+
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+}
+
+#[test]
 fn standard_rc4_bogus_verifier_hash_size_errors() {
     let password = "password";
     let plaintext = include_bytes!(concat!(
