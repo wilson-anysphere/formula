@@ -130,7 +130,7 @@ jobs:
         # Size regressions are useful context, but this workflow is primarily about
         # startup + memory. Keep size checks non-blocking so we still get perf data.
         continue-on-error: true
-        run: node scripts/desktop_dist_asset_report.mjs
+        run: node scripts/desktop_dist_asset_report.mjs --json-out perf-artifacts/desktop-dist-assets-report.json
         env:
           # Optional: set as GitHub Actions variables to enable gating.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
