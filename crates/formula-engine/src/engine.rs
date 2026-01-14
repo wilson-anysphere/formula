@@ -3,8 +3,8 @@ use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::date::ExcelDateSystem;
 use crate::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_range_map_with_resolver,
-    rewrite_formula_for_sheet_delete_with_aliases, rewrite_formula_for_structural_edit_with_resolver,
-    GridRange, RangeMapEdit, StructuralEdit,
+    rewrite_formula_for_sheet_delete_with_aliases,
+    rewrite_formula_for_structural_edit_with_resolver, GridRange, RangeMapEdit, StructuralEdit,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
@@ -15721,11 +15721,7 @@ fn walk_external_dependencies(
                 );
             }
         }
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Bool(_)
-        | Expr::Blank
-        | Expr::Error(_) => {}
+        Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
 }
 
@@ -15860,9 +15856,12 @@ fn walk_external_expr(
             // Excel's `[@ThisRow]` semantics depend on the formula being inside the table. For
             // external workbooks we do not currently model the row context, so preserve `#REF!`
             // behavior by skipping precedent expansion.
-            if sref_expr.sref.items.iter().any(|item| {
-                matches!(item, crate::structured_refs::StructuredRefItem::ThisRow)
-            }) {
+            if sref_expr
+                .sref
+                .items
+                .iter()
+                .any(|item| matches!(item, crate::structured_refs::StructuredRefItem::ThisRow))
+            {
                 return;
             }
 
@@ -16127,11 +16126,7 @@ fn walk_external_expr(
                 );
             }
         }
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Bool(_)
-        | Expr::Blank
-        | Expr::Error(_) => {}
+        Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
 }
 
@@ -17792,16 +17787,15 @@ mod tests {
         let mut engine = Engine::new();
 
         engine
-            .set_cell_formula(
-                "Sheet1",
-                "A1",
-                "=INDIRECT(\"[Book.xlsx]Sheet1!B2\")",
-            )
+            .set_cell_formula("Sheet1", "A1", "=INDIRECT(\"[Book.xlsx]Sheet1!B2\")")
             .unwrap();
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine

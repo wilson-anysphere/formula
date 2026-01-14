@@ -721,11 +721,26 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_preferred(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
 
     let fr_fr_locale = get_locale("fr-FR").expect("expected fr-FR locale to be registered");
-    assert_eq!(fr_fr_locale.localized_error_literal("#NULL!"), Some("#NUL!"));
-    assert_eq!(fr_fr_locale.canonical_error_literal("#NUL!"), Some("#NULL!"));
-    assert_eq!(fr_fr_locale.localized_error_literal("#SPILL!"), Some("#PROPAGATION!"));
-    assert_eq!(fr_fr_locale.canonical_error_literal("#PROPAGATION!"), Some("#SPILL!"));
-    assert_eq!(fr_fr_locale.canonical_error_literal("#DEVERSEMENT!"), Some("#SPILL!"));
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#NULL!"),
+        Some("#NUL!")
+    );
+    assert_eq!(
+        fr_fr_locale.canonical_error_literal("#NUL!"),
+        Some("#NULL!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#SPILL!"),
+        Some("#PROPAGATION!")
+    );
+    assert_eq!(
+        fr_fr_locale.canonical_error_literal("#PROPAGATION!"),
+        Some("#SPILL!")
+    );
+    assert_eq!(
+        fr_fr_locale.canonical_error_literal("#DEVERSEMENT!"),
+        Some("#SPILL!")
+    );
 
     let es_es = parse_error_tsv(
         "es-ES",
@@ -744,12 +759,30 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_preferred(&es_es.entries, "#SPILL!", "#¡DESBORDAMIENTO!");
 
     let es_es_locale = get_locale("es-ES").expect("expected es-ES locale to be registered");
-    assert_eq!(es_es_locale.localized_error_literal("#VALUE!"), Some("#¡VALOR!"));
-    assert_eq!(es_es_locale.canonical_error_literal("#¡VALOR!"), Some("#VALUE!"));
-    assert_eq!(es_es_locale.canonical_error_literal("#VALOR!"), Some("#VALUE!"));
-    assert_eq!(es_es_locale.localized_error_literal("#NAME?"), Some("#¿NOMBRE?"));
-    assert_eq!(es_es_locale.canonical_error_literal("#¿NOMBRE?"), Some("#NAME?"));
-    assert_eq!(es_es_locale.canonical_error_literal("#NOMBRE?"), Some("#NAME?"));
+    assert_eq!(
+        es_es_locale.localized_error_literal("#VALUE!"),
+        Some("#¡VALOR!")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#¡VALOR!"),
+        Some("#VALUE!")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#VALOR!"),
+        Some("#VALUE!")
+    );
+    assert_eq!(
+        es_es_locale.localized_error_literal("#NAME?"),
+        Some("#¿NOMBRE?")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#¿NOMBRE?"),
+        Some("#NAME?")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#NOMBRE?"),
+        Some("#NAME?")
+    );
     assert_eq!(
         es_es_locale.localized_error_literal("#SPILL!"),
         Some("#¡DESBORDAMIENTO!")

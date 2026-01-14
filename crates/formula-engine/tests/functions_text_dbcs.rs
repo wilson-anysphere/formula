@@ -8,4 +8,3 @@ mod harness;
 
 #[path = "functions/text_dbcs.rs"]
 mod text_dbcs;
-

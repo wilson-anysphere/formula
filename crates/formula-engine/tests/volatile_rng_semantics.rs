@@ -119,8 +119,14 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     // recalcs.
     match single.get_cell_value("Sheet1", "A5") {
         Value::Number(n) => {
-            assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
-            assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
+            assert!(
+                n.is_finite(),
+                "expected RAND()-RAND() to be finite, got {n}"
+            );
+            assert!(
+                n > -1.0 && n < 1.0,
+                "expected RAND()-RAND() in (-1,1), got {n}"
+            );
         }
         other => panic!("expected RAND()-RAND() to be a number, got {other:?}"),
     }
@@ -179,8 +185,14 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
         assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
         match single.get_cell_value("Sheet1", "A5") {
             Value::Number(n) => {
-                assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
-                assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
+                assert!(
+                    n.is_finite(),
+                    "expected RAND()-RAND() to be finite, got {n}"
+                );
+                assert!(
+                    n > -1.0 && n < 1.0,
+                    "expected RAND()-RAND() in (-1,1), got {n}"
+                );
                 if n != 0.0 {
                     observed_distinct_draws_in_cell = true;
                 }

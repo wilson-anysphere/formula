@@ -240,7 +240,10 @@ fn delete_sheet_rewrites_references_that_mix_stable_key_and_display_name_spellin
         .unwrap();
 
     engine.delete_sheet("Sheet1").unwrap();
-    assert_eq!(engine.get_cell_formula("Sheet2", "A1"), Some("=#REF!+#REF!"));
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "A1"),
+        Some("=#REF!+#REF!")
+    );
 }
 
 #[test]

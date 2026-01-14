@@ -725,11 +725,7 @@ fn rewrite_sheet_ref_for_delete_with_aliases(
             // If the rewritten boundaries refer to the same sheet (even if they use different naming
             // schemes), collapse to a single-sheet prefix.
             if new_start_idx_usize == new_end_idx_usize {
-                let name = if start_matches {
-                    new_start
-                } else {
-                    new_end
-                };
+                let name = if start_matches { new_start } else { new_end };
                 return DeleteSheetRefRewrite::Adjusted(SheetRef::Sheet(name));
             }
 
