@@ -101,60 +101,101 @@ fn parse_agile_params_from_xml(xml: &str) -> AgileEncryptionParams {
     )
 }
 
-fn parse_agile_params_from_readme(readme: &str, fixture: &str) -> AgileEncryptionParams {
-    let needle = format!("| {fixture} |");
-    let line = readme
-        .lines()
-        .find(|line| line.trim_start().starts_with(&needle))
-        .unwrap_or_else(|| {
-            panic!(
-                "missing README row for fixture {fixture:?} (expected a markdown table row starting with `{needle}`)"
-            )
-        });
+fn parse_agile_params_table_from_readme(readme: &str) -> Vec<(String, AgileEncryptionParams)> {
+    const HEADER: &str =
+        "| fixture | spinCount | cipherAlgorithm | cipherChaining | keyBits | hashAlgorithm | saltSize |";
 
-    let cols: Vec<&str> = line
-        .trim()
-        .trim_matches('|')
-        .split('|')
-        .map(|c| c.trim())
-        .collect();
-    assert_eq!(
-        cols.len(),
-        7,
-        "expected README table row for {fixture:?} to have 7 columns, got {cols:?}"
-    );
-    assert_eq!(
-        cols[0], fixture,
-        "expected first README column to be fixture name"
+    let mut lines = readme.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.trim() == HEADER {
+            break;
+        }
+    }
+    assert!(
+        readme.lines().any(|line| line.trim() == HEADER),
+        "failed to locate Agile params table header in README (expected a line equal to `{HEADER}`)"
     );
 
-    let salt_size = match cols[6] {
-        "" | "-" => None,
-        other => Some(other.parse::<u32>().unwrap_or_else(|_| {
-            panic!(
-                "expected README saltSize column for {fixture:?} to be an integer, got {other:?}"
-            )
-        })),
-    };
+    // Skip the markdown separator row (`| --- | ... |`).
+    let sep = lines
+        .next()
+        .unwrap_or_else(|| panic!("missing markdown separator row after `{HEADER}`"));
+    assert!(
+        sep.trim_start().starts_with("| --- |"),
+        "expected markdown separator row after `{HEADER}`, got {sep:?}"
+    );
 
-    AgileEncryptionParams::new(
-        cols[1].parse::<u32>().unwrap_or_else(|_| {
-            panic!(
-                "expected README spinCount to be an integer, got {:?}",
-                cols[1]
-            )
-        }),
-        cols[2],
-        cols[3],
-        cols[4].parse::<u32>().unwrap_or_else(|_| {
-            panic!(
-                "expected README keyBits to be an integer, got {:?}",
-                cols[4]
-            )
-        }),
-        cols[5],
-        salt_size,
-    )
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(&line) = lines.peek() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            break;
+        }
+        lines.next();
+
+        // Skip any accidental header re-occurrences.
+        if line == HEADER || line.starts_with("| --- |") {
+            continue;
+        }
+
+        let cols: Vec<&str> = line
+            .trim_matches('|')
+            .split('|')
+            .map(|c| c.trim())
+            .collect();
+        assert_eq!(
+            cols.len(),
+            7,
+            "expected README Agile params table row to have 7 columns, got {cols:?}"
+        );
+
+        let fixture = cols[0].to_string();
+        assert!(
+            !fixture.is_empty(),
+            "expected README Agile params table row fixture name to be non-empty: {line:?}"
+        );
+        assert!(
+            seen.insert(fixture.clone()),
+            "duplicate fixture row in README Agile params table: {fixture:?}"
+        );
+
+        let salt_size = match cols[6] {
+            "" | "-" => None,
+            other => Some(other.parse::<u32>().unwrap_or_else(|_| {
+                panic!(
+                    "expected README saltSize column for {fixture:?} to be an integer, got {other:?}"
+                )
+            })),
+        };
+
+        let params = AgileEncryptionParams::new(
+            cols[1].parse::<u32>().unwrap_or_else(|_| {
+                panic!(
+                    "expected README spinCount for {fixture:?} to be an integer, got {:?}",
+                    cols[1]
+                )
+            }),
+            cols[2],
+            cols[3],
+            cols[4].parse::<u32>().unwrap_or_else(|_| {
+                panic!(
+                    "expected README keyBits for {fixture:?} to be an integer, got {:?}",
+                    cols[4]
+                )
+            }),
+            cols[5],
+            salt_size,
+        );
+
+        out.push((fixture, params));
+    }
+
+    assert!(
+        !out.is_empty(),
+        "README Agile params table had no data rows after `{HEADER}`"
+    );
+    out
 }
 
 fn assert_agile_key_data_params_match_expected(
@@ -214,21 +255,28 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
     let readme_text =
         std::fs::read_to_string(&readme).expect("read fixtures/encrypted/ooxml/README.md");
 
-    for fixture_name in [
+    let expected_by_fixture = parse_agile_params_table_from_readme(&readme_text);
+
+    for required in [
         "agile.xlsx",
         "agile-large.xlsx",
+        "agile-empty-password.xlsx",
         "agile-unicode.xlsx",
         "agile-unicode-excel.xlsx",
         "agile-basic.xlsm",
-        "basic-password.xlsm",
-        "agile-empty-password.xlsx",
     ] {
+        assert!(
+            expected_by_fixture.iter().any(|(fixture, _)| fixture == required),
+            "README Agile params table is missing required fixture row for {required:?}"
+        );
+    }
+
+    for (fixture_name, expected) in expected_by_fixture {
         let fixture_rel = format!("encrypted/ooxml/{fixture_name}");
         let fixture = fixture_path(&fixture_rel);
 
         let xml = read_encryption_info_xml(&fixture);
         let actual = parse_agile_params_from_xml(&xml);
-        let expected = parse_agile_params_from_readme(&readme_text, fixture_name);
 
         assert!(
             actual.spin_count <= MAX_CI_SPIN_COUNT,
