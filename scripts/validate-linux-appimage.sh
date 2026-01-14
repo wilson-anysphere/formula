@@ -37,6 +37,13 @@ Usage: ${SCRIPT_NAME} [--appimage <path>] [--all] [--exec-check] [--exec-timeout
 
 Validates a Tauri-produced Linux .AppImage for Formula Desktop.
 
+Options:
+  --appimage <path>        Validate a specific .AppImage file (skip discovery).
+  --all                    Validate all discovered AppImages (otherwise the newest is selected).
+  --exec-check             Run a lightweight "can execute" check (AppRun --startup-bench).
+  --exec-timeout <secs>    Timeout for --exec-check (default: 20).
+  -h, --help               Show this help.
+
 If --appimage is not provided, the script searches common Tauri bundle output
 locations:
   - apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
