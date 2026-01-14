@@ -48,20 +48,27 @@ function normalizeRect(rect) {
 }
 
 /**
- * Normalize a workbook collection field (sheets/tables/namedRanges) into an Array.
+ * Normalize a workbook collection field (sheets/tables/namedRanges) into an array of
+ * `{ key, value }` entries.
  *
  * Some hosts represent metadata as Maps (e.g. keyed by name). We keep the public
  * API typed as arrays, but accept Map/Set/object shapes at runtime for robustness.
  *
  * @param {any} value
- * @returns {any[]}
+ * @returns {Array<{ key: string, value: any }>}
  */
-function normalizeCollection(value) {
-  if (Array.isArray(value)) return value;
-  if (value instanceof Map || value instanceof Set) return Array.from(value.values());
+function normalizeCollectionEntries(value) {
+  if (Array.isArray(value)) return value.map((v) => ({ key: "", value: v }));
+  if (value instanceof Map) {
+    return Array.from(value.entries()).map(([k, v]) => ({
+      key: typeof k === "string" ? k : k == null ? "" : String(k),
+      value: v,
+    }));
+  }
+  if (value instanceof Set) return Array.from(value.values()).map((v) => ({ key: "", value: v }));
   if (value && typeof value === "object") {
     // Plain object map: `{ key: value }`
-    return Object.values(value);
+    return Object.entries(value).map(([k, v]) => ({ key: k, value: v }));
   }
   return [];
 }
@@ -380,16 +387,42 @@ export function extractWorkbookSchema(workbook, options = {}) {
       ? Math.floor(maxAnalyzeColsRaw)
       : 50;
 
-  const workbookSheets = normalizeCollection(workbook?.sheets);
-  const workbookTables = normalizeCollection(workbook?.tables);
-  const workbookNamedRanges = normalizeCollection(workbook?.namedRanges);
+  const workbookSheets = normalizeCollectionEntries(workbook?.sheets);
+  const workbookTables = normalizeCollectionEntries(workbook?.tables);
+  const workbookNamedRanges = normalizeCollectionEntries(workbook?.namedRanges);
 
   /** @type {Array<{ name: string, sheet: any }>} */
   const sheetEntries = [];
-  for (const sheet of workbookSheets) {
+  for (const entry of workbookSheets) {
     throwIfAborted(signal);
-    const name = typeof sheet?.name === "string" ? sheet.name : "";
+    const rawSheet = entry.value;
+    const name =
+      typeof rawSheet?.name === "string"
+        ? rawSheet.name
+        : typeof entry.key === "string"
+          ? entry.key
+          : "";
     if (!name) continue;
+
+    const looksLikeSheetObject =
+      rawSheet &&
+      typeof rawSheet === "object" &&
+      !Array.isArray(rawSheet) &&
+      ("cells" in rawSheet || "values" in rawSheet || typeof rawSheet.getCell === "function" || "origin" in rawSheet);
+
+    let sheet = rawSheet;
+    if (looksLikeSheetObject) {
+      if (typeof rawSheet?.name !== "string") sheet = { ...rawSheet, name };
+    } else if (Array.isArray(rawSheet)) {
+      // Allow sheet maps like `{ Sheet1: [[...]] }` by treating the value as a matrix.
+      sheet = { name, values: rawSheet };
+    } else if (rawSheet && typeof rawSheet.get === "function") {
+      // Allow sheet maps like `{ Sheet1: new Map(...) }` by treating the value as a sparse cell map.
+      sheet = { name, cells: rawSheet };
+    } else {
+      sheet = { name };
+    }
+
     sheetEntries.push({ name, sheet });
   }
 
@@ -399,11 +432,17 @@ export function extractWorkbookSchema(workbook, options = {}) {
 
   /** @type {ReturnType<typeof extractWorkbookSchema>["tables"]} */
   const tables = [];
-  for (const table of workbookTables) {
+  for (const entry of workbookTables) {
     throwIfAborted(signal);
-    const name = typeof table?.name === "string" ? table.name.trim() : "";
+    const table = entry.value;
+    const name =
+      typeof table?.name === "string"
+        ? table.name.trim()
+        : typeof entry.key === "string"
+          ? entry.key.trim()
+          : "";
     const sheetName = typeof table?.sheetName === "string" ? table.sheetName : "";
-    const rect = normalizeRect(table?.rect);
+    const rect = normalizeRect(table?.rect ?? table);
     if (!name || !sheetName || !rect) continue;
     const sheet = sheetByName.get(sheetName) ?? null;
     const analysis = sheet
@@ -438,11 +477,17 @@ export function extractWorkbookSchema(workbook, options = {}) {
 
   /** @type {ReturnType<typeof extractWorkbookSchema>["namedRanges"]} */
   const namedRanges = [];
-  for (const nr of workbookNamedRanges) {
+  for (const entry of workbookNamedRanges) {
     throwIfAborted(signal);
-    const name = typeof nr?.name === "string" ? nr.name.trim() : "";
+    const nr = entry.value;
+    const name =
+      typeof nr?.name === "string"
+        ? nr.name.trim()
+        : typeof entry.key === "string"
+          ? entry.key.trim()
+          : "";
     const sheetName = typeof nr?.sheetName === "string" ? nr.sheetName : "";
-    const rect = normalizeRect(nr?.rect);
+    const rect = normalizeRect(nr?.rect ?? nr);
     if (!name || !sheetName || !rect) continue;
     namedRanges.push({ name, sheetName, rect, rangeA1: rectToRangeA1(sheetName, rect) });
   }

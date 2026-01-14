@@ -69,10 +69,11 @@ describe("extractWorkbookSchema", () => {
 
   it("accepts Map-shaped workbook metadata (tables + namedRanges)", () => {
     const tables = new Map<string, any>();
-    tables.set("T", { name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } });
+    // Name is derived from the Map key when omitted.
+    tables.set("T", { sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } });
 
     const namedRanges = new Map<string, any>();
-    namedRanges.set("NR", { name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 1 } });
+    namedRanges.set("NR", { sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 1 } });
 
     const workbook = {
       id: "wb-map-meta",
@@ -91,6 +92,25 @@ describe("extractWorkbookSchema", () => {
       columnCount: 2,
     });
     expect(schema.namedRanges).toEqual([{ name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 1 }, rangeA1: "Sheet1!A1:B1" }]);
+  });
+
+  it("accepts sheet maps keyed by sheet name (values are matrices)", () => {
+    const workbook = {
+      id: "wb-sheet-map",
+      sheets: {
+        Sheet1: [
+          ["Header"],
+          [1],
+        ],
+      },
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.sheets).toEqual([{ name: "Sheet1" }]);
+    expect(schema.tables[0]).toMatchObject({ rangeA1: "Sheet1!A1:A2", rowCount: 1, columnCount: 1 });
+    expect(schema.tables[0].headers).toEqual(["Header"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["number"]);
   });
 
   it("bounds sampling work for very large table rects", () => {
