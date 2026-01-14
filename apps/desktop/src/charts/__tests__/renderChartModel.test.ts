@@ -141,4 +141,15 @@ describe("charts/renderChart (ChartModel renderer)", () => {
     expect(svg1).toContain("D");
     expect(svg1).toMatchSnapshot();
   });
+
+  it("includes chartType.name in the placeholder label for unsupported chart kinds", () => {
+    const model: ChartModel = {
+      chartType: { kind: "unknown", name: "radar" },
+      title: "Imported Chart",
+      series: [],
+    };
+    const data = resolveChartData(model);
+    const svg = renderChartToSvg(model, data, defaultChartTheme, size);
+    expect(svg).toContain("Unsupported chart: radar");
+  });
 });
