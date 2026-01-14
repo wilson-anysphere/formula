@@ -106,14 +106,16 @@ spreadsheets you will most commonly see:
 
 Current state in this repo (important nuance):
 
-- Decryption primitives exist in multiple crates:
+  - Decryption primitives exist in multiple crates:
   - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an Agile encryption writer:
     `crates/formula-office-crypto`
     - Note: `formula-office-crypto`'s Agile (4.4) decrypt path validates `<dataIntegrity>` when
-      present. Some real-world producers omit `<dataIntegrity>`; in that case decryption can still
-      succeed, but no integrity verification is performed (decrypted bytes are unauthenticated).
+      present (mismatch ⇒ `OfficeCryptoError::IntegrityCheckFailed`). Some real-world producers omit
+      `<dataIntegrity>`; in that case decryption can still succeed, but no integrity verification is
+      performed (decrypted bytes are unauthenticated).
       - When `<dataIntegrity>` *is* present, `formula-office-crypto` is permissive about which bytes
-        are authenticated by the HMAC for compatibility; see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
+        are authenticated by the HMAC for compatibility; see
+        [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
   - MS-OFFCRYPTO parsing + decrypt helpers (Standard + Agile):
     `crates/formula-offcrypto`
     - Note: Agile `dataIntegrity` verification is optional there (`DecryptOptions.verify_integrity`).

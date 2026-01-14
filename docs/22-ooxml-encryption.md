@@ -397,7 +397,8 @@ Implementation note:
   - if absent: Formula decrypts successfully but does **not** verify integrity (and
     `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`)
 - `crates/formula-office-crypto` treats `<dataIntegrity>` as **optional**:
-  - if present: Formula validates the HMAC as described below
+  - if present: Formula validates the HMAC as described below (mismatch ⇒
+    `OfficeCryptoError::IntegrityCheckFailed`)
   - if absent: Formula decrypts successfully but does **not** verify integrity
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting with
   `formula_offcrypto::decrypt_encrypted_package` and `DecryptOptions.verify_integrity = true`
