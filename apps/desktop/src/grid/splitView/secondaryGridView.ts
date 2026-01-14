@@ -12,6 +12,7 @@ import type { DocumentController } from "../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { DrawingOverlay, type ChartRenderer, type GridGeometry, type Viewport as DrawingsViewport } from "../../drawings/overlay";
 import { showToast } from "../../extensions/ui.js";
+import { showCollabEditRejectedToast } from "../../collab/editRejectionToast";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
 import { CellEditorOverlay, type EditorCommit } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
@@ -617,7 +618,33 @@ export class SecondaryGridView {
     const rect = this.grid.getCellRect(request.row, request.col);
     if (!rect) return;
 
+    const sheetId = this.getSheetId();
     const cell = { row: request.row - this.headerRows, col: request.col - this.headerCols };
+    // In collab read-only roles (viewer/commenter) and other permission-restricted scenarios,
+    // DocumentController silently filters cell edits via `canEditCell`. Guard here so the
+    // secondary-pane editor does not open only to have its commit no-op.
+    //
+    // SpreadsheetApp has similar guards for the primary grid.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const canEditCell = (this.document as any).canEditCell as
+      | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+      | null
+      | undefined;
+    if (typeof canEditCell === "function") {
+      let allowed = true;
+      try {
+        allowed = Boolean(canEditCell({ sheetId, row: cell.row, col: cell.col }));
+      } catch {
+        allowed = true;
+      }
+      if (!allowed) {
+        showCollabEditRejectedToast([
+          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
+    }
+
     const initialValue = request.initialKey ?? this.getCellInputText(cell);
     this.editingCell = cell;
     this.editor.open(cell, rect, initialValue, { cursor: "end" });
@@ -635,6 +662,25 @@ export class SecondaryGridView {
 
   private applyEdit(cell: { row: number; col: number }, rawValue: string): void {
     const sheetId = this.getSheetId();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const canEditCell = (this.document as any).canEditCell as
+      | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+      | null
+      | undefined;
+    if (typeof canEditCell === "function") {
+      let allowed = true;
+      try {
+        allowed = Boolean(canEditCell({ sheetId, row: cell.row, col: cell.col }));
+      } catch {
+        allowed = true;
+      }
+      if (!allowed) {
+        showCollabEditRejectedToast([
+          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
+    }
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
 
     const originalInput = (() => {
@@ -831,6 +877,45 @@ export class SecondaryGridView {
     const source = toFillRange(sourceRange);
     const target = toFillRange(targetRange);
     if (!source || !target) return;
+
+    // In collab read-only roles (viewer/commenter), block fill operations in the secondary pane.
+    // DocumentController silently filters disallowed cell deltas via `canEditCell`, so guard here
+    // to avoid a confusing "selection expanded but nothing happened" outcome.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const canEditCell = (this.document as any).canEditCell as
+      | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+      | null
+      | undefined;
+    if (typeof canEditCell === "function") {
+      let allowed = true;
+      try {
+        allowed = Boolean(canEditCell({ sheetId, row: source.startRow, col: source.startCol }));
+      } catch {
+        allowed = true;
+      }
+      if (!allowed) {
+        showCollabEditRejectedToast([
+          { sheetId, row: source.startRow, col: source.startCol, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+
+        // DesktopSharedGrid will still expand selection to the dragged target range even if
+        // we skip applying edits. Suppress selection sync callbacks and restore the prior
+        // selection on the next microtask turn so split-view panes stay consistent.
+        this.suppressSelectionCallbacks = true;
+        queueMicrotask(() => {
+          try {
+            this.grid.setSelectionRanges(prevRanges, {
+              activeIndex: prevActiveIndex,
+              activeCell: prevSelection,
+              scrollIntoView: false,
+            });
+          } finally {
+            this.suppressSelectionCallbacks = false;
+          }
+        });
+        return;
+      }
+    }
 
     const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
     const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
