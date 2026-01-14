@@ -230,4 +230,95 @@ describe("SpreadsheetApp.hitTestDrawingAtClientPoint (split view)", () => {
     secondaryContainer.remove();
     root.remove();
   });
+
+  it("clears the selected drawing via Escape key from the split-view secondary pane", () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 300,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const secondaryContainer = document.createElement("div");
+    secondaryContainer.tabIndex = 0;
+    Object.defineProperty(secondaryContainer, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(secondaryContainer, "clientHeight", { configurable: true, value: 300 });
+    secondaryContainer.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 500,
+          top: 0,
+          right: 900,
+          bottom: 300,
+          x: 500,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(secondaryContainer);
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img_1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+        size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(drawing.id);
+    expect(app.getSelectedDrawingId()).toBe(drawing.id);
+
+    const view = new SecondaryGridView({
+      container: secondaryContainer,
+      document: app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      rowCount: 50,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+      images: app.getDrawingImages(),
+      getSelectedDrawingId: () => app.getSelectedDrawingId(),
+    });
+
+    const selectionCanvas = secondaryContainer.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    if (!selectionCanvas) throw new Error("Missing secondary selection canvas");
+
+    app.setSplitViewSecondaryGridView({ container: secondaryContainer, grid: view.grid });
+
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    selectionCanvas.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(app.getSelectedDrawingId()).toBeNull();
+
+    view.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
 });

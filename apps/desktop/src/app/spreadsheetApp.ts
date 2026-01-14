@@ -1508,9 +1508,10 @@ export class SpreadsheetApp {
     const primary = e.ctrlKey || e.metaKey;
     const isArrow = key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown";
     const isDelete = key === "Delete" || key === "Backspace";
+    const isEscape = key === "Escape";
     const isDuplicate = primary && !e.altKey && !e.shiftKey && (key === "d" || key === "D");
     const isArrange = primary && !e.altKey && (code === "BracketLeft" || code === "BracketRight");
-    if (!(isArrow || isDelete || isDuplicate || isArrange)) return;
+    if (!(isArrow || isDelete || isEscape || isDuplicate || isArrange)) return;
 
     // Never hijack key events originating from text inputs/contenteditable nodes.
     const target = e.target as HTMLElement | null;
@@ -1524,6 +1525,9 @@ export class SpreadsheetApp {
     const secondaryRoot = this.splitViewSecondaryGrid?.container ?? null;
     const inSecondaryGrid = Boolean(target && secondaryRoot && secondaryRoot.contains(target));
     if (!inPrimaryGrid && !inSecondaryGrid) return;
+    // Escape handling for deselect/cancel already works in the primary pane via SpreadsheetApp's
+    // root keydown handler. Only intercept it here for the split-view secondary pane.
+    if (isEscape && !inSecondaryGrid) return;
 
     // Do not handle while editing text (cell editor, formula bar, inline edit).
     if (this.isEditing()) return;
@@ -1538,6 +1542,28 @@ export class SpreadsheetApp {
     // ChartStore charts (canvas charts mode) have their own selection state.
     if (!handled && this.selectedChartId != null) {
       handled = this.handleSelectedChartKeyDown(e);
+      if (!handled && isEscape) {
+        // Excel-like: Escape clears chart selection / cancels an in-progress chart drag.
+        // Mirror SpreadsheetApp.onKeyDown behavior, but scoped to split-view secondary pane focus.
+        if (this.chartDragState) {
+          e.preventDefault();
+          const state = this.chartDragState;
+          this.chartDragState = null;
+          this.chartDragAbort?.abort();
+          this.chartDragAbort = null;
+          this.chartStore.updateChartAnchor(state.chartId, state.startAnchor as any);
+          handled = true;
+        } else if (this.useCanvasCharts && this.chartDrawingGestureActive) {
+          // Canvas charts use a DrawingInteractionController (window-level Escape handler) to cancel
+          // move/resize gestures. Avoid clearing chart selection while such a gesture is active so
+          // Escape behaves like Excel (first Escape cancels the drag, second Escape deselects).
+        } else {
+          e.preventDefault();
+          this.setSelectedChartId(null);
+          this.focus();
+          handled = true;
+        }
+      }
       // Chart deletion is handled outside `handleSelectedChartKeyDown` (historical).
       if (!handled && isDelete) {
         e.preventDefault();
@@ -1561,7 +1587,11 @@ export class SpreadsheetApp {
       // Critical: KeybindingService runs built-in shortcuts in window capture phase. Stop the
       // event here so object shortcuts (Delete/Ctrl+D/arrows) don't also trigger grid commands
       // like Clear Contents / Fill Down.
-      e.stopImmediatePropagation();
+      // Important: Escape should be allowed to reach any DrawingInteractionController
+      // window listener so active drag/resize gestures can be cancelled.
+      if (!isEscape) {
+        e.stopImmediatePropagation();
+      }
     }
   };
 
