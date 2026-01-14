@@ -238,6 +238,109 @@ test("buildWorkbookContext: attachments are redacted under DLP REDACT even when 
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
+  const workbook = {
+    id: "wb-dlp-schema-header-noop-redactor",
+    sheets: [
+      {
+        name: "Contacts",
+        cells: [
+          // Force header detection by ensuring the next row contains a numeric value.
+          [{ v: "Name" }, { v: "alice@example.com" }, { v: "123-45-6789" }, { v: "Amount" }],
+          [{ v: "Alice" }, { v: "foo" }, { v: "bar" }, { v: 100 }],
+        ],
+      },
+    ],
+    tables: [{ name: "HeaderSensitiveTable", sheetName: "Contacts", rect: { r0: 0, c0: 0, r1: 1, c1: 3 } }],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  // Use a no-op redactor to ensure ContextManager still enforces heuristic safety under DLP.
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "contacts",
+    topK: 0, // force empty retrieval so schema is the only cell-derived section
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  assert.equal(out.retrieved.length, 0);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+
+  assert.match(out.promptContext, /## workbook_schema/i);
+  assert.doesNotMatch(schemaSection, /alice@example\.com/);
+  assert.doesNotMatch(schemaSection, /123-45-6789/);
+  assert.match(schemaSection, /\[REDACTED\]/);
+});
+
+test("buildWorkbookContext: workbook_schema fallback redacts sensitive columns even with a no-op redactor (DLP REDACT)", async () => {
+  const workbookId = "wb-api-schema-header-noop-redactor";
+
+  const spreadsheet = {
+    listSheets() {
+      return ["Contacts"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Contacts");
+      return [
+        // Header row contains heuristic-sensitive strings (email + SSN).
+        { address: { sheet: "Contacts", row: 1, col: 1 }, cell: { value: "alice@example.com" } },
+        { address: { sheet: "Contacts", row: 1, col: 2 }, cell: { value: "123-45-6789" } },
+        { address: { sheet: "Contacts", row: 1, col: 3 }, cell: { value: "Amount" } },
+        // Data row ensures header detection + type inference.
+        { address: { sheet: "Contacts", row: 2, col: 1 }, cell: { value: "Alice" } },
+        { address: { sheet: "Contacts", row: 2, col: 2 }, cell: { value: "foo" } },
+        { address: { sheet: "Contacts", row: 2, col: 3 }, cell: { value: 100 } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  // Pre-index without DLP so the persisted chunk metadata contains the raw header values.
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId, coordinateBase: "one" });
+  await indexWorkbook({ workbook, vectorStore, embedder });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContextFromSpreadsheetApi({
+    spreadsheet,
+    workbookId,
+    query: "ignore",
+    topK: 0, // force no retrieval (so schema comes from vectorStore.list fallback)
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbookId,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  assert.equal(out.retrieved.length, 0);
+  assert.match(out.promptContext, /## workbook_schema/i);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+  assert.doesNotMatch(schemaSection, /alice@example\.com/);
+  assert.doesNotMatch(schemaSection, /123-45-6789/);
+  assert.match(schemaSection, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });

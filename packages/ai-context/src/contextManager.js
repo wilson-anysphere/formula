@@ -1491,6 +1491,87 @@ export class ContextManager {
             policyAllowsRestrictedContent,
           })
         : params.attachments;
+
+      const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
+      const schemaRestrictedDecision = dlp
+        ? evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          })
+        : null;
+      const shouldRedactHeuristicSensitiveSchema = schemaRestrictedDecision?.decision === DLP_DECISION.REDACT;
+      const shouldBlockHeuristicSensitiveSchema = schemaRestrictedDecision?.decision === DLP_DECISION.BLOCK;
+
+      /**
+       * Redact a schema token (table name / header / range title) when DLP requires it.
+       *
+       * This mirrors ContextManager's defense-in-depth behavior elsewhere: even when a caller
+       * supplies a no-op redactor, heuristic-sensitive strings should not leak under DLP REDACT.
+       *
+       * @param {unknown} value
+       */
+      const redactSchemaToken = (value) => {
+        const raw = String(value ?? "");
+        if (!dlp) return raw;
+        throwIfAborted(signal);
+
+        if (shouldBlockHeuristicSensitiveSchema && classifyText(raw).level === "sensitive") {
+          const decision = schemaRestrictedDecision;
+          if (decision) {
+            dlp.auditLogger?.log({
+              type: "ai.workbook_context",
+              documentId: dlp.documentId,
+              workbookId: params.workbook.id,
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              decision,
+              classification: decision.classification ?? { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+              redactedChunkCount,
+              blockedChunkId: null,
+              blockedReason: "workbook_schema",
+              chunks: chunkAudits,
+            });
+            throw new DlpViolationError(decision);
+          }
+          throw new DlpViolationError({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            decision: DLP_DECISION.BLOCK,
+            reasonCode: "dlp.blockedByPolicy",
+            classification: { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+            maxAllowed: null,
+          });
+        }
+
+        if (!shouldRedactHeuristicSensitiveSchema) return raw;
+
+        const redacted = this.redactor(raw);
+        if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+        return redacted;
+      };
+
+      /**
+       * Redact a workbook RAG `COLUMNS:` detail string while preserving inferred types.
+       * @param {string} columnsLine
+       */
+      const redactColumnsLine = (columnsLine) => {
+        const raw = String(columnsLine ?? "");
+        if (!raw) return "";
+        const parts = raw.split(/\s*\|\s*/g);
+        const out = [];
+        for (const part of parts) {
+          const seg = String(part ?? "");
+          if (!seg) continue;
+          const m = seg.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+          if (m) {
+            const safeHeader = redactSchemaToken(m[1]);
+            out.push(`${safeHeader} (${m[2]})`);
+          } else {
+            out.push(redactSchemaToken(seg));
+          }
+        }
+        return out.join(" | ");
+      };
       const schemaLines = [];
       const maxTables = 25;
       const maxColumns = 25;
@@ -1529,6 +1610,7 @@ export class ContextManager {
         throwIfAborted(signal);
         const table = schema.tables[i];
         const name = table?.name ?? "";
+        const safeName = redactSchemaToken(name);
         const sheetName = table?.sheetName ?? "";
         const rect = table?.rect;
         const rangeA1 = table?.rangeA1 ?? "";
@@ -1549,7 +1631,7 @@ export class ContextManager {
               options: { includeRestrictedContent },
             });
             if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-              schemaLines.push(`- Table ${name} (range="${rangeA1}"): [REDACTED]`);
+              schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): [REDACTED]`);
               continue;
             }
           }
@@ -1564,12 +1646,13 @@ export class ContextManager {
         for (let c = 0; c < boundedColCount; c++) {
           throwIfAborted(signal);
           const header = headers[c] ?? `Column${c + 1}`;
+          const safeHeader = redactSchemaToken(header);
           const type = types[c] ?? "mixed";
-          cols.push(`${header} (${type})`);
+          cols.push(`${safeHeader} (${type})`);
         }
 
         const colSuffix = boundedColCount < colCount ? " | …" : "";
-        schemaLines.push(`- Table ${name} (range="${rangeA1}"): ${cols.join(" | ")}${colSuffix}`);
+        schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): ${cols.join(" | ")}${colSuffix}`);
       }
 
       // Named ranges can be helpful anchors even without cell samples.
@@ -1577,9 +1660,10 @@ export class ContextManager {
         throwIfAborted(signal);
         const nr = schema.namedRanges[i];
         const name = nr?.name ?? "";
+        const safeName = redactSchemaToken(name);
         const rangeA1 = nr?.rangeA1 ?? "";
         if (!name) continue;
-        schemaLines.push(`- Named range ${name} (range="${rangeA1}")`);
+        schemaLines.push(`- Named range ${safeName} (range="${rangeA1}")`);
       }
 
       // Fallback: if the workbook doesn't supply explicit tables/named ranges, reuse the
@@ -1634,6 +1718,7 @@ export class ContextManager {
             throwIfAborted(signal);
             const kind = String(meta.kind ?? "");
             const title = String(meta.title ?? "");
+            const safeTitle = title ? redactSchemaToken(title) : "";
             const sheetName = String(meta.sheetName ?? "");
             const rect = meta.rect ?? {};
             const r0 = rect.r0;
@@ -1662,7 +1747,7 @@ export class ContextManager {
                 });
                 if (recordDecision.decision !== DLP_DECISION.ALLOW) {
                   const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
-                  const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${title}` : "";
+                  const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${safeTitle}` : "";
                   schemaLines.push(`- ${label}${nameSuffix} (range="${rangeA1}"): [REDACTED]`);
                   continue;
                 }
@@ -1674,8 +1759,8 @@ export class ContextManager {
             const isRedacted = /\[REDACTED\]/.test(storedText);
 
             const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
-            const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${title}` : "";
-            const detail = columns ? columns : isRedacted ? "[REDACTED]" : "";
+            const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${safeTitle}` : "";
+            const detail = columns ? redactColumnsLine(columns) : isRedacted ? "[REDACTED]" : "";
             if (!detail) continue;
             schemaLines.push(`- ${label}${nameSuffix} (range="${rangeA1}"): ${detail}`);
           }
