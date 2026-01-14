@@ -48,6 +48,9 @@ const aiAuditExportEntry = resolve(repoRoot, "packages/ai-audit/src/export.ts");
 const aiCompletionEntry = resolve(repoRoot, "packages/ai-completion/src/index.js");
 const auditCoreEntry = resolve(repoRoot, "packages/audit-core/index.js");
 const extensionApiEntry = resolve(repoRoot, "packages/extension-api/index.mjs");
+const scriptingEntry = resolve(repoRoot, "packages/scripting/src/index.js");
+const scriptingNodeEntry = resolve(repoRoot, "packages/scripting/src/node.js");
+const scriptingWebEntry = resolve(repoRoot, "packages/scripting/src/web.js");
 const pythonRuntimeEntry = resolve(repoRoot, "packages/python-runtime/src/index-node.js");
 const pythonRuntimeDocumentControllerEntry = resolve(repoRoot, "packages/python-runtime/src/document-controller.js");
 const pythonRuntimeNativeEntry = resolve(repoRoot, "packages/python-runtime/src/native.js");
@@ -159,6 +162,9 @@ export default defineConfig({
       { find: /^@formula\/ai-completion$/, replacement: aiCompletionEntry },
       { find: /^@formula\/audit-core$/, replacement: auditCoreEntry },
       { find: /^@formula\/extension-api$/, replacement: extensionApiEntry },
+      { find: /^@formula\/scripting$/, replacement: scriptingEntry },
+      { find: /^@formula\/scripting\/node$/, replacement: scriptingNodeEntry },
+      { find: /^@formula\/scripting\/web$/, replacement: scriptingWebEntry },
       { find: /^@formula\/python-runtime$/, replacement: pythonRuntimeEntry },
       { find: /^@formula\/python-runtime\/document-controller$/, replacement: pythonRuntimeDocumentControllerEntry },
       { find: /^@formula\/python-runtime\/native$/, replacement: pythonRuntimeNativeEntry },
