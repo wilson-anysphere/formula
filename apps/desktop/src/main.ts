@@ -10668,13 +10668,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // DocumentController snapshot. SpreadsheetApp's row/col visibility is tracked in a local
   // per-sheet outline map; if we don't seed it here, hidden columns can momentarily render
   // as visible until the user interacts with the grid.
-  if (importedHiddenColsBySheetId.size > 0) {
-    try {
-      // Clear any outline state from a previously-opened workbook. Sheet ids are often derived
-      // from sheet names (e.g. "Sheet1"), so they can collide across workbook boundaries.
-      const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown> | undefined;
-      if (outlinesBySheet && typeof outlinesBySheet.clear === "function") outlinesBySheet.clear();
+  try {
+    // Clear any outline state from a previously-opened workbook. Sheet ids are often derived from
+    // sheet names (e.g. "Sheet1"), so they can collide across workbook boundaries.
+    //
+    // Even when the newly-opened workbook has no imported hidden columns, we still need to clear
+    // this map so user-hidden rows/cols (and outline groups) don't leak into the next workbook.
+    const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown> | undefined;
+    if (outlinesBySheet && typeof outlinesBySheet.clear === "function") outlinesBySheet.clear();
 
+    if (importedHiddenColsBySheetId.size > 0) {
       const getOutlineForSheet = (app as any).getOutlineForSheet as ((sheetId: string) => any) | undefined;
       if (typeof getOutlineForSheet === "function") {
         for (const [sheetId, cols] of importedHiddenColsBySheetId) {
@@ -10691,19 +10694,18 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
           }
         }
       }
-
-      // SpreadsheetApp's legacy renderer caches row/col visibility to avoid consulting outline state
-      // for every paint. When the active sheet id stays the same across workbook opens (e.g. two
-      // unrelated workbooks both have `Sheet1`), `restoreDocumentState` may not rebuild those caches,
-      // which can cause imported hidden columns to render as visible until the user interacts.
-      //
-      // Rebuild the caches eagerly after seeding imported hidden columns so the first post-open
-      // render matches Excel.
-      const rebuildAxisVisibilityCache = (app as any).rebuildAxisVisibilityCache as (() => void) | undefined;
-      if (typeof rebuildAxisVisibilityCache === "function") rebuildAxisVisibilityCache.call(app);
-    } catch (err) {
-      console.warn("[formula][desktop] Failed to seed imported hidden columns:", err);
     }
+
+    // SpreadsheetApp's legacy renderer caches row/col visibility to avoid consulting outline state
+    // for every paint. When the active sheet id stays the same across workbook opens (e.g. two
+    // unrelated workbooks both have `Sheet1`), `restoreDocumentState` may not rebuild those caches.
+    //
+    // Rebuild the caches after clearing/seeding outline state so the first post-open render matches
+    // Excel (both for imported hidden columns and for the "no hidden columns" case).
+    const rebuildAxisVisibilityCache = (app as any).rebuildAxisVisibilityCache as (() => void) | undefined;
+    if (typeof rebuildAxisVisibilityCache === "function") rebuildAxisVisibilityCache.call(app);
+  } catch (err) {
+    console.warn("[formula][desktop] Failed to reset outline state on workbook open:", err);
   }
   await app.restoreDocumentState(snapshot);
 
