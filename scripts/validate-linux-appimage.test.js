@@ -114,6 +114,7 @@ function writeFakeAppImage(
     withParquetMime = true,
     withMimeTypeEntry = true,
     withSchemeMime = true,
+    desktopMimeValue = "",
     withParquetMimeDefinition = true,
     parquetMimeDefinitionContents = "",
     mainBinaryName = expectedMainBinaryName,
@@ -132,9 +133,10 @@ function writeFakeAppImage(
     mimeTypes = mimeTypes.filter((mt) => mt !== "application/vnd.apache.parquet");
   }
   const desktopMimeBase = `${mimeTypes.join(";")};`;
-  const desktopMime = withSchemeMime
+  const computedDesktopMime = withSchemeMime
     ? `${desktopMimeBase}${expectedSchemeMimes.join(";")};`
     : desktopMimeBase;
+  const desktopMime = desktopMimeValue || computedDesktopMime;
 
   const desktopBlock = withDesktopFile
     ? [
@@ -422,6 +424,26 @@ test("validate-linux-appimage fails when .desktop lacks URL scheme handler (x-sc
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /x-scheme-handler\/formula/i);
 });
+
+test(
+  "validate-linux-appimage requires URL scheme handlers to match exact MimeType= tokens (no prefix matches)",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+    const appImagePath = join(tmp, "Formula.AppImage");
+    const prefixSchemeMimes = expectedSchemeMimes.map((schemeMime) => `${schemeMime}-extra`);
+    writeFakeAppImage(appImagePath, {
+      withDesktopFile: true,
+      withXlsxMime: true,
+      appImageVersion: expectedVersion,
+      desktopMimeValue: `${expectedFileAssociationMimeTypes.join(";")};${prefixSchemeMimes.join(";")};`,
+    });
+
+    const proc = runValidator(appImagePath);
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /expected URL scheme handler/i);
+  },
+);
 
 test("validate-linux-appimage fails when .desktop lacks a MimeType entry", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));

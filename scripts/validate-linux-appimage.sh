@@ -707,10 +707,26 @@ validate_appimage() {
       has_parquet_mime=1
     fi
 
+    # Tokenize MimeType= (semicolon-delimited) so scheme handler checks are exact matches,
+    # not substring matches (e.g. avoid treating x-scheme-handler/<scheme>-extra as matching
+    # expected x-scheme-handler/<scheme>).
+    local -a mime_tokens=()
+    IFS=';' read -r -a mime_tokens <<<"$mime_value"
+    local -A mime_set=()
+    local token
+    for token in "${mime_tokens[@]}"; do
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+      if [ -n "$token" ]; then
+        mime_set["$token"]=1
+      fi
+    done
+
     local has_any_expected_scheme_in_file=0
     local scheme_mime
     for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
-      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+      if [ -n "${mime_set["$scheme_mime"]+x}" ]; then
         found_scheme_mimes["$scheme_mime"]=1
         has_any_expected_scheme_in_file=1
       fi

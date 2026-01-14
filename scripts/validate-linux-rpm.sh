@@ -485,10 +485,26 @@ validate_desktop_mime_associations_extracted() {
       has_parquet_mime=1
     fi
 
+    # Tokenize MimeType= (semicolon-delimited) so scheme handler checks are exact matches,
+    # not substring matches (e.g. avoid treating x-scheme-handler/<scheme>-extra as matching
+    # expected x-scheme-handler/<scheme>).
+    local -a mime_tokens=()
+    IFS=';' read -r -a mime_tokens <<<"$mime_value"
+    local -A mime_set=()
+    local token
+    for token in "${mime_tokens[@]}"; do
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+      if [ -n "$token" ]; then
+        mime_set["$token"]=1
+      fi
+    done
+
     local has_any_expected_scheme_in_file=0
     local scheme_mime
     for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
-      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+      if [ -n "${mime_set["$scheme_mime"]+x}" ]; then
         found_scheme_mimes["$scheme_mime"]=1
         has_any_expected_scheme_in_file=1
       fi
@@ -954,6 +970,14 @@ validate_container() {
   container_cmd+=$'  expected_scheme_mimes_raw="x-scheme-handler/${default_scheme}"\n'
   container_cmd+=$'fi\n'
   container_cmd+=$'IFS=";" read -r -a required_scheme_mimes <<< "${expected_scheme_mimes_raw}"\n'
+  container_cmd+=$'# Normalize scheme MIME tokens (trim + lowercase) so comparisons are token-exact.\n'
+  container_cmd+=$'for i in "${!required_scheme_mimes[@]}"; do\n'
+  container_cmd+=$'  t="${required_scheme_mimes[$i]}"\n'
+  container_cmd+=$'  t="${t#"${t%%[![:space:]]*}"}"\n'
+  container_cmd+=$'  t="${t%"${t##*[![:space:]]}"}"\n'
+  container_cmd+=$'  t="$(printf "%s" "${t}" | tr "[:upper:]" "[:lower:]")"\n'
+  container_cmd+=$'  required_scheme_mimes[$i]="${t}"\n'
+  container_cmd+=$'done\n'
   container_cmd+=$'desktop_files=(/usr/share/applications/*.desktop)\n'
   container_cmd+=$'if [ ! -e "${desktop_files[0]}" ]; then\n'
   container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
@@ -1000,6 +1024,16 @@ validate_container() {
   container_cmd+=$'  fi\n'
   container_cmd+=$'  has_any_mimetype=1\n'
   container_cmd+=$'  mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"\n'
+  container_cmd+=$'  IFS=";" read -r -a mime_tokens <<< "${mime_value}"\n'
+  container_cmd+=$'  declare -A mime_set=()\n'
+  container_cmd+=$'  for token in "${mime_tokens[@]}"; do\n'
+  container_cmd+=$'    token="${token#"${token%%[![:space:]]*}"}"\n'
+  container_cmd+=$'    token="${token%"${token##*[![:space:]]}"}"\n'
+  container_cmd+=$'    token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"\n'
+  container_cmd+=$'    if [ -n "${token}" ]; then\n'
+  container_cmd+=$'      mime_set["$token"]=1\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  done\n'
   container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_parquet_mime}"; then\n'
   container_cmd+=$'    has_parquet_mime=1\n'
   container_cmd+=$'  fi\n'
@@ -1023,7 +1057,7 @@ validate_container() {
   container_cmd+=$'  fi\n'
   container_cmd+=$'  has_any_expected_scheme_in_file=0\n'
   container_cmd+=$'  for scheme_mime in "${required_scheme_mimes[@]}"; do\n'
-  container_cmd+=$'    if [ -n "${scheme_mime}" ] && printf "%s" "${mime_value}" | grep -Fqi "${scheme_mime}"; then\n'
+  container_cmd+=$'    if [ -n "${scheme_mime}" ] && [ -n "${mime_set["$scheme_mime"]+x}" ]; then\n'
   container_cmd+=$'      found_scheme_mimes["$scheme_mime"]=1\n'
   container_cmd+=$'      has_any_expected_scheme_in_file=1\n'
   container_cmd+=$'    fi\n'

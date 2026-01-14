@@ -210,6 +210,36 @@ esac
   chmodSync(p, 0o755);
 }
 
+function writeFakePython3Tool(binDir) {
+  // The DEB validator optionally runs scripts/ci/verify_linux_desktop_integration.py (python)
+  // after its bash-based checks. For certain tests we want to validate the bash fallback
+  // logic without the python verifier masking results, so we stub python3 accordingly.
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\${1:-}" == "-" ]]; then
+  cat >/dev/null || true
+  key="\${3:-}"
+  case "$key" in
+    version) printf '%s\\n' "${expectedVersion}" ;;
+    mainBinaryName) printf '%s\\n' "${expectedMainBinary}" ;;
+    identifier) printf '%s\\n' "${expectedIdentifier}" ;;
+  esac
+  exit 0
+fi
+
+if [[ "\${1:-}" == *"verify_linux_desktop_integration.py" ]]; then
+  exit 0
+fi
+
+exit 0
+`;
+
+  const pythonPath = join(binDir, "python3");
+  writeFileSync(pythonPath, script, { encoding: "utf8" });
+  chmodSync(pythonPath, 0o755);
+}
+
 function writeDefaultDependsFile(tmpDir) {
   const p = join(tmpDir, "deb-depends.txt");
   writeFileSync(
@@ -689,6 +719,33 @@ test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler 
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /x-scheme-handler\/formula/i);
 });
+
+test(
+  "validate-linux-deb requires URL scheme handlers to match exact MimeType= tokens (no prefix matches)",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFakeDpkgDebTool(binDir);
+    writeFakePython3Tool(binDir);
+
+    writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+    const dependsFile = writeDefaultDependsFile(tmp);
+    const contentsFile = writeDefaultContentsFile(tmp);
+
+    const prefixSchemeMimes = expectedSchemeMimes.map((schemeMime) => `${schemeMime}-extra`);
+    const proc = runValidator({
+      cwd: tmp,
+      debArg: "Formula.deb",
+      dependsFile,
+      contentsFile,
+      desktopMimeValue: `${expectedFileAssociationMimeTypes.join(";")};${prefixSchemeMimes.join(";")};`,
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /expected URL scheme handler/i);
+  },
+);
 
 test("validate-linux-deb fails when extracted .desktop lacks Parquet MIME type (application/vnd.apache.parquet)", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));

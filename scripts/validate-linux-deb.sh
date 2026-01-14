@@ -526,10 +526,26 @@ validate_desktop_integration_extracted() {
       has_parquet_mime=1
     fi
 
+    # Tokenize MimeType= (semicolon-delimited) so scheme handler checks are exact matches,
+    # not substring matches (e.g. avoid treating x-scheme-handler/<scheme>-extra as matching
+    # expected x-scheme-handler/<scheme>).
+    local -a mime_tokens=()
+    IFS=';' read -r -a mime_tokens <<<"$mime_value"
+    local -A mime_set=()
+    local token
+    for token in "${mime_tokens[@]}"; do
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+      if [[ -n "$token" ]]; then
+        mime_set["$token"]=1
+      fi
+    done
+
     local has_any_expected_scheme_in_file=0
     local scheme_mime
     for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
-      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+      if [[ -n "${mime_set["$scheme_mime"]+x}" ]]; then
         found_scheme_mimes["$scheme_mime"]=1
         has_any_expected_scheme_in_file=1
       fi
@@ -693,9 +709,16 @@ validate_static() {
     [[ -f "${tmpdir}/usr/share/doc/${EXPECTED_DEB_NAME}/${filename}" ]] || die "Extracted payload missing compliance file: usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
   done
 
-  # Prefer strict validation against tauri.conf.json so we catch missing MIME types,
-  # scheme handlers, compliance artifacts, and Parquet shared-mime-info wiring in the
-  # built artifact (not just in config).
+  # Always run bash-based validation of the extracted .desktop metadata so we have a
+  # python-free fallback *and* avoid false positives from substring matching in MimeType=
+  # checks (e.g. x-scheme-handler/<scheme>-extra should not satisfy x-scheme-handler/<scheme>).
+  if ! validate_desktop_integration_extracted "${tmpdir}"; then
+    die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
+  fi
+
+  # Additionally, prefer strict validation against tauri.conf.json (when python is available)
+  # so we catch missing MIME types, scheme handlers, compliance artifacts, and Parquet
+  # shared-mime-info wiring in the built artifact (not just in config).
   if command -v python3 >/dev/null 2>&1; then
     note "Static desktop integration validation (verify extracted DEB payload)"
     if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" \
@@ -703,10 +726,6 @@ validate_static() {
       --tauri-config "$TAURI_CONF" \
       --expected-main-binary "$EXPECTED_MAIN_BINARY" \
       --doc-package-name "$EXPECTED_DEB_NAME"; then
-      die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
-    fi
-  else
-    if ! validate_desktop_integration_extracted "${tmpdir}"; then
       die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
     fi
   fi
@@ -804,15 +823,40 @@ validate_container() {
     echo "Installed desktop entry: ${desktop_file}"
     grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
     grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+    mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "${desktop_file}" | head -n 1 || true)"
+    mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//I")"
+    if [ -z "${mime_value}" ]; then
+      echo "Installed desktop entry is missing MimeType= (required for file associations + URL scheme handlers): ${desktop_file}" >&2
+      exit 1
+    fi
+    IFS=";" read -r -a mime_tokens <<< "${mime_value}"
+    declare -A mime_set=()
+    for token in "${mime_tokens[@]}"; do
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+      if [ -n "${token}" ]; then
+        mime_set["$token"]=1
+      fi
+    done
     expected_scheme_mimes_raw="${FORMULA_EXPECTED_SCHEME_MIMES:-}"
     if [ -z "${expected_scheme_mimes_raw}" ]; then
       default_scheme="formula"
       expected_scheme_mimes_raw="x-scheme-handler/${default_scheme}"
     fi
     IFS=";" read -r -a expected_scheme_mimes <<< "${expected_scheme_mimes_raw}"
+    for i in "${!expected_scheme_mimes[@]}"; do
+      token="${expected_scheme_mimes[$i]}"
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+      expected_scheme_mimes[$i]="${token}"
+    done
     for scheme_mime in "${expected_scheme_mimes[@]}"; do
-      if [ -n "${scheme_mime}" ]; then
-        grep -Fqi "${scheme_mime}" "${desktop_file}"
+      if [ -n "${scheme_mime}" ] && [ -z "${mime_set["$scheme_mime"]+x}" ]; then
+        echo "Missing URL scheme handler in desktop entry MimeType=: ${scheme_mime}" >&2
+        echo "Observed MimeType= value: ${mime_value}" >&2
+        exit 1
       fi
     done
     grep -qi "application/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet" "${desktop_file}"
