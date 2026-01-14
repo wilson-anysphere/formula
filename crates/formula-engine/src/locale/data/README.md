@@ -277,16 +277,16 @@ Treating bracket content as opaque is also important for correctness because it 
    - Run `node scripts/generate-locale-error-tsvs.mjs` to produce/update
      `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
 3. **Register the locale in code:**
-     - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
-       in `crates/formula-engine/src/locale/registry.rs`.
-     - Add a `static <LOCALE>_ERRORS: ErrorTranslations = ...include_str!("data/<locale>.errors.tsv")`
-       in `crates/formula-engine/src/locale/registry.rs`.
-     - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
-       both TSV translation tables.
-     - Add the locale to `get_locale()` in `registry.rs`.
-     - Update `crates/formula-engine/src/locale/mod.rs` (`normalize_locale_id`) so the engine can
-       actually resolve locale tags to your new locale id (especially if you add a second locale for
-       an existing language, e.g. `fr-CA` vs `fr-FR`).
+      - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
+        in `crates/formula-engine/src/locale/registry.rs`.
+      - Add a `static <LOCALE>_ERRORS: ErrorTranslations = ...include_str!("data/<locale>.errors.tsv")`
+        in `crates/formula-engine/src/locale/registry.rs`.
+      - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals and
+        set `errors: &<LOCALE>_ERRORS` and `functions: &<LOCALE>_FUNCTIONS`.
+      - Add the locale to `get_locale()` in `registry.rs`.
+      - Update `crates/formula-engine/src/locale/mod.rs` (`normalize_locale_id`) so the engine can
+        actually resolve locale tags to your new locale id (especially if you add a second locale for
+        an existing language, e.g. `fr-CA` vs `fr-FR`).
      - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
        accessible as `locale::<LOCALE>`.
 4. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
