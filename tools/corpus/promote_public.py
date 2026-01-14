@@ -303,6 +303,49 @@ def main() -> int:
             return 1
 
     if input_ext == ".xlsb" and not args.confirm_sanitized:
+        # Leak scanning is XLSX-zip based and cannot parse XLSB. However, allow idempotent
+        # no-op runs on already-promoted public fixtures without requiring `--confirm-sanitized`.
+        # This mirrors the "already_promoted" fast path behavior for XLSX fixtures.
+        if (
+            not args.force
+            and not args.sanitize
+            and args.input.suffix.lower() == ".b64"
+            and args.diff_limit == 25
+            and not args.recalc
+            and not args.render_smoke
+        ):
+            try:
+                public_dir: Path = args.public_dir
+                candidate_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=input_ext)
+                fixture_path = public_dir / f"{candidate_name}.b64"
+                expectations_path = public_dir / "expectations.json"
+                if args.input.resolve() == fixture_path.resolve() and expectations_path.exists():
+                    expectations = load_json(expectations_path)
+                    exp = expectations.get(candidate_name) if isinstance(expectations, dict) else None
+                    if (
+                        isinstance(exp, dict)
+                        and exp.get("open_ok") is True
+                        and isinstance(exp.get("round_trip_ok"), bool)
+                        and isinstance(exp.get("diff_critical_count"), int)
+                    ):
+                        print(
+                            json.dumps(
+                                {
+                                    "fixture": str(fixture_path),
+                                    "expectations": str(expectations_path),
+                                    "expectations_changed": False,
+                                    "fixture_changed": False,
+                                    "dry_run": args.dry_run,
+                                    "triage_report": None,
+                                    "skipped": "already_promoted",
+                                },
+                                indent=2,
+                            )
+                        )
+                        return 0
+            except Exception:
+                pass
+
         print(
             "XLSB leak scanning is not supported. "
             "Provide an already-sanitized XLSB and pass --confirm-sanitized."
