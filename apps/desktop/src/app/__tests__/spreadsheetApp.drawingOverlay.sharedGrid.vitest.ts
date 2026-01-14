@@ -167,8 +167,6 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
-
       const root = createRoot();
       const status = {
         activeCell: document.createElement("div"),
@@ -177,6 +175,10 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
+      // Spy on the *drawings* overlay instance specifically. SpreadsheetApp also uses
+      // `DrawingOverlay` for chart selection handles, which runs on scroll; using a
+      // prototype spy would include those calls and make this test order-dependent.
+      const renderSpy = vi.spyOn((app as any).drawingOverlay, "render");
 
       const doc = app.getDocument();
       doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
