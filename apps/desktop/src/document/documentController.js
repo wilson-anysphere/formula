@@ -2518,15 +2518,25 @@ export class DocumentController {
       if (!isJsonObject(raw)) {
         throw new Error("Drawings must be JSON objects");
       }
-      const drawingId = String(raw.id ?? "").trim();
-      if (!drawingId) throw new Error("Drawing.id must be a non-empty string");
+      const rawId = raw.id;
+      let drawingId;
+      if (typeof rawId === "string") {
+        drawingId = rawId.trim();
+        if (!drawingId) throw new Error("Drawing.id must be a non-empty string");
+      } else if (typeof rawId === "number") {
+        if (!Number.isSafeInteger(rawId)) throw new Error("Drawing.id must be a safe integer");
+        drawingId = rawId;
+      } else {
+        throw new Error("Drawing.id must be a string or number");
+      }
       if (!("anchor" in raw)) throw new Error("Drawing.anchor is required");
       if (!("kind" in raw)) throw new Error("Drawing.kind is required");
-      const zOrder = Number(raw.zOrder);
+      const zOrder = Number(raw.zOrder ?? raw.z_order);
       if (!Number.isFinite(zOrder)) throw new Error("Drawing.zOrder must be a finite number");
       const cloned = cloneJsonSerializable(raw);
       cloned.id = drawingId;
       cloned.zOrder = zOrder;
+      if ("z_order" in cloned) delete cloned.z_order;
       after.push(cloned);
     }
 
@@ -2550,21 +2560,22 @@ export class DocumentController {
    * Convenience helper to update a drawing by id.
    *
    * @param {string} sheetId
-   * @param {string} drawingId
+   * @param {string | number} drawingId
    * @param {Record<string, any> | ((drawing: any) => any)} patchOrUpdater
    * @param {{ label?: string, mergeKey?: string }} [options]
    */
   updateDrawing(sheetId, drawingId, patchOrUpdater, options = {}) {
     const id = String(sheetId ?? "").trim();
     if (!id) throw new Error("Sheet id cannot be empty");
-    const targetId = String(drawingId ?? "").trim();
-    if (!targetId) throw new Error("Drawing id cannot be empty");
+    const targetIdKey = typeof drawingId === "string" ? drawingId.trim() : typeof drawingId === "number" ? String(drawingId) : "";
+    if (!targetIdKey) throw new Error("Drawing id cannot be empty");
 
     const existing = this.getSheetDrawings(id);
-    const idx = existing.findIndex((d) => isJsonObject(d) && d.id === targetId);
+    const idx = existing.findIndex((d) => isJsonObject(d) && String(d.id) === targetIdKey);
     if (idx === -1) return;
 
     const current = existing[idx];
+    const stableId = current.id;
     let next;
     if (typeof patchOrUpdater === "function") {
       next = patchOrUpdater(cloneJsonSerializable(current));
@@ -2575,7 +2586,7 @@ export class DocumentController {
     }
 
     if (!isJsonObject(next)) throw new Error("Drawing updates must produce a JSON object");
-    next.id = targetId;
+    next.id = stableId;
 
     const updated = existing.slice();
     updated[idx] = next;
@@ -2586,17 +2597,17 @@ export class DocumentController {
    * Convenience helper to delete a drawing by id.
    *
    * @param {string} sheetId
-   * @param {string} drawingId
+   * @param {string | number} drawingId
    * @param {{ label?: string, mergeKey?: string }} [options]
    */
   deleteDrawing(sheetId, drawingId, options = {}) {
     const id = String(sheetId ?? "").trim();
     if (!id) throw new Error("Sheet id cannot be empty");
-    const targetId = String(drawingId ?? "").trim();
-    if (!targetId) throw new Error("Drawing id cannot be empty");
+    const targetIdKey = typeof drawingId === "string" ? drawingId.trim() : typeof drawingId === "number" ? String(drawingId) : "";
+    if (!targetIdKey) throw new Error("Drawing id cannot be empty");
 
     const existing = this.getSheetDrawings(id);
-    const next = existing.filter((d) => !(isJsonObject(d) && d.id === targetId));
+    const next = existing.filter((d) => !(isJsonObject(d) && String(d.id) === targetIdKey));
     if (next.length === existing.length) return;
     this.setSheetDrawings(id, next, options);
   }
@@ -4133,34 +4144,139 @@ export class DocumentController {
     /** @type {Map<string, ImageEntry>} */
     const nextImages = new Map();
 
-    const rawImages = Array.isArray(parsed?.images) ? parsed.images : [];
-    for (const image of rawImages) {
-      const id = typeof image?.id === "string" ? image.id.trim() : "";
-      if (!id) continue;
-      const bytesBase64 = typeof image?.bytesBase64 === "string" ? image.bytesBase64 : null;
-      if (!bytesBase64) continue;
-      let bytes;
-      try {
-        bytes = decodeBase64(bytesBase64);
-      } catch {
-        continue;
+    const parseBytes = (value) => {
+      if (value instanceof Uint8Array) return value.slice();
+      if (Array.isArray(value)) {
+        const out = new Uint8Array(value.length);
+        for (let i = 0; i < value.length; i++) {
+          const n = Number(value[i]);
+          if (!Number.isFinite(n)) return null;
+          out[i] = n & 0xff;
+        }
+        return out;
       }
-      const mimeTypeRaw = "mimeType" in (image ?? {}) ? image.mimeType : undefined;
-      let mimeType = undefined;
-      if (mimeTypeRaw === undefined) {
-        mimeType = undefined;
-      } else if (mimeTypeRaw === null) {
-        mimeType = null;
-      } else if (typeof mimeTypeRaw === "string") {
-        mimeType = mimeTypeRaw;
-      } else {
-        mimeType = null;
+      if (value && typeof value === "object") {
+        // Node Buffer JSON shape.
+        if (value.type === "Buffer" && Array.isArray(value.data)) return parseBytes(value.data);
+        if (Array.isArray(value.data)) return parseBytes(value.data);
+        const numericKeys = Object.keys(value).filter((k) => /^\d+$/.test(k));
+        if (numericKeys.length > 0) {
+          numericKeys.sort((a, b) => Number(a) - Number(b));
+          const maxIndex = Number(numericKeys[numericKeys.length - 1]);
+          const declaredLength = Number(value.length);
+          const length = Number.isInteger(declaredLength) && declaredLength >= maxIndex + 1 ? declaredLength : maxIndex + 1;
+          const out = new Uint8Array(length);
+          for (const k of numericKeys) {
+            const idx = Number(k);
+            const n = Number(value[k]);
+            if (!Number.isFinite(n)) return null;
+            out[idx] = n & 0xff;
+          }
+          return out;
+        }
       }
+      if (typeof value === "string" && value) {
+        try {
+          return decodeBase64(value);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
+    const parseMimeType = (raw) => {
+      if (raw === null) return null;
+      if (typeof raw === "string") return raw;
+      return null;
+    };
+
+    const addImageEntry = (imageId, rawEntry) => {
+      const id = String(imageId ?? "").trim();
+      if (!id) return;
+      const record = rawEntry && typeof rawEntry === "object" ? rawEntry : {};
+      const bytesBase64 =
+        typeof record.bytesBase64 === "string"
+          ? record.bytesBase64
+          : typeof record.bytes_base64 === "string"
+            ? record.bytes_base64
+            : null;
+      const bytesValue = bytesBase64 ?? ("bytes" in record ? record.bytes : rawEntry);
+      const bytes = parseBytes(bytesValue);
+      if (!bytes || bytes.length === 0) return;
+
+      const hasMimeType =
+        (record && Object.prototype.hasOwnProperty.call(record, "mimeType") && record.mimeType !== undefined) ||
+        (record && Object.prototype.hasOwnProperty.call(record, "content_type") && record.content_type !== undefined) ||
+        (record && Object.prototype.hasOwnProperty.call(record, "contentType") && record.contentType !== undefined);
+      const rawMimeType =
+        record && Object.prototype.hasOwnProperty.call(record, "mimeType")
+          ? record.mimeType
+          : record && Object.prototype.hasOwnProperty.call(record, "content_type")
+            ? record.content_type
+            : record && Object.prototype.hasOwnProperty.call(record, "contentType")
+              ? record.contentType
+              : undefined;
+      const mimeType = parseMimeType(rawMimeType);
+
       /** @type {ImageEntry} */
       const entry = { bytes };
-      if (mimeTypeRaw !== undefined) entry.mimeType = mimeType;
+      if (hasMimeType) entry.mimeType = mimeType;
       nextImages.set(id, entry);
+    };
+
+    const rawImagesField = parsed?.images ?? parsed?.metadata?.images ?? null;
+    if (Array.isArray(rawImagesField)) {
+      for (const image of rawImagesField) {
+        const id =
+          typeof image?.id === "string"
+            ? image.id.trim()
+            : typeof image?.id === "number" && Number.isFinite(image.id)
+              ? String(image.id)
+              : "";
+        if (!id) continue;
+        addImageEntry(id, image);
+      }
+    } else if (rawImagesField && typeof rawImagesField === "object") {
+      const imagesMap =
+        rawImagesField && typeof rawImagesField.images === "object" && !Array.isArray(rawImagesField.images)
+          ? rawImagesField.images
+          : rawImagesField;
+      if (imagesMap && typeof imagesMap === "object" && !Array.isArray(imagesMap)) {
+        for (const [id, entry] of Object.entries(imagesMap)) {
+          addImageEntry(id, entry);
+        }
+      }
     }
+
+    const normalizeDrawingsList = (rawList) => {
+      if (!Array.isArray(rawList)) return [];
+      /** @type {any[]} */
+      const out = [];
+      for (const raw of rawList) {
+        if (!isJsonObject(raw)) continue;
+        const rawId = raw.id;
+        let drawingId;
+        if (typeof rawId === "string") {
+          drawingId = rawId.trim();
+          if (!drawingId) continue;
+        } else if (typeof rawId === "number") {
+          if (!Number.isSafeInteger(rawId)) continue;
+          drawingId = rawId;
+        } else {
+          continue;
+        }
+        if (!("anchor" in raw) || !("kind" in raw)) continue;
+        const zOrder = Number(raw.zOrder ?? raw.z_order);
+        if (!Number.isFinite(zOrder)) continue;
+        const cloned = cloneJsonSerializable(raw);
+        cloned.id = drawingId;
+        cloned.zOrder = zOrder;
+        if ("z_order" in cloned) delete cloned.z_order;
+        out.push(cloned);
+      }
+      return out;
+    };
 
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
@@ -4241,16 +4357,19 @@ export class DocumentController {
       return out;
     };
     for (const sheet of sheets) {
-      if (!sheet?.id) continue;
+      const rawId = sheet?.id;
+      const sheetId =
+        typeof rawId === "string" ? rawId.trim() : typeof rawId === "number" && Number.isFinite(rawId) ? String(rawId) : "";
+      if (!sheetId) continue;
       const rawName = typeof sheet?.name === "string" ? sheet.name : null;
-      const name = rawName && rawName.trim() ? rawName.trim() : sheet.id;
+      const name = rawName && rawName.trim() ? rawName.trim() : sheetId;
       const visibilityRaw = sheet?.visibility;
       const visibility =
         visibilityRaw === "hidden" || visibilityRaw === "veryHidden" || visibilityRaw === "visible" ? visibilityRaw : "visible";
       const tabColorRaw = sheet?.tabColor;
       const tabColor =
         typeof tabColorRaw === "string" || isPlainObject(tabColorRaw) ? cloneTabColor(tabColorRaw) : undefined;
-      nextSheetMeta.set(sheet.id, { name, visibility, ...(tabColor ? { tabColor } : {}) });
+      nextSheetMeta.set(sheetId, { name, visibility, ...(tabColor ? { tabColor } : {}) });
 
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
       const view = normalizeSheetViewState({
@@ -4272,43 +4391,31 @@ export class DocumentController {
         const cell = { value: entry?.value ?? null, formula: normalizeFormula(entry?.formula), styleId };
         cellMap.set(`${row},${col}`, cloneCellState(cell));
       }
-      nextSheets.set(sheet.id, cellMap);
-      nextViews.set(sheet.id, view);
+      nextSheets.set(sheetId, cellMap);
+      nextViews.set(sheetId, view);
 
       const defaultFormat = sheet?.defaultFormat ?? sheet?.sheetFormat ?? null;
       const defaultStyleId = defaultFormat == null ? 0 : this.styleTable.intern(defaultFormat);
-      nextFormats.set(sheet.id, {
+      nextFormats.set(sheetId, {
         defaultStyleId,
         rowStyleIds: normalizeFormatOverrides(sheet?.rowFormats, "row"),
         colStyleIds: normalizeFormatOverrides(sheet?.colFormats, "col"),
       });
-      nextRangeRuns.set(sheet.id, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
+      nextRangeRuns.set(sheetId, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
+
+      // Backwards/interop: accept per-sheet `drawings` arrays (formula-model workbook JSON).
+      const sheetDrawings = normalizeDrawingsList(sheet?.drawings);
+      if (sheetDrawings.length > 0) nextDrawingsBySheet.set(sheetId, sheetDrawings);
     }
 
-    const rawDrawingsBySheet = parsed?.drawingsBySheet;
+    const rawDrawingsBySheet = parsed?.drawingsBySheet ?? parsed?.metadata?.drawingsBySheet ?? parsed?.drawings_by_sheet;
     if (rawDrawingsBySheet && typeof rawDrawingsBySheet === "object" && !Array.isArray(rawDrawingsBySheet)) {
       for (const [rawSheetId, rawList] of Object.entries(rawDrawingsBySheet)) {
-        if (typeof rawSheetId !== "string" || !rawSheetId) continue;
-        if (!nextSheets.has(rawSheetId)) continue;
-        if (!Array.isArray(rawList)) continue;
-
-        /** @type {any[]} */
-        const drawings = [];
-        for (const raw of rawList) {
-          if (!isJsonObject(raw)) continue;
-          const drawingId = typeof raw.id === "string" ? raw.id.trim() : "";
-          if (!drawingId) continue;
-          if (!("anchor" in raw) || !("kind" in raw)) continue;
-          const zOrder = Number(raw.zOrder);
-          if (!Number.isFinite(zOrder)) continue;
-          const cloned = cloneJsonSerializable(raw);
-          cloned.id = drawingId;
-          cloned.zOrder = zOrder;
-          drawings.push(cloned);
-        }
-        if (drawings.length > 0) {
-          nextDrawingsBySheet.set(rawSheetId, drawings);
-        }
+        const sheetId = typeof rawSheetId === "string" ? rawSheetId.trim() : "";
+        if (!sheetId) continue;
+        if (!nextSheets.has(sheetId)) continue;
+        const drawings = normalizeDrawingsList(rawList);
+        if (drawings.length > 0) nextDrawingsBySheet.set(sheetId, drawings);
       }
     }
 
@@ -4320,8 +4427,8 @@ export class DocumentController {
       const desiredOrder = [];
       const seen = new Set();
       for (const raw of rawSheetOrder) {
-        if (typeof raw !== "string") continue;
-        const id = raw;
+        const id = typeof raw === "string" ? raw.trim() : typeof raw === "number" && Number.isFinite(raw) ? String(raw) : "";
+        if (!id) continue;
         if (seen.has(id)) continue;
         if (!nextSheets.has(id)) continue;
         seen.add(id);

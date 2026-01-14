@@ -102,3 +102,68 @@ test("change event includes drawingDeltas + imageDeltas", () => {
   assert.equal(lastChange.drawingDeltas[0].after[0].id, "d1");
 });
 
+test("drawing helpers support numeric ids (overlay-compatible)", () => {
+  const doc = new DocumentController();
+
+  doc.setSheetDrawings("Sheet1", [
+    {
+      id: 1,
+      zOrder: 0,
+      anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+      kind: { type: "image", imageId: "img1" },
+    },
+  ]);
+
+  doc.updateDrawing("Sheet1", 1, { zOrder: 2 });
+  assert.equal(doc.getSheetDrawings("Sheet1")[0]?.id, 1);
+  assert.equal(doc.getSheetDrawings("Sheet1")[0]?.zOrder, 2);
+
+  doc.deleteDrawing("Sheet1", "1");
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), []);
+});
+
+test("applyState accepts formula-model style image + drawings payloads", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [
+            {
+              id: 1,
+              z_order: 3,
+              anchor: { OneCell: { from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } }, ext: { cx: 100, cy: 80 } } },
+              kind: { Image: { image_id: "img1.png" } },
+            },
+          ],
+        },
+      ],
+      images: {
+        images: {
+          "img1.png": { bytes: [1, 2, 3], content_type: "image/png" },
+        },
+      },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const image = doc.getImage("img1.png");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, 1);
+  assert.equal(drawings[0].zOrder, 3);
+  assert.ok(drawings[0].anchor);
+  assert.ok(drawings[0].kind);
+});
