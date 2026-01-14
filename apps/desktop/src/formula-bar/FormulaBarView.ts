@@ -1062,6 +1062,11 @@ export class FormulaBarView {
   #lastHintRenderKey: string | null = null;
   // Use a non-null sentinel so the first render always syncs the error panel state.
   #lastErrorExplanationKey: string | null = "__init__";
+  #lastShowEditingActions: boolean | null = null;
+  #lastErrorFixAiDisabled: boolean | null = null;
+  #lastErrorShowRangesDisabled: boolean | null = null;
+  #lastErrorShowRangesPressed: boolean | null = null;
+  #lastErrorShowRangesText: string | null = null;
   #referenceElsByIndex: Map<number, HTMLElement[]> | null = null;
   #lastAdjustedHeightDraft: string | null = null;
   #lastAdjustedHeightIsEditing = false;
@@ -2870,10 +2875,13 @@ export class FormulaBarView {
     }
 
     const showEditingActions = this.model.isEditing;
-    this.#cancelButtonEl.hidden = !showEditingActions;
-    this.#cancelButtonEl.disabled = !showEditingActions;
-    this.#commitButtonEl.hidden = !showEditingActions;
-    this.#commitButtonEl.disabled = !showEditingActions;
+    if (this.#lastShowEditingActions !== showEditingActions) {
+      this.#lastShowEditingActions = showEditingActions;
+      this.#cancelButtonEl.hidden = !showEditingActions;
+      this.#cancelButtonEl.disabled = !showEditingActions;
+      this.#commitButtonEl.hidden = !showEditingActions;
+      this.#commitButtonEl.disabled = !showEditingActions;
+    }
 
     const cursor = this.model.cursorStart;
     const ghost = this.model.isEditing ? this.model.aiGhostText() : "";
@@ -3379,8 +3387,13 @@ export class FormulaBarView {
   }
 
   #syncScroll(): void {
-    (this.#highlightEl as HTMLElement).scrollTop = this.textarea.scrollTop;
-    (this.#highlightEl as HTMLElement).scrollLeft = this.textarea.scrollLeft;
+    const highlightEl = this.#highlightEl as HTMLElement;
+    const nextTop = this.textarea.scrollTop;
+    const nextLeft = this.textarea.scrollLeft;
+    // Writing scroll positions can trigger additional work in the browser; only sync when
+    // the underlying values changed (or when a highlight re-render reset scroll state).
+    if (highlightEl.scrollTop !== nextTop) highlightEl.scrollTop = nextTop;
+    if (highlightEl.scrollLeft !== nextLeft) highlightEl.scrollLeft = nextLeft;
   }
 
   #setTextareaSelectionFromModel(): void {
@@ -3637,13 +3650,30 @@ export class FormulaBarView {
   #syncErrorPanelActions(explanation?: ReturnType<FormulaBarModel["errorExplanation"]> | null): void {
     const resolved = explanation === undefined ? this.model.errorExplanation() : explanation;
     const canFix = Boolean(resolved) && typeof this.#callbacks.onFixFormulaErrorWithAi === "function";
-    this.#errorFixAiButton.disabled = !canFix;
+    const fixDisabled = !canFix;
+    if (this.#lastErrorFixAiDisabled !== fixDisabled) {
+      this.#lastErrorFixAiDisabled = fixDisabled;
+      this.#errorFixAiButton.disabled = fixDisabled;
+    }
 
     const isFormula = this.model.draft.trimStart().startsWith("=");
     const isShowingRanges = this.#errorPanelReferenceHighlights != null;
-    this.#errorShowRangesButton.disabled = !isFormula;
-    this.#errorShowRangesButton.setAttribute("aria-pressed", isShowingRanges ? "true" : "false");
-    this.#errorShowRangesButton.textContent = isShowingRanges ? "Hide referenced ranges" : "Show referenced ranges";
+    const showRangesDisabled = !isFormula;
+    if (this.#lastErrorShowRangesDisabled !== showRangesDisabled) {
+      this.#lastErrorShowRangesDisabled = showRangesDisabled;
+      this.#errorShowRangesButton.disabled = showRangesDisabled;
+    }
+
+    if (this.#lastErrorShowRangesPressed !== isShowingRanges) {
+      this.#lastErrorShowRangesPressed = isShowingRanges;
+      this.#errorShowRangesButton.setAttribute("aria-pressed", isShowingRanges ? "true" : "false");
+    }
+
+    const showRangesText = isShowingRanges ? "Hide referenced ranges" : "Show referenced ranges";
+    if (this.#lastErrorShowRangesText !== showRangesText) {
+      this.#lastErrorShowRangesText = showRangesText;
+      this.#errorShowRangesButton.textContent = showRangesText;
+    }
   }
 
   #currentReferenceHighlights(): FormulaReferenceHighlight[] {
