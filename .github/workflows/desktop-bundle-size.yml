@@ -72,6 +72,9 @@ jobs:
     name: Linux desktop installer artifact sizes
     needs: conflict-marker-guard
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -280,7 +283,10 @@ jobs:
           # - FORMULA_BUNDLE_SIZE_LIMIT_MB=50 to adjust the default 50 MB budget
           FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
-        run: python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json | tee desktop-bundle-size-report.md
 
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
@@ -290,3 +296,99 @@ jobs:
           name: desktop-bundle-size-report
           path: desktop-bundle-size-report.json
           if-no-files-found: warn
+
+      - name: Post bundle size report PR comment
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
+          FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
+        with:
+          script: |
+            const fs = require("fs");
+
+            const marker = "<!-- formula-desktop-bundle-size -->";
+            const prNumber = context.payload.pull_request.number;
+
+            function isTruthyEnv(val) {
+              if (!val) return false;
+              const v = String(val).trim().toLowerCase();
+              return ["1", "true", "yes", "y", "on"].includes(v);
+            }
+
+            function parseLimitMb(val) {
+              if (!val || !String(val).trim()) return null;
+              const n = Number.parseFloat(String(val).trim());
+              if (Number.isNaN(n)) return null;
+              return Number.parseInt(String(n), 10);
+            }
+
+            let reportMd = "";
+            try {
+              reportMd = fs.readFileSync("desktop-bundle-size-report.md", "utf8").trim();
+            } catch (err) {
+              core.warning(`Failed to read desktop-bundle-size-report.md: ${err.message}`);
+            }
+
+            let reportJson = null;
+            try {
+              reportJson = JSON.parse(fs.readFileSync("desktop-bundle-size-report.json", "utf8"));
+            } catch (err) {
+              core.warning(`Failed to read desktop-bundle-size-report.json: ${err.message}`);
+            }
+
+            const rawEnforce = process.env.FORMULA_ENFORCE_BUNDLE_SIZE || "";
+            const rawLimit = process.env.FORMULA_BUNDLE_SIZE_LIMIT_MB || "";
+
+            const enforceEnabled =
+              reportJson && typeof reportJson.enforce === "boolean"
+                ? reportJson.enforce
+                : isTruthyEnv(rawEnforce);
+
+            const limitMb =
+              reportJson && Number.isInteger(reportJson.limit_mb)
+                ? reportJson.limit_mb
+                : parseLimitMb(rawLimit) || 50;
+
+            const enforceVal = rawEnforce ? `\`${rawEnforce}\`` : "_(unset)_";
+            const limitVal = rawLimit ? `\`${rawLimit}\`` : "_(unset)_";
+
+            const note = `_Enforcement: **${enforceEnabled ? "enabled" : "disabled"}** (FORMULA_ENFORCE_BUNDLE_SIZE=${enforceVal}) · Limit: **${limitMb} MB** (FORMULA_BUNDLE_SIZE_LIMIT_MB=${limitVal})_`;
+
+            const bodyParts = [
+              marker,
+              "",
+              note,
+              "",
+              reportMd || "_No bundle-size report markdown was produced (build may have failed before bundling)._",
+              "",
+            ];
+            const body = bodyParts.join("\n");
+
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => (c.body || "").includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing bundle-size comment (id=${existing.id}).`);
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info("Created new bundle-size comment.");
+            }
