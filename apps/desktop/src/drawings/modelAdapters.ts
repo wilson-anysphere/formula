@@ -1,4 +1,14 @@
-import type { Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectKind, EmuSize, ImageEntry, ImageStore } from "./types";
+import type {
+  Anchor,
+  AnchorPoint,
+  CellOffset,
+  DrawingObject,
+  DrawingObjectKind,
+  DrawingTransform,
+  EmuSize,
+  ImageEntry,
+  ImageStore,
+} from "./types";
 import { graphicFramePlaceholderLabel } from "./shapeRenderer";
 import { parseDrawingTransformFromRawXml } from "./transform";
 import { pxToEmu } from "../shared/emu.js";
@@ -714,7 +724,34 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (!anchor) continue;
-          out.push({ id, kind, anchor, zOrder, ...(size ? { size } : {}) });
+
+          // Best-effort passthrough for metadata authored by the UI layer
+          // (e.g. rotation interactions or XLSX compatibility XML).
+          const preservedValue = pick(raw, ["preserved"]);
+          let preserved: Record<string, string> | undefined;
+          if (isRecord(preservedValue)) {
+            const outPreserved: Record<string, string> = {};
+            for (const [k, v] of Object.entries(preservedValue)) {
+              if (typeof v === "string") outPreserved[k] = v;
+            }
+            if (Object.keys(outPreserved).length > 0) preserved = outPreserved;
+          }
+
+          const transformValue = pick(raw, ["transform"]);
+          let transform: DrawingTransform | undefined;
+          if (isRecord(transformValue)) {
+            const rotationDeg = readOptionalNumber((transformValue as JsonRecord).rotationDeg);
+            const flipH = (transformValue as JsonRecord).flipH;
+            const flipV = (transformValue as JsonRecord).flipV;
+            if (rotationDeg != null && typeof flipH === "boolean" && typeof flipV === "boolean") {
+              transform = { rotationDeg, flipH, flipV };
+            }
+          }
+
+          const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
+          if (preserved) obj.preserved = preserved;
+          if (transform) obj.transform = transform;
+          out.push(obj);
           continue;
         }
 

@@ -302,6 +302,45 @@ describe("drawings/modelAdapters", () => {
     });
   });
 
+  it("preserves DocumentController drawing transform metadata", () => {
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 10, height: 10 },
+        transform: { rotationDeg: 30, flipH: true, flipV: false },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.transform).toEqual({ rotationDeg: 30, flipH: true, flipV: false });
+  });
+
+  it("preserves DocumentController drawing preserved metadata maps", () => {
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 10, height: 10 },
+        preserved: {
+          "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>",
+          // Malformed entries should be ignored (best-effort).
+          other: 123,
+        },
+        unrelatedKey: { hello: "world" },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.preserved).toEqual({ "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>" });
+  });
+
   it("accepts workbook snapshots with sheets encoded as an object map", () => {
     const workbook = {
       images: {
