@@ -1,7 +1,7 @@
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
-import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
+import { getFunctionSignature } from "./highlight/functionSignatures.js";
 
 type FunctionPickerItem = {
   name: string;
@@ -10,6 +10,8 @@ type FunctionPickerItem = {
 };
 
 type CatalogFunction = { name?: string | null };
+
+type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
 const ALL_FUNCTION_NAMES_SORTED: string[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
   .map((fn) => String(fn?.name ?? "").trim())

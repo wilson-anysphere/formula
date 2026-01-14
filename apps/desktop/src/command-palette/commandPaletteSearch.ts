@@ -1,5 +1,5 @@
 import type { CommandContribution } from "../extensions/commandRegistry.js";
-import { getFunctionSignature, type FunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
+import { getFunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
 
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 
@@ -33,6 +33,8 @@ export type CommandPaletteSection = {
   title: "RECENT" | "COMMANDS" | "FUNCTIONS";
   results: CommandPaletteResult[];
 };
+
+type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
 type CatalogFunction = { name?: string | null };
 

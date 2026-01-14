@@ -2,7 +2,7 @@ import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.mjs";
 
 type FunctionParam = { name: string; optional?: boolean };
 
-export type FunctionSignature = {
+type FunctionSignature = {
   name: string;
   params: FunctionParam[];
   summary: string;

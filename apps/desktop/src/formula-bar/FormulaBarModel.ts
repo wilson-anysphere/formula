@@ -1,6 +1,6 @@
 import { explainFormulaError } from "./errors.js";
 import { getFunctionCallContext } from "./highlight/functionContext.js";
-import { getFunctionSignature, signatureParts, type FunctionSignature } from "./highlight/functionSignatures.js";
+import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
@@ -32,6 +32,8 @@ type FormulaBarAiSuggestion = {
   text: string;
   preview?: unknown;
 };
+
+type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
 type FunctionHint = {
   context: { name: string; argIndex: number };
