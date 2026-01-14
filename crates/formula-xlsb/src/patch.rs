@@ -2942,6 +2942,11 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
         buf.len().saturating_sub(i) >= needed
     }
 
+    // When scanning formulas we typically do not have workbook context. Use an empty context for
+    // scoring so we can still skip non-canonical structured-reference payload alignments (e.g. 2/4
+    // prefix bytes) without requiring table metadata.
+    let default_ctx = crate::workbook_context::WorkbookContext::default();
+
     // Some ptgs (PtgMem*) embed a nested token stream of known length (`cce`). Scan those
     // sub-streams as well so we can detect `PtgArray` even when it appears inside the mem payload.
     //
@@ -2992,10 +2997,16 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     match etpg {
                         // etpg=0x19 is the structured reference payload (PtgList).
                         0x19 => {
-                            if !has_remaining(buf, i, 12) {
+                            let Some(payload_len) = crate::rgce::ptg_list_payload_len_best_effort(
+                                &buf[i..],
+                                Some(&default_ctx),
+                            ) else {
+                                return false;
+                            };
+                            if !has_remaining(buf, i, payload_len) {
                                 return false;
                             }
-                            i += 12;
+                            i += payload_len;
                         }
                         // Unknown extend subtype: stop scanning to avoid desync/false positives.
                         _ => {

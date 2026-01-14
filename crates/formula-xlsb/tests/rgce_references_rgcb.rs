@@ -55,6 +55,23 @@ fn rgce_extend_list_then_array() -> Vec<u8> {
     rgce
 }
 
+fn rgce_extend_list_with_2_byte_prefix_then_array() -> Vec<u8> {
+    // Some producers appear to insert prefix bytes before the canonical 12-byte PtgList payload.
+    // Ensure `rgce_references_rgcb` can still skip the token and detect later PtgArray tokens.
+    //
+    // Payload bytes are chosen such that naive 12-byte consumption would desync the stream
+    // (leaving trailing payload bytes before the `PtgArray` opcode).
+    let mut rgce = vec![0x18, 0x19];
+    rgce.extend_from_slice(&[0u8; 2]); // prefix padding
+    rgce.extend_from_slice(&[
+        0x01, 0x00, 0x00, 0x00, // table_id = 1
+        0x00, 0x00, 0x10, 0x00, // col_first_raw = flags<<16 (flags=0x0010, col_first=0)
+        0x00, 0x00, 0x00, 0x00, // col_last_raw = 0
+    ]);
+    rgce.extend_from_slice(&fixture_builder::rgce::array_placeholder());
+    rgce
+}
+
 fn rgce_referr_then_array() -> Vec<u8> {
     // PtgRefErr: [ptg=0x2A][row:u32][col:u16]
     let mut rgce = vec![0x2A];
@@ -287,6 +304,12 @@ fn rgce_references_rgcb_detects_ptgarray_after_ptgextend_list() {
 }
 
 #[test]
+fn rgce_references_rgcb_detects_ptgarray_after_prefixed_ptgextend_list() {
+    let rgce = rgce_extend_list_with_2_byte_prefix_then_array();
+    assert!(rgce_references_rgcb(&rgce));
+}
+
+#[test]
 fn rgce_references_rgcb_detects_ptgarray_after_ptgreferr() {
     let rgce = rgce_referr_then_array();
     assert!(rgce_references_rgcb(&rgce));
@@ -296,6 +319,7 @@ fn rgce_references_rgcb_detects_ptgarray_after_ptgreferr() {
 fn patch_sheet_bin_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
     assert_patch_requires_rgcb(rgce_memfunc_with_array());
     assert_patch_requires_rgcb(rgce_extend_list_then_array());
+    assert_patch_requires_rgcb(rgce_extend_list_with_2_byte_prefix_then_array());
     assert_patch_requires_rgcb(rgce_referr_then_array());
 }
 
@@ -303,6 +327,7 @@ fn patch_sheet_bin_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
 fn patch_sheet_bin_streaming_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
     assert_streaming_patch_requires_rgcb(rgce_memfunc_with_array());
     assert_streaming_patch_requires_rgcb(rgce_extend_list_then_array());
+    assert_streaming_patch_requires_rgcb(rgce_extend_list_with_2_byte_prefix_then_array());
     assert_streaming_patch_requires_rgcb(rgce_referr_then_array());
 }
 
