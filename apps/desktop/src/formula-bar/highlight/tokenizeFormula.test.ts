@@ -97,6 +97,16 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("tokenizes localized error literals with non-ASCII letters (de-DE #ÜBERLAUF!)", () => {
+    const tokens = tokenizeFormula("=#ÜBERLAUF! + 1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["error", "#ÜBERLAUF!"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
   it("does not treat ambiguous unquoted sheet prefixes as sheet-qualified refs", () => {
     const tokens = tokenizeFormula("=SUM(TRUE!A1, A1!B2, R1C1!C3)");
     const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);

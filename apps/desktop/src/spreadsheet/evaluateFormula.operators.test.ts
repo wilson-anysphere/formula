@@ -62,6 +62,8 @@ describe("evaluateFormula operators", () => {
   it("canonicalizes localized error literals (including inverted punctuation) when a localeId is provided", () => {
     // de-DE #WERT! -> #VALUE!
     expect(evaluateFormula('=WENNFEHLER(#WERT!; "fallback")', () => null, { localeId: "de-DE" })).toBe("fallback");
+    // de-DE #ÜBERLAUF! -> #SPILL!
+    expect(evaluateFormula('=WENNFEHLER(#ÜBERLAUF!; "fallback")', () => null, { localeId: "de-DE" })).toBe("fallback");
     // es-ES #¡VALOR! -> #VALUE!
     expect(evaluateFormula('=SI.ERROR(#¡VALOR!; "fallback")', () => null, { localeId: "es-ES" })).toBe("fallback");
   });

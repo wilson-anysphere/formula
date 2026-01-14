@@ -140,14 +140,12 @@ function isIdentifierPart(ch: string): boolean {
 
 function isErrorBodyChar(ch: string): boolean {
   return (
-    ch === "¡" ||
-    ch === "¿" ||
     ch === "_" ||
     ch === "/" ||
     ch === "." ||
-    (ch >= "0" && ch <= "9") ||
-    (ch >= "A" && ch <= "Z") ||
-    (ch >= "a" && ch <= "z")
+    ch === "¡" ||
+    ch === "¿" ||
+    isUnicodeAlphanumeric(ch)
   );
 }
 
