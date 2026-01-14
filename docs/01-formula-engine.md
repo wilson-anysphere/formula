@@ -360,9 +360,9 @@ restrictions (notably: no `]`), so this split is unambiguous.
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
-* **INDIRECT + external workbook refs:** `INDIRECT` does not resolve external workbook references
-  today. Strings like `"[Book.xlsx]Sheet1!A1"` or `"[Book.xlsx]Sheet1:Sheet3!A1"` evaluate to `#REF!`
-  (even when an `ExternalValueProvider` is configured).
+* **INDIRECT + external workbook refs:** `INDIRECT` can resolve *single-sheet* external workbook
+  references like `"[Book.xlsx]Sheet1!A1"` via `ExternalValueProvider` when configured. External
+  3D spans like `"[Book.xlsx]Sheet1:Sheet3!A1"` still evaluate to `#REF!` today.
 
 #### Minimal provider sketch (including `sheet_order`)
 
