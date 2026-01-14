@@ -115,6 +115,14 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "localstorage" respects bounded:false', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis as any, "localStorage", { value: storage, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage", bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "localstorage" falls back to memory when localStorage access throws', async () => {
     Object.defineProperty(globalThis as any, "localStorage", {
       configurable: true,

@@ -121,6 +121,16 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
   });
 
+  it('prefer: "localstorage" wraps LocalStorageAIAuditStore in BoundedAIAuditStore by default', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "memory" chooses MemoryAIAuditStore even when persistence APIs exist', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
@@ -131,6 +141,13 @@ describe("createDefaultAIAuditStore", () => {
     expect(store).toBeInstanceOf(MemoryAIAuditStore);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((store as any).maxEntries).toBe(7);
+  });
+
+  it('prefer: "memory" wraps MemoryAIAuditStore in BoundedAIAuditStore by default', async () => {
+    const store = await createDefaultAIAuditStore({ prefer: "memory" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(MemoryAIAuditStore);
   });
 
   it('prefer: "localstorage" falls back to MemoryAIAuditStore when localStorage is unavailable (even if indexedDB exists)', async () => {
