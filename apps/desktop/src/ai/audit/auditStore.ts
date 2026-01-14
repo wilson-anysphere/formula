@@ -54,57 +54,55 @@ function isNodeRuntime(): boolean {
   return typeof proc.version === "string" && proc.version.startsWith("v");
 }
 
+const repoRootPathForNode = (() => {
+  if (!isNodeRuntime()) return "";
+  try {
+    const url = new URL("../../../../..", import.meta.url);
+    let pathname = decodeURIComponent(url.pathname);
+    if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+    return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  } catch {
+    return "";
+  }
+})();
+
 function coerceViteUrlToNodeFileUrl(href: string): string {
   if (!href) return href;
-  if (href.startsWith("file://")) return href;
   if (!isNodeRuntime()) return href;
 
-  // Vite can emit absolute-path URLs using a special `/@fs/...` prefix. sql.js will treat whatever
-  // we return from `locateFile` as a filesystem path in Node, so strip the `/@fs` marker and convert
-  // to a file:// URL rooted at the absolute path.
-  if (href.startsWith("/@fs/")) {
-    let absPath = href.slice("/@fs".length); // `/path` (posix) or `/C:/path` (win)
-    // Windows absolute paths in Vite `/@fs` URLs can include an extra leading slash.
-    if (/^\/[A-Za-z]:[\\/]/.test(absPath)) absPath = absPath.slice(1);
-    absPath = absPath.replaceAll("\\", "/");
-    if (/^[A-Za-z]:\//.test(absPath)) return `file:///${absPath}`;
-    return `file://${absPath}`;
+  let out = href;
+
+  // Vite can surface absolute filesystem paths through a special "/@fs/" URL prefix (or "@fs/").
+  // In Node-based test runners, sql.js loads WASM via `fs.readFileSync`, so we must strip these
+  // URL-only prefixes and return an actual filesystem path.
+  const viteIdx = out.indexOf("/@fs/");
+  if (viteIdx >= 0) {
+    out = out.slice(viteIdx + 4);
+  } else if (out.startsWith("@fs/")) {
+    out = out.slice(3);
   }
 
-  // Some environments may omit the leading `/` (e.g. `@fs/...`).
-  if (href.startsWith("@fs/")) {
-    let absPath = href.slice("@fs".length); // `/path` (posix) or `/C:/path` (win)
-    if (/^\/[A-Za-z]:[\\/]/.test(absPath)) absPath = absPath.slice(1);
-    absPath = absPath.replaceAll("\\", "/");
-    if (/^[A-Za-z]:\//.test(absPath)) return `file:///${absPath}`;
-    return `file://${absPath}`;
-  }
-
-  // Vite asset URLs are typically root-relative (`/node_modules/...` or `/assets/...`).
-  // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
-  // file:// URL rooted at the repository cwd.
-  if (href.startsWith("/")) {
-    // If this already looks like an absolute filesystem path (e.g. from `import.meta.resolve`),
-    // don't prefix with cwd (that would produce a non-existent path like `<cwd>/state/...`).
-    const looksLikeDevServerUrl =
-      href.startsWith("/assets/") || href.startsWith("/node_modules/") || href.startsWith("/@");
-    if (!looksLikeDevServerUrl) {
-      return `file://${href}`;
-    }
-
-    const cwd = typeof (globalThis as any).process?.cwd === "function" ? (globalThis as any).process.cwd() : "";
-    if (cwd) {
-      // Normalize Windows backslashes to URL-friendly forward slashes.
-      const cwdUrlPath = String(cwd).replace(/\\/g, "/");
-      const combined = `${cwdUrlPath}${href}`;
-      // If we ended up with a drive-letter path (e.g. `C:/...`), prefix `/` so the file URL
-      // uses a path component rather than treating `C:` as a hostname.
-      const urlPath = /^[A-Za-z]:\//.test(combined) ? `/${combined}` : combined;
-      return `file://${urlPath}`;
+  if (out.startsWith("file://")) {
+    try {
+      let pathname = decodeURIComponent(new URL(out).pathname);
+      if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+      out = pathname;
+    } catch {
+      // ignore
     }
   }
 
-  return href;
+  // Windows absolute paths can still include a leading slash (e.g. "/C:/...").
+  if (/^\/[A-Za-z]:\//.test(out)) out = out.slice(1);
+
+  // If Vite gives us a root-relative URL (e.g. "/node_modules/..."), treat it as repo-root relative.
+  // `process.cwd()` is typically `apps/desktop` in this monorepo (due to `pnpm -C`), so resolve
+  // relative to the repository root derived from `import.meta.url` instead.
+  if (out.startsWith("/") && repoRootPathForNode && !out.startsWith(repoRootPathForNode)) {
+    out = `${repoRootPathForNode}${out}`;
+  }
+
+  return out;
 }
 
 async function createSqliteBackedStore(params: { storageKey: string; retentionMaxEntries: number; retentionMaxAgeMs: number }) {

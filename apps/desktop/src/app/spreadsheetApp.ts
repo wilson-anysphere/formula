@@ -18049,7 +18049,6 @@ export class SpreadsheetApp {
           }
         }
       }
-
       const hit = hitTestDrawingsInto(hitIndex, drawingViewport, x, y, drawingBounds, this.drawingGeom);
       if (hit) {
         const prevSelected = this.selectedDrawingId;

@@ -204,6 +204,9 @@ describe("SpreadsheetApp drawings header clipping", () => {
       expect(clipIdx).toBeGreaterThan(rectIdx);
       expect(strokeIdx).toBeGreaterThan(clipIdx);
 
+      const selectionCanvasEl = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvasEl).not.toBeNull();
+
       // Header hit-test should ignore drawings.
       expect((app as any).selectedDrawingId).toBe(null);
       // Legacy grid mode handles drawing selection via the bubbling `onPointerDown` handler.
@@ -339,6 +342,9 @@ describe("SpreadsheetApp drawings header clipping", () => {
       const strokeIdx = calls.findIndex((c, idx) => idx > clipIdx && c.method === "strokeRect");
       expect(clipIdx).toBeGreaterThan(rectIdx);
       expect(strokeIdx).toBeGreaterThan(clipIdx);
+
+      const selectionCanvasEl = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvasEl).not.toBeNull();
 
       expect((app as any).selectedDrawingId).toBe(null);
       const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;

@@ -773,6 +773,9 @@ export class SecondaryGridView {
   }
 
   private onAxisSizeChange(change: GridAxisSizeChange): void {
+    // The shared-grid renderer updates sizes interactively during resize drags; invalidate the
+    // drawing spatial index so anchors recompute with the new geometry before re-rendering.
+    this.drawingsOverlay.invalidateSpatialIndex();
     const sheetId = this.getSheetId();
     const baseSize = change.size / change.zoom;
     const baseDefault = change.defaultSize / change.zoom;

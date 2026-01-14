@@ -4226,6 +4226,43 @@ export class DocumentController {
   }
 
   /**
+   * Low-level cell-state setter.
+   *
+   * This is useful for tests and snapshot hydration flows where callers need to set a cell's
+   * `{ value, formula, styleId }` in one update (e.g. formula cells that include a cached rich
+   * value payload).
+   *
+   * Note: Unlike `setCellInput` / `setCellFormula`, this method treats the provided `cell` object
+   * as already-normalized state. The only normalization applied is `formula` canonicalization via
+   * `normalizeFormula` and clamping `styleId` to a safe integer.
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @param {Partial<CellState> | null | undefined} cell
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
+   */
+  setCell(sheetId, row, col, cell, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    const r = Number(row);
+    const c = Number(col);
+    if (!Number.isInteger(r) || r < 0) throw new Error("Row must be a non-negative integer");
+    if (!Number.isInteger(c) || c < 0) throw new Error("Column must be a non-negative integer");
+    const before = this.model.getCell(id, r, c);
+    const patch = cell && typeof cell === "object" ? cell : {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
+    const nextStyleId = Number(patch.styleId);
+    const after = {
+      value: has("value") ? patch.value ?? null : before.value,
+      formula: has("formula") ? normalizeFormula(patch.formula) : before.formula,
+      styleId: Number.isSafeInteger(nextStyleId) ? nextStyleId : before.styleId,
+    };
+    if (cellStateEquals(before, after)) return;
+    this.#applyUserDeltas([{ sheetId: id, row: r, col: c, before, after: cloneCellState(after) }], options);
+  }
+
+  /**
    * Set a cell from raw user input (e.g. formula bar / cell editor contents).
    *
    * - Strings starting with "=" are treated as formulas.
