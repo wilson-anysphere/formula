@@ -595,7 +595,7 @@ fn derive_standard_segment_iv(
             Ok(iv)
         }
         other => Err(DecryptError::InvalidInfo(format!(
-            "unsupported Standard algIdHash=0x{other:08x} for IV derivation"
+            "unsupported Standard algIdHash=0x{other:08x} for AES-CBC compatibility IV derivation"
         ))),
     }
 }

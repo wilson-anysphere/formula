@@ -472,7 +472,8 @@ pub fn decrypt_standard_encrypted_package_stream(
             false
         } else {
             // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using a non-standard
-            // segmented CBC mode with a per-segment IV derived from the Standard salt.
+            // segmented CBC mode with a per-segment IV derived from the verifier salt
+            // (`EncryptionVerifier.salt`).
             //
             // Unfortunately, some real-world files still use AES-ECB while also carrying a salt, so
             // we cannot select the mode purely from `salt.is_empty()`.
