@@ -8593,14 +8593,7 @@ function handleRibbonCommand(commandId: string): void {
         app.focus();
         return;
       case "edit.find":
-      case "home.editing.findSelect.find":
         executeBuiltinCommand("edit.find");
-        return;
-      case "home.editing.findSelect.replace":
-        executeBuiltinCommand("edit.replace");
-        return;
-      case "home.editing.findSelect.goTo":
-        executeBuiltinCommand("navigation.goTo");
         return;
       case "edit.replace":
         executeBuiltinCommand("edit.replace");
