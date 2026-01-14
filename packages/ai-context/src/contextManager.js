@@ -842,6 +842,10 @@ export class ContextManager {
       // decide whether we should redact *metadata tokens* like the sheet name itself, which may
       // contain non-heuristic sensitive strings (e.g. "TopSecret") even when the configured
       // redactor is a no-op.
+      //
+      // Note: buildContext is window-scoped; range/cell selectors outside the provided origin
+      // window should not force sheet-name redaction (that would make unrelated selectors affect
+      // prompt ranges and break sheet display-name expectations).
       let structuredSheetClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
       for (const record of records) {
         throwIfAborted(signal);
