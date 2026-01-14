@@ -5,7 +5,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::REL_NS;
@@ -212,7 +212,7 @@ fn parse_legend(
 
 fn detect_chart_kind(
     doc: &Document<'_>,
-    root_ns: &str,
+    _root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
@@ -249,18 +249,9 @@ fn detect_chart_kind(
         return chart_type;
     }
 
-    // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
-    // detection for new ChartEx variants.
-    let hints = collect_chart_ex_kind_hints(doc);
-    let hint_list = if hints.is_empty() {
-        "<none>".to_string()
-    } else {
-        hints.join(", ")
-    };
-
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!("ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"),
+        message: "ChartEx chart kind could not be inferred".to_string(),
     });
 
     "unknown".to_string()
