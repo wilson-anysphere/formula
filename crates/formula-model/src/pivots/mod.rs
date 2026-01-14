@@ -116,79 +116,6 @@ pub enum SortOrder {
     Manual,
 }
 
-/// Configuration for a pivot table (fields, layout, totals, filters).
-///
-/// This type is part of the canonical workbook model and is intended to be
-/// serialization / IPC friendly. Missing keys during deserialization default to
-/// Excel-like empty/disabled values for backward compatibility.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PivotConfig {
-    pub row_fields: Vec<PivotField>,
-    pub column_fields: Vec<PivotField>,
-    pub value_fields: Vec<ValueField>,
-    pub filter_fields: Vec<FilterField>,
-    pub calculated_fields: Vec<CalculatedField>,
-    pub calculated_items: Vec<CalculatedItem>,
-    pub layout: Layout,
-    pub subtotals: SubtotalPosition,
-    pub grand_totals: GrandTotals,
-}
-
-/// Pivot output layout mode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    Tabular,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        // Keep the default stable for serialization/back-compat.
-        Layout::Tabular
-    }
-}
-
-/// Where subtotals are rendered within a grouped field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    None,
-}
-
-impl Default for SubtotalPosition {
-    fn default() -> Self {
-        SubtotalPosition::None
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Whether grand totals are emitted for rows and columns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    #[serde(default = "default_true")]
-    pub rows: bool,
-    #[serde(default = "default_true")]
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
@@ -201,15 +128,6 @@ pub enum PivotKeyPart {
     Date(NaiveDate),
     Text(String),
     Bool(bool),
-}
-
-/// Filter configuration for a pivot field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
 }
 
 impl PivotKeyPart {
