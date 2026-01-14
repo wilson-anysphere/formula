@@ -243,4 +243,48 @@ describe("ImageBitmapCache", () => {
       vi.useRealTimers();
     }
   });
+
+  it("getOrRequest() closes decoded bitmaps when caching is disabled (maxEntries=0)", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    vi.stubGlobal("createImageBitmap", vi.fn(() => Promise.resolve(bitmap)) as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 0, negativeCacheMs: 0 });
+    const entry = makeEntry("img_1");
+    const onReady = vi.fn();
+
+    expect(cache.getOrRequest(entry, onReady)).toBeNull();
+
+    // Flush the internal decode completion handlers.
+    await Promise.resolve();
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("getOrRequest() does not close decoded bitmaps when an async get() consumer is awaiting (maxEntries=0)", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => inflightDecode) as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 0, negativeCacheMs: 0 });
+    const entry = makeEntry("img_1");
+    const onReady = vi.fn();
+
+    expect(cache.getOrRequest(entry, onReady)).toBeNull();
+    const pending = cache.get(entry);
+
+    resolveDecode(bitmap);
+
+    await expect(pending).resolves.toBe(bitmap);
+    // Flush `getOrRequest` handlers.
+    await Promise.resolve();
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
 });

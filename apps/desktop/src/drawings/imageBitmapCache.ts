@@ -263,6 +263,16 @@ export class ImageBitmapCache {
    */
   getOrRequest(entry: ImageEntry, onReady: () => void): ImageBitmap | null {
     const id = entry.id;
+
+    // Opportunistically prune expired negative-cache entries so we don't retain
+    // large numbers of failures indefinitely (the expiry window is short, but a
+    // workbook could reference many distinct broken images).
+    let now: number | undefined;
+    if (this.negativeCacheMs > 0 && this.negativeCache.size > 0) {
+      now = Date.now();
+      this.pruneExpiredNegativeCache(now);
+    }
+
     const existing = this.entries.get(id);
     if (existing) {
       this.touch(id, existing);
@@ -273,7 +283,8 @@ export class ImageBitmapCache {
 
     const cachedFailure = this.negativeCache.get(id);
     if (cachedFailure) {
-      if (cachedFailure.expiresAt > Date.now()) {
+      const t = now ?? Date.now();
+      if (cachedFailure.expiresAt > t) {
         return null;
       }
       this.negativeCache.delete(id);
@@ -309,6 +320,11 @@ export class ImageBitmapCache {
         if (this.maxEntries === 0) {
           this.entries.delete(id);
           this.fireReadyCallbacks(record);
+          // With caching disabled, `getOrRequest()` callers will never receive the bitmap value.
+          // Close it unless there is an active `get()` consumer waiting on the same decode.
+          if (!record.pinned && record.waiters === 0) {
+            ImageBitmapCache.tryClose(bitmap);
+          }
           return;
         }
 
@@ -331,6 +347,8 @@ export class ImageBitmapCache {
 
         this.__testOnly_failCount++;
         if (this.negativeCacheMs > 0) {
+          // Replace + touch for predictable iteration order (useful for pruning).
+          this.negativeCache.delete(id);
           this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
         }
 
