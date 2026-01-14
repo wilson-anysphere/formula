@@ -1450,21 +1450,27 @@ where
                                 A: de::SeqAccess<'de>,
                             {
                                 let mut row = Vec::new();
-                                while let Some(cell) = seq.next_element::<T>()? {
-                                    if row.len() >= MAX_DIM {
-                                        return Err(de::Error::custom(format!(
-                                            "range values row is too large (max {MAX_DIM} columns)"
-                                        )));
-                                    }
+                                while row.len() < MAX_DIM {
+                                    match seq.next_element::<T>()? {
+                                        Some(cell) => {
+                                            *self.total_cells = self.total_cells.saturating_add(1);
+                                            if *self.total_cells > MAX_CELLS {
+                                                return Err(de::Error::custom(format!(
+                                                    "range values payload is too large (max {MAX_CELLS} cells)"
+                                                )));
+                                            }
 
-                                    *self.total_cells = self.total_cells.saturating_add(1);
-                                    if *self.total_cells > MAX_CELLS {
-                                        return Err(de::Error::custom(format!(
-                                            "range values payload is too large (max {MAX_CELLS} cells)"
-                                        )));
+                                            row.push(cell);
+                                        }
+                                        None => return Ok(row),
                                     }
+                                }
 
-                                    row.push(cell);
+                                // Reject extra columns without fully deserializing them.
+                                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                                    return Err(de::Error::custom(format!(
+                                        "range values row is too large (max {MAX_DIM} columns)"
+                                    )));
                                 }
                                 Ok(row)
                             }
