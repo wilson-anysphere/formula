@@ -1185,6 +1185,25 @@ fn sum_over_external_table_structured_ref_resolves_via_provider_metadata() {
 }
 
 #[test]
+fn external_table_structured_ref_with_workbook_name_containing_escaped_rbracket_resolves() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book[Name]].xlsx", "Sheet1", table_fixture_multi_col());
+
+    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
+    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book[Name]].xlsx]Table1[Col2])")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+}
+
+#[test]
 fn external_table_this_row_structured_ref_is_ref_error() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());

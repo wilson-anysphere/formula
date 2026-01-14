@@ -940,8 +940,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             // Workbook-only external reference (`[Book.xlsx]...`); parse the
                             // bracketed workbook prefix.
                             // Workbook ids can contain `]` (either escaped as `]]` in quoted
-                            // references or from bracketed path components), so locate the *last*
-                            // closing bracket.
+                            // references or from bracketed path components like `C:\[foo]\Book.xlsx`),
+                            // so locate the last closing bracket.
                             let Some(end) = key.rfind(']') else {
                                 return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                             };

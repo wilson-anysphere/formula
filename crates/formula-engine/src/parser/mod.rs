@@ -3643,6 +3643,15 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     let workbook = self.src[workbook_start..workbook_end].to_string();
+
+                    // Workbook-scoped external structured reference, e.g. `[Book.xlsx]Table1[Col]`.
+                    //
+                    // This is ambiguous with workbook-scoped external defined names
+                    // (`[Book.xlsx]MyName`), so we only treat it as a structured reference when the
+                    // identifier is immediately followed by a structured-ref specifier (`[...]`).
+                    if matches!(self.peek_kind(), TokenKind::LBracket) {
+                        return self.parse_structured_ref(Some(workbook), None, Some(start_sheet));
+                    }
                     return Ok(Expr::NameRef(NameRef {
                         workbook: Some(workbook),
                         sheet: None,
