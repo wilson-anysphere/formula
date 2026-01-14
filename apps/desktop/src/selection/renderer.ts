@@ -62,7 +62,9 @@ function defaultStyleFromTheme(): SelectionRenderStyle {
     borderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
     activeBorderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
     fillHandleColor: resolveToken("--formula-grid-selection-handle", () =>
-      resolveCssVar("--selection-border", { fallback: "transparent" }),
+      resolveToken("--formula-grid-selection-border", () =>
+        resolveCssVar("--selection-border", { fallback: "transparent" }),
+      ),
     ),
     borderWidth: 2,
     activeBorderWidth: 3,
