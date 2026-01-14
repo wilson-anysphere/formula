@@ -801,6 +801,8 @@ export class ContextManager {
     let dlpDecision = null;
     /** @type {ReturnType<typeof evaluatePolicy> | null} */
     let dlpStructuredDecision = null;
+    /** @type {ReturnType<typeof evaluatePolicy> | null} */
+    let dlpStructuredSheetDecision = null;
     let dlpHeuristic = null;
     let dlpHeuristicApplied = false;
     let dlpAuditDocumentId = null;
@@ -835,6 +837,29 @@ export class ContextManager {
       const sheetId = resolveDlpSheetId(dlp.sheetId ?? rawSheet.name);
       dlpAuditDocumentId = documentId;
       dlpAuditSheetId = sheetId;
+
+      // Structured sheet-level classification (document/sheet scopes only). This is used to
+      // decide whether we should redact *metadata tokens* like the sheet name itself, which may
+      // contain non-heuristic sensitive strings (e.g. "TopSecret") even when the configured
+      // redactor is a no-op.
+      let structuredSheetClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+      for (const record of records) {
+        throwIfAborted(signal);
+        const selector = record?.selector;
+        if (!selector || typeof selector !== "object") continue;
+        if (selector.documentId !== documentId) continue;
+        if (selector.scope === "document") {
+          structuredSheetClassification = maxClassification(structuredSheetClassification, record.classification);
+        } else if (selector.scope === "sheet" && selector.sheetId === sheetId) {
+          structuredSheetClassification = maxClassification(structuredSheetClassification, record.classification);
+        }
+      }
+      dlpStructuredSheetDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: structuredSheetClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
 
       const maxCols = valuesForContext.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
       const rangeRef = {
@@ -1018,6 +1043,9 @@ export class ContextManager {
     });
     throwIfAborted(signal);
 
+    const shouldRedactStructuredSheetNameToken =
+      Boolean(dlp) && dlpStructuredSheetDecision && dlpStructuredSheetDecision.decision !== DLP_DECISION.ALLOW;
+
     // Structured DLP redaction can be triggered by explicit range/cell classifications that are not
     // detectable by heuristic redactors. In those cases, treat table/namedRange names as disallowed
     // metadata tokens too (they can contain non-heuristic sensitive strings like "TopSecret").
@@ -1027,6 +1055,22 @@ export class ContextManager {
       if (!shouldRedactStructuredSchemaTokens) return schema;
       throwIfAborted(signal);
       const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
+      const redactedSheetName = shouldRedactStructuredSheetNameToken ? "[REDACTED]" : null;
+
+      /**
+       * Redact the sheet-name component of an A1 range under structured sheet-level DLP.
+       * @param {unknown} rangeA1
+       */
+      const redactA1SheetName = (rangeA1) => {
+        const raw = String(rangeA1 ?? "");
+        if (!raw || !redactedSheetName) return raw;
+        try {
+          const parsed = parseA1Range(raw);
+          return rangeToA1({ ...parsed, sheetName: redactedSheetName });
+        } catch {
+          return "[REDACTED]";
+        }
+      };
 
       /**
        * Evaluate policy for an A1 range string (table/namedRange) using structured DLP selectors.
@@ -1063,24 +1107,52 @@ export class ContextManager {
       const nextTables = Array.isArray(schema?.tables)
         ? schema.tables.map((t) => {
             const decision = recordDecisionForA1Range(t?.range);
-            if (!decision || decision.decision === DLP_DECISION.ALLOW) return t;
-            return { ...t, name: "[REDACTED]" };
+            const safeRange = redactA1SheetName(t?.range);
+            if (!decision || decision.decision === DLP_DECISION.ALLOW) return { ...t, range: safeRange };
+            return { ...t, name: "[REDACTED]", range: safeRange };
           })
         : schema?.tables;
 
       const nextNamedRanges = Array.isArray(schema?.namedRanges)
         ? schema.namedRanges.map((r) => {
             const decision = recordDecisionForA1Range(r?.range);
-            if (!decision || decision.decision === DLP_DECISION.ALLOW) return r;
-            return { ...r, name: "[REDACTED]" };
+            const safeRange = redactA1SheetName(r?.range);
+            if (!decision || decision.decision === DLP_DECISION.ALLOW) return { ...r, range: safeRange };
+            return { ...r, name: "[REDACTED]", range: safeRange };
           })
         : schema?.namedRanges;
 
+      const nextDataRegions = Array.isArray(schema?.dataRegions)
+        ? schema.dataRegions.map((region) => ({
+            ...region,
+            range: redactA1SheetName(region?.range),
+          }))
+        : schema?.dataRegions;
+
       return {
         ...(schema && typeof schema === "object" ? schema : {}),
+        ...(redactedSheetName ? { name: redactedSheetName } : null),
         ...(Array.isArray(nextTables) ? { tables: nextTables } : null),
         ...(Array.isArray(nextNamedRanges) ? { namedRanges: nextNamedRanges } : null),
+        ...(Array.isArray(nextDataRegions) ? { dataRegions: nextDataRegions } : null),
       };
+    })();
+
+    const retrievedForDlp = (() => {
+      if (!shouldRedactStructuredSheetNameToken) return retrieved;
+      return (retrieved ?? []).map((hit) => {
+        if (!hit || typeof hit !== "object") return hit;
+        const rawRange = /** @type {any} */ (hit).range;
+        const raw = String(rawRange ?? "");
+        if (!raw) return hit;
+        try {
+          const parsed = parseA1Range(raw);
+          const safeRange = rangeToA1({ ...parsed, sheetName: "[REDACTED]" });
+          return { ...hit, range: safeRange };
+        } catch {
+          return hit;
+        }
+      });
     })();
 
     const sampleRows = params.sampleRows ?? 20;
@@ -1115,7 +1187,12 @@ export class ContextManager {
 
     const attachmentDataRaw = buildRangeAttachmentSectionText(
       { sheet: sheetForContext, attachments: params.attachments },
-      { maxRows: 30, maxAttachments: 3, signal },
+      {
+        maxRows: 30,
+        maxAttachments: 3,
+        sheetNameForOutput: shouldRedactStructuredSheetNameToken ? "[REDACTED]" : undefined,
+        signal,
+      },
     );
 
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
@@ -1130,9 +1207,37 @@ export class ContextManager {
       : params.attachments;
     const shouldDropAllAttachmentData =
       Boolean(dlp) && dlpStructuredDecision?.decision === DLP_DECISION.REDACT;
-    const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
+    const attachmentsForPromptRaw = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
       dropAllData: shouldDropAllAttachmentData,
     });
+    const attachmentsForPrompt =
+      shouldRedactStructuredSheetNameToken && Array.isArray(attachmentsForPromptRaw)
+        ? attachmentsForPromptRaw.map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+            const type = /** @type {any} */ (item).type;
+            const reference = /** @type {any} */ (item).reference;
+            if (type !== "range" || typeof reference !== "string") return item;
+            let parsed;
+            try {
+              parsed = parseA1Range(reference);
+            } catch {
+              // Best-effort: if the reference includes the raw sheet name, strip it entirely.
+              const sheetNameRaw = String(rawSheet?.name ?? "");
+              if (sheetNameRaw && reference.includes(sheetNameRaw)) {
+                return { ...item, reference: "[REDACTED]" };
+              }
+              return item;
+            }
+
+            // Only rewrite explicit sheet-qualified references that point at the current sheet.
+            if (!parsed.sheetName) return item;
+            if (normalizeSheetNameForComparison(parsed.sheetName) !== normalizeSheetNameForComparison(rawSheet?.name ?? "")) {
+              return item;
+            }
+
+            return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
+          })
+        : attachmentsForPromptRaw;
     const schemaOut = shouldReturnRedactedStructured
       ? redactStructuredValue(schemaForDlp, this.redactor, {
           signal,
@@ -1148,12 +1253,12 @@ export class ContextManager {
         })
       : sampled;
     const retrievedOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(retrieved, this.redactor, {
+      ? redactStructuredValue(retrievedForDlp, this.redactor, {
           signal,
           includeRestrictedContent: includeRestrictedContentForStructured,
           policyAllowsRestrictedContent,
         })
-      : retrieved;
+      : retrievedForDlp;
     const schemaForPrompt = compactSheetSchemaForPrompt(schemaOut, {
       maxTables: 10,
       maxRegions: 10,
@@ -2893,7 +2998,7 @@ function getSheetOrigin(sheet) {
 
 /**
  * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[] }} params
- * @param {{ maxRows?: number, maxAttachments?: number, signal?: AbortSignal }} [options]
+ * @param {{ maxRows?: number, maxAttachments?: number, sheetNameForOutput?: string, signal?: AbortSignal }} [options]
  */
 function buildRangeAttachmentSectionText(params, options = {}) {
   const signal = options.signal;
@@ -2902,6 +3007,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
   if (attachments.length === 0) return "";
   const sheet = params.sheet;
   const sheetName = sheet?.name ?? "";
+  const sheetNameForOutput = typeof options.sheetNameForOutput === "string" ? options.sheetNameForOutput : sheetName;
   const normalizedSheetName = normalizeSheetNameForComparison(sheetName);
   const maxRows = options.maxRows ?? 30;
   const maxAttachments = options.maxAttachments ?? 3;
@@ -2930,7 +3036,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
   const availableRange =
     matrixRowCount > 0 && matrixColCount > 0
       ? rangeToA1({
-          sheetName,
+          sheetName: sheetNameForOutput,
           startRow: origin.row,
           startCol: origin.col,
           endRow: origin.row + matrixRowCount - 1,
@@ -2956,7 +3062,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
     const attachmentSheetName = normalizeSheetNameForComparison(parsed.sheetName);
     if (attachmentSheetName && attachmentSheetName !== normalizedSheetName) continue;
 
-    const canonicalRange = rangeToA1({ ...parsed, sheetName });
+    const canonicalRange = rangeToA1({ ...parsed, sheetName: sheetNameForOutput || sheetName });
 
     if (matrixRowCount === 0 || matrixColCount === 0) {
       entries.push(`${canonicalRange}: (no sheet values available to preview)`);

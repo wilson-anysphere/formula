@@ -189,6 +189,38 @@ test("buildContext: structured DLP REDACT also redacts non-heuristic table/named
   assert.doesNotMatch(JSON.stringify(out.schema), /TopSecret/);
 });
 
+test("buildContext: structured DLP REDACT also redacts non-heuristic sheet names when the sheet is classified (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "TopSecret",
+      values: [["Hello"]],
+    },
+    query: "hello",
+    attachments: [{ type: "range", reference: "TopSecret!A1:A1" }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "TopSecret",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: { scope: "sheet", documentId: "doc-1", sheetId: "TopSecret" },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecret/);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (even when sheet window is public)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
