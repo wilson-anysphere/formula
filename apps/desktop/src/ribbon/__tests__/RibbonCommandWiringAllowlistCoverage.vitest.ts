@@ -54,6 +54,8 @@ const implementedCommandIds: string[] = [
   "clipboard.pasteSpecial.values",
   "comments.addComment",
   "comments.togglePanel",
+  "data.forecast.whatIfAnalysis.goalSeek",
+  "data.forecast.whatIfAnalysis.scenarioManager",
   "data.queriesConnections.queriesConnections",
   "data.queriesConnections.refreshAll",
   "data.queriesConnections.refreshAll.refresh",
