@@ -692,7 +692,7 @@ delete prior release assets.
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
   - `tauri_plugin_dialog` (native open/save dialogs; gated by `dialog:allow-*` permissions)
-  - `tauri_plugin_shell` (used by the Rust command `open_external_url` to open external links in the host OS; direct webview access is not granted)
+  - `tauri_plugin_opener` (used by the Rust command `open_external_url` to open external links in the host OS; direct webview access is not granted)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_notification` (native notifications)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
@@ -967,7 +967,7 @@ For update-driven restarts prefer `restart_app` (graceful).
 - **Notifications**
   - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
 - **External URLs**
-  - `open_external_url` (opens URLs in the OS via `tauri_plugin_shell`; allowlists `http:`, `https:`, `mailto:` and rejects everything else, including `javascript:`, `data:`, and `file:`; restricted to the main window + trusted app-local origins)
+  - `open_external_url` (opens URLs in the OS via `tauri_plugin_opener`; allowlists `http:`, `https:`, `mailto:` and rejects everything else, including `javascript:`, `data:`, and `file:`; restricted to the main window + trusted app-local origins)
 
 ### Backend → frontend events
 
@@ -1206,7 +1206,7 @@ Where it’s defined:
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
     (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-dialog`,
-    `tauri-plugin-shell`, `tauri-plugin-updater`, `tauri-plugin-deep-link`), plus a few desktop-only helpers (e.g.
+    `tauri-plugin-opener`, `tauri-plugin-updater`, `tauri-plugin-deep-link`), plus a few desktop-only helpers (e.g.
     `http-range`, `percent-encoding`), plus Linux-only GTK deps for the clipboard backend, and enables the `parquet` feature.
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures the desktop binary is compiled with the correct feature set when running the Tauri CLI

@@ -1582,9 +1582,15 @@ fn main() {
             apply_cross_origin_isolation_headers(&mut response);
             response
         })
-        // Core platform plugins used by the app (dialog, shell).
+        // Core platform plugins used by the app (dialog, opener).
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
+        // We intentionally disable the plugin's JS link-click handler so external URL opening is
+        // routed through the `open_external_url` command (which enforces origin + scheme checks).
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // OAuth PKCE deep-link redirect capture (e.g. `formula://oauth/callback?...`).
             //

@@ -2273,7 +2273,7 @@ use std::path::PathBuf;
 #[cfg(feature = "desktop")]
 use tauri::{Emitter, State};
 #[cfg(feature = "desktop")]
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 
 #[cfg(feature = "desktop")]
 fn app_error(err: AppStateError) -> String {
@@ -8425,8 +8425,8 @@ pub async fn open_external_url(
     let parsed = crate::external_url::validate_external_url(url.as_ref())?;
 
     window
-        .shell()
-        .open(parsed.as_str(), None)
+        .opener()
+        .open_url(parsed.as_str(), None::<&str>)
         .map_err(|e| format!("Failed to open URL: {e}"))?;
     Ok(())
 }
