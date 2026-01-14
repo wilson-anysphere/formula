@@ -110,6 +110,22 @@ test("tokenBudget: stableJsonStringify handles cyclic Map/Set structures without
   assert.equal(stableJsonStringify(set), '["[Circular]"]');
 });
 
+test("tokenBudget: stableJsonStringify does not call custom toString() on objects when serialization fails", () => {
+  let called = false;
+  const obj = {
+    get boom() {
+      throw new Error("boom");
+    },
+    toString() {
+      called = true;
+      return "TopSecret";
+    },
+  };
+
+  assert.equal(stableJsonStringify(obj), '"[Unserializable]"');
+  assert.equal(called, false);
+});
+
 test("tokenBudget: packSectionsToTokenBudgetWithReport reports token usage, trims, and drops", () => {
   const charEstimator = {
     estimateTextTokens: (text) => String(text ?? "").length,
@@ -160,4 +176,3 @@ test("tokenBudget: packSectionsToTokenBudgetWithReport reports token usage, trim
     },
   ]);
 });
-

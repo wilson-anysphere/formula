@@ -41,8 +41,17 @@ export function stableJsonStringify(value) {
     return JSON.stringify(stabilizeJson(value));
   } catch {
     try {
+      // Avoid calling `String(...)` on arbitrary objects: custom `toString()` implementations
+      // can leak non-heuristic sensitive strings into prompt context (even when higher-level
+      // redaction is enabled).
+      if (value !== null && (typeof value === "object" || typeof value === "function")) {
+        return JSON.stringify("[Unserializable]");
+      }
       return JSON.stringify(String(value));
     } catch {
+      if (value !== null && (typeof value === "object" || typeof value === "function")) {
+        return "[Unserializable]";
+      }
       return String(value);
     }
   }
