@@ -507,6 +507,7 @@ struct AppStateSpreadsheet<'a> {
     output_bytes: usize,
     output_truncated: bool,
     updates: Vec<CellUpdateData>,
+    update_index_by_cell: HashMap<(String, usize, usize), usize>,
 }
 
 impl<'a> AppStateSpreadsheet<'a> {
@@ -530,6 +531,7 @@ impl<'a> AppStateSpreadsheet<'a> {
             output_bytes: 0,
             output_truncated: false,
             updates: Vec::new(),
+            update_index_by_cell: HashMap::new(),
         })
     }
 
@@ -608,6 +610,7 @@ impl<'a> AppStateSpreadsheet<'a> {
     }
 
     fn take_updates(&mut self) -> Vec<CellUpdateData> {
+        self.update_index_by_cell.clear();
         std::mem::take(&mut self.updates)
     }
 
@@ -619,8 +622,19 @@ impl<'a> AppStateSpreadsheet<'a> {
             return Ok(());
         }
 
+        // Count the number of *new* distinct cells this batch would add. Existing cells are updated
+        // in-place and do not increase the total update cardinality.
+        let mut new_keys = HashSet::<(String, usize, usize)>::new();
+        for update in &updates {
+            let key = (update.sheet_id.clone(), update.row, update.col);
+            if self.update_index_by_cell.contains_key(&key) {
+                continue;
+            }
+            new_keys.insert(key);
+        }
+
         let remaining = MAX_MACRO_UPDATES.saturating_sub(self.updates.len());
-        if updates.len() > remaining {
+        if new_keys.len() > remaining {
             // `state.set_cell` has already applied the change and computed `updates`. If we simply
             // return an error here we would leave the backend workbook mutated without returning
             // the corresponding updates, which would desync the frontend from backend state.
@@ -636,7 +650,15 @@ impl<'a> AppStateSpreadsheet<'a> {
             )));
         }
 
-        self.updates.extend(updates);
+        for update in updates {
+            let key = (update.sheet_id.clone(), update.row, update.col);
+            if let Some(idx) = self.update_index_by_cell.get(&key).copied() {
+                self.updates[idx] = update;
+            } else {
+                self.update_index_by_cell.insert(key, self.updates.len());
+                self.updates.push(update);
+            }
+        }
         Ok(())
     }
 }
