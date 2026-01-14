@@ -48,6 +48,16 @@ fn decrypts_agile_fixture_matches_plaintext() {
 }
 
 #[test]
+fn decrypts_agile_basic_xlsm_fixture_matches_plaintext() {
+    let plaintext = read_fixture("plaintext-basic.xlsm");
+    let agile = read_fixture("agile-basic.xlsm");
+
+    let decrypted = decrypt_encrypted_package_ole(&agile, "password").expect("decrypt agile xlsm");
+    assert_eq!(decrypted, plaintext);
+    assert!(decrypted.starts_with(b"PK"));
+}
+
+#[test]
 fn standard_wrong_password_returns_invalid_password() {
     let standard = read_fixture("standard.xlsx");
 
