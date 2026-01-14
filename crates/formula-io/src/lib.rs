@@ -2755,7 +2755,11 @@ fn decrypt_encrypted_ooxml_package(
         // References:
         // - `docs/offcrypto-standard-cryptoapi-rc4.md`
         // - `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`
-        use sha1::{Digest as _, Sha1};
+        use crate::offcrypto::cryptoapi::{
+            hash_password_fixed_spin,
+            password_to_utf16le,
+            HashAlg as CryptoApiHashAlg,
+        };
 
         // Parse the Standard EncryptionInfo stream to read algId/algIdHash/keySize + verifier
         // fields. For the RC4 variant, we need the salt + key size to derive per-block keys.
@@ -2830,15 +2834,16 @@ fn decrypt_encrypted_ooxml_package(
             .to_vec();
 
         const CALG_RC4: u32 = 0x0000_6801;
-        const CALG_SHA1: u32 = 0x0000_8004;
 
         if alg_id == CALG_RC4 {
             // --- Standard CryptoAPI RC4 ---------------------------------------------------------
-            if alg_id_hash != CALG_SHA1 {
-                return Err(Error::InvalidPassword {
+            let hash_alg = CryptoApiHashAlg::from_calg_id(alg_id_hash).map_err(|_| {
+                Error::InvalidPassword {
                     path: path.to_path_buf(),
-                });
-            }
+                }
+            })?;
+
+            let key_size_bits_raw = key_size_bits;
             // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit.
             let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
             if key_size_bits % 8 != 0 {
@@ -2848,38 +2853,21 @@ fn decrypt_encrypted_ooxml_package(
             }
             let key_len = (key_size_bits / 8) as usize;
 
-            // Derive the spun password hash H (20 bytes) (MS-OFFCRYPTO Standard RC4).
-            fn password_utf16le_bytes(password: &str) -> Vec<u8> {
-                let mut out = Vec::with_capacity(password.len().saturating_mul(2));
-                for cu in password.encode_utf16() {
-                    out.extend_from_slice(&cu.to_le_bytes());
-                }
-                out
-            }
-
-            let pw = password_utf16le_bytes(password);
-            let mut hasher = Sha1::new();
-            hasher.update(&salt);
-            hasher.update(&pw);
-            let mut h: [u8; 20] = hasher.finalize().into();
-            for i in 0..50_000u32 {
-                let mut hasher = Sha1::new();
-                hasher.update(i.to_le_bytes());
-                hasher.update(h);
-                h = hasher.finalize().into();
-            }
-            let h_vec = h.to_vec();
+            // Derive the spun password hash H (Hash(salt || password_utf16le) then 50k rounds).
+            let pw_utf16le = password_to_utf16le(password);
+            let h_vec = hash_password_fixed_spin(&pw_utf16le, &salt, hash_alg);
 
             // Verify password using EncryptionVerifier:
             // decrypt `encryptedVerifier || encryptedVerifierHash` using block 0 key.
             let mut verifier_cipher = Vec::new();
             verifier_cipher.extend_from_slice(&encrypted_verifier);
             verifier_cipher.extend_from_slice(&encrypted_verifier_hash);
-            let mut verifier_reader = Rc4CryptoApiDecryptReader::new(
+            let mut verifier_reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
                 std::io::Cursor::new(verifier_cipher.as_slice()),
                 verifier_cipher.len() as u64,
                 h_vec.clone(),
                 key_len,
+                hash_alg,
             )
             .map_err(|_| Error::InvalidPassword {
                 path: path.to_path_buf(),
@@ -2902,7 +2890,16 @@ fn decrypt_encrypted_ooxml_package(
                 .ok_or_else(|| Error::InvalidPassword {
                     path: path.to_path_buf(),
                 })?;
-            let expected_hash: [u8; 20] = Sha1::digest(verifier).into();
+            let expected_hash = match hash_alg {
+                CryptoApiHashAlg::Sha1 => {
+                    use sha1::Digest as _;
+                    sha1::Sha1::digest(verifier).to_vec()
+                }
+                CryptoApiHashAlg::Md5 => {
+                    use md5::Digest as _;
+                    md5::Md5::digest(verifier).to_vec()
+                }
+            };
             let expected_hash = expected_hash
                 .get(..hash_len)
                 .ok_or_else(|| Error::InvalidPassword {
@@ -2914,26 +2911,18 @@ fn decrypt_encrypted_ooxml_package(
                 });
             }
 
-            // Decrypt EncryptedPackage stream (RC4 in 0x200-byte blocks) and truncate to orig_size.
-            if encrypted_package.len() < 8 {
-                return Err(Error::InvalidPassword {
-                    path: path.to_path_buf(),
-                });
-            }
-            let orig_size = u64::from_le_bytes(encrypted_package[..8].try_into().unwrap());
-            let mut cursor = std::io::Cursor::new(encrypted_package.as_slice());
-            cursor
-                .seek(std::io::SeekFrom::Start(8))
-                .map_err(|source| Error::OpenIo {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-            let mut reader =
-                Rc4CryptoApiDecryptReader::new(cursor, orig_size, h_vec, key_len).map_err(|_| {
-                    Error::InvalidPassword {
-                        path: path.to_path_buf(),
-                    }
-                })?;
+            // Decrypt the EncryptedPackage stream (RC4 in 0x200-byte blocks) and truncate to the
+            // plaintext `package_size` prefix.
+            let cursor = std::io::Cursor::new(encrypted_package.as_slice());
+            let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+                cursor,
+                h_vec,
+                key_size_bits_raw,
+                alg_id_hash,
+            )
+            .map_err(|_| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
             let mut out = Vec::new();
             reader.read_to_end(&mut out).map_err(|_| Error::InvalidPassword {
                 path: path.to_path_buf(),
