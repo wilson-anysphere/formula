@@ -805,12 +805,15 @@ export class ContextManager {
     let dlpHeuristicApplied = false;
     let dlpAuditDocumentId = null;
     let dlpAuditSheetId = null;
+    /** @type {Array<{ selector: any, classification: any }>} */
+    let dlpClassificationRecords = [];
     const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
 
     if (dlp) {
       const documentId = dlp.documentId;
       const records = dlp.classificationRecords ?? dlp.classificationStore?.list?.(documentId) ?? [];
       const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
+      dlpClassificationRecords = records;
 
       // Some hosts keep stable internal sheet ids even after a user renames the sheet
       // (id != display name). When a resolver is provided, map the user-facing name back
@@ -900,13 +903,15 @@ export class ContextManager {
         sheetMetaPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC
       ) {
         dlpHeuristicApplied = true;
-        dlpDecision = evaluatePolicy({
-          action: DLP_ACTION.AI_CLOUD_PROCESSING,
-          classification: combinedClassification,
-          policy: dlp.policy,
-          options: { includeRestrictedContent },
-        });
       }
+      // Always evaluate the combined policy decision so explicit (structured) DLP enforcement can
+      // influence the overall decision even when heuristic classifications are all Public.
+      dlpDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: combinedClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
 
       if (dlpDecision.decision === DLP_DECISION.BLOCK) {
         dlp.auditLogger?.log({
@@ -1013,6 +1018,71 @@ export class ContextManager {
     });
     throwIfAborted(signal);
 
+    // Structured DLP redaction can be triggered by explicit range/cell classifications that are not
+    // detectable by heuristic redactors. In those cases, treat table/namedRange names as disallowed
+    // metadata tokens too (they can contain non-heuristic sensitive strings like "TopSecret").
+    const shouldRedactStructuredSchemaTokens =
+      Boolean(dlp) && dlpStructuredDecision?.decision === DLP_DECISION.REDACT && dlpClassificationRecords.length > 0;
+    const schemaForDlp = (() => {
+      if (!shouldRedactStructuredSchemaTokens) return schema;
+      throwIfAborted(signal);
+      const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
+
+      /**
+       * Evaluate policy for an A1 range string (table/namedRange) using structured DLP selectors.
+       *
+       * @param {unknown} rangeA1
+       */
+      const recordDecisionForA1Range = (rangeA1) => {
+        const raw = String(rangeA1 ?? "");
+        if (!raw) return null;
+        let parsed;
+        try {
+          parsed = parseA1Range(raw);
+        } catch {
+          // If we cannot parse the range, be conservative and treat it as disallowed metadata.
+          return { decision: DLP_DECISION.REDACT };
+        }
+        const rangeRef = {
+          documentId: dlpAuditDocumentId ?? dlp.documentId,
+          sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
+          range: {
+            start: { row: parsed.startRow, col: parsed.startCol },
+            end: { row: parsed.endRow, col: parsed.endCol },
+          },
+        };
+        const classification = effectiveRangeClassification(rangeRef, dlpClassificationRecords);
+        return evaluatePolicy({
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          classification,
+          policy: dlp.policy,
+          options: { includeRestrictedContent },
+        });
+      };
+
+      const nextTables = Array.isArray(schema?.tables)
+        ? schema.tables.map((t) => {
+            const decision = recordDecisionForA1Range(t?.range);
+            if (!decision || decision.decision === DLP_DECISION.ALLOW) return t;
+            return { ...t, name: "[REDACTED]" };
+          })
+        : schema?.tables;
+
+      const nextNamedRanges = Array.isArray(schema?.namedRanges)
+        ? schema.namedRanges.map((r) => {
+            const decision = recordDecisionForA1Range(r?.range);
+            if (!decision || decision.decision === DLP_DECISION.ALLOW) return r;
+            return { ...r, name: "[REDACTED]" };
+          })
+        : schema?.namedRanges;
+
+      return {
+        ...(schema && typeof schema === "object" ? schema : {}),
+        ...(Array.isArray(nextTables) ? { tables: nextTables } : null),
+        ...(Array.isArray(nextNamedRanges) ? { namedRanges: nextNamedRanges } : null),
+      };
+    })();
+
     const sampleRows = params.sampleRows ?? 20;
     const dataForSampling = sheetForContext.values; // already capped
     let sampled;
@@ -1064,12 +1134,12 @@ export class ContextManager {
       dropAllData: shouldDropAllAttachmentData,
     });
     const schemaOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(schema, this.redactor, {
+      ? redactStructuredValue(schemaForDlp, this.redactor, {
           signal,
           includeRestrictedContent: includeRestrictedContentForStructured,
           policyAllowsRestrictedContent,
         })
-      : schema;
+      : schemaForDlp;
     const sampledOut = shouldReturnRedactedStructured
       ? redactStructuredValue(sampled, this.redactor, {
           signal,

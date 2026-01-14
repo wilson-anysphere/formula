@@ -152,6 +152,43 @@ test("buildContext: structured DLP REDACT also drops attachment payload fields f
   assert.doesNotMatch(out.promptContext, /TopSecret/);
 });
 
+test("buildContext: structured DLP REDACT also redacts non-heuristic table/namedRange names (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Hello"]],
+      tables: [{ name: "TopSecret", range: "Sheet1!A1:A1" }],
+      namedRanges: [{ name: "TopSecretRange", range: "Sheet1!A1:A1" }],
+    },
+    query: "hello",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /TopSecret/);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (even when sheet window is public)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
