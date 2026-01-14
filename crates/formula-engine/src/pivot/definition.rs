@@ -726,6 +726,15 @@ pub(crate) fn refresh_pivot(
 
     let prev_output_range = def.last_output_range;
 
+    // When the pivot output grows (or moves), cells in the newly-covered area may already contain
+    // values or formatting. Clear those cells up-front so applying the pivot output does not
+    // preserve that stale state.
+    if let Some(prev) = prev_output_range {
+        for newly_covered in stale_ranges(output_range, prev) {
+            ctx.clear_range(&def.destination.sheet, newly_covered).ok();
+        }
+    }
+
     let options = PivotApplyOptions {
         apply_number_formats: def.apply_number_formats,
         ..PivotApplyOptions::default()
