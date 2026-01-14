@@ -181,6 +181,7 @@ fn shared_strings_save_converting_shared_string_cell_to_formula_decrements_total
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -241,6 +242,7 @@ fn streaming_shared_strings_save_converting_shared_string_cell_to_formula_decrem
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");

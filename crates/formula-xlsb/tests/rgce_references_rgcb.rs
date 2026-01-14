@@ -114,6 +114,7 @@ fn assert_patch_requires_rgcb(new_rgce: Vec<u8>) {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         }],
     )
     .expect_err("expected patch to reject missing rgcb bytes for PtgArray");

@@ -217,6 +217,7 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_formula_flags: None,
                 new_rgcb: None,
                 shared_string_index: None,
+                clear_formula: false,
             },
             CellEdit {
                 row: 0,
@@ -228,6 +229,7 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_formula_flags: None,
                 new_rgcb: None,
                 shared_string_index: None,
+                clear_formula: false,
             },
         ],
     )
@@ -312,6 +314,7 @@ fn shared_strings_writer_does_not_reuse_true_rich_si_records_as_plain() {
             new_formula_flags: None,
             new_rgcb: None,
             shared_string_index: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");

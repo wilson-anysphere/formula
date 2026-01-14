@@ -1027,6 +1027,7 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_v
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
+        clear_formula: false,
     }];
 
     let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
@@ -1088,6 +1089,7 @@ fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_payload_
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
+        clear_formula: false,
     }];
 
     let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");

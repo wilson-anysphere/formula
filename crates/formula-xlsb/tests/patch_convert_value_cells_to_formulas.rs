@@ -63,6 +63,7 @@ fn can_convert_existing_value_cell_to_formula_preserving_style_in_both_patchers(
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
+        clear_formula: false,
     }];
 
     let tmpdir = tempfile::tempdir().expect("create tempdir");
@@ -146,6 +147,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // NUM (RK) -> BrtFmlaNum
         CellEdit {
@@ -158,6 +160,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // CELL_ST -> BrtFmlaString
         CellEdit {
@@ -170,6 +173,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // STRING (SST) -> BrtFmlaNum (cross-type conversion)
         CellEdit {
@@ -182,6 +186,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // BOOL -> BrtFmlaBool
         CellEdit {
@@ -194,6 +199,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // BOOLERR -> BrtFmlaError
         CellEdit {
@@ -206,6 +212,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
         // BLANK -> BrtFmlaNum
         CellEdit {
@@ -218,6 +225,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
         },
     ];
 
@@ -325,6 +333,7 @@ fn cannot_convert_to_formula_with_blank_cached_value() {
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
+        clear_formula: false,
     }];
 
     let out_path = tmpdir.path().join("out.xlsb");
