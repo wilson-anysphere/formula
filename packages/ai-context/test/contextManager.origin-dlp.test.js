@@ -152,6 +152,42 @@ test("buildContext: structured DLP REDACT also drops attachment payload fields f
   assert.doesNotMatch(out.promptContext, /TopSecret/);
 });
 
+test("buildContext: structured DLP REDACT also redacts non-heuristic attachment references (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Hello"]],
+    },
+    query: "ignore",
+    attachments: [{ type: "chart", reference: "TopSecret" }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildContext: structured DLP REDACT also redacts non-heuristic table/namedRange names (no-op redactor)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,

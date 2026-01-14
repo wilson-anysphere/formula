@@ -286,6 +286,53 @@ test("buildWorkbookContext: structured DLP REDACT also drops attachment payload 
   assert.doesNotMatch(out.promptContext, /TopSecret/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic attachment references (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-attachments-structured-reference",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    attachments: [{ type: "chart", reference: "TopSecret" }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
   const workbook = {
     id: "wb-dlp-schema-header-noop-redactor",
@@ -720,6 +767,101 @@ test("buildWorkbookContext: redacts sensitive query before embedding when DLP is
   assert.equal(embedder.seen.length, 2);
   assert.doesNotMatch(embedder.seen[1], /alice@example\.com/);
   assert.match(embedder.seen[1], /\[REDACTED_EMAIL\]/);
+});
+
+test("buildWorkbookContext: structured DLP also redacts non-heuristic sheet names in queries before embedding (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-query-sheetname",
+    sheets: [
+      {
+        name: "TopSecret",
+        // Single-cell region -> no workbook chunks (chunkWorkbook drops 1-cell regions).
+        cells: [[{ v: "Hello" }]],
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "Ask about TopSecret",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "TopSecret",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  // Only the query is embedded (no chunks were indexed).
+  assert.equal(embedder.seen.length, 1);
+  assert.doesNotMatch(embedder.seen[0], /TopSecret/);
+  assert.match(embedder.seen[0], /\[REDACTED\]/);
+});
+
+test("buildWorkbookContext: structured DLP also redacts non-heuristic table names in queries before embedding (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-query-tablename",
+    sheets: [
+      {
+        name: "Sheet1",
+        // Two disconnected 2-cell regions so indexing yields chunks.
+        cells: [[{ v: "SecretA" }, { v: "SecretB" }, null, { v: "Hello" }, { v: "World" }]],
+      },
+    ],
+    tables: [{ name: "TopSecretTable", sheetName: "Sheet1", rect: { r0: 0, c0: 3, r1: 0, c1: 4 } }],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "TopSecretTable",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /TopSecretTable/);
 });
 
 test("buildWorkbookContext: redacts sensitive query before embedding even when includeRestrictedContent=true but policy blocks", async () => {

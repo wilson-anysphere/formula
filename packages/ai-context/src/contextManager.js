@@ -1210,34 +1210,67 @@ export class ContextManager {
     const attachmentsForPromptRaw = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
       dropAllData: shouldDropAllAttachmentData,
     });
-    const attachmentsForPrompt =
-      shouldRedactStructuredSheetNameToken && Array.isArray(attachmentsForPromptRaw)
-        ? attachmentsForPromptRaw.map((item) => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-            const type = /** @type {any} */ (item).type;
-            const reference = /** @type {any} */ (item).reference;
-            if (type !== "range" || typeof reference !== "string") return item;
+    const attachmentsForPrompt = (() => {
+      if (!Array.isArray(attachmentsForPromptRaw)) return attachmentsForPromptRaw;
+
+      // Under structured DLP redaction, treat attachment reference strings as disallowed metadata
+      // tokens too. They can contain non-heuristic secrets (e.g. "TopSecret") that a no-op redactor
+      // cannot detect.
+      if (shouldDropAllAttachmentData) {
+        return attachmentsForPromptRaw.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+          const type = /** @type {any} */ (item).type;
+          const reference = /** @type {any} */ (item).reference;
+          if (typeof reference !== "string") return item;
+
+          if (type === "range") {
             let parsed;
             try {
               parsed = parseA1Range(reference);
             } catch {
-              // Best-effort: if the reference includes the raw sheet name, strip it entirely.
-              const sheetNameRaw = String(rawSheet?.name ?? "");
-              if (sheetNameRaw && reference.includes(sheetNameRaw)) {
-                return { ...item, reference: "[REDACTED]" };
-              }
-              return item;
+              return { ...item, reference: "[REDACTED]" };
             }
-
-            // Only rewrite explicit sheet-qualified references that point at the current sheet.
             if (!parsed.sheetName) return item;
-            if (normalizeSheetNameForComparison(parsed.sheetName) !== normalizeSheetNameForComparison(rawSheet?.name ?? "")) {
-              return item;
-            }
-
             return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
-          })
-        : attachmentsForPromptRaw;
+          }
+
+          // Table/chart/formula/etc references are identifiers; redact them entirely.
+          return { ...item, reference: "[REDACTED]" };
+        });
+      }
+
+      // Otherwise, only rewrite explicit sheet-qualified range references when the sheet name itself
+      // is structurally disallowed (sheet-level structured DLP).
+      if (shouldRedactStructuredSheetNameToken) {
+        return attachmentsForPromptRaw.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+          const type = /** @type {any} */ (item).type;
+          const reference = /** @type {any} */ (item).reference;
+          if (type !== "range" || typeof reference !== "string") return item;
+          let parsed;
+          try {
+            parsed = parseA1Range(reference);
+          } catch {
+            // Best-effort: if the reference includes the raw sheet name, strip it entirely.
+            const sheetNameRaw = String(rawSheet?.name ?? "");
+            if (sheetNameRaw && reference.includes(sheetNameRaw)) {
+              return { ...item, reference: "[REDACTED]" };
+            }
+            return item;
+          }
+
+          // Only rewrite explicit sheet-qualified references that point at the current sheet.
+          if (!parsed.sheetName) return item;
+          if (normalizeSheetNameForComparison(parsed.sheetName) !== normalizeSheetNameForComparison(rawSheet?.name ?? "")) {
+            return item;
+          }
+
+          return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
+        });
+      }
+
+      return attachmentsForPromptRaw;
+    })();
     const schemaOut = shouldReturnRedactedStructured
       ? redactStructuredValue(schemaForDlp, this.redactor, {
           signal,
@@ -1594,6 +1627,32 @@ export class ContextManager {
     };
 
     /**
+     * Structured DLP decision helper for a workbook rect (table/namedRange/chunk).
+     *
+     * @param {unknown} sheetName
+     * @param {any} rect
+     */
+    const rectDisallowed = (sheetName, rect) => {
+      const rawSheet = typeof sheetName === "string" ? sheetName.trim() : "";
+      if (!dlp || !rawSheet) return false;
+      const sheetId = resolveDlpSheetId(rawSheet);
+      if (!sheetId) return false;
+      const range = rectToRange(rect);
+      if (!range) return false;
+      const index = getDlpDocumentIndex();
+      const recordClassification = index
+        ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+        : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+      const recordDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: recordClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
+      return recordDecision.decision !== DLP_DECISION.ALLOW;
+    };
+
+    /**
      * @param {any} rect
      */
     function rectToA1WithoutSheet(rect) {
@@ -1799,6 +1858,100 @@ export class ContextManager {
       if (!restrictedAllowed && classifyTextForDlp(queryForEmbedding).level === "sensitive") {
         queryForEmbedding = "[REDACTED]";
       }
+    }
+
+    // Structured DLP can require redaction for non-heuristic workbook metadata tokens (e.g. sheet names,
+    // table names) that a no-op redactor cannot detect. If those disallowed identifiers appear in the
+    // user's query, strip them before embedding to keep future cloud embedders safe.
+    if (dlp && classificationRecords.length && typeof queryForEmbedding === "string") {
+      let nextQuery = queryForEmbedding;
+
+      /**
+       * @param {string} haystack
+       * @param {string} needle
+       * @param {string} replacement
+       */
+      const replaceAll = (haystack, needle, replacement) => {
+        if (!needle) return haystack;
+        if (!haystack.includes(needle)) return haystack;
+        return haystack.split(needle).join(replacement);
+      };
+
+      /**
+       * Replace a disallowed token and common encodings/quoting forms.
+       * @param {string} token
+       */
+      const redactQueryToken = (token) => {
+        const raw = String(token ?? "");
+        if (!raw) return;
+        nextQuery = replaceAll(nextQuery, raw, "[REDACTED]");
+        const encoded = encodeURIComponent(raw);
+        if (encoded && encoded !== raw) nextQuery = replaceAll(nextQuery, encoded, "[REDACTED]");
+        // Excel-style quoted sheet names.
+        const quoted = `'${raw.replace(/'/g, "''")}'`;
+        if (quoted !== raw) nextQuery = replaceAll(nextQuery, quoted, "'[REDACTED]'");
+      };
+
+      // Workbook id itself can be user-controlled metadata. If any structured selector would require
+      // redaction for cloud AI processing, treat the workbook id as disallowed too.
+      let structuredOverallClassificationForQuery = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+      for (const record of classificationRecords) {
+        throwIfAborted(signal);
+        const classification = record?.classification;
+        if (classification && typeof classification === "object") {
+          structuredOverallClassificationForQuery = maxClassification(structuredOverallClassificationForQuery, classification);
+        }
+      }
+      const structuredOverallDecisionForQuery = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: structuredOverallClassificationForQuery,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
+      if (structuredOverallDecisionForQuery.decision !== DLP_DECISION.ALLOW) {
+        redactQueryToken(String(params.workbook.id ?? ""));
+      }
+
+      // Sheet names.
+      for (const s of params.workbook.sheets ?? []) {
+        throwIfAborted(signal);
+        const sheetName = String(s?.name ?? "");
+        if (!sheetName) continue;
+        if (
+          !nextQuery.includes(sheetName) &&
+          !nextQuery.includes(encodeURIComponent(sheetName)) &&
+          !nextQuery.includes(`'${sheetName.replace(/'/g, "''")}'`)
+        ) {
+          continue;
+        }
+        if (sheetNameDisallowed(sheetName)) {
+          redactQueryToken(sheetName);
+        }
+      }
+
+      // Table/namedRange names.
+      for (const t of params.workbook.tables ?? []) {
+        throwIfAborted(signal);
+        const name = String(t?.name ?? "");
+        if (!name) continue;
+        if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
+        const sheetName = String(t?.sheetName ?? "");
+        if (sheetNameDisallowed(sheetName) || rectDisallowed(sheetName, t?.rect)) {
+          redactQueryToken(name);
+        }
+      }
+      for (const r of params.workbook.namedRanges ?? []) {
+        throwIfAborted(signal);
+        const name = String(r?.name ?? "");
+        if (!name) continue;
+        if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
+        const sheetName = String(r?.sheetName ?? "");
+        if (sheetNameDisallowed(sheetName) || rectDisallowed(sheetName, r?.rect)) {
+          redactQueryToken(name);
+        }
+      }
+
+      queryForEmbedding = nextQuery;
     }
     throwIfAborted(signal);
     const hits = await searchWorkbookRag({
@@ -2108,7 +2261,7 @@ export class ContextManager {
             try {
               parsed = parseA1Range(reference);
             } catch {
-              return item;
+              return { ...item, reference: "[REDACTED]" };
             }
             if (!parsed.sheetName) return item;
             if (sheetNameDisallowed(parsed.sheetName)) {
@@ -2135,10 +2288,12 @@ export class ContextManager {
           if (type === "table") {
             const target = reference;
             const tables = Array.isArray(params.workbook?.tables) ? params.workbook.tables : [];
+            let matched = false;
             for (const t of tables) {
               throwIfAborted(signal);
               if (!t || typeof t !== "object") continue;
               if (t.name !== target) continue;
+              matched = true;
               const sheetName = String(t.sheetName ?? "");
               if (sheetNameDisallowed(sheetName)) {
                 return { ...item, reference: "[REDACTED]" };
@@ -2146,7 +2301,10 @@ export class ContextManager {
               const rect = t.rect;
               const range = rectToRange(rect);
               const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
-              if (!range || !sheetId) continue;
+              if (!range || !sheetId) {
+                // If we cannot evaluate the structured selector, be conservative and redact.
+                return { ...item, reference: "[REDACTED]" };
+              }
               const recordClassification = index
                 ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
                 : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
@@ -2161,9 +2319,13 @@ export class ContextManager {
               }
               break;
             }
+            if (!matched) return { ...item, reference: "[REDACTED]" };
+            return item;
           }
 
-          return item;
+          // Other attachment types (chart/formula/etc) do not have a structured selector model today.
+          // Under structured DLP redaction, treat their `reference` strings as disallowed metadata tokens.
+          return { ...item, reference: "[REDACTED]" };
         });
       })();
 
