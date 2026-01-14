@@ -15,7 +15,8 @@
 use formula_model::hash_legacy_password;
 use md5::{Digest as _, Md5};
 use sha1::Sha1;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
+use std::path::Path;
 use std::path::PathBuf;
 
 const RECORD_BOF: u16 = 0x0809;
@@ -71,6 +72,35 @@ fn build_xls_bytes(workbook_stream: &[u8]) -> Vec<u8> {
             .expect("write Workbook stream bytes");
     }
     ole.into_inner().into_inner()
+}
+
+fn read_workbook_stream_from_xls(path: &Path) -> Vec<u8> {
+    let mut comp = cfb::open(path).expect("open xls cfb");
+    for candidate in ["/Workbook", "/Book", "Workbook", "Book"] {
+        if let Ok(mut stream) = comp.open_stream(candidate) {
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).expect("read workbook stream");
+            // Some writers may include trailing padding bytes after the final EOF record. Legacy
+            // RC4 standard decryption expects the workbook stream to end on a record boundary, so
+            // trim any non-record tail bytes to keep regenerated fixtures decryptable.
+            let end = last_complete_record_end(&buf);
+            if end > 0 && end < buf.len() {
+                buf.truncate(end);
+            }
+            return buf;
+        }
+    }
+    panic!("xls fixture missing Workbook/Book stream: {path:?}");
+}
+
+fn last_complete_record_end(stream: &[u8]) -> usize {
+    let mut offset = 0usize;
+    let mut last_end = 0usize;
+    while let Some((_, _, next)) = super_read_record(stream, offset) {
+        last_end = next;
+        offset = next;
+    }
+    last_end
 }
 
 fn window1() -> [u8; 18] {
@@ -285,6 +315,51 @@ fn derive_rc4_standard_intermediate_key(password: &str, salt: &[u8; 16]) -> [u8;
 fn derive_rc4_standard_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
     // block_key = MD5(intermediate_key + block_index_le32)
     md5_bytes(&[intermediate_key, &block.to_le_bytes()])
+}
+
+fn build_filepass_rc4_standard_payload(password: &str) -> (Vec<u8>, [u8; 16]) {
+    // FILEPASS payload layout (BIFF8 RC4 "Standard Encryption") [MS-XLS 2.4.105]:
+    // - u16 wEncryptionType = 0x0001 (RC4)
+    // - u16 major = 0x0001 (RC4 standard subtype)
+    // - u16 minor = 0x0002 (128-bit)
+    // - 16-byte salt
+    // - 16-byte encrypted verifier
+    // - 16-byte encrypted verifier hash (MD5)
+    //
+    // Note: Passwords are truncated to the first 15 UTF-16 code units per [MS-OFFCRYPTO].
+
+    let salt: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+        0xDC, 0xFE,
+    ];
+    let verifier_plain: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x0E, 0x0F,
+    ];
+    let verifier_hash_plain = md5_bytes(&[&verifier_plain]);
+
+    let intermediate_key = derive_rc4_standard_intermediate_key(password, &salt);
+    let block0_key = derive_rc4_standard_block_key(&intermediate_key, 0);
+    let mut rc4 = Rc4::new(&block0_key);
+    let mut verifier_buf = [0u8; 32];
+    verifier_buf[..16].copy_from_slice(&verifier_plain);
+    verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+    rc4.apply_keystream(&mut verifier_buf);
+
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
+    let mut encrypted_verifier_hash = [0u8; 16];
+    encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
+
+    let mut payload = Vec::<u8>::new();
+    payload.extend_from_slice(&[0x01, 0x00]); // wEncryptionType (RC4)
+    payload.extend_from_slice(&[0x01, 0x00]); // major (subType)
+    payload.extend_from_slice(&[0x02, 0x00]); // minor (128-bit)
+    payload.extend_from_slice(&salt);
+    payload.extend_from_slice(&encrypted_verifier);
+    payload.extend_from_slice(&encrypted_verifier_hash);
+
+    (payload, intermediate_key)
 }
 
 fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
@@ -579,6 +654,90 @@ fn encrypt_payloads_after_filepass<T>(
     }
 }
 
+fn patch_boundsheet_offsets_for_inserted_record(workbook_stream: &mut [u8], inserted_len: u32) {
+    // BOUNDSHEET payload layout (BIFF8) [MS-XLS 2.4.28]:
+    // - u32 lbPlyPos: absolute stream offset of the sheet substream BOF
+    // - u16 grbit: visibility + sheet type
+    // - sheet name (short XLUnicodeString)
+    //
+    // When inserting bytes into the workbook globals stream before worksheet substreams, these
+    // absolute offsets must be shifted forward by the insertion length.
+    let mut offset = 0usize;
+    let mut patched = 0usize;
+    while offset + 4 <= workbook_stream.len() {
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
+            as usize;
+        let data_start = offset + 4;
+        let data_end = data_start.saturating_add(len);
+        if data_end > workbook_stream.len() {
+            break;
+        }
+
+        if record_id == RECORD_BOUNDSHEET && len >= 4 {
+            let raw = u32::from_le_bytes([
+                workbook_stream[data_start],
+                workbook_stream[data_start + 1],
+                workbook_stream[data_start + 2],
+                workbook_stream[data_start + 3],
+            ]);
+            let adjusted = raw.wrapping_add(inserted_len);
+            workbook_stream[data_start..data_start + 4].copy_from_slice(&adjusted.to_le_bytes());
+            patched += 1;
+        }
+
+        offset = data_end;
+    }
+
+    assert!(patched > 0, "expected to patch at least one BOUNDSHEET record");
+}
+
+fn build_rc4_standard_encrypted_xls_from_plain_stream(
+    workbook_stream_plain: &[u8],
+    password: &str,
+) -> Vec<u8> {
+    // Encrypt an existing BIFF8 workbook stream by inserting FILEPASS and applying RC4 "standard"
+    // encryption to all subsequent record payloads.
+    //
+    // This is used for the password edge-case fixtures derived from `basic.xls`.
+    let (filepass_payload, intermediate_key) = build_filepass_rc4_standard_payload(password);
+
+    let Some((record_id, _, bof_end)) = super_read_record(workbook_stream_plain, 0) else {
+        panic!("unexpected empty workbook stream");
+    };
+    assert_eq!(record_id, RECORD_BOF, "expected BOF record at workbook stream offset 0");
+
+    // Ensure the input stream is not already encrypted.
+    let mut scan = 0usize;
+    while let Some((rid, _, next)) = super_read_record(workbook_stream_plain, scan) {
+        assert_ne!(
+            rid, RECORD_FILEPASS,
+            "expected plaintext stream without FILEPASS; pass an unencrypted fixture"
+        );
+        scan = next;
+    }
+
+    let filepass_record = record(RECORD_FILEPASS, &filepass_payload);
+    let inserted_len = filepass_record.len() as u32;
+
+    let mut workbook_stream = Vec::with_capacity(workbook_stream_plain.len() + filepass_record.len());
+    workbook_stream.extend_from_slice(&workbook_stream_plain[..bof_end]);
+    workbook_stream.extend_from_slice(&filepass_record);
+    workbook_stream.extend_from_slice(&workbook_stream_plain[bof_end..]);
+
+    // Patch BOUNDSHEET offsets to account for the inserted FILEPASS bytes.
+    patch_boundsheet_offsets_for_inserted_record(&mut workbook_stream, inserted_len);
+
+    // Encrypt payload bytes after FILEPASS.
+    let filepass_data_end = bof_end + filepass_record.len();
+    let mut cipher = PayloadRc4Standard::new(intermediate_key, 16);
+    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
+        cipher.apply_keystream(data);
+    });
+
+    build_xls_bytes(&workbook_stream)
+}
+
 fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     // BIFF8 XOR obfuscation fixture.
     const KEY: u16 = 0x1234;
@@ -617,37 +776,7 @@ fn build_rc4_standard_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     // BIFF8 RC4 "Standard Encryption" fixture. Ensure payload-after-FILEPASS crosses 1024 bytes by
     // adding a large dummy record in the worksheet substream.
 
-    // Deterministic "DocId" / salt bytes.
-    let salt: [u8; 16] = [
-        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
-        0xDC, 0xFE,
-    ];
-    let verifier_plain: [u8; 16] = [
-        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
-        0x0E, 0x0F,
-    ];
-    let verifier_hash_plain = md5_bytes(&[&verifier_plain]);
-
-    let intermediate_key = derive_rc4_standard_intermediate_key(password, &salt);
-    let block0_key = derive_rc4_standard_block_key(&intermediate_key, 0);
-    let mut rc4 = Rc4::new(&block0_key);
-    let mut verifier_buf = [0u8; 32];
-    verifier_buf[..16].copy_from_slice(&verifier_plain);
-    verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
-    rc4.apply_keystream(&mut verifier_buf);
-
-    let mut encrypted_verifier = [0u8; 16];
-    encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
-    let mut encrypted_verifier_hash = [0u8; 16];
-    encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
-
-    let mut filepass_payload = Vec::<u8>::new();
-    filepass_payload.extend_from_slice(&[0x01, 0x00]); // wEncryptionType (RC4)
-    filepass_payload.extend_from_slice(&[0x01, 0x00]); // major (subType)
-    filepass_payload.extend_from_slice(&[0x02, 0x00]); // minor (128-bit)
-    filepass_payload.extend_from_slice(&salt);
-    filepass_payload.extend_from_slice(&encrypted_verifier);
-    filepass_payload.extend_from_slice(&encrypted_verifier_hash);
+    let (filepass_payload, intermediate_key) = build_filepass_rc4_standard_payload(password);
 
     let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 2048);
 
@@ -725,6 +854,13 @@ fn regenerate_encrypted_xls_fixtures() {
         .join("encrypted");
     std::fs::create_dir_all(&fixtures_dir).expect("create encrypted fixtures dir");
 
+    // Base workbook used by password edge-case fixtures (multi-sheet, strings, formulas).
+    let basic_fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("basic.xls");
+    let basic_workbook_stream = read_workbook_stream_from_xls(&basic_fixture_path);
+
     // Decryptable BIFF8 XOR fixture.
     let xor_path = fixtures_dir.join("biff8_xor_pw_open.xls");
     let xor_bytes = build_xor_encrypted_xls_bytes("password");
@@ -736,6 +872,22 @@ fn regenerate_encrypted_xls_fixtures() {
     let rc4_standard_bytes = build_rc4_standard_encrypted_xls_bytes("password");
     std::fs::write(&rc4_standard_path, rc4_standard_bytes).unwrap_or_else(|err| {
         panic!("write encrypted fixture {rc4_standard_path:?} failed: {err}");
+    });
+
+    // RC4 Standard edge-case fixtures derived from `basic.xls`.
+    let rc4_standard_long_path = fixtures_dir.join("biff8_rc4_standard_pw_open_long_password.xls");
+    let rc4_standard_long_bytes =
+        build_rc4_standard_encrypted_xls_from_plain_stream(&basic_workbook_stream, "0123456789abcdef");
+    std::fs::write(&rc4_standard_long_path, rc4_standard_long_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {rc4_standard_long_path:?} failed: {err}");
+    });
+
+    let rc4_standard_empty_path =
+        fixtures_dir.join("biff8_rc4_standard_pw_open_empty_password.xls");
+    let rc4_standard_empty_bytes =
+        build_rc4_standard_encrypted_xls_from_plain_stream(&basic_workbook_stream, "");
+    std::fs::write(&rc4_standard_empty_path, rc4_standard_empty_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {rc4_standard_empty_path:?} failed: {err}");
     });
 
     // Decryptable BIFF8 RC4 CryptoAPI fixture.
