@@ -483,8 +483,9 @@ fn locale_error_literal_maps_match_generated_error_tsvs() {
                 "invalid TSV line in {label}:{line_no} (empty field): {raw_line:?}"
             );
 
-            // `FormulaLocale` only stores non-identity mappings in `error_literal_map`; allow
-            // identity spellings to round-trip via the fallback behavior (leave unchanged).
+            // Some locales intentionally keep many error spellings identical to canonical.
+            // `FormulaLocale` returns `None` for unknown/unmapped errors, so allow identity
+            // spellings to round-trip via the fallback behavior (leave unchanged).
             assert_eq!(
                 locale.localized_error_literal(canonical).unwrap_or(canonical),
                 localized,
