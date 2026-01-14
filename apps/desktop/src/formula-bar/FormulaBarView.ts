@@ -222,6 +222,9 @@ export class FormulaBarView {
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
+  #lastAdjustedHeightDraft: string | null = null;
+  #lastAdjustedHeightIsEditing = false;
+  #lastAdjustedHeightIsExpanded = false;
 
   #argumentPreviewProvider: ((expr: string) => unknown | Promise<unknown>) | null = null;
   #argumentPreviewKey: string | null = null;
@@ -2203,6 +2206,21 @@ export class FormulaBarView {
   #adjustHeight(): void {
     const minHeight = FORMULA_BAR_MIN_HEIGHT;
     const maxHeight = this.#isExpanded ? FORMULA_BAR_MAX_HEIGHT_EXPANDED : FORMULA_BAR_MAX_HEIGHT_COLLAPSED;
+
+    // Measuring `scrollHeight` can trigger layout and become noticeable on very long formulas.
+    // Skip redundant re-measurements when only the selection/cursor changed.
+    const draft = this.model.draft;
+    if (
+      this.#lastAdjustedHeightDraft === draft &&
+      this.#lastAdjustedHeightIsEditing === this.model.isEditing &&
+      this.#lastAdjustedHeightIsExpanded === this.#isExpanded
+    ) {
+      return;
+    }
+
+    this.#lastAdjustedHeightDraft = draft;
+    this.#lastAdjustedHeightIsEditing = this.model.isEditing;
+    this.#lastAdjustedHeightIsExpanded = this.#isExpanded;
 
     const highlightEl = this.#highlightEl as HTMLElement;
 
