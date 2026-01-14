@@ -39,6 +39,52 @@ fn encodes_and_decodes_sheet_range_ref_in_function() {
 }
 
 #[test]
+fn encodes_and_decodes_sheet_qualified_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded = encode_rgce_with_context("=SUM(Sheet2!A:A)", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM(Sheet2!A:A)");
+}
+
+#[test]
+fn encodes_and_decodes_sheet_qualified_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded = encode_rgce_with_context("=SUM(Sheet2!1:1)", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM(Sheet2!1:1)");
+}
+
+#[test]
+fn encodes_and_decodes_sheet_range_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded =
+        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!A:A)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!A:A)");
+}
+
+#[test]
+fn encodes_and_decodes_sheet_range_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded =
+        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!1:1)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!1:1)");
+}
+
+#[test]
 fn encodes_and_decodes_external_workbook_sheet_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
@@ -55,6 +101,38 @@ fn encodes_and_decodes_external_workbook_sheet_range_ref_in_function() {
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!A1)");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_sheet_range_column_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded = encode_rgce_with_context(
+        "=SUM([Book2.xlsb]SheetA:SheetB!A:A)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!A:A)");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_sheet_range_row_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let encoded = encode_rgce_with_context(
+        "=SUM([Book2.xlsb]SheetA:SheetB!1:1)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!1:1)");
 }
 
 #[test]
