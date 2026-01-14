@@ -400,6 +400,27 @@ pub fn build_shared_formula_shrfmla_only_ptgref_relative_flags_fixture_xls() -> 
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where a shared formula is defined only by a `SHRFMLA` record
+/// (no `FORMULA` records in the shared range), and the shared `rgce` uses `PtgArea` with
+/// row/col-relative flags set.
+///
+/// Expected decoded formulas:
+/// - B1: `SUM(A1:A2)`
+/// - B2: `SUM(A2:A3)`
+pub fn build_shared_formula_shrfmla_only_ptgarea_relative_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_shared_formula_shrfmla_only_ptgarea_relative_flags_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a malformed shared-formula pattern:
 /// - Base cell contains a full `FORMULA.rgce` token stream (no `PtgExp`).
 /// - Follower cell contains only `PtgExp` pointing at the base cell.
@@ -8901,6 +8922,13 @@ fn build_shared_formula_shrfmla_only_ptgref_relative_flags_workbook_stream() -> 
     build_single_sheet_workbook_stream("SharedOnlyRefFlags", &sheet_stream, 1252)
 }
 
+fn build_shared_formula_shrfmla_only_ptgarea_relative_flags_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream =
+        build_shared_formula_shrfmla_only_ptgarea_relative_flags_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedOnlyAreaFlags", &sheet_stream, 1252)
+}
+
 fn build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula range B1:B2, but without any cell `FORMULA` records. The importer should still
     // recover formulas from the SHRFMLA record definition.
@@ -8949,6 +8977,52 @@ fn build_shared_formula_out_of_bounds_relative_refs_workbook_stream() -> Vec<u8>
     let xf_cell = 16u16;
     let sheet_stream = build_shared_formula_out_of_bounds_relative_refs_sheet_stream(xf_cell);
     build_single_sheet_workbook_stream("SharedOutOfBounds", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_only_ptgarea_relative_flags_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula range B1:B2, but without any cell `FORMULA` records. The importer should still
+    // recover formulas from the SHRFMLA record definition.
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 3) cols [0, 2) => A1:B3.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&3u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1:A3 so the area references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(2, 0, xf_cell, 3.0));
+
+    // Shared formula definition (`SHRFMLA`) for range B1:B2.
+    //
+    // Base rgce is `SUM(A1:A2)`, encoded using `PtgArea` with row/col-relative flags set.
+    let rgce_base = vec![
+        0x25, // PtgArea
+        0x00, 0x00, // rwFirst = 0
+        0x01, 0x00, // rwLast = 1
+        0x00, 0xC0, // colFirst = 0 | row_rel | col_rel
+        0x00, 0xC0, // colLast = 0 | row_rel | col_rel
+        0x22, // PtgFuncVar
+        0x01, // argc = 1
+        0x04, 0x00, // SUM
+    ];
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &rgce_base),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
 }
 
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
