@@ -719,12 +719,11 @@ impl DependencyGraph {
             }
 
             processed += level.len();
-            out.push(level.clone());
 
             let mut next_ready_cells: BTreeSet<ReadyNode> = BTreeSet::new();
             let mut next_ready_ranges: BTreeSet<ReadyNode> = BTreeSet::new();
 
-            for cell in level {
+            for &cell in &level {
                 // Direct dependents.
                 if let Some(dependents) = self.cell_dependents.get(&cell) {
                     for &dep in dependents {
@@ -748,6 +747,7 @@ impl DependencyGraph {
                 }
             }
 
+            out.push(level);
             ready_cells = next_ready_cells;
             ready_ranges = next_ready_ranges;
         }

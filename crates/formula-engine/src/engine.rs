@@ -257,7 +257,7 @@ struct Cell {
     /// - During recalculation, the engine may update cached `value` fields, but it must not mutate
     ///   `phonetic` metadata.
     phonetic: Option<String>,
-    formula: Option<String>,
+    formula: Option<Arc<str>>,
     compiled: Option<CompiledFormula>,
     bytecode_compile_reason: Option<BytecodeCompileReason>,
     number_format: Option<String>,
@@ -641,13 +641,6 @@ impl Workbook {
             self.rebuild_sheet_tab_index_by_id();
             return false;
         };
-        // Guard against stale `sheet_tab_index_by_id` caches. In normal operation,
-        // `sheet_order` and `sheet_tab_index_by_id` are always kept in sync, but callers/tests may
-        // simulate an inconsistent state (e.g. a live sheet missing from `sheet_order`). In that
-        // case we should fail without mutating the remaining order.
-        if self.sheet_order.get(current) != Some(&sheet) {
-            return false;
-        }
         if current == new_index {
             // Even in a no-op reorder, keep the cache aligned with `sheet_order` in case it became
             // stale.
@@ -1265,12 +1258,15 @@ impl Engine {
                 let Some(formula) = cell.formula.as_mut() else {
                     continue;
                 };
-                let rewritten =
-                    formula_model::rewrite_sheet_names_in_formula(formula, &old_name, new_name);
-                if rewritten != *formula {
+                let rewritten = formula_model::rewrite_sheet_names_in_formula(
+                    formula.as_ref(),
+                    &old_name,
+                    new_name,
+                );
+                if rewritten != formula.as_ref() {
                     any_formula_rewritten = true;
+                    *formula = rewritten.into();
                 }
-                *formula = rewritten;
             }
 
             for table in &mut sheet.tables {
@@ -2053,12 +2049,12 @@ impl Engine {
                 continue;
             };
             for (addr, cell) in sheet.cells.iter_mut() {
-                let Some(formula) = cell.formula.clone() else {
+                let Some(formula) = cell.formula.as_deref() else {
                     continue;
                 };
                 let origin = crate::CellAddr::new(addr.row, addr.col);
-                if let Some(rewritten) = rewrite_deleted_sheet_formula(&formula, origin) {
-                    cell.formula = Some(rewritten);
+                if let Some(rewritten) = rewrite_deleted_sheet_formula(formula, origin) {
+                    cell.formula = Some(rewritten.into());
                 }
             }
 
@@ -4236,16 +4232,16 @@ impl Engine {
                 .unwrap_or_else(|| sheet_id.to_string());
 
             for (addr, cell) in sheet.cells.iter_mut() {
-                let Some(formula) = cell.formula.as_mut() else {
+                let Some(formula) = cell.formula.as_deref() else {
                     continue;
                 };
                 let rewritten = rewrite_table_names_in_formula(formula, &renames);
-                if rewritten == *formula {
+                if rewritten == formula {
                     continue;
                 }
-
-                let before = std::mem::replace(formula, rewritten);
-                let after = formula.clone();
+                let before = formula.to_string();
+                let after = rewritten.clone();
+                cell.formula = Some(rewritten.into());
 
                 if let Some(compiled) = cell.compiled.as_mut() {
                     rewrite_table_names_in_compiled_formula(compiled, &renames);
@@ -4722,16 +4718,14 @@ impl Engine {
                 Err(reason) => (CompiledFormula::Ast(compiled), Some(reason)),
             };
 
-        {
-            let cell = self.workbook.get_or_create_cell_mut(key);
-            cell.phonetic = None;
-            cell.formula = Some(formula.to_string());
-            cell.compiled = Some(compiled_formula);
-            cell.bytecode_compile_reason = bytecode_compile_reason;
-            cell.volatile = volatile;
-            cell.thread_safe = thread_safe;
-            cell.dynamic_deps = dynamic_deps;
-        }
+        let cell = self.workbook.get_or_create_cell_mut(key);
+        cell.phonetic = None;
+        cell.formula = Some(Arc::from(formula));
+        cell.compiled = Some(compiled_formula);
+        cell.bytecode_compile_reason = bytecode_compile_reason;
+        cell.volatile = volatile;
+        cell.thread_safe = thread_safe;
+        cell.dynamic_deps = dynamic_deps;
 
         if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
             if origin_deps {
@@ -5725,6 +5719,69 @@ impl Engine {
         // sharing a single `RecalcContext` so volatile functions remain stable.
         let mut recalc_ctx: Option<crate::eval::RecalcContext> = None;
         loop {
+            // Single-threaded recalc does not need dependency levels (parallel batches). Using the
+            // cached calculation chain avoids allocating many tiny level vectors for deep chains.
+            if mode == RecalcMode::SingleThreaded {
+                let order = match self.calc_graph.calc_order_for_dirty() {
+                    Ok(order) => order,
+                    Err(_) => {
+                        self.recalculate_with_cycles(mode, value_changes);
+                        return;
+                    }
+                };
+
+                if order.is_empty() {
+                    return;
+                }
+
+                // Some workloads (range aggregations / dynamic-deps formulas) benefit from the
+                // level schedule because it lets us build per-level range caches and ensures
+                // dynamic reference evaluation happens after other work in the same batch.
+                let sheet_dims_generation = self.sheet_dims_generation;
+                let mut needs_levels = false;
+                for &cell_id in &order {
+                    let key = cell_key_from_id(cell_id);
+                    let Some(cell) = self.workbook.get_cell(key) else {
+                        continue;
+                    };
+                    if cell.dynamic_deps {
+                        needs_levels = true;
+                        break;
+                    }
+
+                    let Some(CompiledFormula::Bytecode(bc)) = cell.compiled.as_ref() else {
+                        continue;
+                    };
+
+                    // Sheet-dim changes force AST fallback, which does not use the bytecode range cache.
+                    if bc.sheet_dims_generation != sheet_dims_generation {
+                        continue;
+                    }
+                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty() {
+                        needs_levels = true;
+                        break;
+                    }
+                }
+
+                if !needs_levels {
+                    let recalc_ctx = recalc_ctx.get_or_insert_with(|| self.begin_recalc_context());
+                    let (spill_dirty_roots, dynamic_dirty_roots) = self.recalculate_order(
+                        order,
+                        recalc_ctx,
+                        date_system,
+                        value_changes.as_deref_mut(),
+                    );
+                    if spill_dirty_roots.is_empty() && dynamic_dirty_roots.is_empty() {
+                        return;
+                    }
+
+                    for cell in spill_dirty_roots.into_iter().chain(dynamic_dirty_roots) {
+                        self.calc_graph.mark_dirty(cell);
+                    }
+                    continue;
+                }
+            }
+
             let levels = match self.calc_graph.calc_levels_for_dirty() {
                 Ok(levels) => levels,
                 Err(_) => {
@@ -5759,6 +5816,123 @@ impl Engine {
         }
     }
 
+    fn recalculate_order(
+        &mut self,
+        order: Vec<CellId>,
+        recalc_ctx: &crate::eval::RecalcContext,
+        date_system: ExcelDateSystem,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
+    ) -> (Vec<CellId>, Vec<CellId>) {
+        self.circular_references.clear();
+        let value_locale = self.value_locale;
+        let locale_config = self.locale_config.clone();
+
+        let mut snapshot = Snapshot::from_workbook(
+            &self.workbook,
+            &self.spills,
+            self.external_value_provider.clone(),
+            self.external_data_provider.clone(),
+            self.info.clone(),
+            self.pivot_registry.clone(),
+        );
+        let sheet_dims_generation = self.sheet_dims_generation;
+        let mut spill_dirty_roots: Vec<CellId> = Vec::new();
+        let dynamic_dirty_roots: Vec<CellId> = Vec::new();
+        let text_codepage = self.text_codepage;
+
+        let sheet_count = self.workbook.sheets.len();
+        let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
+        let empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> =
+            vec![HashMap::new(); sheet_count];
+        let cols_by_sheet = empty_cols_by_sheet.as_slice();
+
+        let mut vm = bytecode::Vm::with_capacity(32);
+        let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
+            date_system,
+            value_locale,
+            recalc_ctx.now_utc.clone(),
+            recalc_ctx.recalc_id,
+        );
+
+        for cell_id in order {
+            let key = cell_key_from_id(cell_id);
+
+            let value = {
+                let Some(cell) = self.workbook.get_cell(key) else {
+                    continue;
+                };
+                let Some(compiled_cell) = cell.compiled.as_ref() else {
+                    continue;
+                };
+
+                let ctx = crate::eval::EvalContext {
+                    current_sheet: key.sheet,
+                    current_cell: key.addr,
+                };
+
+                match compiled_cell {
+                    CompiledFormula::Ast(expr) => {
+                        let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                            &snapshot,
+                            ctx,
+                            recalc_ctx,
+                            date_system,
+                            value_locale,
+                            locale_config.clone(),
+                        )
+                        .with_text_codepage(text_codepage);
+                        evaluator.eval_formula(expr)
+                    }
+                    CompiledFormula::Bytecode(bc) => {
+                        if bc.sheet_dims_generation != sheet_dims_generation {
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                &snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            )
+                            .with_text_codepage(text_codepage);
+                            evaluator.eval_formula(&bc.ast)
+                        } else {
+                            let cols = cols_by_sheet.get(key.sheet).unwrap_or(&empty_cols);
+                            let slice_mode = slice_mode_for_program(&bc.program);
+                            let grid = EngineBytecodeGrid {
+                                snapshot: &snapshot,
+                                sheet_id: key.sheet,
+                                cols,
+                                cols_by_sheet,
+                                slice_mode,
+                                trace: None,
+                            };
+                            let base = bytecode::CellCoord {
+                                row: key.addr.row as i32,
+                                col: key.addr.col as i32,
+                            };
+                            let v = vm.eval(&bc.program, &grid, key.sheet, base, &locale_config);
+                            bytecode_value_to_engine(v)
+                        }
+                    }
+                }
+            };
+
+            self.apply_eval_result(
+                key,
+                value,
+                &mut snapshot,
+                &mut spill_dirty_roots,
+                value_changes.as_deref_mut(),
+            );
+        }
+
+        self.calc_graph.clear_dirty();
+        self.dirty.clear();
+        self.dirty_reasons.clear();
+
+        (spill_dirty_roots, dynamic_dirty_roots)
+    }
+
     fn recalculate_levels(
         &mut self,
         levels: Vec<Vec<CellId>>,
@@ -5783,6 +5957,10 @@ impl Engine {
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
         let text_codepage = self.text_codepage;
+        let sheet_count = self.workbook.sheets.len();
+        let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
+        let empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> =
+            vec![HashMap::new(); sheet_count];
 
         for level in levels {
             let mut keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
@@ -5791,6 +5969,7 @@ impl Engine {
             let mut parallel_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut serial_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut dynamic_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+            let mut needs_column_cache = false;
 
             for &k in &keys {
                 let Some(cell) = self.workbook.get_cell(k) else {
@@ -5812,6 +5991,12 @@ impl Engine {
                     }
                 };
 
+                if let CompiledFormula::Bytecode(bc) = &compiled {
+                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty() {
+                        needs_column_cache = true;
+                    }
+                }
+
                 if cell.dynamic_deps {
                     dynamic_tasks.push((k, compiled));
                 } else if cell.thread_safe {
@@ -5821,15 +6006,21 @@ impl Engine {
                 }
             }
 
-            let mut all_tasks: Vec<(CellKey, CompiledFormula)> =
-                Vec::with_capacity(parallel_tasks.len() + serial_tasks.len() + dynamic_tasks.len());
-            all_tasks.extend(parallel_tasks.iter().cloned());
-            all_tasks.extend(serial_tasks.iter().cloned());
-            all_tasks.extend(dynamic_tasks.iter().cloned());
-
-            let sheet_count = self.workbook.sheets.len();
-            let column_cache = BytecodeColumnCache::build(sheet_count, &snapshot, &all_tasks);
-            let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
+            let column_cache = if needs_column_cache {
+                let mut all_tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(
+                    parallel_tasks.len() + serial_tasks.len() + dynamic_tasks.len(),
+                );
+                all_tasks.extend(parallel_tasks.iter().cloned());
+                all_tasks.extend(serial_tasks.iter().cloned());
+                all_tasks.extend(dynamic_tasks.iter().cloned());
+                Some(BytecodeColumnCache::build(sheet_count, &snapshot, &all_tasks))
+            } else {
+                None
+            };
+            let cols_by_sheet = column_cache
+                .as_ref()
+                .map(|cache| cache.by_sheet.as_slice())
+                .unwrap_or(empty_cols_by_sheet.as_slice());
 
             let mut results: Vec<(CellKey, Value)> =
                 Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
@@ -5861,13 +6052,13 @@ impl Engine {
                             evaluator.eval_formula(expr)
                         }
                         CompiledFormula::Bytecode(bc) => {
-                            let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                            let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                             let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
                                 snapshot: &snapshot,
                                 sheet_id: k.sheet,
                                 cols,
-                                cols_by_sheet: &column_cache.by_sheet,
+                                cols_by_sheet,
                                 slice_mode,
                                 trace: None,
                             };
@@ -5923,16 +6114,14 @@ impl Engine {
                                                 (*k, evaluator.eval_formula(expr))
                                             }
                                             CompiledFormula::Bytecode(bc) => {
-                                                let cols = column_cache
-                                                    .by_sheet
-                                                    .get(k.sheet)
-                                                    .unwrap_or(&empty_cols);
+                                                let cols =
+                                                    cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                                                 let slice_mode = slice_mode_for_program(&bc.program);
                                                 let grid = EngineBytecodeGrid {
                                                     snapshot: &snapshot,
                                                     sheet_id: k.sheet,
                                                     cols,
-                                                    cols_by_sheet: &column_cache.by_sheet,
+                                                    cols_by_sheet,
                                                     slice_mode,
                                                     trace: None,
                                                 };
@@ -5997,13 +6186,13 @@ impl Engine {
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
-                        let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                        let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
                         let grid = EngineBytecodeGrid {
                             snapshot: &snapshot,
                             sheet_id: k.sheet,
                             cols,
-                            cols_by_sheet: &column_cache.by_sheet,
+                            cols_by_sheet,
                             slice_mode,
                             trace: None,
                         };
@@ -6058,13 +6247,13 @@ impl Engine {
                     }
                     CompiledFormula::Bytecode(bc) => {
                         used_bytecode_trace = true;
-                        let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                        let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
                         let grid = EngineBytecodeGrid {
                             snapshot: &snapshot,
                             sheet_id: k.sheet,
                             cols,
-                            cols_by_sheet: &column_cache.by_sheet,
+                            cols_by_sheet,
                             slice_mode,
                             trace: Some(&bytecode_trace),
                         };
@@ -6414,7 +6603,14 @@ impl Engine {
             other => other,
         };
 
-        let format_pattern = self.number_format_pattern_for_rounding(key);
+        // The number-format lookup is only needed for Excel's "precision as displayed" mode.
+        // In full-precision mode (the Excel default), `round_number_as_displayed` ignores the
+        // format string, so avoid the repeated style/format lookups on hot recalc paths.
+        let format_pattern = if self.calc_settings.full_precision {
+            None
+        } else {
+            self.number_format_pattern_for_rounding(key)
+        };
 
         match value {
             Value::Array(mut array) => {
@@ -8245,7 +8441,7 @@ impl Engine {
             };
             for (addr, cell) in &sheet.cells {
                 if let Some(formula) = &cell.formula {
-                    formulas.push((sheet_name.clone(), *addr, formula.clone()));
+                    formulas.push((sheet_name.clone(), *addr, formula.to_string()));
                 }
             }
         }
@@ -9543,15 +9739,15 @@ fn copy_range(
             let origin = crate::CellAddr::new(target.row, target.col);
             let (new_formula, _) =
                 rewrite_formula_for_copy_delta(formula, sheet_name, origin, delta_row, delta_col);
-            if &new_formula != formula {
+            if new_formula != formula.as_ref() {
                 formula_rewrites.push(FormulaRewrite {
                     sheet: sheet_name.to_string(),
                     cell: target,
-                    before: formula.clone(),
+                    before: formula.to_string(),
                     after: new_formula.clone(),
                 });
             }
-            value.formula = Some(new_formula);
+            value.formula = Some(new_formula.into());
         }
 
         // Copy/paste-style operations overwrite cell input but do not explicitly set phonetic
@@ -9596,15 +9792,15 @@ fn fill_range(
             let origin = crate::CellAddr::new(cell.row, cell.col);
             let (new_formula, _) =
                 rewrite_formula_for_copy_delta(formula, sheet_name, origin, delta_row, delta_col);
-            if &new_formula != formula {
+            if new_formula != formula.as_ref() {
                 formula_rewrites.push(FormulaRewrite {
                     sheet: sheet_name.to_string(),
                     cell,
-                    before: formula.clone(),
+                    before: formula.to_string(),
                     after: new_formula.clone(),
                 });
             }
-            value.formula = Some(new_formula);
+            value.formula = Some(new_formula.into());
         }
         // Fill operations overwrite cell input but do not explicitly set phonetic metadata. Clear
         // it to avoid returning stale furigana via PHONETIC().
@@ -9662,10 +9858,10 @@ fn rewrite_all_formulas_structural(
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
                     cell: cell_ref_from_addr(*addr),
-                    before: formula.clone(),
+                    before: formula.to_string(),
                     after: new_formula.clone(),
                 });
-                cell.formula = Some(new_formula);
+                cell.formula = Some(new_formula.into());
             }
         }
     }
@@ -9702,10 +9898,10 @@ fn rewrite_all_formulas_range_map(
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
                     cell: cell_ref_from_addr(*addr),
-                    before: formula.clone(),
+                    before: formula.to_string(),
                     after: new_formula.clone(),
                 });
-                cell.formula = Some(new_formula);
+                cell.formula = Some(new_formula.into());
             }
         }
     }
@@ -9755,7 +9951,7 @@ fn diff_workbooks(
 fn cell_snapshot(cell: &Cell) -> CellSnapshot {
     CellSnapshot {
         value: cell.value.clone(),
-        formula: cell.formula.clone(),
+        formula: cell.formula.as_deref().map(str::to_string),
     }
 }
 
@@ -10814,7 +11010,7 @@ struct Snapshot {
     values: HashMap<CellKey, Value>,
     style_ids: HashMap<CellKey, u32>,
     phonetics: HashMap<CellKey, String>,
-    formulas: HashMap<CellKey, String>,
+    formulas: HashMap<CellKey, Arc<str>>,
     number_formats: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
     ///
@@ -10918,10 +11114,21 @@ impl Snapshot {
                 }
             })
             .collect();
-        let mut values = HashMap::new();
-        let mut phonetics = HashMap::new();
-        let mut style_ids = HashMap::new();
-        let mut formulas = HashMap::new();
+        let mut cell_count = 0usize;
+        for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
+            if !workbook.sheet_exists(sheet_id) {
+                continue;
+            }
+            cell_count = cell_count.saturating_add(sheet.cells.len());
+        }
+        for spill in spills.by_origin.values() {
+            cell_count = cell_count.saturating_add(spill.array.values.len());
+        }
+
+        let mut values = HashMap::with_capacity(cell_count);
+        let mut phonetics = HashMap::with_capacity(cell_count);
+        let mut style_ids = HashMap::with_capacity(cell_count);
+        let mut formulas = HashMap::with_capacity(cell_count);
         let mut number_formats = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
@@ -10945,9 +11152,11 @@ impl Snapshot {
                 if let Some(phonetic) = cell.phonetic.as_ref() {
                     phonetics.insert(key, phonetic.clone());
                 }
-                style_ids.insert(key, cell.style_id);
+                if cell.style_id != 0 {
+                    style_ids.insert(key, cell.style_id);
+                }
                 if let Some(formula) = cell.formula.as_ref() {
-                    formulas.insert(key, formula.clone());
+                    formulas.insert(key, Arc::clone(formula));
                 }
                 if let Some(number_format) = cell.number_format.as_ref() {
                     number_formats.insert(key, number_format.clone());
@@ -11086,13 +11295,16 @@ impl Snapshot {
     }
 
     fn insert_value(&mut self, key: CellKey, value: Value) {
-        self.values.insert(key, value);
-        self.ordered_cells.insert(key);
+        let existed = self.values.insert(key, value).is_some();
+        if !existed {
+            self.ordered_cells.insert(key);
+        }
     }
 
     fn remove_value(&mut self, key: &CellKey) {
-        self.values.remove(key);
-        self.ordered_cells.remove(key);
+        if self.values.remove(key).is_some() {
+            self.ordered_cells.remove(key);
+        }
     }
 }
 
@@ -11221,7 +11433,7 @@ impl crate::eval::ValueResolver for Snapshot {
                 sheet: sheet_id,
                 addr,
             })
-            .map(|s| s.as_str())
+            .map(|s| s.as_ref())
     }
 
     fn get_cell_phonetic(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
