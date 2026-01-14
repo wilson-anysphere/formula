@@ -253,37 +253,101 @@ jobs:
           set -euo pipefail
           mkdir -p perf-artifacts
           node - <<'NODE'
-          const fs = require("node:fs");
-          const path = require("node:path");
-          const { execSync } = require("node:child_process");
-          
-          function readJsonMaybe(p) {
+           const fs = require("node:fs");
+           const path = require("node:path");
+           const { execSync } = require("node:child_process");
+           
+           function readJsonMaybe(p) {
             try {
               return JSON.parse(fs.readFileSync(p, "utf8"));
             } catch {
               return null;
-            }
-          }
+             }
+           }
 
-          function tryExec(command) {
-            try {
-              return execSync(command, { encoding: "utf8" }).trim();
-            } catch {
-              return null;
-            }
-          }
-          
-          const startupColdPath = path.resolve("perf-artifacts/desktop-startup-metrics-cold.json");
-          const startupWarmPath = path.resolve("perf-artifacts/desktop-startup-metrics-warm.json");
-          const memoryPath = path.resolve("perf-artifacts/desktop-memory-metrics.json");
-          const startupCold = readJsonMaybe(startupColdPath);
-          const startupWarm = readJsonMaybe(startupWarmPath);
-          const idleMemory = readJsonMaybe(memoryPath);
-          
-          const merged = {
-            generatedAt: new Date().toISOString(),
-            ci: {
-              workflow: process.env.GITHUB_WORKFLOW || null,
+           function tryExec(command) {
+             try {
+               return execSync(command, { encoding: "utf8" }).trim();
+             } catch {
+               return null;
+             }
+           }
+
+           function compareDottedVersions(a, b) {
+             // Descending sort helper for strings like "123.0.4567.89".
+             const pa = String(a).split(".").map((x) => Number(x));
+             const pb = String(b).split(".").map((x) => Number(x));
+             const len = Math.max(pa.length, pb.length);
+             for (let i = 0; i < len; i += 1) {
+               const av = Number.isFinite(pa[i]) ? pa[i] : 0;
+               const bv = Number.isFinite(pb[i]) ? pb[i] : 0;
+               if (av !== bv) return bv - av;
+             }
+             return 0;
+           }
+
+           function detectWebview() {
+             try {
+               if (process.platform === "linux") {
+                 const version =
+                   tryExec("pkg-config --modversion webkit2gtk-4.1 2>/dev/null") ??
+                   tryExec("pkg-config --modversion webkit2gtk-4.0 2>/dev/null");
+                 return { engine: "webkitgtk", version };
+               }
+               if (process.platform === "darwin") {
+                 const plist =
+                   "/System/Library/Frameworks/WebKit.framework/Versions/A/Resources/Info.plist";
+                 const version =
+                   tryExec(`plutil -extract CFBundleShortVersionString raw -o - ${plist} 2>/dev/null`) ??
+                   tryExec(`defaults read ${plist} CFBundleShortVersionString 2>/dev/null`);
+                 return { engine: "wkwebview", version };
+               }
+               if (process.platform === "win32") {
+                 const roots = [
+                   process.env["ProgramFiles(x86)"]
+                     ? path.join(process.env["ProgramFiles(x86)"], "Microsoft", "EdgeWebView", "Application")
+                     : null,
+                   process.env.ProgramFiles
+                     ? path.join(process.env.ProgramFiles, "Microsoft", "EdgeWebView", "Application")
+                     : null,
+                   process.env.LOCALAPPDATA
+                     ? path.join(process.env.LOCALAPPDATA, "Microsoft", "EdgeWebView", "Application")
+                     : null,
+                 ].filter(Boolean);
+                 for (const root of roots) {
+                   try {
+                     const entries = fs.readdirSync(root, { withFileTypes: true });
+                     const versions = entries
+                       .filter((e) => e.isDirectory() && /^\d+\.\d+\.\d+\.\d+$/.test(e.name))
+                       .map((e) => e.name)
+                       .sort(compareDottedVersions);
+                     if (versions.length > 0) {
+                       return { engine: "webview2", version: versions[0], rootDir: root };
+                     }
+                   } catch {
+                     // ignore
+                   }
+                 }
+                 return { engine: "webview2", version: null };
+               }
+             } catch {
+               // ignore
+             }
+             return null;
+           }
+           
+           const startupColdPath = path.resolve("perf-artifacts/desktop-startup-metrics-cold.json");
+           const startupWarmPath = path.resolve("perf-artifacts/desktop-startup-metrics-warm.json");
+           const memoryPath = path.resolve("perf-artifacts/desktop-memory-metrics.json");
+           const startupCold = readJsonMaybe(startupColdPath);
+           const startupWarm = readJsonMaybe(startupWarmPath);
+           const idleMemory = readJsonMaybe(memoryPath);
+           const webview = detectWebview();
+           
+           const merged = {
+             generatedAt: new Date().toISOString(),
+             ci: {
+               workflow: process.env.GITHUB_WORKFLOW || null,
               runId: process.env.GITHUB_RUN_ID || null,
               runNumber: process.env.GITHUB_RUN_NUMBER || null,
               attempt: process.env.GITHUB_RUN_ATTEMPT || null,
@@ -300,18 +364,19 @@ jobs:
               version: process.env.ImageVersion || null,
               name: process.env.ImageName || null,
             },
-            toolchain: {
-              node: process.version,
-              pnpm: tryExec("pnpm --version"),
-              rustc: tryExec("rustc --version"),
-              cargo: tryExec("cargo --version"),
-              wasmPack: tryExec("wasm-pack --version"),
-            },
-            startupCold,
-            startupWarm,
-            idleMemory,
-          };
-          
+             toolchain: {
+               node: process.version,
+               pnpm: tryExec("pnpm --version"),
+               rustc: tryExec("rustc --version"),
+               cargo: tryExec("cargo --version"),
+               wasmPack: tryExec("wasm-pack --version"),
+             },
+             webview,
+             startupCold,
+             startupWarm,
+             idleMemory,
+           };
+           
           fs.writeFileSync(
             path.resolve("perf-artifacts/desktop-perf-metrics.json"),
             JSON.stringify(merged, null, 2),
@@ -326,14 +391,19 @@ jobs:
             return n.toFixed(digits);
           }
           
-          const lines = [];
-          lines.push(`## Desktop perf summary (${process.env.RUNNER_OS ?? "unknown"})`);
-          if (process.env.ImageOS || process.env.ImageVersion) {
-            lines.push(`Runner image: \`${process.env.ImageOS ?? "n/a"}\` \`${process.env.ImageVersion ?? ""}\``);
-          }
-          lines.push("");
-          lines.push("| Metric | p50 | p95 | Notes |");
-          lines.push("|---|---:|---:|---|");
+           const lines = [];
+           lines.push(`## Desktop perf summary (${process.env.RUNNER_OS ?? "unknown"})`);
+           if (process.env.ImageOS || process.env.ImageVersion) {
+             lines.push(`Runner image: \`${process.env.ImageOS ?? "n/a"}\` \`${process.env.ImageVersion ?? ""}\``);
+           }
+           if (webview?.engine) {
+             lines.push(
+               `WebView: \`${webview.engine}\`${webview.version ? ` \`${webview.version}\`` : ""}`,
+             );
+           }
+           lines.push("");
+           lines.push("| Metric | p50 | p95 | Notes |");
+           lines.push("|---|---:|---:|---|");
           
           if (startupCold?.summary) {
             const s = startupCold.summary;
