@@ -88,8 +88,8 @@ jobs:
       - name: "Guard: Tauri CLI version pins match CI workflow"
         run: bash scripts/ci/check-tauri-cli-version-pins.sh
 
-  validate-version:
-    name: Validate desktop version matches tag
+  preflight:
+    name: Preflight validations
     needs: conflict-marker-guard
     permissions:
       contents: read
@@ -313,7 +313,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.label }})
-    needs: validate-version
+    needs: preflight
     permissions:
       contents: write
     strategy:
@@ -411,7 +411,7 @@ jobs:
           # - FORMULA_REQUIRE_CODESIGN=1 to fail when required signing secrets are missing
           FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
           # Optional override: allow re-runs to switch timestamp servers without changing the repo.
-          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ needs.validate-version.outputs.windows_timestamp_url }}
+          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ needs.preflight.outputs.windows_timestamp_url }}
 
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -890,7 +890,7 @@ jobs:
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build and upload release assets (macOS universal)
-        if: runner.os == 'macOS' && needs.validate-version.outputs.upload == 'true'
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -902,17 +902,17 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
-          tagName: ${{ needs.validate-version.outputs.release_tag }}
-          releaseName: Formula ${{ needs.validate-version.outputs.release_tag }}
+          tagName: ${{ needs.preflight.outputs.release_tag }}
+          releaseName: Formula ${{ needs.preflight.outputs.release_tag }}
           releaseBody: |
-            Automated build for ${{ needs.validate-version.outputs.release_tag }}.
+            Automated build for ${{ needs.preflight.outputs.release_tag }}.
             See the assets below for the installers/bundles.
           releaseDraft: true
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
-          prerelease: ${{ contains(needs.validate-version.outputs.release_tag, '-') }}
+          prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
       - name: Build desktop bundles (macOS universal, dry run)
-        if: runner.os == 'macOS' && needs.validate-version.outputs.upload != 'true'
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1069,7 +1069,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Build and upload release assets
-        if: runner.os != 'macOS' && needs.validate-version.outputs.upload == 'true'
+        if: runner.os != 'macOS' && needs.preflight.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -1081,18 +1081,18 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
-          tagName: ${{ needs.validate-version.outputs.release_tag }}
-          releaseName: Formula ${{ needs.validate-version.outputs.release_tag }}
+          tagName: ${{ needs.preflight.outputs.release_tag }}
+          releaseName: Formula ${{ needs.preflight.outputs.release_tag }}
           releaseBody: |
-            Automated build for ${{ needs.validate-version.outputs.release_tag }}.
+            Automated build for ${{ needs.preflight.outputs.release_tag }}.
             See the assets below for the installers/bundles.
           releaseDraft: true
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
-          prerelease: ${{ contains(needs.validate-version.outputs.release_tag, '-') }}
+          prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
 
       - name: Build desktop bundles (dry run)
-        if: runner.os != 'macOS' && needs.validate-version.outputs.upload != 'true'
+        if: runner.os != 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1347,21 +1347,21 @@ jobs:
           done
 
       - name: Upload desktop bundles (dry run)
-        if: needs.validate-version.outputs.upload != 'true'
+        if: needs.preflight.outputs.upload != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-bundles-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
+          name: desktop-bundles-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           if-no-files-found: error
           path: |
             apps/desktop/src-tauri/target/**/release/bundle/**
             target/**/release/bundle/**
 
       - name: Export updater manifest for merge (latest.json)
-        if: needs.validate-version.outputs.upload == 'true'
+        if: needs.preflight.outputs.upload == 'true'
         run: node scripts/ci/export-updater-manifest.mjs "updater-manifest/latest-${{ matrix.cache_target }}.json"
 
       - name: Upload updater manifest artifact (per-platform)
-        if: needs.validate-version.outputs.upload == 'true'
+        if: needs.preflight.outputs.upload == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: updater-manifest-${{ matrix.cache_target }}
@@ -1778,7 +1778,7 @@ jobs:
           # `latest.json` is only generated/uploaded when we publish to a GitHub Release.
           # In dry-run (workflow_dispatch upload=false) we still validate installer artifacts exist,
           # but we skip enforcing updater signatures/manifest files.
-          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '') }}
+          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '') }}
         run: node scripts/ci/check-desktop-release-artifacts.mjs
 
       - name: Verify macOS bundle file associations + deep link schemes
@@ -1943,17 +1943,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-bundle-size-report-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
+          name: desktop-bundle-size-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           path: desktop-bundle-size-report.json
           if-no-files-found: warn
 
   publish-updater-manifest:
     name: Publish combined updater manifest (latest.json)
-    needs: [build, validate-version]
+    needs: [build, preflight]
     # Publishing `latest.json` requires updater signatures (`latest.json.sig`) which are only
     # produced when TAURI_PRIVATE_KEY is configured. We only publish in the upstream repo or when
     # forks have configured their own updater key secrets.
-    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+    if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -1979,16 +1979,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-        run: node scripts/ci/publish-updater-manifest.mjs "${{ needs.validate-version.outputs.release_tag }}" updater-manifest
+        run: node scripts/ci/publish-updater-manifest.mjs "${{ needs.preflight.outputs.release_tag }}" updater-manifest
 
   validate-updater-manifest:
     name: Validate combined updater manifest (latest.json)
-    needs: [publish-updater-manifest, validate-version]
+    needs: [publish-updater-manifest, preflight]
     # Validating the updater manifest requires updater signatures (`latest.json.sig`), which are
     # only produced when the TAURI_PRIVATE_KEY secret is configured. We always validate in the
     # upstream repo (to avoid accidentally shipping an unsigned updater manifest) and validate in
     # forks only when the user has configured their own updater key secrets.
-    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+    if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -2007,7 +2007,7 @@ jobs:
           # Set both token env vars so it works whether it looks for GH_TOKEN or GITHUB_TOKEN.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/verify-tauri-latest-json.mjs "${{ needs.validate-version.outputs.release_tag }}"
+        run: node scripts/verify-tauri-latest-json.mjs "${{ needs.preflight.outputs.release_tag }}"
 
       - name: Verify updater manifest signature matches embedded pubkey
         run: node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
@@ -2017,13 +2017,13 @@ jobs:
           # This validator also uses the GitHub API to read/download assets from the draft release.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/verify-tauri-updater-assets.mjs "${{ needs.validate-version.outputs.release_tag }}"
+        run: node scripts/verify-tauri-updater-assets.mjs "${{ needs.preflight.outputs.release_tag }}"
   verify-release-assets:
     name: Verify GitHub Release assets (multi-arch safe)
     # Wait for the combined updater manifest publish step so we don't race while `latest.json`
     # is being deleted/re-uploaded.
-    needs: [publish-updater-manifest, validate-version]
-    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+    needs: [publish-updater-manifest, preflight]
+    if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -2031,7 +2031,7 @@ jobs:
       - name: Validate release assets are present and uniquely named per target
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ needs.validate-version.outputs.release_tag }}
+          TAG_NAME: ${{ needs.preflight.outputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -2373,10 +2373,10 @@ jobs:
     name: Generate SHA256SUMS.txt
     needs:
       - build
-      - validate-version
+      - preflight
       - validate-updater-manifest
       - verify-release-assets
-    if: needs.validate-version.outputs.upload == 'true'
+    if: needs.preflight.outputs.upload == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -2392,13 +2392,13 @@ jobs:
       - name: Verify desktop release assets + latest.json and generate SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.validate-version.outputs.release_tag }}"
+        run: node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.preflight.outputs.release_tag }}"
 
       - name: Upload SHA256SUMS.txt to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ needs.validate-version.outputs.release_tag }}" SHA256SUMS.txt \
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" SHA256SUMS.txt \
             --repo "${{ github.repository }}" \
             --clobber
