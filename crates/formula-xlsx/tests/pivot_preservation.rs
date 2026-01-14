@@ -24,18 +24,26 @@ fn build_source_package() -> Vec<u8> {
     let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <pivotCaches>
-    <pivotCache cacheId="1" r:id="rId99"/>
-  </pivotCaches>
   <sheets>
     <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
   </sheets>
+  <pivotCaches>
+    <pivotCache cacheId="1" r:id="rId99"/>
+  </pivotCaches>
+  <slicerCaches>
+    <slicerCache r:id="rId98"/>
+  </slicerCaches>
+  <timelineCaches>
+    <timelineCache r:id="rId97"/>
+  </timelineCaches>
 </workbook>"#;
 
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
+  <Relationship Id="rId98" Type="http://schemas.microsoft.com/office/2007/relationships/slicerCache" Target="slicerCaches/slicerCache1.xml"/>
+  <Relationship Id="rId97" Type="http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition" Target="timelineCaches/timelineCacheDefinition1.xml"/>
 </Relationships>"#;
 
     let sheet = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -146,6 +154,14 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
         .part("xl/pivotCache/pivotCacheDefinition1.xml")
         .unwrap()
         .to_vec();
+    let original_slicer_cache = source_pkg
+        .part("xl/slicerCaches/slicerCache1.xml")
+        .unwrap()
+        .to_vec();
+    let original_timeline_cache = source_pkg
+        .part("xl/timelineCaches/timelineCacheDefinition1.xml")
+        .unwrap()
+        .to_vec();
 
     let dest_bytes = build_destination_package();
     let mut dest_pkg = XlsxPackage::from_bytes(&dest_bytes).expect("read destination");
@@ -157,16 +173,36 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
         dest_pkg.part("xl/pivotCache/pivotCacheDefinition1.xml"),
         Some(original_part.as_slice())
     );
+    assert_eq!(
+        dest_pkg.part("xl/slicerCaches/slicerCache1.xml"),
+        Some(original_slicer_cache.as_slice())
+    );
+    assert_eq!(
+        dest_pkg.part("xl/timelineCaches/timelineCacheDefinition1.xml"),
+        Some(original_timeline_cache.as_slice())
+    );
 
     let workbook_xml = std::str::from_utf8(dest_pkg.part("xl/workbook.xml").unwrap()).unwrap();
     assert!(workbook_xml.contains("<pivotCaches"));
     assert!(workbook_xml.contains("cacheId=\"1\""));
+    assert!(
+        workbook_xml.contains("slicerCaches"),
+        "expected workbook.xml to contain slicerCaches"
+    );
+    assert!(
+        workbook_xml.contains("timelineCaches"),
+        "expected workbook.xml to contain timelineCaches"
+    );
 
     let workbook_rels =
         std::str::from_utf8(dest_pkg.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
     assert!(workbook_rels.contains("pivotCacheDefinition"));
     assert!(workbook_rels.contains("Id=\"rId99\""));
     assert!(workbook_rels.contains("Target=\"pivotCache/pivotCacheDefinition1.xml\""));
+    assert!(workbook_rels.contains("relationships/slicerCache"));
+    assert!(workbook_rels.contains("Target=\"slicerCaches/slicerCache1.xml\""));
+    assert!(workbook_rels.contains("relationships/timelineCacheDefinition"));
+    assert!(workbook_rels.contains("Target=\"timelineCaches/timelineCacheDefinition1.xml\""));
 
     let sheet_xml = std::str::from_utf8(dest_pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert!(sheet_xml.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""));
@@ -195,5 +231,6 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
     assert!(ct.contains("PartName=\"/xl/pivotCache/pivotCacheDefinition1.xml\""));
     assert!(ct.contains("PartName=\"/xl/pivotCache/pivotCacheRecords1.xml\""));
     assert!(ct.contains("PartName=\"/xl/slicers/slicer1.xml\""));
+    assert!(ct.contains("PartName=\"/xl/slicerCaches/slicerCache1.xml\""));
     assert!(ct.contains("PartName=\"/xl/timelineCaches/timelineCacheDefinition1.xml\""));
 }
