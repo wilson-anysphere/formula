@@ -2974,23 +2974,15 @@ fn from_encrypted_xlsx_bytes_rejects_invalid_password() {
 }
 
 #[wasm_bindgen_test]
-fn from_encrypted_xlsx_bytes_rejects_xlsb_payload() {
-    use std::io::Write as _;
-
-    // Construct a minimal OPC-like ZIP that looks like an XLSB workbook by including
-    // `xl/workbook.bin` (but *not* `xl/workbook.xml`).
-    let cursor = std::io::Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(cursor);
-    let options = zip::write::FileOptions::<()>::default();
-    zip.start_file("xl/workbook.bin", options)
-        .expect("start workbook.bin");
-    zip.write_all(b"not a real xlsb").expect("write");
-    let cursor = zip.finish().expect("finish zip");
-    let xlsb_like_zip = cursor.into_inner();
-
+fn from_encrypted_xlsx_bytes_opens_xlsb_payload() {
+    let plaintext: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
     let password = "secret-password";
+
     let encrypted = formula_office_crypto::encrypt_package_to_ole(
-        &xlsb_like_zip,
+        plaintext,
         password,
         formula_office_crypto::EncryptOptions {
             key_bits: 128,
@@ -3001,17 +2993,20 @@ fn from_encrypted_xlsx_bytes_rejects_xlsb_payload() {
     )
     .expect("encrypt");
 
-    let err = match WasmWorkbook::from_encrypted_xlsx_bytes(&encrypted, password.to_string()) {
-        Ok(_) => panic!("expected xlsb payload error"),
-        Err(err) => err,
-    };
-    let message = err
-        .as_string()
-        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
-    assert!(
-        message.to_lowercase().contains("xlsb"),
-        "expected xlsb error message, got {message:?}"
-    );
+    let mut wb = WasmWorkbook::from_encrypted_xlsx_bytes(&encrypted, password.to_string()).unwrap();
+    wb.recalculate(None).unwrap();
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.value, json!("Hello"));
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 42.5);
+
+    let c1_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let c1: CellData = serde_wasm_bindgen::from_value(c1_js).unwrap();
+    assert_json_number(&c1.value, 85.0);
 }
 
 #[wasm_bindgen_test]
