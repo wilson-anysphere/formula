@@ -72,6 +72,10 @@ function createAbortError(): Error {
   return err;
 }
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
 /**
  * Cache for decoded images.
  *
@@ -425,7 +429,15 @@ export class ImageBitmapCache {
     entry.onReady.clear();
     for (const cb of callbacks) {
       try {
-        cb();
+        const result = cb() as unknown;
+        // Callbacks are expected to be synchronous, but unit tests sometimes stub them with async
+        // mocks (returning a Promise). Swallow async rejections so decode completion does not
+        // surface as an unhandled promise rejection.
+        if (isThenable(result)) {
+          void Promise.resolve(result).catch(() => {
+            // Ignore async callback failures; cache bookkeeping must remain robust.
+          });
+        }
       } catch {
         // Ignore errors from caller-provided callbacks so cache bookkeeping stays robust.
       }
