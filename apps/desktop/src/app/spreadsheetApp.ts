@@ -11832,6 +11832,7 @@ export class SpreadsheetApp {
       const y = e.clientY - this.rootTop;
 
       const viewport = this.getDrawingInteractionViewport();
+      const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
       const scroll = effectiveScrollForAnchor(this.drawingGesture.startAnchor, viewport);
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
@@ -11857,8 +11858,8 @@ export class SpreadsheetApp {
 
       const nextAnchor =
         this.drawingGesture.mode === "resize"
-          ? resizeAnchor(this.drawingGesture.startAnchor, this.drawingGesture.handle, dxPx, dyPx, this.drawingGeom)
-          : shiftAnchor(this.drawingGesture.startAnchor, dxPx, dyPx, this.drawingGeom);
+          ? resizeAnchor(this.drawingGesture.startAnchor, this.drawingGesture.handle, dxPx, dyPx, this.drawingGeom, undefined, zoom)
+          : shiftAnchor(this.drawingGesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
 
       const objects = this.listDrawingObjectsForSheet();
       const nextObjects = objects.map((obj) => (obj.id === this.drawingGesture!.objectId ? { ...obj, anchor: nextAnchor } : obj));
@@ -12051,6 +12052,7 @@ export class SpreadsheetApp {
       const y = e.clientY - this.rootTop;
 
       const viewport = this.getDrawingInteractionViewport();
+      const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
       const scroll = effectiveScrollForAnchor(gesture.startAnchor, viewport);
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
@@ -12062,8 +12064,8 @@ export class SpreadsheetApp {
 
       const nextAnchor =
         gesture.mode === "resize"
-          ? resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom)
-          : shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom);
+          ? resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, undefined, zoom)
+          : shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
 
       const objects = this.listDrawingObjectsForSheet();
       const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
