@@ -40,7 +40,9 @@ fn isinscope_uses_pivot_scope_metadata() {
         .unwrap();
 
     model
-        .add_measure("InScopeRegion", "ISINSCOPE(Customers[Region])")
+        // Identifiers are case-insensitive; verify that scope metadata and identifier resolution do
+        // not depend on exact casing.
+        .add_measure("InScopeRegion", "ISINSCOPE(customers[region])")
         .unwrap();
 
     assert_eq!(
@@ -78,4 +80,3 @@ fn isinscope_uses_pivot_scope_metadata() {
         assert_eq!(row[1], Value::Boolean(true));
     }
 }
-

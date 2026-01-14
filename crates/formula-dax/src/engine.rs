@@ -920,12 +920,10 @@ impl DaxEngine {
                         "ISINSCOPE expects a column reference".into(),
                     ));
                 };
-                Ok(Value::Boolean(
-                    filter
-                        .in_scope_columns
-                        .iter()
-                        .any(|(t, c)| t == table && c == column),
-                ))
+                Ok(Value::Boolean(filter.in_scope_columns.contains(&(
+                    normalize_ident(table),
+                    normalize_ident(column),
+                ))))
             }
             "SELECTEDVALUE" => {
                 if args.is_empty() || args.len() > 2 {
