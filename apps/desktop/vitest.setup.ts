@@ -84,3 +84,33 @@ const existing = (() => {
 if (!storageUsable(existing)) {
   installLocalStorage(new MemoryLocalStorage());
 }
+
+// JSDOM does not always provide PointerEvent. Some tests (e.g. shared-grid drawing interactions)
+// rely on dispatching pointer events; provide a minimal shim backed by MouseEvent.
+if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThis as any).MouseEvent === "function") {
+  const Base = (globalThis as any).MouseEvent as typeof MouseEvent;
+  class PointerEventShim extends Base {
+    pointerId: number;
+
+    constructor(type: string, init?: PointerEventInit) {
+      super(type, init);
+      this.pointerId = typeof init?.pointerId === "number" ? init.pointerId : 1;
+    }
+  }
+
+  try {
+    Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: PointerEventShim });
+  } catch {
+    // eslint-disable-next-line no-global-assign
+    (globalThis as any).PointerEvent = PointerEventShim;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      Object.defineProperty(window, "PointerEvent", { configurable: true, value: PointerEventShim });
+    } catch {
+      // eslint-disable-next-line no-global-assign
+      (window as any).PointerEvent = PointerEventShim;
+    }
+  }
+}

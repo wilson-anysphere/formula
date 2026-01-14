@@ -48,3 +48,20 @@ if (!localStorageUsable()) {
   // eslint-disable-next-line no-global-assign
   globalThis.localStorage = new MemoryLocalStorage();
 }
+
+// JSDOM does not always expose PointerEvent. Some UI tests dispatch pointer events;
+// provide a minimal shim backed by MouseEvent so `new PointerEvent(...)` works.
+if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThis as any).MouseEvent === "function") {
+  const Base = (globalThis as any).MouseEvent as typeof MouseEvent;
+  class PointerEventShim extends Base {
+    pointerId: number;
+
+    constructor(type: string, init?: PointerEventInit) {
+      super(type, init);
+      this.pointerId = typeof init?.pointerId === "number" ? init.pointerId : 1;
+    }
+  }
+
+  // eslint-disable-next-line no-global-assign
+  (globalThis as any).PointerEvent = PointerEventShim;
+}
