@@ -13,12 +13,25 @@ use zip::{CompressionMethod, ZipWriter};
 /// OPC + BIFF12 to exercise our reader with targeted cell and formula payloads.
 pub struct XlsbFixtureBuilder {
     sheet_name: String,
-    shared_strings: Vec<String>,
+    shared_strings: Vec<SharedStringSpec>,
     shared_strings_bin_override: Option<Vec<u8>>,
     // row -> (col -> cell)
     cells: BTreeMap<u32, BTreeMap<u32, CellSpec>>,
     row_record_trailing_bytes: Vec<u8>,
     extra_zip_parts: Vec<(String, Vec<u8>)>,
+}
+
+#[derive(Debug, Clone)]
+struct SharedStringSpec {
+    text: String,
+    /// BrtSI flags. See MS-XLSB `BrtSI`:
+    /// - bit 0: rich text runs
+    /// - bit 1: phonetic (ruby) data
+    flags: u8,
+    /// Any extra bytes appended after the base UTF-16 text in `BrtSI`.
+    ///
+    /// When `flags & 0x02 != 0` these bytes are treated as an opaque phonetic tail by our parser.
+    extra: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +76,21 @@ impl XlsbFixtureBuilder {
 
     pub fn add_shared_string(&mut self, s: &str) -> u32 {
         let idx = self.shared_strings.len() as u32;
-        self.shared_strings.push(s.to_string());
+        self.shared_strings.push(SharedStringSpec {
+            text: s.to_string(),
+            flags: 0,
+            extra: Vec::new(),
+        });
+        idx
+    }
+
+    pub fn add_shared_string_with_phonetic(&mut self, s: &str, phonetic_tail: Vec<u8>) -> u32 {
+        let idx = self.shared_strings.len() as u32;
+        self.shared_strings.push(SharedStringSpec {
+            text: s.to_string(),
+            flags: 0x02,
+            extra: phonetic_tail,
+        });
         idx
     }
 
@@ -564,7 +591,7 @@ fn build_sheet_bin(
 }
 
 fn build_shared_strings_bin(
-    strings: &[String],
+    strings: &[SharedStringSpec],
     cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>,
 ) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
@@ -586,8 +613,9 @@ fn build_shared_strings_bin(
 
     for s in strings {
         let mut si = Vec::<u8>::new();
-        si.push(0u8); // flags (rich text / phonetic) - not used by our parser.
-        write_utf16_string(&mut si, s);
+        si.push(s.flags);
+        write_utf16_string(&mut si, &s.text);
+        si.extend_from_slice(&s.extra);
         write_record(&mut out, biff12::SI, &si);
     }
 

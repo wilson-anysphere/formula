@@ -1243,6 +1243,7 @@ mod tests {
         parse_sheet_stream(
             &mut Cursor::new(&sheet_bin),
             &shared_strings,
+            None,
             &ctx,
             false,
             true,
@@ -1612,6 +1613,7 @@ fn slice_by_char_range(text: &str, start: usize, end: usize) -> &str {
 pub(crate) fn parse_sheet<R: Read>(
     sheet_bin: &mut R,
     shared_strings: &[String],
+    shared_strings_table: Option<&[SharedString]>,
     ctx: &WorkbookContext,
     preserve_parsed_parts: bool,
     decode_formulas: bool,
@@ -1620,6 +1622,7 @@ pub(crate) fn parse_sheet<R: Read>(
     let dimension = parse_sheet_stream(
         sheet_bin,
         shared_strings,
+        shared_strings_table,
         ctx,
         preserve_parsed_parts,
         decode_formulas,
@@ -1634,6 +1637,7 @@ pub(crate) fn parse_sheet<R: Read>(
 pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>(
     sheet_bin: &mut R,
     shared_strings: &[String],
+    shared_strings_table: Option<&[SharedString]>,
     ctx: &WorkbookContext,
     preserve_parsed_parts: bool,
     decode_formulas: bool,
@@ -1750,8 +1754,92 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                     }
                     biff12::STRING => {
                         let idx = rr.read_u32()? as usize;
-                        let s = shared_strings.get(idx).cloned().unwrap_or_default();
-                        (CellValue::Text(s), None, None)
+                        let text = shared_strings
+                            .get(idx)
+                            .cloned()
+                            .or_else(|| {
+                                shared_strings_table
+                                    .and_then(|table| table.get(idx))
+                                    .map(|s| s.plain_text().to_string())
+                            })
+                            .unwrap_or_default();
+
+                        let preserved = if preserve_parsed_parts {
+                            shared_strings_table
+                                .and_then(|table| table.get(idx))
+                                .and_then(|s| {
+                                    let has_rich = !s.rich_text.is_plain();
+                                    let has_phonetic = s.phonetic.is_some();
+                                    if has_rich || has_phonetic {
+                                        let rich = if has_rich {
+                                            // Convert our parsed shared-string run boundaries into an
+                                            // XLWideString-style `StrRun` byte array:
+                                            //   [ich: u32 (UTF-16 code units)][ifnt: u16][reserved: u16]
+                                            //
+                                            // This is best-effort: we preserve the original `ifnt`
+                                            // bytes (and any other run-format bytes) opaquely, and
+                                            // recompute `ich` from the decoded string.
+                                            let mut utf16_offsets: Vec<u32> =
+                                                Vec::with_capacity(s.rich_text.char_len() + 1);
+                                            let mut u16_cursor: u32 = 0;
+                                            utf16_offsets.push(0);
+                                            for ch in s.rich_text.text.chars() {
+                                                u16_cursor = u16_cursor
+                                                    .saturating_add(ch.len_utf16() as u32);
+                                                utf16_offsets.push(u16_cursor);
+                                            }
+
+                                            let mut runs_bytes: Vec<u8> =
+                                                Vec::with_capacity(s.rich_text.runs.len() * 8);
+                                            for (i, run) in s.rich_text.runs.iter().enumerate() {
+                                                let ich = utf16_offsets
+                                                    .get(run.start)
+                                                    .copied()
+                                                    .unwrap_or(run.start as u32);
+                                                runs_bytes.extend_from_slice(&ich.to_le_bytes());
+
+                                                let fmt =
+                                                    s.run_formats.get(i).map(|v| v.as_slice());
+                                                match fmt.map(|v| v.len()).unwrap_or(0) {
+                                                    0 => runs_bytes.extend_from_slice(&[0u8; 4]),
+                                                    2 => {
+                                                        runs_bytes.extend_from_slice(fmt.unwrap());
+                                                        runs_bytes.extend_from_slice(&[0u8; 2]);
+                                                    }
+                                                    4 => runs_bytes.extend_from_slice(fmt.unwrap()),
+                                                    n => {
+                                                        let fmt = fmt.unwrap();
+                                                        let take = n.min(4);
+                                                        runs_bytes.extend_from_slice(&fmt[..take]);
+                                                        if take < 4 {
+                                                            runs_bytes.extend_from_slice(
+                                                                &[0u8; 4][..4 - take],
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Some(crate::strings::OpaqueRichText {
+                                                runs: runs_bytes,
+                                            })
+                                        } else {
+                                            None
+                                        };
+
+                                        Some(ParsedXlsbString {
+                                            text: text.clone(),
+                                            rich,
+                                            phonetic: s.phonetic.clone(),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                })
+                        } else {
+                            None
+                        };
+
+                        (CellValue::Text(text), None, preserved)
                     }
                     biff12::FORMULA_STRING => {
                         // BrtFmlaString stores the cached string value as an XLWideString-like
