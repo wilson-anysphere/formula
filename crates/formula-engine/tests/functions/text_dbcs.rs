@@ -225,6 +225,77 @@ fn lenb_counts_bytes_for_chinese_korean_and_big5_dbcs_codepages() {
 }
 
 #[test]
+fn byte_count_text_functions_use_dbcs_semantics_for_other_dbcs_codepages() {
+    let mut sheet = TestSheet::new();
+
+    let cases = [
+        (936, "汉"), // GBK (Simplified Chinese)
+        (949, "가"), // EUC-KR (Korean)
+        (950, "漢"), // Big5 (Traditional Chinese)
+    ];
+
+    for (cp, ch) in cases {
+        sheet.set_text_codepage(cp);
+
+        assert_eq!(sheet.eval(&format!(r#"=LENB("{ch}")"#)), Value::Number(2.0));
+        assert_eq!(
+            sheet.eval(&format!(r#"=LENB("A{ch}B")"#)),
+            Value::Number(4.0)
+        );
+
+        assert_eq!(
+            sheet.eval(&format!(r#"=LEFTB("A{ch}B",2)"#)),
+            Value::Text("A".to_string()),
+            "LEFTB should truncate partial DBCS characters (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=LEFTB("A{ch}B",3)"#)),
+            Value::Text(format!("A{ch}")),
+            "LEFTB should include full DBCS characters when length permits (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=RIGHTB("A{ch}B",2)"#)),
+            Value::Text("B".to_string()),
+            "RIGHTB should truncate partial DBCS characters (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=RIGHTB("A{ch}B",3)"#)),
+            Value::Text(format!("{ch}B")),
+            "RIGHTB should include full DBCS characters when length permits (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=MIDB("A{ch}B",2,2)"#)),
+            Value::Text(ch.to_string()),
+            "MIDB should slice on byte indices in DBCS locales (cp={cp})"
+        );
+
+        // FINDB/SEARCHB return 1-indexed byte positions.
+        assert_eq!(
+            sheet.eval(&format!(r#"=FINDB("{ch}","A{ch}B")"#)),
+            Value::Number(2.0),
+            "FINDB should return byte position (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=SEARCHB("b","A{ch}B")"#)),
+            Value::Number(4.0),
+            "SEARCHB should return byte position (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(&format!(r#"=SEARCHB("{ch}*","A{ch}B")"#)),
+            Value::Number(2.0),
+            "SEARCHB should support wildcards with byte positions (cp={cp})"
+        );
+
+        // REPLACEB uses byte-based start/length.
+        assert_eq!(
+            sheet.eval(&format!(r#"=REPLACEB("A{ch}B",2,2,"Z")"#)),
+            Value::Text("AZB".to_string()),
+            "REPLACEB should replace by bytes in DBCS locales (cp={cp})"
+        );
+    }
+}
+
+#[test]
 fn phonetic_reads_cell_metadata_or_falls_back_to_text() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "abc");
