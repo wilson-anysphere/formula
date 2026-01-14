@@ -371,6 +371,19 @@ globalThis.crossOriginIsolated
 typeof SharedArrayBuffer !== "undefined"
 ```
 
+## Tauri capability permission identifier check
+
+Tauri v2 capabilities (`apps/desktop/src-tauri/capabilities/*.json`) reference permission identifiers that can drift when
+Tauri core/plugins are upgraded. To validate that the capability files only reference identifiers supported by your
+installed toolchain, run:
+
+```bash
+pnpm -C apps/desktop check:tauri-permissions
+```
+
+This check runs `cargo tauri permission ls` under the hood, so it requires the Tauri CLI and (on Linux) the system WebView
+dependencies.
+
 ## Production/Tauri: clipboard smoke check
 
 The packaged Tauri app should be able to round-trip key clipboard formats (at minimum `text/plain`, `text/html`, and
