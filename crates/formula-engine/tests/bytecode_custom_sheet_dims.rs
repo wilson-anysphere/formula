@@ -107,6 +107,76 @@ fn bytecode_custom_sheet_dims_column_spill_respects_sheet_col_count() {
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_row_spill_uses_referenced_sheet_dimensions() {
+    let mut engine = Engine::new();
+    // Make Sheet1 larger than Sheet2 so we can detect if the spill shape accidentally uses the
+    // formula's sheet dimensions.
+    engine
+        .set_sheet_dimensions("Sheet1", 30, 10)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 20, 7)
+        .expect("set Sheet2 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROW(Sheet2!A:A)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // Spill range should be based on Sheet2's row count (20), not Sheet1's (30).
+    let (start, end) = engine.spill_range("Sheet1", "B1").expect("spill range");
+    assert_eq!(start.row, 0);
+    assert_eq!(start.col, 1);
+    assert_eq!(end.row, 19);
+    assert_eq!(end.col, 1);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B20"), Value::Number(20.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_column_spill_uses_referenced_sheet_dimensions() {
+    let mut engine = Engine::new();
+    // Make Sheet1 larger than Sheet2 so we can detect if the spill shape accidentally uses the
+    // formula's sheet dimensions.
+    engine
+        .set_sheet_dimensions("Sheet1", 30, 10)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 20, 7)
+        .expect("set Sheet2 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "A2", "=COLUMN(Sheet2!1:1)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // Spill range should be based on Sheet2's column count (7), not Sheet1's (10).
+    let (start, end) = engine.spill_range("Sheet1", "A2").expect("spill range");
+    assert_eq!(start.row, 1);
+    assert_eq!(start.col, 0);
+    assert_eq!(end.row, 1);
+    assert_eq!(end.col, 6);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(7.0));
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_use_referenced_sheet_for_sheet_prefixed_whole_row_col_refs() {
     let mut engine = Engine::new();
     engine
