@@ -933,7 +933,8 @@ Recommended (repo script; runs static RPM queries + an installability check in a
 bash scripts/validate-linux-rpm.sh
 
 # Or validate a specific .rpm file:
-rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1)"
+rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1 || true)"
+test -n "$rpm_pkg" || { echo "No RPM found under target/**/release/bundle/rpm/*.rpm" >&2; exit 1; }
 bash scripts/validate-linux-rpm.sh --rpm "$rpm_pkg"
 
 # Skip the Fedora container step (static checks only):
@@ -1010,7 +1011,8 @@ CI note: the release workflow also runs a lightweight smoke test that validates 
 Manual inspection (useful when debugging bundling issues):
 
 ```bash
-appimage="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/appimage/*.AppImage' 2>/dev/null | head -n 1)"
+appimage="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/appimage/*.AppImage' 2>/dev/null | head -n 1 || true)"
+test -n "$appimage" || { echo "No AppImage found under target/**/release/bundle/appimage/*.AppImage" >&2; exit 1; }
 chmod +x "$appimage"
 
 tmpdir="$(mktemp -d)"
