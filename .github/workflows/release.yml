@@ -97,7 +97,6 @@ jobs:
     needs: conflict-marker-guard
     permissions:
       contents: read
-      actions: read
     runs-on: ubuntu-24.04
     outputs:
       upload: ${{ steps.params.outputs.upload }}
@@ -219,12 +218,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Verify tagged commit has successful CI run
-        if: steps.params.outputs.upload == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/check-tag-ci-status.mjs --sha "${{ github.sha }}" --workflow "CI"
-
       - name: Check pinned Tauri CLI version matches Tauri crates
         run: node scripts/ci/check-tauri-cli-version.mjs
 
@@ -340,13 +333,13 @@ jobs:
             x86_64-apple-darwin \
             aarch64-apple-darwin; do
             echo "Checking Cargo.lock for target: $target"
-            cargo metadata \
-              --locked \
-              --format-version=1 \
-              --manifest-path "$manifest" \
-              --features desktop \
-              --filter-platform "$target" \
-              >/dev/null
+          cargo metadata \
+            --locked \
+            --format-version=1 \
+            --manifest-path "$manifest" \
+            --features desktop \
+            --filter-platform "$target" \
+            >/dev/null
           done
 
           # The desktop app also bundles a WASM engine (`crates/formula-wasm`), built via wasm-pack.
@@ -358,14 +351,36 @@ jobs:
             --format-version=1 \
             --filter-platform wasm32-unknown-unknown \
             >/dev/null
-
-  build:
-    name: Build (${{ matrix.label }})
+  check-ci-status:
+    name: Verify tagged commit has successful CI run
     needs: preflight
+    if: needs.preflight.outputs.upload == 'true'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Verify tagged commit has successful CI run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-tag-ci-status.mjs --sha "${{ github.sha }}" --workflow "CI"
+
+  build: &build_job
+    name: Build (${{ matrix.label }})
+    needs:
+      - preflight
+      - check-ci-status
     permissions:
       contents: write
       id-token: write
       attestations: write
+    if: needs.preflight.outputs.upload == 'true'
     strategy:
       fail-fast: false
       # NOTE: `tauri-apps/tauri-action` updates shared GitHub Release assets (notably `latest.json`)
@@ -2249,6 +2264,14 @@ jobs:
           path: desktop-bundle-size-report.json
           if-no-files-found: warn
 
+  build-dry-run:
+    <<: *build_job
+    name: Build (dry run) (${{ matrix.label }})
+    needs: preflight
+    if: needs.preflight.outputs.upload != 'true'
+    permissions:
+      contents: read
+
   publish-updater-manifest:
     name: Publish combined updater manifest (latest.json)
     needs: [build, preflight]
@@ -2720,12 +2743,12 @@ jobs:
 
   sbom:
     name: Generate SBOM (Rust + JS)
-    needs:
-      - build
-      - preflight
+    needs: preflight
     runs-on: ubuntu-24.04
+    outputs:
+      generated: ${{ steps.generate_sbom.outcome == 'success' }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -2769,8 +2792,21 @@ jobs:
           path: sbom.spdx.json
           if-no-files-found: warn
 
+  upload-sbom:
+    name: Upload SBOM to the draft release
+    needs: [sbom, preflight]
+    if: needs.preflight.outputs.upload == 'true' && needs.sbom.outputs.generated == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sbom-${{ needs.preflight.outputs.artifact_label }}
+          path: .
+
       - name: Upload SBOM to the draft release
-        if: needs.preflight.outputs.upload == 'true' && steps.generate_sbom.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
