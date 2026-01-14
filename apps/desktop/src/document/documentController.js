@@ -1405,6 +1405,42 @@ function unwrapSingletonObjectWrapper(value) {
 }
 
 /**
+ * Unwrap singleton wrappers around arrays only when the wrapped payload is itself an array.
+ *
+ * This intentionally does NOT unwrap arbitrary `{0: ...}` objects where `"0"` could be a real
+ * key (e.g. axis override maps). We only unwrap when the object has exactly one key and that key
+ * maps to an array.
+ *
+ * @param {any} value
+ * @returns {any[] | null}
+ */
+function unwrapSingletonArrayWrapper(value) {
+  let current = value;
+  for (let depth = 0; depth < 4; depth++) {
+    if (Array.isArray(current)) {
+      // Some interop layers wrap arrays as singleton arrays-of-arrays.
+      if (current.length === 1 && Array.isArray(current[0])) {
+        current = current[0];
+        continue;
+      }
+      return current;
+    }
+    // Some interop layers wrap arrays as `{0: [...]}` objects.
+    if (
+      isJsonObject(current) &&
+      Object.keys(current).length === 1 &&
+      Object.prototype.hasOwnProperty.call(current, "0") &&
+      Array.isArray(current[0])
+    ) {
+      current = current[0];
+      continue;
+    }
+    return null;
+  }
+  return Array.isArray(current) ? current : null;
+}
+
+/**
  * @param {any} raw
  * @returns {any[] | null}
  */
@@ -6490,7 +6526,7 @@ export class DocumentController {
    */
   applyState(snapshot) {
     const parsed = JSON.parse(decodeUtf8(snapshot));
-    const sheets = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
+    const sheets = unwrapSingletonArrayWrapper(parsed?.sheets) ?? [];
 
     /** @type {Map<string, Map<string, CellState>>} */
     let nextSheets = new Map();
@@ -6777,46 +6813,30 @@ export class DocumentController {
 
       return out;
     };
-    for (const sheet of sheets) {
+    for (const rawSheet of sheets) {
+      const sheet = unwrapSingletonObjectWrapper(rawSheet);
+      if (!sheet || typeof sheet !== "object") continue;
       const rawId = unwrapSingletonId(sheet?.id);
       const sheetId =
         typeof rawId === "string" ? rawId.trim() : typeof rawId === "number" && Number.isFinite(rawId) ? String(rawId) : "";
       if (!sheetId) continue;
-      const rawName = typeof sheet?.name === "string" ? sheet.name : null;
+      const rawNameCandidate = unwrapSingletonId(sheet?.name);
+      const rawName = typeof rawNameCandidate === "string" ? rawNameCandidate : null;
       const name = rawName && rawName.trim() ? rawName.trim() : sheetId;
-      const visibilityRaw = sheet?.visibility;
+      const visibilityRaw = unwrapSingletonId(sheet?.visibility);
       const visibility =
         visibilityRaw === "hidden" || visibilityRaw === "veryHidden" || visibilityRaw === "visible" ? visibilityRaw : "visible";
-      const tabColorRaw = sheet?.tabColor;
+      const tabColorRaw = unwrapSingletonId(sheet?.tabColor ?? sheet?.tab_color);
       const tabColor =
         typeof tabColorRaw === "string" || isPlainObject(tabColorRaw) ? cloneTabColor(tabColorRaw) : undefined;
       nextSheetMeta.set(sheetId, { name, visibility, ...(tabColor ? { tabColor } : {}) });
 
-      const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
-      const viewRaw = sheet?.view && typeof sheet.view === "object" ? sheet.view : null;
-      const unwrapDrawingsArray = (value) => {
-        if (Array.isArray(value)) {
-          // Some interop layers wrap arrays as singleton arrays-of-arrays.
-          if (value.length === 1 && Array.isArray(value[0])) return value[0];
-          return value;
-        }
-        // Some interop layers wrap arrays as `{0: [...]}` objects.
-        if (
-          value &&
-          typeof value === "object" &&
-          !Array.isArray(value) &&
-          Object.keys(value).length === 1 &&
-          Object.prototype.hasOwnProperty.call(value, "0") &&
-          Array.isArray(value[0])
-        ) {
-          return value[0];
-        }
-        return null;
-      };
+      const cellList = unwrapSingletonArrayWrapper(sheet.cells) ?? [];
+      const viewRaw = unwrapSingletonObjectWrapper(sheet?.view);
       const rawDrawings =
-        unwrapDrawingsArray(sheet?.drawings) ??
-        unwrapDrawingsArray(viewRaw?.drawings) ??
-        unwrapDrawingsArray(legacyDrawingsBySheet?.[sheetId]) ??
+        unwrapSingletonArrayWrapper(sheet?.drawings) ??
+        unwrapSingletonArrayWrapper(viewRaw?.drawings) ??
+        unwrapSingletonArrayWrapper(legacyDrawingsBySheet?.[sheetId]) ??
         null;
       const view = normalizeSheetViewState({
         frozenRows: sheet?.frozenRows ?? viewRaw?.frozenRows,
@@ -6857,7 +6877,7 @@ export class DocumentController {
       nextSheets.set(sheetId, cellMap);
       nextViews.set(sheetId, view);
 
-      const defaultFormat = sheet?.defaultFormat ?? sheet?.sheetFormat ?? null;
+      const defaultFormat = unwrapSingletonId(sheet?.defaultFormat ?? sheet?.sheetFormat) ?? null;
       const defaultStyleId = defaultFormat == null ? 0 : this.styleTable.intern(defaultFormat);
       nextFormats.set(sheetId, {
         defaultStyleId,
@@ -6868,7 +6888,7 @@ export class DocumentController {
     }
     // Prefer an explicit sheet order field when present, falling back to the ordering
     // of the `sheets` array itself (legacy behavior).
-    const rawSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder : [];
+    const rawSheetOrder = unwrapSingletonArrayWrapper(parsed?.sheetOrder) ?? [];
     if (rawSheetOrder.length > 0 && nextSheets.size > 0) {
       /** @type {string[]} */
       const desiredOrder = [];

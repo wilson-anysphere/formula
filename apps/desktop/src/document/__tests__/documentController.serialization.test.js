@@ -285,3 +285,43 @@ test("applyState accepts tabColor as an ARGB string (branch/collab snapshots)", 
     tabColor: { rgb: "FF00FF00" },
   });
 });
+
+test("applyState accepts singleton-wrapped sheets/sheetOrder arrays and nested sheet/view/cells wrappers (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheetOrder: { 0: ["Sheet2", "Sheet1"] },
+      sheets: {
+        0: [
+          {
+            0: {
+              id: "Sheet2",
+              name: { 0: " Sheet Two " },
+              visibility: { 0: "hidden" },
+              tabColor: { 0: "ff00ff00" },
+              // Place view fields only under a wrapped `view` object (no top-level frozenRows/Cols).
+              view: { 0: { frozenRows: { 0: 2 }, frozenCols: [1] } },
+              // Cells list wrapped as `{0:[...]}`.
+              cells: { 0: [{ row: 0, col: 0, value: 123, formula: null, format: null }] },
+            },
+          },
+          { id: "Sheet1", cells: [] },
+        ],
+      },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  assert.deepEqual(doc.getSheetIds(), ["Sheet2", "Sheet1"]);
+  assert.deepEqual(doc.getSheetMeta("Sheet2"), {
+    name: "Sheet Two",
+    visibility: "hidden",
+    tabColor: { rgb: "FF00FF00" },
+  });
+  assert.deepEqual(doc.getSheetMeta("Sheet1"), { name: "Sheet1", visibility: "visible" });
+  assert.equal(doc.getSheetView("Sheet2").frozenRows, 2);
+  assert.equal(doc.getSheetView("Sheet2").frozenCols, 1);
+  assert.equal(doc.getCell("Sheet2", "A1").value, 123);
+});
