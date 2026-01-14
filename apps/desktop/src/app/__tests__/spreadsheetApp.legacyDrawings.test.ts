@@ -113,9 +113,11 @@ function dispatchPointerEvent(
       ? new (globalThis as any).PointerEvent(type, { ...base, pointerType })
       : (() => {
           const e = new MouseEvent(type, base);
-          Object.assign(e, { pointerId, pointerType });
           return e;
         })();
+  // Some test environments polyfill `PointerEvent` as `MouseEvent` or omit `pointerId/pointerType`.
+  // Ensure the fields exist so DrawingInteractionController can track the active gesture.
+  Object.assign(event, { pointerId, pointerType });
   target.dispatchEvent(event);
 }
 
@@ -374,6 +376,12 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         button: 0,
         pointerType: "mouse",
       });
+
+      // Pointerup should commit the new anchor to the DocumentController.
+      const committed = (app.getDocument() as any).getSheetDrawings(sheetId)[0];
+      expect(committed.anchor.type).toBe("oneCell");
+      expect(committed.anchor.from.offset.xEmu).toBe(startFromX + pxToEmu(dxPx));
+      expect(committed.anchor.from.offset.yEmu).toBe(startFromY + pxToEmu(dyPx));
 
       const updatedObjects = (app as any).listDrawingObjectsForSheet();
       const updatedObject = updatedObjects.find((o: any) => o.id === object.id);
