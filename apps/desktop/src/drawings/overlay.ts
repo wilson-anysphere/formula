@@ -253,6 +253,8 @@ export interface ChartRenderer {
   destroy?(): void;
 }
 
+const A1_CELL = { row: 0, col: 0 };
+
 export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom?: number): Rect {
   switch (anchor.type) {
     case "oneCell": {
@@ -293,7 +295,7 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom?: number
       // Use the A1 origin from the grid geometry so drawings align with
       // oneCell/twoCell anchors when the overlay canvas covers the full grid
       // surface.
-      const origin = geom.cellOriginPx({ row: 0, col: 0 });
+      const origin = geom.cellOriginPx(A1_CELL);
       return {
         x: origin.x + emuToPx(anchor.pos.xEmu, zoom),
         y: origin.y + emuToPx(anchor.pos.yEmu, zoom),
@@ -351,6 +353,28 @@ export class DrawingOverlay {
   private readonly imageHydrationNegativeCache = new Map<string, number>();
   private imageHydrationEpoch = 0;
   private hydrationRerenderScheduled = false;
+  // Scratch state to avoid per-frame allocations during render().
+  private readonly viewportRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly queryRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly visibleObjectsScratch: DrawingObject[] = [];
+  private readonly queryCandidatesScratch: DrawingObject[] = [];
+  private readonly screenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly aabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly localRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly selectedScreenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly selectedAabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly paneLayoutScratch: PaneLayout = {
+    frozenRows: 0,
+    frozenCols: 0,
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    quadrants: {
+      topLeft: { x: 0, y: 0, width: 0, height: 0 },
+      topRight: { x: 0, y: 0, width: 0, height: 0 },
+      bottomLeft: { x: 0, y: 0, width: 0, height: 0 },
+      bottomRight: { x: 0, y: 0, width: 0, height: 0 },
+    },
+  };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -594,73 +618,109 @@ export class DrawingOverlay {
     const colors = this.colorTokens ?? (this.colorTokens = resolveOverlayColorTokens(cssVarStyle));
     const zoom = resolveZoom(viewport.zoom);
 
-    const paneLayout = resolvePaneLayout(viewport, this.geom);
-    const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    const paneLayout = resolvePaneLayout(viewport, this.geom, this.paneLayoutScratch);
+    const viewportRect = this.viewportRectScratch;
+    viewportRect.x = 0;
+    viewportRect.y = 0;
+    viewportRect.width = viewport.width;
+    viewportRect.height = viewport.height;
 
     // Spatial index: compute a small candidate list for the current viewport rather
     // than scanning every drawing on each render.
     this.spatialIndex.rebuild(objects, this.geom, zoom);
-    const ordered: DrawingObject[] = [];
-    const candidatesScratch: DrawingObject[] = [];
+    const ordered = this.visibleObjectsScratch;
+    ordered.length = 0;
+    const candidatesScratch = this.queryCandidatesScratch;
+    const queryRect = this.queryRectScratch;
     const frozenContentWidth = paneLayout.quadrants.topLeft.width;
     const frozenContentHeight = paneLayout.quadrants.topLeft.height;
-    const addCandidates = (quadrant: PaneQuadrant, rect: { x: number; y: number; width: number; height: number }) => {
-      if (!(rect.width > 0 && rect.height > 0)) return;
-      const candidates = this.spatialIndex.query(rect, candidatesScratch);
-      if (candidates.length === 0) return;
+    const frozenRows = paneLayout.frozenRows;
+    const frozenCols = paneLayout.frozenCols;
+
+    // Collect visible candidates per quadrant (avoid allocating per-query rects).
+    let w = paneLayout.quadrants.topLeft.width;
+    let h = paneLayout.quadrants.topLeft.height;
+    if (w > 0 && h > 0) {
+      queryRect.x = 0;
+      queryRect.y = 0;
+      queryRect.width = w;
+      queryRect.height = h;
+      const candidates = this.spatialIndex.query(queryRect, candidatesScratch);
       for (const obj of candidates) {
         const anchor = obj.anchor;
-        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
-        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
-        const objQuadrant: PaneQuadrant =
-          anchor.type === "absolute"
-            ? "bottomRight"
-            : inFrozenRows && inFrozenCols
-              ? "topLeft"
-              : inFrozenRows
-                ? "topRight"
-                : inFrozenCols
-                  ? "bottomLeft"
-                  : "bottomRight";
-        if (objQuadrant !== quadrant) continue;
-        ordered.push(obj);
+        if (anchor.type === "absolute") continue;
+        if (anchor.from.cell.row < frozenRows && anchor.from.cell.col < frozenCols) ordered.push(obj);
       }
-    };
+    }
 
-    addCandidates("topLeft", {
-      x: 0,
-      y: 0,
-      width: paneLayout.quadrants.topLeft.width,
-      height: paneLayout.quadrants.topLeft.height,
-    });
-    addCandidates("topRight", {
-      x: viewport.scrollX + frozenContentWidth,
-      y: 0,
-      width: paneLayout.quadrants.topRight.width,
-      height: paneLayout.quadrants.topRight.height,
-    });
-    addCandidates("bottomLeft", {
-      x: 0,
-      y: viewport.scrollY + frozenContentHeight,
-      width: paneLayout.quadrants.bottomLeft.width,
-      height: paneLayout.quadrants.bottomLeft.height,
-    });
-    addCandidates("bottomRight", {
-      x: viewport.scrollX + frozenContentWidth,
-      y: viewport.scrollY + frozenContentHeight,
-      width: paneLayout.quadrants.bottomRight.width,
-      height: paneLayout.quadrants.bottomRight.height,
-    });
+    w = paneLayout.quadrants.topRight.width;
+    h = paneLayout.quadrants.topRight.height;
+    if (w > 0 && h > 0) {
+      queryRect.x = viewport.scrollX + frozenContentWidth;
+      queryRect.y = 0;
+      queryRect.width = w;
+      queryRect.height = h;
+      const candidates = this.spatialIndex.query(queryRect, candidatesScratch);
+      for (const obj of candidates) {
+        const anchor = obj.anchor;
+        if (anchor.type === "absolute") continue;
+        if (anchor.from.cell.row < frozenRows && anchor.from.cell.col >= frozenCols) ordered.push(obj);
+      }
+    }
+
+    w = paneLayout.quadrants.bottomLeft.width;
+    h = paneLayout.quadrants.bottomLeft.height;
+    if (w > 0 && h > 0) {
+      queryRect.x = 0;
+      queryRect.y = viewport.scrollY + frozenContentHeight;
+      queryRect.width = w;
+      queryRect.height = h;
+      const candidates = this.spatialIndex.query(queryRect, candidatesScratch);
+      for (const obj of candidates) {
+        const anchor = obj.anchor;
+        if (anchor.type === "absolute") continue;
+        if (anchor.from.cell.row >= frozenRows && anchor.from.cell.col < frozenCols) ordered.push(obj);
+      }
+    }
+
+    w = paneLayout.quadrants.bottomRight.width;
+    h = paneLayout.quadrants.bottomRight.height;
+    if (w > 0 && h > 0) {
+      queryRect.x = viewport.scrollX + frozenContentWidth;
+      queryRect.y = viewport.scrollY + frozenContentHeight;
+      queryRect.width = w;
+      queryRect.height = h;
+      const candidates = this.spatialIndex.query(queryRect, candidatesScratch);
+      for (const obj of candidates) {
+        const anchor = obj.anchor;
+        if (anchor.type === "absolute") {
+          ordered.push(obj);
+          continue;
+        }
+        if (anchor.from.cell.row >= frozenRows && anchor.from.cell.col >= frozenCols) ordered.push(obj);
+      }
+    }
+
+    // Release references from the query scratch array before drawing (we no longer need it).
+    candidatesScratch.length = 0;
 
     const selectedId = this.selectedId;
     let selectedScreenRect: Rect | null = null;
     let selectedClipRect: Rect | null = null;
     let selectedAabb: Rect | null = null;
     let selectedTransform: DrawingTransform | undefined = undefined;
-    const screenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
-    const aabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
-    const localRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    const screenRectScratch = this.screenRectScratch;
+    const aabbScratch = this.aabbScratch;
+    const localRectScratch = this.localRectScratch;
     let selectedDrawRotationHandle = true;
+    const headerOffsetX = paneLayout.headerOffsetX;
+    const headerOffsetY = paneLayout.headerOffsetY;
+    const scrollXBase = viewport.scrollX;
+    const scrollYBase = viewport.scrollY;
+    const qTopLeft = paneLayout.quadrants.topLeft;
+    const qTopRight = paneLayout.quadrants.topRight;
+    const qBottomLeft = paneLayout.quadrants.bottomLeft;
+    const qBottomRight = paneLayout.quadrants.bottomRight;
 
     if (drawObjects) {
       // First pass: kick off image decodes for all visible images without awaiting so
@@ -670,25 +730,24 @@ export class DrawingOverlay {
 
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const anchor = obj.anchor;
-        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
-        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
-        const scrollX = inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = inFrozenRows ? 0 : viewport.scrollY;
-        screenRectScratch.x = rect.x - scrollX + paneLayout.headerOffsetX;
-        screenRectScratch.y = rect.y - scrollY + paneLayout.headerOffsetY;
+        let scrollX = scrollXBase;
+        let scrollY = scrollYBase;
+        let clipRect = qBottomRight;
+        if (anchor.type !== "absolute") {
+          const inFrozenRows = anchor.from.cell.row < frozenRows;
+          const inFrozenCols = anchor.from.cell.col < frozenCols;
+          scrollX = inFrozenCols ? 0 : scrollXBase;
+          scrollY = inFrozenRows ? 0 : scrollYBase;
+          if (inFrozenRows) {
+            clipRect = inFrozenCols ? qTopLeft : qTopRight;
+          } else {
+            clipRect = inFrozenCols ? qBottomLeft : qBottomRight;
+          }
+        }
+        screenRectScratch.x = rect.x - scrollX + headerOffsetX;
+        screenRectScratch.y = rect.y - scrollY + headerOffsetY;
         screenRectScratch.width = rect.width;
         screenRectScratch.height = rect.height;
-        const quadrant: PaneQuadrant =
-          anchor.type === "absolute"
-            ? "bottomRight"
-            : inFrozenRows && inFrozenCols
-              ? "topLeft"
-              : inFrozenRows
-                ? "topRight"
-                : inFrozenCols
-                  ? "bottomLeft"
-                  : "bottomRight";
-        const clipRect = paneLayout.quadrants[quadrant];
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
@@ -709,50 +768,40 @@ export class DrawingOverlay {
       for (const obj of ordered) {
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const anchor = obj.anchor;
-        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
-        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
-        const scrollX = inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = inFrozenRows ? 0 : viewport.scrollY;
-        screenRectScratch.x = rect.x - scrollX + paneLayout.headerOffsetX;
-        screenRectScratch.y = rect.y - scrollY + paneLayout.headerOffsetY;
+        let scrollX = scrollXBase;
+        let scrollY = scrollYBase;
+        let clipRect = qBottomRight;
+        if (anchor.type !== "absolute") {
+          const inFrozenRows = anchor.from.cell.row < frozenRows;
+          const inFrozenCols = anchor.from.cell.col < frozenCols;
+          scrollX = inFrozenCols ? 0 : scrollXBase;
+          scrollY = inFrozenRows ? 0 : scrollYBase;
+          if (inFrozenRows) {
+            clipRect = inFrozenCols ? qTopLeft : qTopRight;
+          } else {
+            clipRect = inFrozenCols ? qBottomLeft : qBottomRight;
+          }
+        }
+        screenRectScratch.x = rect.x - scrollX + headerOffsetX;
+        screenRectScratch.y = rect.y - scrollY + headerOffsetY;
         screenRectScratch.width = rect.width;
         screenRectScratch.height = rect.height;
-        const quadrant: PaneQuadrant =
-          anchor.type === "absolute"
-            ? "bottomRight"
-            : inFrozenRows && inFrozenCols
-              ? "topLeft"
-              : inFrozenRows
-                ? "topRight"
-                : inFrozenCols
-                  ? "bottomLeft"
-                  : "bottomRight";
-        const clipRect = paneLayout.quadrants[quadrant];
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (selectedId != null && obj.id === selectedId) {
-          if (!selectedScreenRect) {
-            selectedScreenRect = {
-              x: screenRectScratch.x,
-              y: screenRectScratch.y,
-              width: screenRectScratch.width,
-              height: screenRectScratch.height,
-            };
-          } else {
-            selectedScreenRect.x = screenRectScratch.x;
-            selectedScreenRect.y = screenRectScratch.y;
-            selectedScreenRect.width = screenRectScratch.width;
-            selectedScreenRect.height = screenRectScratch.height;
-          }
+          const selScreen = this.selectedScreenRectScratch;
+          selScreen.x = screenRectScratch.x;
+          selScreen.y = screenRectScratch.y;
+          selScreen.width = screenRectScratch.width;
+          selScreen.height = screenRectScratch.height;
+          selectedScreenRect = selScreen;
           selectedClipRect = clipRect;
-          if (!selectedAabb) {
-            selectedAabb = { x: aabb.x, y: aabb.y, width: aabb.width, height: aabb.height };
-          } else {
-            selectedAabb.x = aabb.x;
-            selectedAabb.y = aabb.y;
-            selectedAabb.width = aabb.width;
-            selectedAabb.height = aabb.height;
-          }
+          const selAabb = this.selectedAabbScratch;
+          selAabb.x = aabb.x;
+          selAabb.y = aabb.y;
+          selAabb.width = aabb.width;
+          selAabb.height = aabb.height;
+          selectedAabb = selAabb;
           selectedTransform = obj.transform;
           // Charts behave like Excel chart objects: movable/resizable but not rotatable.
           selectedDrawRotationHandle = obj.kind.type !== "chart";
@@ -1025,54 +1074,65 @@ export class DrawingOverlay {
     if (selectedId != null) {
       if (selectedScreenRect && selectedClipRect && selectedAabb) {
         if (selectedClipRect.width > 0 && selectedClipRect.height > 0 && intersects(selectedAabb, selectedClipRect)) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(selectedClipRect.x, selectedClipRect.y, selectedClipRect.width, selectedClipRect.height);
-          ctx.clip();
-          drawSelection(ctx, selectedScreenRect, colors, selectedTransform, { drawRotationHandle: selectedDrawRotationHandle });
-          ctx.restore();
+          pushClipRect(ctx, selectedClipRect);
+          try {
+            drawSelection(ctx, selectedScreenRect, colors, selectedTransform, { drawRotationHandle: selectedDrawRotationHandle });
+          } finally {
+            ctx.restore();
+          }
         }
       } else {
         // Fallback: selection can still be rendered when `drawObjects` is disabled.
-        const selected = ordered.find((o) => o.id === selectedId);
+        let selected: DrawingObject | null = null;
+        for (let i = 0; i < ordered.length; i += 1) {
+          const obj = ordered[i]!;
+          if (obj.id === selectedId) {
+            selected = obj;
+            break;
+          }
+        }
         if (selected) {
           const rect = this.spatialIndex.getRect(selected.id) ?? anchorToRectPx(selected.anchor, this.geom, zoom);
           const anchor = selected.anchor;
-          const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
-          const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
-          const scrollX = inFrozenCols ? 0 : viewport.scrollX;
-          const scrollY = inFrozenRows ? 0 : viewport.scrollY;
-          const screen = {
-            x: rect.x - scrollX + paneLayout.headerOffsetX,
-            y: rect.y - scrollY + paneLayout.headerOffsetY,
-            width: rect.width,
-            height: rect.height,
-          };
-          const quadrant: PaneQuadrant =
-            anchor.type === "absolute"
-              ? "bottomRight"
-              : inFrozenRows && inFrozenCols
-                ? "topLeft"
-                : inFrozenRows
-                  ? "topRight"
-                  : inFrozenCols
-                    ? "bottomLeft"
-                    : "bottomRight";
-          const clipRect = paneLayout.quadrants[quadrant];
-          const selectionAabb = getAabbForObject(screen, selected.transform);
+          let scrollX = scrollXBase;
+          let scrollY = scrollYBase;
+          let clipRect = qBottomRight;
+          if (anchor.type !== "absolute") {
+            const inFrozenRows = anchor.from.cell.row < frozenRows;
+            const inFrozenCols = anchor.from.cell.col < frozenCols;
+            scrollX = inFrozenCols ? 0 : scrollXBase;
+            scrollY = inFrozenRows ? 0 : scrollYBase;
+            if (inFrozenRows) {
+              clipRect = inFrozenCols ? qTopLeft : qTopRight;
+            } else {
+              clipRect = inFrozenCols ? qBottomLeft : qBottomRight;
+            }
+          }
+
+          screenRectScratch.x = rect.x - scrollX + headerOffsetX;
+          screenRectScratch.y = rect.y - scrollY + headerOffsetY;
+          screenRectScratch.width = rect.width;
+          screenRectScratch.height = rect.height;
+
+          const selectionAabb = getAabbForObject(screenRectScratch, selected.transform, aabbScratch);
           if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-            ctx.clip();
-            drawSelection(ctx, screen, colors, selected.transform, { drawRotationHandle: selected.kind.type !== "chart" });
-            ctx.restore();
+            pushClipRect(ctx, clipRect);
+            try {
+              drawSelection(ctx, screenRectScratch, colors, selected.transform, { drawRotationHandle: selected.kind.type !== "chart" });
+            } finally {
+              ctx.restore();
+            }
           }
         }
       }
     }
     completed = true;
     } finally {
+      // Release object references eagerly so we don't accidentally retain the most recently visible
+      // object set when rendering pauses.
+      this.visibleObjectsScratch.length = 0;
+      this.queryCandidatesScratch.length = 0;
+
       // Prune cached shape text layouts for shapes that no longer exist.
       //
       if (completed && this.shapeTextCache.size > 0) {
@@ -1201,6 +1261,8 @@ export class DrawingOverlay {
     this.pendingImageHydrations.clear();
     this.imageHydrationNegativeCache.clear();
     this.hydrationRerenderScheduled = false;
+    this.visibleObjectsScratch.length = 0;
+    this.queryCandidatesScratch.length = 0;
 
     // Release the canvas backing store even if the DOM element is still referenced
     // by a long-lived owner (tests/hot reload). Setting width/height resets the
@@ -1566,69 +1628,81 @@ function dashPatternForPreset(preset: string | undefined, strokeWidthPx: number)
 
 type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
 
-function resolvePaneLayout(
-  viewport: Viewport,
-  geom: GridGeometry,
-): {
+type PaneLayout = {
   frozenRows: number;
   frozenCols: number;
   headerOffsetX: number;
   headerOffsetY: number;
   quadrants: Record<PaneQuadrant, Rect>;
-} {
+};
+
+const PANE_CELL_SCRATCH = { row: 0, col: 0 };
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+function resolvePaneLayout(
+  viewport: Viewport,
+  geom: GridGeometry,
+  out: PaneLayout,
+): PaneLayout {
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
   const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
 
-  const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
   const cellAreaWidth = Math.max(0, viewport.width - headerOffsetX);
   const cellAreaHeight = Math.max(0, viewport.height - headerOffsetY);
 
   // `frozenWidthPx/HeightPx` are specified in viewport coordinates (they represent
   // the frozen boundary position). When omitted, derive them from the grid geometry
   // (sheet-space frozen extents) plus any header offset.
-  const derivedFrozenContentWidth = (() => {
-    if (frozenCols <= 0) return 0;
+  let derivedFrozenContentWidth = 0;
+  if (frozenCols > 0) {
     try {
-      return geom.cellOriginPx({ row: 0, col: frozenCols }).x;
+      PANE_CELL_SCRATCH.row = 0;
+      PANE_CELL_SCRATCH.col = frozenCols;
+      derivedFrozenContentWidth = geom.cellOriginPx(PANE_CELL_SCRATCH).x;
     } catch {
-      return 0;
+      derivedFrozenContentWidth = 0;
     }
-  })();
-  const derivedFrozenContentHeight = (() => {
-    if (frozenRows <= 0) return 0;
+  }
+  let derivedFrozenContentHeight = 0;
+  if (frozenRows > 0) {
     try {
-      return geom.cellOriginPx({ row: frozenRows, col: 0 }).y;
+      PANE_CELL_SCRATCH.row = frozenRows;
+      PANE_CELL_SCRATCH.col = 0;
+      derivedFrozenContentHeight = geom.cellOriginPx(PANE_CELL_SCRATCH).y;
     } catch {
-      return 0;
+      derivedFrozenContentHeight = 0;
     }
-  })();
+  }
 
   // Only treat `frozenWidthPx/HeightPx` as meaningful when the corresponding frozen row/col
   // count is non-zero. This mirrors hit testing semantics and guards against stale pixel
   // extents if a caller updates frozen row/col counts but forgets to reset the boundary.
-  const frozenBoundaryX = clamp(
+  const frozenBoundaryX =
     frozenCols > 0
-      ? Number.isFinite(viewport.frozenWidthPx)
-        ? viewport.frozenWidthPx!
-        : headerOffsetX + derivedFrozenContentWidth
-      : headerOffsetX,
-    headerOffsetX,
-    viewport.width,
-  );
-  const frozenBoundaryY = clamp(
+      ? clampNumber(
+          Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
+          headerOffsetX,
+          viewport.width,
+        )
+      : headerOffsetX;
+  const frozenBoundaryY =
     frozenRows > 0
-      ? Number.isFinite(viewport.frozenHeightPx)
-        ? viewport.frozenHeightPx!
-        : headerOffsetY + derivedFrozenContentHeight
-      : headerOffsetY,
-    headerOffsetY,
-    viewport.height,
-  );
+      ? clampNumber(
+          Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
+          headerOffsetY,
+          viewport.height,
+        )
+      : headerOffsetY;
 
-  const frozenContentWidth = clamp(frozenBoundaryX - headerOffsetX, 0, cellAreaWidth);
-  const frozenContentHeight = clamp(frozenBoundaryY - headerOffsetY, 0, cellAreaHeight);
+  const frozenContentWidth = clampNumber(frozenBoundaryX - headerOffsetX, 0, cellAreaWidth);
+  const frozenContentHeight = clampNumber(frozenBoundaryY - headerOffsetY, 0, cellAreaHeight);
   const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
   const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
 
@@ -1637,18 +1711,28 @@ function resolvePaneLayout(
   const x1 = headerOffsetX + frozenContentWidth;
   const y1 = headerOffsetY + frozenContentHeight;
 
-  return {
-    frozenRows,
-    frozenCols,
-    headerOffsetX,
-    headerOffsetY,
-    quadrants: {
-      topLeft: { x: x0, y: y0, width: frozenContentWidth, height: frozenContentHeight },
-      topRight: { x: x1, y: y0, width: scrollableWidth, height: frozenContentHeight },
-      bottomLeft: { x: x0, y: y1, width: frozenContentWidth, height: scrollableHeight },
-      bottomRight: { x: x1, y: y1, width: scrollableWidth, height: scrollableHeight },
-    },
-  };
+  out.frozenRows = frozenRows;
+  out.frozenCols = frozenCols;
+  out.headerOffsetX = headerOffsetX;
+  out.headerOffsetY = headerOffsetY;
+  const quads = out.quadrants;
+  quads.topLeft.x = x0;
+  quads.topLeft.y = y0;
+  quads.topLeft.width = frozenContentWidth;
+  quads.topLeft.height = frozenContentHeight;
+  quads.topRight.x = x1;
+  quads.topRight.y = y0;
+  quads.topRight.width = scrollableWidth;
+  quads.topRight.height = frozenContentHeight;
+  quads.bottomLeft.x = x0;
+  quads.bottomLeft.y = y1;
+  quads.bottomLeft.width = frozenContentWidth;
+  quads.bottomLeft.height = scrollableHeight;
+  quads.bottomRight.x = x1;
+  quads.bottomRight.y = y1;
+  quads.bottomRight.width = scrollableWidth;
+  quads.bottomRight.height = scrollableHeight;
+  return out;
 }
 
 const DEFAULT_SHAPE_FONT_FAMILY = "Calibri, sans-serif";
