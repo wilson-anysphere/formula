@@ -502,7 +502,11 @@ export function createEngineClient(options?: {
         if (connectAbort === abortController) {
           connectAbort = null;
         }
-        worker?.terminate();
+        try {
+          worker?.terminate();
+        } catch {
+          // ignore
+        }
         worker = null;
       });
 
@@ -626,7 +630,11 @@ export function createEngineClient(options?: {
       enginePromise = null;
       engine?.terminate();
       engine = null;
-      worker?.terminate();
+      try {
+        worker?.terminate();
+      } catch {
+        // ignore
+      }
       worker = null;
     }
   };
