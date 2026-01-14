@@ -175,7 +175,9 @@ find_appimages() {
   done
 
   if [ "${#found[@]}" -eq 0 ]; then
-    die "No AppImage found. Build one with Tauri, or pass --appimage <path>."
+    # Caller is responsible for error handling so failures propagate correctly
+    # even when `find_appimages` is used via process substitution.
+    return 0
   fi
 
   # Deduplicate paths in case the same directory is searched twice.
@@ -208,6 +210,10 @@ else
   while IFS= read -r -d '' file; do
     APPIMAGES+=("$file")
   done < <(find_appimages)
+fi
+
+if [ "${#APPIMAGES[@]}" -eq 0 ]; then
+  die "No AppImage found. Build one with Tauri, or pass --appimage <path>."
 fi
 
 expected_file_arch_substring() {
@@ -484,7 +490,7 @@ validate_appimage() {
 }
 
 if [ "${#APPIMAGES[@]}" -eq 0 ]; then
-  die "Internal error: no AppImage paths to validate"
+  die "No AppImage paths to validate after discovery. Build an AppImage or pass --appimage <path>."
 fi
 
 if ! command -v unsquashfs >/dev/null 2>&1; then
