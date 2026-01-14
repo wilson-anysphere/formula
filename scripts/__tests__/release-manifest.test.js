@@ -180,6 +180,38 @@ test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a t
   assert.match(child.stdout, /signature OK/i);
 });
 
+test("merge-tauri-updater-manifests.mjs CLI merges manifests and writes output JSON", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-merge-"));
+  const outPath = path.join(tmpDir, "merged.json");
+
+  const child = spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "merge-tauri-updater-manifests.mjs"),
+      "--out",
+      outPath,
+      path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.a.json"),
+      path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.b.json"),
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(
+    child.status,
+    0,
+    `merge-tauri-updater-manifests.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+
+  const mergedText = await readFile(outPath, "utf8");
+  const merged = JSON.parse(mergedText);
+  assert.equal(merged.version, "0.1.0");
+  assert.ok(merged.platforms && typeof merged.platforms === "object");
+  assert.ok("windows-x86_64" in merged.platforms);
+  assert.ok("windows-aarch64" in merged.platforms);
+  assert.ok("linux-x86_64" in merged.platforms);
+  assert.ok("linux-aarch64" in merged.platforms);
+});
+
 function assetsMapFromManifest(manifest) {
   const names = getAssetNamesFromPlatforms(manifest?.platforms);
   return new Map(names.map((name) => [name, { name }]));
