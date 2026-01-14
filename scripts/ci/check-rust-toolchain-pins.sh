@@ -90,6 +90,10 @@ for workflow in "${workflow_files[@]}"; do
       # - but not `.cargo/` paths or `cargo-foo` cache keys.
       if (s ~ /cargo_agent\.sh/) return 1
       if (s ~ /check-cargo-lock-reproducible\.sh/) return 1
+      if (s ~ /check-tauri-permissions\.mjs/) return 1
+      if (s ~ /build-formula-wasm-node\.mjs/) return 1
+      if (s ~ /packages\/engine\/scripts\/build-wasm\.mjs/) return 1
+      if (s ~ /generate-function-catalog\.js/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1

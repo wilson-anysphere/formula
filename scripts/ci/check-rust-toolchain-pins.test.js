@@ -313,6 +313,84 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("fails when workflow runs check-tauri-permissions.mjs without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: node scripts/check-tauri-permissions.mjs
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running check-tauri-permissions.mjs", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - run: node scripts/check-tauri-permissions.mjs
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
+test("fails when workflow runs build-wasm.mjs without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: node packages/engine/scripts/build-wasm.mjs
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running build-wasm.mjs", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - run: node packages/engine/scripts/build-wasm.mjs
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("fails when workflow installs Rust in one job but uses cargo in another", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `
