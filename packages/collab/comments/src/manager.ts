@@ -385,7 +385,7 @@ export class CommentManager {
         .findIndex((item) => item === yComment || String(item.get("id") ?? "") === commentId);
       if (index < 0) return yComment;
 
-      const local = cloneYjsValueToLocal(yComment) as Y.Map<unknown>;
+      const local = cloneYjsValue(yComment, { Map: Y.Map, Array: Y.Array, Text: Y.Text }) as Y.Map<unknown>;
       this.doc.transact(() => {
         root.array.delete(index, 1);
         root.array.insert(index, [local]);
@@ -393,7 +393,7 @@ export class CommentManager {
       return local;
     }
 
-    const local = cloneYjsValueToLocal(yComment) as Y.Map<unknown>;
+    const local = cloneYjsValue(yComment, { Map: Y.Map, Array: Y.Array, Text: Y.Text }) as Y.Map<unknown>;
     this.doc.transact(() => {
       root.map.set(commentId, local);
     });
@@ -852,45 +852,4 @@ function hasForeignYjsTypes(value: unknown, seen: Set<any> = new Set()): boolean
   }
 
   return false;
-}
-
-function cloneYjsValueToLocal(value: any, seen: Map<any, any> = new Map()): any {
-  if (value && typeof value === "object") {
-    const cached = seen.get(value);
-    if (cached) return cached;
-  }
-
-  const map = getYMap(value);
-  if (map) {
-    const out = new Y.Map();
-    seen.set(value, out);
-    map.forEach((v: any, k: string) => {
-      out.set(k, cloneYjsValueToLocal(v, seen));
-    });
-    return out;
-  }
-
-  const array = getYArray(value);
-  if (array) {
-    const out = new Y.Array();
-    seen.set(value, out);
-    for (const item of array.toArray()) {
-      out.push([cloneYjsValueToLocal(item, seen)]);
-    }
-    return out;
-  }
-
-  const text = getYText(value);
-  if (text) {
-    const out = new Y.Text();
-    seen.set(value, out);
-    out.applyDelta(structuredClone(text.toDelta()));
-    return out;
-  }
-
-  if (value && typeof value === "object") {
-    return structuredClone(value);
-  }
-
-  return value;
 }
