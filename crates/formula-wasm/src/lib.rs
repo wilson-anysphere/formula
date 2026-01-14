@@ -4476,7 +4476,7 @@ impl WasmWorkbook {
             // Some workbooks persist hidden state as outline/group collapse flags rather than the
             // user-hidden bit (`col_properties[*].hidden`), so include outline-based hidden state as
             // well.
-            for (&index, entry) in sheet.outline.cols.iter() {
+            for (index, entry) in sheet.outline.cols.iter() {
                 if entry.hidden.is_hidden() && index > 0 {
                     let col = index - 1;
                     if col < EXCEL_MAX_COLS {

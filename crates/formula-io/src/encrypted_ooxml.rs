@@ -2,7 +2,8 @@
 //!
 //! This module is behind the `encrypted-workbooks` feature because password-based decryption is
 //! still landing.
-
+// Some helpers in this module are used only by fixtures/tests while encrypted workbook support is
+// being hardened. Keep `cargo check` warning-free in default builds.
 #![allow(dead_code)]
 
 use std::io;
