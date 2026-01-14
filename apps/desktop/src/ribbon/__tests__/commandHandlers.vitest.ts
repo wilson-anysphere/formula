@@ -185,4 +185,22 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "home.number.moreFormats.custom")).toBe(true);
     expect(promptCustomNumberFormat).toHaveBeenCalledTimes(1);
   });
+
+  it("routes filter commands through ctx auto-filter hooks", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    ctx.toggleAutoFilter = vi.fn();
+    ctx.clearAutoFilter = vi.fn();
+    ctx.reapplyAutoFilter = vi.fn();
+
+    expect(handleRibbonCommand(ctx, "data.sortFilter.filter")).toBe(true);
+    expect(ctx.toggleAutoFilter).toHaveBeenCalledTimes(1);
+
+    expect(handleRibbonCommand(ctx, "data.sortFilter.clear")).toBe(true);
+    expect(ctx.clearAutoFilter).toHaveBeenCalledTimes(1);
+
+    expect(handleRibbonCommand(ctx, "data.sortFilter.reapply")).toBe(true);
+    expect(ctx.reapplyAutoFilter).toHaveBeenCalledTimes(1);
+  });
 });

@@ -8198,6 +8198,23 @@ const ribbonCommandHandlersCtx = {
     void commandRegistry.executeCommand(commandId, ...args).catch((err) => onRibbonCommandError(commandId, err));
   },
   sortSelection: (options: { order: "ascending" | "descending" }) => sortSelection(app, options),
+  toggleAutoFilter: () => {
+    // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:
+    // - if any filter is active on the sheet, clear it
+    // - otherwise, prompt for values and apply a simple row-hiding filter
+    if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
+      clearRibbonAutoFiltersForActiveSheet();
+      return;
+    }
+    void applyRibbonAutoFilterFromSelection().catch((err) => {
+      console.error("Failed to apply filter:", err);
+      showToast(`Failed to apply filter: ${String(err)}`, "error");
+      scheduleRibbonSelectionFormatStateUpdate();
+      app.focus();
+    });
+  },
+  clearAutoFilter: () => clearRibbonAutoFiltersForActiveSheet(),
+  reapplyAutoFilter: () => reapplyRibbonAutoFiltersForActiveSheet(),
   openCustomSort: (commandId: string) => {
     handleCustomSortCommand(commandId, {
       isEditing: isSpreadsheetEditing,
@@ -8794,7 +8811,14 @@ function handleRibbonCommand(commandId: string): void {
     if (
       commandId === "home.editing.sortFilter.customSort" ||
       commandId === "data.sortFilter.sort.customSort" ||
-      commandId === "home.number.moreFormats.custom"
+      commandId === "home.number.moreFormats.custom" ||
+      commandId === "home.editing.sortFilter.filter" ||
+      commandId === "data.sortFilter.filter" ||
+      commandId === "home.editing.sortFilter.clear" ||
+      commandId === "data.sortFilter.clear" ||
+      commandId === "data.sortFilter.advanced.clearFilter" ||
+      commandId === "home.editing.sortFilter.reapply" ||
+      commandId === "data.sortFilter.reapply"
     ) {
       if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
         return;
@@ -9013,32 +9037,6 @@ function handleRibbonCommand(commandId: string): void {
         controller.openPanel(PanelIds.SOLVER);
         return;
       }
-      case "home.editing.sortFilter.filter":
-      case "data.sortFilter.filter": {
-        // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:
-        // - if any filter is active on the sheet, clear it
-        // - otherwise, prompt for values and apply a simple row-hiding filter
-        if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
-          clearRibbonAutoFiltersForActiveSheet();
-          return;
-        }
-        void applyRibbonAutoFilterFromSelection().catch((err) => {
-          console.error("Failed to apply filter:", err);
-          showToast(`Failed to apply filter: ${String(err)}`, "error");
-          scheduleRibbonSelectionFormatStateUpdate();
-          app.focus();
-        });
-        return;
-      }
-      case "home.editing.sortFilter.clear":
-      case "data.sortFilter.clear":
-      case "data.sortFilter.advanced.clearFilter":
-        clearRibbonAutoFiltersForActiveSheet();
-        return;
-      case "home.editing.sortFilter.reapply":
-      case "data.sortFilter.reapply":
-        reapplyRibbonAutoFiltersForActiveSheet();
-        return;
       case "view.freezePanes":
       case "view.freezeTopRow":
       case "view.freezeFirstColumn":

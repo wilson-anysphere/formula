@@ -62,6 +62,9 @@ export type RibbonCommandHandlerContext = {
   sortSelection?: (options: { order: "ascending" | "descending" }) => void;
   openCustomSort?: (commandId: string) => void;
   promptCustomNumberFormat?: () => void;
+  toggleAutoFilter?: () => void;
+  clearAutoFilter?: () => void;
+  reapplyAutoFilter?: () => void;
   openFormatCells?: () => void;
   /**
    * Pass-through for app shell concerns. Not currently used by formatting handlers, but
@@ -997,6 +1000,34 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
         ctx.openCustomSort(commandId);
       } else {
         ctx.showToast?.("Custom sort is not available.", "error");
+        ctx.app.focus();
+      }
+      return true;
+    case "home.editing.sortFilter.filter":
+    case "data.sortFilter.filter":
+      if (ctx.toggleAutoFilter) {
+        ctx.toggleAutoFilter();
+      } else {
+        ctx.showToast?.("Filtering is not available.", "error");
+        ctx.app.focus();
+      }
+      return true;
+    case "home.editing.sortFilter.clear":
+    case "data.sortFilter.clear":
+    case "data.sortFilter.advanced.clearFilter":
+      if (ctx.clearAutoFilter) {
+        ctx.clearAutoFilter();
+      } else {
+        ctx.showToast?.("Filtering is not available.", "error");
+        ctx.app.focus();
+      }
+      return true;
+    case "home.editing.sortFilter.reapply":
+    case "data.sortFilter.reapply":
+      if (ctx.reapplyAutoFilter) {
+        ctx.reapplyAutoFilter();
+      } else {
+        ctx.showToast?.("Filtering is not available.", "error");
         ctx.app.focus();
       }
       return true;
