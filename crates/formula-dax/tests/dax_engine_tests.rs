@@ -507,6 +507,26 @@ fn calculate_table_filter_over_values_column_filters_by_column_values() {
 }
 
 #[test]
+fn calculate_table_filter_var_over_values_column_filters_by_column_values() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    // Same as `calculate_table_filter_over_values_column_filters_by_column_values`, but ensures
+    // the semantics hold when the projected table is routed through a table variable.
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR Regions = FILTER(VALUES(Customers[Region]), Customers[Region] = \"East\") RETURN CALCULATE([Total Sales], Regions)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 38.0.into());
+}
+
+#[test]
 fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
     let mut model = build_model();
     model
