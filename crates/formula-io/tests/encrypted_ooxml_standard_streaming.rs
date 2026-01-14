@@ -50,6 +50,7 @@ fn decrypts_standard_fixture_via_open_workbook_with_options() {
     .expect("open standard.xlsx with password");
 
     let decrypted_model = match decrypted {
+        Workbook::Model(workbook) => workbook,
         Workbook::Xlsx(package) => {
             // Materialize the decrypted ZIP bytes and parse them into a model workbook so we can
             // validate cell contents.
@@ -59,7 +60,9 @@ fn decrypts_standard_fixture_via_open_workbook_with_options() {
             formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
                 .expect("parse decrypted bytes to model workbook")
         }
-        other => panic!("expected Workbook::Xlsx for decrypted Standard workbook, got {other:?}"),
+        other => panic!(
+            "expected Workbook::Model or Workbook::Xlsx for decrypted Standard workbook, got {other:?}"
+        ),
     };
     assert_expected_contents(&decrypted_model);
 

@@ -1469,7 +1469,6 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         {
             break;
         }
-
         buf.clear();
     }
 
@@ -3590,7 +3589,6 @@ fn verify_agile_integrity(
             .ok_or(OffcryptoError::InvalidEncryptionInfo {
                 context: "decrypted HMAC value is truncated",
             })?;
-
     fn compute_hmac(hash: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
         match hash {
             HashAlgorithm::Md5 => {
@@ -3726,39 +3724,28 @@ fn decrypt_agile_stream(
         });
     }
 
-    // Derive the secret key (also validates the password via verifier hashes).
-    //
-    // This helper includes compatibility fallback behavior for password key-encryptor IV derivation
-    // (some producers use per-blob derived IVs instead of `iv = saltValue`).
+    // Derive the secret key (also validates the password via verifier hashes), while supporting
+    // both IV derivation schemes observed in the wild.
     let secret_key = agile_secret_key_with_options(info, password, options)?;
 
+    let plaintext = agile_decrypt_package(info, secret_key.as_slice(), encrypted_package)?;
     if options.verify_integrity {
-        let data_integrity =
-            info.data_integrity
-                .as_ref()
-                .ok_or(OffcryptoError::InvalidEncryptionInfo {
-                    context: "missing <dataIntegrity> element",
-                })?;
-        match verify_agile_integrity(info, data_integrity, &secret_key, encrypted_package, None) {
-            Ok(()) => {}
-            Err(OffcryptoError::IntegrityCheckFailed) => {
-                // Compatibility: some real-world producers compute the HMAC over the *decrypted*
-                // plaintext bytes, so we may need to decrypt before we can validate integrity.
-                let decrypted = agile_decrypt_package(info, &secret_key, encrypted_package)?;
-                verify_agile_integrity(
-                    info,
-                    data_integrity,
-                    &secret_key,
-                    encrypted_package,
-                    Some(&decrypted),
-                )?;
-                return Ok(decrypted);
-            }
-            Err(other) => return Err(other),
-        }
+        let data_integrity = info
+            .data_integrity
+            .as_ref()
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "missing <dataIntegrity> element",
+            })?;
+        verify_agile_integrity(
+            info,
+            data_integrity,
+            secret_key.as_slice(),
+            encrypted_package,
+            Some(plaintext.as_slice()),
+        )?;
     }
 
-    agile_decrypt_package(info, &secret_key, encrypted_package)
+    Ok(plaintext)
 }
 
 fn decrypt_standard_stream(

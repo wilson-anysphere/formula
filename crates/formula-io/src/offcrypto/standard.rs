@@ -608,20 +608,51 @@ pub(crate) fn verify_password_standard_with_key(
                 return Ok(true);
             }
 
-            // Compatibility fallback: AES-CBC (no padding) with a derived IV.
-            let iv = derive_standard_aes_iv(info)?;
-            decrypt_aes_cbc_no_padding_in_place(key, &iv, ciphertext.as_mut_slice())
-                .map_err(|err| {
-                    let msg = match err {
-                        AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
-                        AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
-                        AesCbcDecryptError::InvalidCiphertextLength(_) => {
-                            "invalid AES ciphertext length"
-                        }
-                    };
-                    OffcryptoError::crypto(msg)
-                })?;
-            verifier_hash_matches(info, ciphertext.as_slice())
+            // Compatibility fallback: AES-CBC (no padding) with a derived IV (streaming CBC over the
+            // concatenated verifier blob).
+            let iv = derive_standard_aes_iv(info, 0)?;
+            decrypt_aes_cbc_no_padding_in_place(key, &iv, ciphertext.as_mut_slice()).map_err(|err| {
+                let msg = match err {
+                    AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
+                    AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
+                    AesCbcDecryptError::InvalidCiphertextLength(_) => "invalid AES ciphertext length",
+                };
+                OffcryptoError::crypto(msg)
+            })?;
+            if verifier_hash_matches(info, ciphertext.as_slice())? {
+                return Ok(true);
+            }
+
+            // Compatibility fallback: AES-CBC (no padding) with per-field IVs. Some producers decrypt
+            // `encryptedVerifier` and `encryptedVerifierHash` as separate CBC streams (resetting the
+            // IV between fields) with block keys 0 and 1.
+            let mut verifier = info.verifier.encrypted_verifier.to_vec();
+            let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+
+            let iv_verifier = derive_standard_aes_iv(info, 0)?;
+            decrypt_aes_cbc_no_padding_in_place(key, &iv_verifier, &mut verifier).map_err(|err| {
+                let msg = match err {
+                    AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
+                    AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
+                    AesCbcDecryptError::InvalidCiphertextLength(_) => "invalid AES ciphertext length",
+                };
+                OffcryptoError::crypto(msg)
+            })?;
+
+            let iv_hash = derive_standard_aes_iv(info, 1)?;
+            decrypt_aes_cbc_no_padding_in_place(key, &iv_hash, &mut verifier_hash).map_err(|err| {
+                let msg = match err {
+                    AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
+                    AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
+                    AesCbcDecryptError::InvalidCiphertextLength(_) => "invalid AES ciphertext length",
+                };
+                OffcryptoError::crypto(msg)
+            })?;
+
+            let mut combined = Vec::with_capacity(verifier.len() + verifier_hash.len());
+            combined.extend_from_slice(&verifier);
+            combined.extend_from_slice(&verifier_hash);
+            verifier_hash_matches(info, &combined)
         }
         CALG_RC4 => {
             rc4_apply_keystream(key, ciphertext.as_mut_slice())?;
@@ -727,7 +758,7 @@ pub(crate) fn derive_key_standard_for_block(
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
     }
-}
+    }
 
 pub(crate) fn derive_file_key_standard(
     info: &StandardEncryptionInfo,
@@ -736,13 +767,14 @@ pub(crate) fn derive_file_key_standard(
     derive_key_standard_for_block(info, password, 0)
 }
 
-fn derive_standard_aes_iv(info: &StandardEncryptionInfo) -> Result<[u8; AES_BLOCK_SIZE], OffcryptoError> {
-    // Compatibility fallback IV derivation for non-standard Standard/CryptoAPI AES producers that
-    // encrypt verifier fields with AES-CBC (baseline MS-OFFCRYPTO/ECMA-376 Standard AES uses
-    // AES-ECB and has no IV).
+fn derive_standard_aes_iv(
+    info: &StandardEncryptionInfo,
+    block_index: u32,
+) -> Result<[u8; AES_BLOCK_SIZE], OffcryptoError> {
+    // Standard/CryptoAPI AES IV derivation observed in the wild for CBC variants:
     //
-    // iv = Hash(salt || LE32(0))[0..16]
-    let block = 0u32.to_le_bytes();
+    //   iv = Hash(salt || LE32(block_index))[0..16]
+    let block = block_index.to_le_bytes();
     let iv_full = hash(info.header.alg_id_hash, &[&info.verifier.salt, &block])?;
     if iv_full.len() < AES_BLOCK_SIZE {
         return Err(OffcryptoError::crypto(format!(
