@@ -323,6 +323,32 @@ fn agile_encryption_accepts_header_plus_plaintext_hmac_target() {
 }
 
 #[test]
+fn agile_header_plus_plaintext_hmac_accepts_reserved_high_dword_size_header() {
+    // Some producers treat the 8-byte EncryptedPackage size prefix as `(u32 size, u32 reserved)`
+    // and may emit a non-zero reserved high DWORD. Ensure the header+plaintext HMAC target variant
+    // still decrypts successfully in that case.
+    let password = "Password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
+    ));
+    let mut size_header = [0u8; 8];
+    size_header[..4].copy_from_slice(&(plaintext.len() as u32).to_le_bytes());
+    size_header[4..8].copy_from_slice(&1u32.to_le_bytes()); // reserved high DWORD
+
+    let ole_bytes = encrypt_agile_ooxml_ole_header_plus_plaintext_hmac_with_size_header(
+        plaintext,
+        password,
+        size_header,
+    );
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+}
+
+#[test]
 fn agile_header_plus_plaintext_hmac_ignores_trailing_encrypted_package_bytes() {
     let password = "Password";
     let plaintext = include_bytes!(concat!(
@@ -1337,6 +1363,19 @@ fn encrypt_agile_ooxml_ole_plaintext_hmac(plaintext: &[u8], password: &str) -> V
 }
 
 fn encrypt_agile_ooxml_ole_header_plus_plaintext_hmac(plaintext: &[u8], password: &str) -> Vec<u8> {
+    let size_header = (plaintext.len() as u64).to_le_bytes();
+    encrypt_agile_ooxml_ole_header_plus_plaintext_hmac_with_size_header(
+        plaintext,
+        password,
+        size_header,
+    )
+}
+
+fn encrypt_agile_ooxml_ole_header_plus_plaintext_hmac_with_size_header(
+    plaintext: &[u8],
+    password: &str,
+    size_header: [u8; 8],
+) -> Vec<u8> {
     // Deterministic parameters (not intended to be secure).
     //
     // This test helper is identical to `encrypt_agile_ooxml_ole` except that `dataIntegrity`'s HMAC
@@ -1401,7 +1440,6 @@ fn encrypt_agile_ooxml_ole_header_plus_plaintext_hmac(plaintext: &[u8], password
     // Encrypt the package data in 4096-byte segments using a single package key and per-block IVs
     // derived from the keyData salt + block index.
     let mut encrypted_package = Vec::new();
-    let size_header = (plaintext.len() as u64).to_le_bytes();
     encrypted_package.extend_from_slice(&size_header);
 
     const SEGMENT_LEN: usize = 4096;
