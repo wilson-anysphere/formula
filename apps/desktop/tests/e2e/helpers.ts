@@ -458,6 +458,34 @@ export async function waitForDesktopReady(page: Page, options: DesktopReadyOptio
         await menuWait;
       }
 
+      // Mirror `gotoDesktop` so reload paths also avoid flaking when the built-in
+      // "formula.e2e-events" extension prompts for storage permission.
+      await page.evaluate(() => {
+        const key = "formula.extensionHost.permissions";
+        const extensionId = "formula.e2e-events";
+        let existing: any = {};
+        try {
+          const raw = localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+          existing = {};
+        }
+        const current = existing[extensionId];
+        const merged =
+          current && typeof current === "object" && !Array.isArray(current)
+            ? { ...current, storage: true }
+            : { storage: true };
+        existing[extensionId] = merged;
+        try {
+          localStorage.setItem(key, JSON.stringify(existing));
+        } catch {
+          // ignore storage errors (disabled/quota/etc.)
+        }
+      });
+
       // If the desktop shell threw during startup (uncaught exception), the app can partially
       // mount while leaving other regions uninitialized. Surface those failures early so flaky
       // "element not found" assertions are easier to debug.
