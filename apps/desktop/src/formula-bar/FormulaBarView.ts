@@ -2730,14 +2730,17 @@ export class FormulaBarView {
     if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && isFormulaText(this.model.draft)) {
       e.preventDefault();
 
-      const prevText = this.textarea.value;
-      const cursorStart = this.textarea.selectionStart ?? prevText.length;
-      const cursorEnd = this.textarea.selectionEnd ?? prevText.length;
+      // F4 toggles absolute references without mutating the underlying draft text. Prefer the
+      // model's cached draft over reading `textarea.value` (which can allocate/copy a very large
+      // string for long formulas).
+      const prevText = this.model.draft;
+      const draftLen = prevText.length;
+      const cursorStart = this.textarea.selectionStart ?? draftLen;
+      const cursorEnd = this.textarea.selectionEnd ?? draftLen;
 
       // Ensure model-derived reference metadata is current for the F4 operation
       // (the selection may have changed without triggering our keyup/select listeners yet).
       if (
-        this.model.draft !== prevText ||
         this.model.cursorStart !== cursorStart ||
         this.model.cursorEnd !== cursorEnd
       ) {
@@ -2791,9 +2794,12 @@ export class FormulaBarView {
     if (e.key === "Enter" && e.altKey) {
       e.preventDefault();
 
-      const prevText = this.textarea.value;
-      const cursorStart = this.textarea.selectionStart ?? prevText.length;
-      const cursorEnd = this.textarea.selectionEnd ?? prevText.length;
+      // Alt+Enter inserts a newline/indentation but doesn't otherwise depend on reading the DOM.
+      // Prefer the model draft string to avoid allocating large strings for long formulas.
+      const prevText = this.model.draft;
+      const draftLen = prevText.length;
+      const cursorStart = this.textarea.selectionStart ?? draftLen;
+      const cursorEnd = this.textarea.selectionEnd ?? draftLen;
 
       const indentation = computeFormulaIndentation(prevText, cursorStart);
       const insertion = `\n${indentation}`;
