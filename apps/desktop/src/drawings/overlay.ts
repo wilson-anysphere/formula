@@ -524,7 +524,15 @@ export class DrawingOverlay {
       const cb = this.requestRender;
       if (cb) {
         try {
-          cb();
+          const result = cb() as unknown;
+          // `requestRender` is expected to be synchronous, but unit tests sometimes stub it with an async
+          // mock (returning a Promise). Swallow async rejections to avoid unhandled promise rejection
+          // noise when image hydration triggers follow-up renders.
+          if (typeof (result as { then?: unknown } | null)?.then === "function") {
+            void Promise.resolve(result).catch(() => {
+              // Best-effort: rendering hooks should never throw from cache callbacks.
+            });
+          }
         } catch {
           // Best-effort: rendering hooks should never throw from cache callbacks.
         }
