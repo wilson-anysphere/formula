@@ -338,9 +338,10 @@ restrictions (notably: no `]`), so this split is unambiguous.
 * **External workbook defined names:** name references cannot be qualified to an external workbook
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
-* **External workbook metadata functions:** workbook/sheet metadata functions such as `SHEET(...)`,
-  `SHEETS(...)`, `CELL(...)`, and `INFO(...)` currently operate on the *current workbook* and do not
-  introspect external workbooks referenced via `[Book.xlsx]...`.
+* **External workbook metadata functions:** `SHEET(...)` / `SHEETS(...)` consult
+  `ExternalValueProvider::sheet_order` when evaluating external sheet references / 3D spans.
+  Other workbook metadata functions such as `CELL(...)` and `INFO(...)` still operate on the
+  *current workbook* and do not query external workbook metadata beyond the external sheet key.
 * **Volatility / invalidation:** external workbook references are treated as **volatile** by default
   (they are reevaluated on every `Engine::recalculate()` pass). This matches Excel and is
   configurable via `Engine::set_external_refs_volatile(...)`.
