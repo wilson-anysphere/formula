@@ -157,6 +157,18 @@ test("CollabSession sheet view binder does not write view state into Yjs when se
     dc.setFrozen("Sheet1", 2, 1, { label: "Freeze (local-only)" });
     dc.setColWidth("Sheet1", 0, 120, { label: "Resize Column (local-only)" });
     dc.setRowHeight("Sheet1", 1, 40, { label: "Resize Row (local-only)" });
+    dc.setSheetDrawings(
+      "Sheet1",
+      [
+        {
+          id: "drawing-local",
+          zOrder: 0,
+          kind: { type: "image", imageId: "img-local" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+        },
+      ],
+      { label: "Insert Drawing (local-only)" },
+    );
 
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(updates, 0, "expected no Yjs updates from local sheet view changes in read-only role");
@@ -167,6 +179,14 @@ test("CollabSession sheet view binder does not write view state into Yjs when se
       colWidths: { "0": 120 },
       rowHeights: { "1": 40 },
     });
+    assert.deepEqual(dc.getSheetDrawings("Sheet1"), [
+      {
+        id: "drawing-local",
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-local" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ]);
 
     // Remote Yjs updates should still apply to the DocumentController.
     updates = 0;
@@ -197,6 +217,44 @@ test("CollabSession sheet view binder does not write view state into Yjs when se
       colWidths: { "0": 200 },
       rowHeights: { "1": 10 },
     });
+
+    // Remote drawings updates should still apply to the DocumentController in read-only mode.
+    updates = 0;
+    doc.transact(
+      () => {
+        const sheet = session.sheets.toArray().find((s) => (s?.get?.("id") ?? s?.id) === "Sheet1") ?? null;
+        assert.ok(sheet, "expected Sheet1 entry in Yjs");
+        const view = sheet.get("view");
+        const drawings = [
+          {
+            id: "drawing-remote",
+            zOrder: 1,
+            kind: { type: "image", imageId: "img-remote" },
+            anchor: { type: "absolute", pos: { xEmu: 10, yEmu: 10 }, size: { cx: 2, cy: 3 } },
+          },
+        ];
+        if (view && typeof view.set === "function") {
+          view.set("drawings", drawings);
+        } else {
+          sheet.set("view", { ...(view ?? {}), drawings });
+        }
+      },
+      REMOTE_ORIGIN,
+    );
+
+    await waitForCondition(() => {
+      assert.deepEqual(dc.getSheetDrawings("Sheet1"), [
+        {
+          id: "drawing-remote",
+          zOrder: 1,
+          kind: { type: "image", imageId: "img-remote" },
+          anchor: { type: "absolute", pos: { xEmu: 10, yEmu: 10 }, size: { cx: 2, cy: 3 } },
+        },
+      ]);
+      return true;
+    });
+
+    assert.ok(updates > 0, "expected remote Yjs drawing changes to produce doc updates");
   } finally {
     doc.off("update", onUpdate);
     binder.destroy();
