@@ -31,6 +31,9 @@ describe("imageBytesBinder", () => {
     const binderA = bindImageBytesToCollabSession({ session: sessionA, images: storeA });
     const binderB = bindImageBytesToCollabSession({ session: sessionB, images: storeB });
 
+    // Binder should be read-only on startup and avoid creating empty Yjs roots.
+    expect(metadata.get("drawingImages")).toBeUndefined();
+
     const image: ImageEntry = { id: "img-1", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3, 4]) };
     storeA.set(image);
     binderA.onLocalImageInserted(image);
@@ -39,6 +42,39 @@ describe("imageBytesBinder", () => {
     expect(received).toBeTruthy();
     expect(received?.mimeType).toBe("image/png");
     expect(Array.from(received?.bytes ?? [])).toEqual([1, 2, 3, 4]);
+
+    binderA.destroy();
+    binderB.destroy();
+  });
+
+  it("is idempotent and does not re-hydrate on unrelated metadata changes", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const storeA = createMemoryImageStore();
+    const storeB = createMemoryImageStore();
+    let storeBSets = 0;
+    storeB.set = (entry: ImageEntry) => {
+      storeBSets += 1;
+      storeB.map.set(entry.id, entry);
+    };
+
+    const sessionA = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const sessionB = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binderA = bindImageBytesToCollabSession({ session: sessionA, images: storeA });
+    const binderB = bindImageBytesToCollabSession({ session: sessionB, images: storeB });
+
+    const image: ImageEntry = { id: "img-1", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3, 4]) };
+    binderA.onLocalImageInserted(image);
+    expect(storeBSets).toBe(1);
+
+    doc.transact(() => {
+      metadata.set("unrelatedKey", "value");
+    });
+
+    // Unrelated metadata changes should not cause repeated base64 decoding / ImageStore writes.
+    expect(storeBSets).toBe(1);
 
     binderA.destroy();
     binderB.destroy();
@@ -71,4 +107,3 @@ describe("imageBytesBinder", () => {
     binderB.destroy();
   });
 });
-
