@@ -332,13 +332,15 @@ test("fails when xlsx appears only in UT*TypeDeclarations (not CFBundleDocumentT
     <dict>
       <key>CFBundleTypeExtensions</key>
       <array>
-${extsXml}
+ ${extsXml}
       </array>
     </dict>
   </array>
   <key>UTImportedTypeDeclarations</key>
   <array>
     <dict>
+      <key>UTTypeIdentifier</key>
+      <string>org.openxmlformats.spreadsheetml.sheet</string>
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
@@ -355,4 +357,56 @@ ${extsXml}
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Missing macOS file association registration/i);
+});
+
+test("passes when xlsx is registered via LSItemContentTypes + UT*TypeDeclarations (macOS Info.plist)", () => {
+  const config = baseConfig();
+  const docTypeExts = requiredFileExtensions.filter((ext) => ext !== "xlsx");
+  const extsXml = docTypeExts.map((ext) => `        <string>${ext}</string>`).join("\n");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>formula</string>
+      </array>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+${extsXml}
+      </array>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>org.openxmlformats.spreadsheetml.sheet</string>
+      </array>
+    </dict>
+  </array>
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>org.openxmlformats.spreadsheetml.sheet</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>xlsx</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>
+`;
+
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.equal(proc.status, 0, proc.stderr);
 });

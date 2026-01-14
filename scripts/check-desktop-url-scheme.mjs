@@ -81,7 +81,7 @@ function errBlock(heading, details) {
  * @returns {string | null}
  */
 function extractPlistArrayBlock(plistXml, keyName) {
-  const keyRe = new RegExp(`<key>\\s*${keyName}\\s*<\\/key>`, "i");
+  const keyRe = new RegExp(`<key>\\s*${escapeRegExp(keyName)}\\s*<\\/key>`, "i");
   const keyMatch = keyRe.exec(plistXml);
   if (!keyMatch || keyMatch.index == null) return null;
 
@@ -117,6 +117,252 @@ function extractPlistArrayBlock(plistXml, keyName) {
 
   if (endIdx < 0) return null;
   return plistXml.slice(startIdx, endIdx);
+}
+
+/**
+ * Best-effort extraction of the `<dict>...</dict>` block immediately following a
+ * `<key>...</key>` in an XML plist.
+ *
+ * @param {string} plistXml
+ * @param {string} keyName
+ * @returns {string | null}
+ */
+function extractPlistDictBlock(plistXml, keyName) {
+  const keyRe = new RegExp(`<key>\\s*${escapeRegExp(keyName)}\\s*<\\/key>`, "i");
+  const keyMatch = keyRe.exec(plistXml);
+  if (!keyMatch || keyMatch.index == null) return null;
+
+  const afterKeyIdx = keyMatch.index + keyMatch[0].length;
+  const dictOpenRe = /<dict\b[^>]*>/gi;
+  dictOpenRe.lastIndex = afterKeyIdx;
+  const openMatch = dictOpenRe.exec(plistXml);
+  if (!openMatch || openMatch.index == null) return null;
+
+  const startIdx = openMatch.index;
+
+  const tagRe = /<\/?dict\b[^>]*>/gi;
+  tagRe.lastIndex = startIdx;
+  let depth = 0;
+  let endIdx = -1;
+  while (true) {
+    const m = tagRe.exec(plistXml);
+    if (!m || m.index == null) break;
+
+    const tag = m[0].toLowerCase();
+    if (tag.startsWith("</dict")) {
+      depth -= 1;
+      if (depth === 0) {
+        endIdx = m.index + m[0].length;
+        break;
+      }
+    } else {
+      depth += 1;
+    }
+  }
+
+  if (endIdx < 0) return null;
+  return plistXml.slice(startIdx, endIdx);
+}
+
+/**
+ * Extract all `<array>...</array>` blocks that immediately follow `<key>${keyName}</key>`
+ * occurrences inside a larger plist XML snippet.
+ *
+ * @param {string} plistXml
+ * @param {string} keyName
+ * @returns {string[]}
+ */
+function extractAllPlistArrayBlocks(plistXml, keyName) {
+  /** @type {string[]} */
+  const out = [];
+  const keyRe = new RegExp(`<key>\\s*${escapeRegExp(keyName)}\\s*<\\/key>`, "gi");
+  while (true) {
+    const keyMatch = keyRe.exec(plistXml);
+    if (!keyMatch || keyMatch.index == null) break;
+
+    const afterKeyIdx = keyMatch.index + keyMatch[0].length;
+    const arrayOpenRe = /<array\b[^>]*>/gi;
+    arrayOpenRe.lastIndex = afterKeyIdx;
+    const openMatch = arrayOpenRe.exec(plistXml);
+    if (!openMatch || openMatch.index == null) continue;
+
+    const startIdx = openMatch.index;
+    const tagRe = /<\/?array\b[^>]*>/gi;
+    tagRe.lastIndex = startIdx;
+    let depth = 0;
+    let endIdx = -1;
+    while (true) {
+      const m = tagRe.exec(plistXml);
+      if (!m || m.index == null) break;
+      const tag = m[0].toLowerCase();
+      if (tag.startsWith("</array")) {
+        depth -= 1;
+        if (depth === 0) {
+          endIdx = m.index + m[0].length;
+          break;
+        }
+      } else {
+        depth += 1;
+      }
+    }
+    if (endIdx < 0) continue;
+    out.push(plistXml.slice(startIdx, endIdx));
+    // Continue scanning after the array we just captured.
+    keyRe.lastIndex = endIdx;
+  }
+  return out;
+}
+
+/**
+ * Extract `<string>...</string>` values from a snippet of plist XML.
+ * @param {string} xml
+ * @returns {string[]}
+ */
+function extractPlistStrings(xml) {
+  /** @type {string[]} */
+  const out = [];
+  const re = /<string\b[^>]*>\s*([^<]*?)\s*<\/string>/gi;
+  while (true) {
+    const m = re.exec(xml);
+    if (!m) break;
+    const val = String(m[1] ?? "").trim();
+    if (val) out.push(val);
+  }
+  return out;
+}
+
+/**
+ * Extract top-level `<dict>...</dict>` blocks inside an `<array>...</array>` snippet.
+ *
+ * @param {string} arrayBlock
+ * @returns {string[]}
+ */
+function extractTopLevelDictBlocks(arrayBlock) {
+  /** @type {string[]} */
+  const out = [];
+  const arrayOpenEnd = arrayBlock.indexOf(">");
+  const startScan = arrayOpenEnd >= 0 ? arrayOpenEnd + 1 : 0;
+
+  const tagRe = /<\/?dict\b[^>]*>/gi;
+  tagRe.lastIndex = startScan;
+
+  let depth = 0;
+  let dictStart = -1;
+  while (true) {
+    const m = tagRe.exec(arrayBlock);
+    if (!m || m.index == null) break;
+    const tag = m[0].toLowerCase();
+    if (tag.startsWith("</dict")) {
+      if (depth === 1 && dictStart >= 0) {
+        out.push(arrayBlock.slice(dictStart, m.index + m[0].length));
+        dictStart = -1;
+      }
+      depth -= 1;
+    } else {
+      depth += 1;
+      if (depth === 1) {
+        dictStart = m.index;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Extract a string value from a `<dict>` snippet.
+ * @param {string} dictXml
+ * @param {string} keyName
+ * @returns {string}
+ */
+function extractPlistStringValue(dictXml, keyName) {
+  const keyRe = new RegExp(`<key>\\s*${escapeRegExp(keyName)}\\s*<\\/key>`, "i");
+  const keyMatch = keyRe.exec(dictXml);
+  if (!keyMatch || keyMatch.index == null) return "";
+  const afterKeyIdx = keyMatch.index + keyMatch[0].length;
+  const stringRe = /<string\b[^>]*>\s*([^<]*?)\s*<\/string>/gi;
+  stringRe.lastIndex = afterKeyIdx;
+  const m = stringRe.exec(dictXml);
+  if (!m) return "";
+  return String(m[1] ?? "").trim();
+}
+
+/**
+ * Extract either `<string>` or `<array><string>..</string></array>` values from a dict snippet.
+ * @param {string} dictXml
+ * @param {string} keyName
+ * @returns {string[]}
+ */
+function extractPlistStringOrArrayValues(dictXml, keyName) {
+  const array = extractPlistArrayBlock(dictXml, keyName);
+  if (array) return extractPlistStrings(array);
+  const single = extractPlistStringValue(dictXml, keyName);
+  return single ? [single] : [];
+}
+
+/**
+ * Best-effort: determine which file extensions are registered by Info.plist.
+ *
+ * We accept extensions registered:
+ *   - directly via CFBundleDocumentTypes/CFBundleTypeExtensions
+ *   - indirectly via CFBundleDocumentTypes/LSItemContentTypes referencing UTIs whose
+ *     UT*TypeDeclarations define public.filename-extension.
+ *
+ * @param {string} plistXml
+ */
+function collectMacosRegisteredExtensions(plistXml) {
+  const docTypesBlock = extractPlistArrayBlock(plistXml, "CFBundleDocumentTypes");
+  /** @type {Set<string>} */
+  const docExts = new Set();
+  /** @type {Set<string>} */
+  const docUtis = new Set();
+  /** @type {Map<string, Set<string>>} */
+  const utiToExts = new Map();
+
+  if (docTypesBlock) {
+    for (const block of extractAllPlistArrayBlocks(docTypesBlock, "CFBundleTypeExtensions")) {
+      for (const raw of extractPlistStrings(block)) {
+        const ext = raw.trim().toLowerCase().replace(/^\./, "");
+        if (ext) docExts.add(ext);
+      }
+    }
+    for (const block of extractAllPlistArrayBlocks(docTypesBlock, "LSItemContentTypes")) {
+      for (const raw of extractPlistStrings(block)) {
+        const uti = raw.trim().toLowerCase();
+        if (uti) docUtis.add(uti);
+      }
+    }
+  }
+
+  for (const key of ["UTExportedTypeDeclarations", "UTImportedTypeDeclarations"]) {
+    const declsBlock = extractPlistArrayBlock(plistXml, key);
+    if (!declsBlock) continue;
+    for (const declDict of extractTopLevelDictBlocks(declsBlock)) {
+      const uti = extractPlistStringValue(declDict, "UTTypeIdentifier").trim().toLowerCase();
+      if (!uti) continue;
+      const tagSpec = extractPlistDictBlock(declDict, "UTTypeTagSpecification");
+      if (!tagSpec) continue;
+      const extValues = extractPlistStringOrArrayValues(tagSpec, "public.filename-extension");
+      for (const raw of extValues) {
+        const ext = raw.trim().toLowerCase().replace(/^\./, "");
+        if (!ext) continue;
+        const set = utiToExts.get(uti) ?? new Set();
+        set.add(ext);
+        utiToExts.set(uti, set);
+      }
+    }
+  }
+
+  /** @type {Set<string>} */
+  const viaUtis = new Set();
+  for (const uti of docUtis) {
+    const exts = utiToExts.get(uti);
+    if (!exts) continue;
+    for (const ext of exts) viaUtis.add(ext);
+  }
+
+  /** @type {Set<string>} */
+  const registered = new Set([...docExts, ...viaUtis]);
+  return { docTypesBlock, registered, docExts, docUtis, viaUtis };
 }
 
 /**
@@ -326,20 +572,21 @@ function main() {
 
     const docTypesBlock = extractPlistArrayBlock(plist, "CFBundleDocumentTypes");
     const expectedExts = collectFileAssociationExtensions(config);
-    const missingExts = [];
-    if (docTypesBlock && expectedExts.length > 0) {
-      for (const ext of expectedExts) {
-        const re = new RegExp(`<string>\\s*${escapeRegExp(ext)}\\s*<\\/string>`, "i");
-        if (!re.test(docTypesBlock)) missingExts.push(ext);
-      }
-    }
+    const { registered, docExts, docUtis, viaUtis } = collectMacosRegisteredExtensions(plist);
+    const missingExts = expectedExts.filter((ext) => !registered.has(ext));
 
     if (!docTypesBlock || missingExts.length > 0) {
       errBlock("Missing macOS file association registration (Info.plist)", [
-        "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleDocumentTypes entries for all extensions in bundle.fileAssociations (tauri.conf.json).",
+        "Expected apps/desktop/src-tauri/Info.plist to register handlers for all extensions in bundle.fileAssociations (tauri.conf.json).",
+        "Acceptable forms:",
+        "  - CFBundleDocumentTypes / CFBundleTypeExtensions includes the extension",
+        "  - CFBundleDocumentTypes / LSItemContentTypes references a UTI whose UT*TypeDeclarations defines public.filename-extension",
         ...(missingExts.length > 0
           ? [`Missing extension(s): ${missingExts.join(", ")}`, `Expected extensions: ${expectedExts.join(", ")}`]
           : []),
+        `Observed CFBundleTypeExtensions: ${Array.from(docExts).join(", ") || "(none)"}`,
+        `Observed LSItemContentTypes: ${Array.from(docUtis).join(", ") || "(none)"}`,
+        `Observed extensions via LSItemContentTypes: ${Array.from(viaUtis).join(", ") || "(none)"}`,
         "Fix: add/update CFBundleDocumentTypes/CFBundleTypeExtensions in Info.plist.",
       ]);
     }
