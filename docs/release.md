@@ -1225,6 +1225,9 @@ CI note: the release workflow also runs a lightweight smoke test that validates 
 Note: AppImage validation executes the AppImage to extract it (`--appimage-extract`), so the
 AppImage’s CPU architecture must match the host (x86_64 vs aarch64) unless you are using emulation.
 
+Note: extraction (`--appimage-extract`) typically relies on `unsquashfs` (package: `squashfs-tools`).
+If AppImage extraction fails with an `unsquashfs`/SquashFS error, install `squashfs-tools` and retry.
+
 Manual inspection (useful when debugging bundling issues):
 
 ```bash
