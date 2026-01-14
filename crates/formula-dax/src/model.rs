@@ -480,8 +480,6 @@ pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
     /// Column index of `rel.from_column` in the `from_table`.
     pub(crate) from_idx: usize,
-    /// Column index of `rel.to_column` in the `to_table`.
-    pub(crate) to_idx: usize,
     pub(crate) to_index: HashMap<Value, RowSet>,
     /// Relationship index for the fact-side (from_table) foreign key.
     ///
@@ -930,7 +928,6 @@ impl DataModel {
         self.relationships.push(RelationshipInfo {
             rel: relationship,
             from_idx,
-            to_idx,
             to_index,
             from_index,
             from_column_idx: from_idx,
