@@ -12,6 +12,7 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
 
   assert.equal(typeof mod.AIAuditRecorder, "function");
   assert.equal(typeof mod.MemoryAIAuditStore, "function");
+  assert.equal(typeof mod.createDefaultAIAuditStore, "function");
   assert.equal(typeof RecorderFromTs, "function");
 
   const store = new mod.MemoryAIAuditStore();
@@ -29,4 +30,10 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
   const entries = await store.listEntries({ session_id: "s1" });
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.session_id, "s1");
+
+  // Ensure the Node entrypoint's default store factory is usable via package exports.
+  const defaultStore = await mod.createDefaultAIAuditStore();
+  assert.ok(defaultStore instanceof mod.BoundedAIAuditStore);
+  // TypeScript-private but runtime-visible property used in other test suites too.
+  assert.ok(defaultStore.store instanceof mod.MemoryAIAuditStore);
 });
