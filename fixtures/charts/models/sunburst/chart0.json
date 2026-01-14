@@ -162,7 +162,7 @@
       },
       {
         "level": "warning",
-        "message": "ChartEx chart kind could not be inferred; hints: <none>"
+        "message": "ChartEx chart kind could not be inferred (root ns=http://schemas.microsoft.com/office/drawing/2014/chartex); hints: <none>"
       }
     ]
   }
