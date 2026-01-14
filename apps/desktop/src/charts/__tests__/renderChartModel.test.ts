@@ -5,6 +5,22 @@ import { defaultChartTheme, renderChartToSvg, resolveChartData, type ChartModel 
 const size = { width: 320, height: 200 };
 
 describe("charts/renderChart (ChartModel renderer)", () => {
+  it("uses numeric categories from categoriesNum when categories are missing", () => {
+    const model: any = {
+      chartType: { kind: "line" },
+      series: [
+        {
+          categories: null,
+          categoriesNum: { cache: [45123, 45124] },
+          values: { cache: [2, 4] },
+        },
+      ],
+    };
+
+    const data = resolveChartData(model as ChartModel);
+    expect(data.series[0]?.categories).toEqual(["45123", "45124"]);
+  });
+
   it("renders clustered bar chart with axes, gridlines, legend, and title", () => {
     const model: ChartModel = {
       chartType: { kind: "bar" },
@@ -126,4 +142,3 @@ describe("charts/renderChart (ChartModel renderer)", () => {
     expect(svg1).toMatchSnapshot();
   });
 });
-

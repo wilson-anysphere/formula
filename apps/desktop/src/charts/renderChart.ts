@@ -163,11 +163,21 @@ export function resolveChartData(model: ChartModel, liveData?: Partial<ResolvedC
     const name = (m.name ?? l.name ?? null) as string | null;
 
     const modelCats = extractStringCache(m.categories);
+    // Rust chart models can represent numeric/date categories separately
+    // (`categoriesNum`). The UI model converter maps this to `categories`, but
+    // keep the renderer resilient if a raw model sneaks through.
+    const modelCatsNum = extractStringCache(m.categoriesNum ?? m.categories_num);
     const modelVals = extractNumberCache(m.values);
     const modelX = extractNumberCache(m.xValues);
     const modelY = extractNumberCache(m.yValues);
 
-    const cats = modelCats.length ? modelCats : Array.isArray(l.categories) ? l.categories.map((v: any) => String(v ?? "")) : [];
+    const cats = modelCats.length
+      ? modelCats
+      : modelCatsNum.length
+        ? modelCatsNum
+        : Array.isArray(l.categories)
+          ? l.categories.map((v: any) => String(v ?? ""))
+          : [];
     const vals = modelVals.length ? modelVals : Array.isArray(l.values) ? l.values.map((v: any) => Number(v)) : [];
     const xs = modelX.length ? modelX : Array.isArray(l.xValues) ? l.xValues.map((v: any) => Number(v)) : [];
     const ys = modelY.length ? modelY : Array.isArray(l.yValues) ? l.yValues.map((v: any) => Number(v)) : [];
