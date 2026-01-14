@@ -540,6 +540,17 @@ impl AppState {
                 crate::file_io::Sheet::new(candidate_id.clone(), candidate_name.clone()),
             );
 
+            // The preserved pivot cache parts store the original workbook sheet list (including the
+            // sheet indices used to rewrite `worksheetSource sheet="..."` references on apply).
+            // Keep those indices aligned with structural edits so later renames still map correctly.
+            if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
+                for sheet in &mut preserved.workbook_sheets {
+                    if sheet.index >= insert_index {
+                        sheet.index = sheet.index.saturating_add(1);
+                    }
+                }
+            }
+
             // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
             // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
             // Drop the origin bytes so the next save/export regenerates from storage.
@@ -672,6 +683,16 @@ impl AppState {
                 insert_index,
                 crate::file_io::Sheet::new(sheet_id.clone(), name.clone()),
             );
+
+            // Keep preserved pivot cache sheet indices aligned with the inserted sheet so
+            // index-based worksheetSource rewrites remain correct.
+            if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
+                for sheet in &mut preserved.workbook_sheets {
+                    if sheet.index >= insert_index {
+                        sheet.index = sheet.index.saturating_add(1);
+                    }
+                }
+            }
 
             // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
             // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
@@ -824,6 +845,29 @@ impl AppState {
             }
             next.extend(remaining);
             workbook.sheets = next;
+
+            // Keep preserved pivot cache sheet indices aligned with the reordered sheet list so
+            // index-based worksheetSource rewrites remain correct after a reorder+rename sequence.
+            if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
+                let mut old_idx_by_sheet_id: HashMap<&str, usize> =
+                    HashMap::with_capacity(before_order.len());
+                for (idx, sheet_id) in before_order.iter().enumerate() {
+                    old_idx_by_sheet_id.insert(sheet_id.as_str(), idx);
+                }
+                let mut new_idx_by_old: HashMap<usize, usize> =
+                    HashMap::with_capacity(before_order.len());
+                for (new_idx, sheet_id) in ordered_ids.iter().enumerate() {
+                    if let Some(old_idx) = old_idx_by_sheet_id.get(sheet_id.as_str()) {
+                        new_idx_by_old.insert(*old_idx, new_idx);
+                    }
+                }
+
+                for sheet in &mut preserved.workbook_sheets {
+                    if let Some(new_idx) = new_idx_by_old.get(&sheet.index) {
+                        sheet.index = *new_idx;
+                    }
+                }
+            }
 
             // NOTE: Reordering sheets is a structural edit for XLSB inputs. The `.xlsb` writer
             // cannot currently reorder workbook metadata, so treat this as a conversion to XLSX
@@ -1022,11 +1066,11 @@ impl AppState {
                         preserved.sheet_pivot_tables.insert(new_name.clone(), value);
                     }
                 }
-                for preserved_sheet in &mut preserved.workbook_sheets {
-                    if sheet_name_eq_case_insensitive(&preserved_sheet.name, &old_name) {
-                        preserved_sheet.name = new_name.clone();
-                    }
-                }
+                // NOTE: `preserved.workbook_sheets` intentionally retains the sheet names from the
+                // original workbook.xml. These names are used to rewrite pivot cache
+                // `worksheetSource sheet="..."` references when a sheet is renamed in-app. The
+                // index field is kept aligned with structural edits (insert/delete/reorder), so we
+                // can still map old names -> current sheet names by index at save time.
             }
 
             if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {
@@ -1161,9 +1205,17 @@ impl AppState {
                 for key in keys {
                     preserved.sheet_pivot_tables.remove(&key);
                 }
-                preserved
-                    .workbook_sheets
-                    .retain(|s| !sheet_name_eq_case_insensitive(&s.name, &deleted_name));
+
+                // The preserved pivot cache definition parts reference worksheet sources by name.
+                // We rewrite those names using the original sheet list indices, so keep the
+                // indices aligned with structural edits to avoid mapping deleted sheets to the
+                // wrong remaining sheet.
+                preserved.workbook_sheets.retain(|s| s.index != deleted_index);
+                for sheet in &mut preserved.workbook_sheets {
+                    if sheet.index > deleted_index {
+                        sheet.index = sheet.index.saturating_sub(1);
+                    }
+                }
             }
 
             if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {
@@ -5542,7 +5594,20 @@ mod tests {
         workbook.preserved_pivot_parts = Some(PreservedPivotParts {
             content_types_xml: b"<Types/>".to_vec(),
             parts: BTreeMap::new(),
-            workbook_sheets: Vec::new(),
+            workbook_sheets: vec![
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet1".to_string(),
+                    index: 0,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet2".to_string(),
+                    index: 1,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Chart1".to_string(),
+                    index: 2,
+                },
+            ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
             sheet_pivot_tables: pivot_tables,
@@ -5653,6 +5718,16 @@ mod tests {
         assert!(!pivots.sheet_pivot_tables.contains_key("Sheet1"));
         assert!(pivots.sheet_pivot_tables.contains_key("Budget"));
         assert!(pivots.sheet_pivot_tables.contains_key("Sheet2"));
+        let sheet1 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("original sheet list should keep old names for rename mapping");
+        assert_eq!(sheet1.index, 0);
+        assert!(
+            !pivots.workbook_sheets.iter().any(|s| s.name == "Budget"),
+            "workbook_sheets should retain the original sheet names"
+        );
 
         let drawings = workbook
             .preserved_drawing_parts
@@ -5682,7 +5757,20 @@ mod tests {
         workbook.preserved_pivot_parts = Some(PreservedPivotParts {
             content_types_xml: b"<Types/>".to_vec(),
             parts: BTreeMap::new(),
-            workbook_sheets: Vec::new(),
+            workbook_sheets: vec![
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet1".to_string(),
+                    index: 0,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet2".to_string(),
+                    index: 1,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Chart1".to_string(),
+                    index: 2,
+                },
+            ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::from([
@@ -5815,6 +5903,22 @@ mod tests {
             .expect("pivot parts preserved");
         assert!(!pivots.sheet_pivot_tables.contains_key("Sheet1"));
         assert!(pivots.sheet_pivot_tables.contains_key("Sheet2"));
+        assert!(
+            !pivots.workbook_sheets.iter().any(|s| s.name == "Sheet1"),
+            "deleted sheet should be removed from workbook_sheets"
+        );
+        let sheet2 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet2")
+            .expect("Sheet2 should remain in workbook_sheets");
+        assert_eq!(sheet2.index, 0, "Sheet2 index should shift after delete");
+        let chart = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Chart1")
+            .expect("Chart1 should remain in workbook_sheets");
+        assert_eq!(chart.index, 1, "Chart index should shift after delete");
 
         let drawings = workbook
             .preserved_drawing_parts
@@ -5828,6 +5932,126 @@ mod tests {
         assert!(!drawings.sheet_drawing_hfs.contains_key("Sheet1"));
         // Chart sheets are not deleted by the worksheet delete operation.
         assert!(drawings.chart_sheets.contains_key("Chart1"));
+    }
+
+    #[test]
+    fn add_sheet_shifts_preserved_pivot_workbook_sheet_indices() {
+        use std::collections::BTreeMap;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        workbook.preserved_pivot_parts = Some(PreservedPivotParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            workbook_sheets: vec![
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet1".to_string(),
+                    index: 0,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet2".to_string(),
+                    index: 1,
+                },
+            ],
+            workbook_pivot_caches: None,
+            workbook_pivot_cache_rels: Vec::new(),
+            sheet_pivot_tables: BTreeMap::new(),
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .add_sheet("Inserted".to_string(), None, None, Some(0))
+            .expect("insert sheet succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let pivots = workbook
+            .preserved_pivot_parts
+            .as_ref()
+            .expect("pivot parts preserved");
+        assert_eq!(pivots.workbook_sheets.len(), 2);
+
+        let sheet1 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 present");
+        let sheet2 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet2")
+            .expect("Sheet2 present");
+        assert_eq!(sheet1.index, 1);
+        assert_eq!(sheet2.index, 2);
+    }
+
+    #[test]
+    fn reorder_sheets_shifts_preserved_pivot_workbook_sheet_indices() {
+        use std::collections::BTreeMap;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        workbook.preserved_pivot_parts = Some(PreservedPivotParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            workbook_sheets: vec![
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet1".to_string(),
+                    index: 0,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet2".to_string(),
+                    index: 1,
+                },
+                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
+                    name: "Sheet3".to_string(),
+                    index: 2,
+                },
+            ],
+            workbook_pivot_caches: None,
+            workbook_pivot_cache_rels: Vec::new(),
+            sheet_pivot_tables: BTreeMap::new(),
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .reorder_sheets(vec![
+                "Sheet3".to_string(),
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+            ])
+            .expect("reorder sheets succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let pivots = workbook
+            .preserved_pivot_parts
+            .as_ref()
+            .expect("pivot parts preserved");
+
+        let sheet1 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 present");
+        let sheet2 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet2")
+            .expect("Sheet2 present");
+        let sheet3 = pivots
+            .workbook_sheets
+            .iter()
+            .find(|s| s.name == "Sheet3")
+            .expect("Sheet3 present");
+        assert_eq!(sheet1.index, 1);
+        assert_eq!(sheet2.index, 2);
+        assert_eq!(sheet3.index, 0);
     }
 
     #[test]
