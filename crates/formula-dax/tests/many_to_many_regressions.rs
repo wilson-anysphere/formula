@@ -230,6 +230,101 @@ fn userelationship_override_works_with_m2m_for_columnar_dim() {
 }
 
 #[test]
+fn userelationship_override_sees_virtual_blank_member_for_columnar_dim() {
+    // Regression coverage: even when the *dimension* table is columnar-backed, an inactive
+    // ManyToMany relationship with RI disabled should still surface unmatched fact keys via the
+    // relationship-generated blank/unknown member under USERELATIONSHIP.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB", "Amount"]);
+    // One row matched on KeyB.
+    fact.push_row(vec![1.into(), 1.into(), 10.into(), 5.0.into()])
+        .unwrap();
+    // One row unmatched on KeyB (should belong to blank member for relationship B).
+    fact.push_row(vec![2.into(), 1.into(), 999.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    // Active relationship A (RI enforced).
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Inactive relationship B (RI disabled) so unmatched keys map to the virtual blank member.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(model.evaluate_measure("Total", &blank_attr).unwrap(), Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
+        7.0.into()
+    );
+}
+
+#[test]
 fn blank_foreign_keys_in_m2m_flow_to_blank_dimension_member_when_allowed() {
     let mut model = DataModel::new();
 
