@@ -142,10 +142,19 @@ The expected UX is:
 
 Passwords should not be persisted or logged by default.
 
+Implementation note (desktop IPC):
+
+- The Tauri backend command `open_workbook` accepts an optional `password` parameter.
+- For encrypted OOXML workbooks, the backend surfaces sentinel error strings prefixed with:
+  - `PASSWORD_REQUIRED:` (no password provided)
+  - `INVALID_PASSWORD:` (wrong password)
+  so the frontend can prompt/retry without doing string matching on the rest of the message.
+
 Current desktop limitations:
 
-- Password prompting/open is implemented for **encrypted OOXML workbooks that decrypt to XLSX/XLSM**
-  packages.
+- Password-aware open is supported for **encrypted OOXML workbooks that decrypt to XLSX/XLSM**
+  packages (via the `open_workbook` command’s `password` parameter). The frontend is expected to
+  prompt/retry when it receives a `PASSWORD_REQUIRED:` error.
 - Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
 - Encrypted `.xlsb` containers are detected, but the decrypted payload is not currently routed
   through the `.xlsb` reader.
