@@ -3216,8 +3216,22 @@ export class SpreadsheetApp {
       this.document.on("change", (payload: any) => {
         if (this.disposed) return;
         if (!this.uiReady) return;
-        if (!this.documentChangeAffectsDrawings(payload)) return;
         const source = typeof payload?.source === "string" ? payload.source : "";
+
+        // Keep workbook-wide drawing-image reference counts up to date even when the active sheet
+        // isn't affected. This is important for collaboration and background sheet edits: an image
+        // can be re-referenced on another sheet while a GC timer is pending.
+        const shouldSyncWorkbookImageRefs =
+          source === "applyState" ||
+          payload?.drawingsChanged === true ||
+          (Array.isArray(payload?.drawingDeltas) && payload.drawingDeltas.length > 0) ||
+          (Array.isArray(payload?.sheetMetaDeltas) && payload.sheetMetaDeltas.length > 0) ||
+          (Array.isArray(payload?.sheetViewDeltas) && payload.sheetViewDeltas.length > 0);
+        if (shouldSyncWorkbookImageRefs) {
+          this.syncWorkbookImageRefCountsFromDocument(payload);
+        }
+
+        if (!this.documentChangeAffectsDrawings(payload)) return;
         if (source === "applyState") {
           this.drawingOverlay.clearImageCache();
         }
@@ -3232,7 +3246,6 @@ export class SpreadsheetApp {
           this.drawingOverlay.invalidateImage(imageId);
         }
         this.handleWorkbookImageDeltasForBackground(payload);
-        this.syncWorkbookImageRefCountsFromDocument(payload);
         invalidateAndRenderDrawings("document:change");
       }),
     );
