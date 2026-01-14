@@ -1230,6 +1230,25 @@ pub fn build_shared_formula_ptgexp_u32_row_u16_col_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula where a follower cell uses a
+/// non-standard `PtgExp` payload layout (row u32 + col u32, 8 bytes).
+///
+/// Some producers emit BIFF12-style coordinate widths even in BIFF8 `.xls` files. The `.xls`
+/// importer should still resolve the follower formula against the sheet’s SHRFMLA definition.
+pub fn build_shared_formula_ptgexp_u32_row_u32_col_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgexp_u32_row_u32_col_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a shared formula (`SHRFMLA` + `PtgExp`).
 ///
 /// The fixture contains a single sheet (`Sheet1`) with:
@@ -8553,6 +8572,75 @@ fn build_shared_formula_ptgexp_u32_row_u16_col_sheet_stream(xf_cell: u16) -> Vec
     sheet
 }
 
+fn build_shared_formula_ptgexp_u32_row_u32_col_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgexp_u32_row_u32_col_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("Shared", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgexp_u32_row_u32_col_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Worksheet containing:
+    // - Numeric inputs in A2/A3
+    // - Shared formula range B2:B3 whose rgce is `A?*2`
+    // - Follower cell B3 stores `PtgExp` coordinates as row u32 + col u32 (8 bytes)
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [1, 3) cols [0, 2) => A2:B3.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&1u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&3u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Input values.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 10.0)); // A2
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(2, 0, xf_cell, 20.0)); // A3
+
+    // Shared formula rgce: `PtgRefN(row+0,col-1) * 2`.
+    let shared_rgce: Vec<u8> = vec![
+        0x2C, // PtgRefN
+        0x00, 0x00, // row offset (0)
+        0xFF, 0xFF, // col offset (-1)
+        0x1E, // PtgInt
+        0x02, 0x00, // 2
+        0x05, // PtgMul
+    ];
+
+    // Anchor cell B2 (row=1,col=1): store canonical PtgExp(B2) followed by SHRFMLA containing the
+    // shared rgce.
+    let anchor_ptgexp = ptg_exp(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &anchor_ptgexp),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(1, 2, 1, 1, &shared_rgce),
+    );
+
+    // Follower cell B3 (row=2,col=1): PtgExp with an 8-byte payload (row u32 + col u32).
+    // Keep the column within BIFF8 bounds even though the token uses a u32 width.
+    let follower_ptgexp = ptg_exp_row_u32_col_u32(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(2, 1, xf_cell, 0.0, &follower_ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_shared_formula_workbook_stream() -> Vec<u8> {
     // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
     // including a default cell XF at index 16.
@@ -13229,6 +13317,15 @@ fn ptg_exp(row: u16, col: u16) -> Vec<u8> {
 
 fn ptg_exp_row_u32_col_u16(row: u32, col: u16) -> Vec<u8> {
     // Non-standard PtgExp payload (seen in the wild): [rw: u32][col: u16]
+    let mut out = Vec::<u8>::new();
+    out.push(0x01);
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out
+}
+
+fn ptg_exp_row_u32_col_u32(row: u32, col: u32) -> Vec<u8> {
+    // Non-standard PtgExp payload (seen in the wild): [rw: u32][col: u32]
     let mut out = Vec::<u8>::new();
     out.push(0x01);
     out.extend_from_slice(&row.to_le_bytes());
