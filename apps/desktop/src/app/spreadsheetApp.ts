@@ -5807,6 +5807,9 @@ export class SpreadsheetApp {
       // stays in sync with functions like `CELL("filename")` / `INFO("directory")`.
       if (this.formulaBar?.isEditing()) {
         this.formulaBar.setArgumentPreviewProvider((expr) => this.evaluateFormulaBarArgumentPreview(expr));
+        // Tab completion preview evaluation can also depend on workbook metadata. Trigger a refresh
+        // so any visible ghost/preview stays accurate after Save As / rename operations.
+        this.formulaBarCompletion?.update();
       }
       if (!hasWasmEngine || !useEngineCache) {
         const tooltipRange = this.formulaRangePreviewTooltipLastRange;

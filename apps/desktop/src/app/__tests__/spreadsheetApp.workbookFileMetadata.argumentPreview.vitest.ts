@@ -147,6 +147,10 @@ describe("SpreadsheetApp workbook file metadata + formula-bar argument preview",
 
     const app = new SpreadsheetApp(root, status, { formulaBar });
     const doc = app.getDocument();
+    const completionUpdateSpy = vi.fn();
+    // Prevent the lazy tab-completion module from loading during this test, while still
+    // asserting that metadata changes request a refresh.
+    (app as any).formulaBarCompletion = { update: completionUpdateSpy, destroy: vi.fn() };
 
     // Force multi-sheet mode so computed values are evaluated in-process (no engine cache reliance).
     doc.addSheet({ sheetId: "Sheet2", name: "Sheet2" });
@@ -177,10 +181,10 @@ describe("SpreadsheetApp workbook file metadata + formula-bar argument preview",
 
     const preview2 = formulaBar.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
     expect(preview2?.textContent).toContain("/tmp/[Book.xlsx]Sheet1");
+    expect(completionUpdateSpy).toHaveBeenCalled();
 
     app.destroy();
     root.remove();
     formulaBar.remove();
   });
 });
-
