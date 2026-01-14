@@ -871,7 +871,9 @@ jobs:
         # Pinned for release reproducibility. Known-good with this repo's WASM build
         # (`crates/formula-wasm` via `packages/engine/scripts/build-wasm.mjs`).
         if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
+        # Use --force so cache restore-keys (or other CI caches) can't strand a stale/untracked
+        # wasm-pack binary that would otherwise block `cargo install` from overwriting it.
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked --force
 
       - name: Verify wasm-pack version
         shell: bash

@@ -140,7 +140,9 @@ jobs:
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.wasm-pack-cache.outputs.cache-hit != 'true'
         # Pinned to match the tagged release workflow so perf runs don't break
         # when wasm-pack publishes a new incompatible version.
-        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
+        # Use --force so cache restore-keys (or other CI caches) can't strand a stale/untracked
+        # wasm-pack binary that would otherwise block `cargo install` from overwriting it.
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked --force
 
       - name: Verify wasm-pack version
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
