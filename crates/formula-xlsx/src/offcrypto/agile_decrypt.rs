@@ -515,14 +515,17 @@ fn decrypt_agile_encrypted_package_impl(
                         attr: "encryptedHmacKey".to_string(),
                         reason: e.to_string(),
                     })?;
-            decrypted
-                .get(..info.key_data.hash_size)
-                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            // HMAC accepts any key length; some producers emit a shorter decrypted key than
+            // `hashSize`. Be tolerant and use as much key material as available.
+            let key_len = std::cmp::min(info.key_data.hash_size, decrypted.len());
+            if key_len == 0 {
+                return Err(OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
-                    reason: "decrypted HMAC key shorter than hashSize".to_string(),
-                })?
-                .to_vec()
+                    reason: "decrypted HMAC key is empty".to_string(),
+                });
+            }
+            decrypted[..key_len].to_vec()
         };
 
         let expected_hmac = {
@@ -551,7 +554,7 @@ fn decrypt_agile_encrypted_package_impl(
                 })?
                 .to_vec()
         };
- 
+
         // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
         // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
         //
@@ -699,14 +702,15 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
                         attr: "encryptedHmacKey".to_string(),
                         reason: e.to_string(),
                     })?;
-            decrypted
-                .get(..info.key_data.hash_size)
-                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            let key_len = std::cmp::min(info.key_data.hash_size, decrypted.len());
+            if key_len == 0 {
+                return Err(OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
-                    reason: "decrypted HMAC key shorter than hashSize".to_string(),
-                })?
-                .to_vec()
+                    reason: "decrypted HMAC key is empty".to_string(),
+                });
+            }
+            decrypted[..key_len].to_vec()
         };
 
         let expected = {

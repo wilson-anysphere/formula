@@ -439,6 +439,118 @@ fn agile_decrypt_ignores_trailing_padding_in_verifier_and_hmac_values() {
 }
 
 #[test]
+fn agile_decrypt_accepts_short_hmac_key() {
+    // Some producers emit a decrypted `encryptedHmacKey` whose length is shorter than `hashSize`.
+    // HMAC accepts any key length, so we should accept such files as long as the computed digest
+    // matches `encryptedHmacValue` (first `hashSize` bytes).
+    let password = "pw";
+    let plain_zip = build_tiny_zip();
+
+    // Use SHA1 so `hashSize=20` is not AES-block aligned (16), forcing padding in `encryptedHmacValue`.
+    let hash_alg = HashAlgorithm::Sha1;
+    let hash_size = 20usize;
+    let block_size = 16usize;
+    let key_encrypt_key_len = 16usize;
+
+    let key_data_salt: Vec<u8> = (0u8..=15).collect();
+    let password_salt: Vec<u8> = (16u8..=31).collect();
+    let spin_count = 10u32;
+
+    let package_key: Vec<u8> = (32u8..=47).collect(); // AES-128 keyValue
+
+    // --- Build EncryptedPackage stream ---------------------------------------------------------
+    let iv0 = derive_iv(&key_data_salt, &0u32.to_le_bytes(), block_size, hash_alg).unwrap();
+    let padded_plain_zip = {
+        let mut out = plain_zip.clone();
+        out.extend(std::iter::repeat(0u8).take((16 - (out.len() % 16)) % 16));
+        out
+    };
+    let ciphertext = encrypt_aes128_cbc_no_padding(&package_key, &iv0, &padded_plain_zip);
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plain_zip.len() as u64).to_le_bytes());
+    encrypted_package.extend_from_slice(&ciphertext);
+
+    // --- Build password key encryptor fields ---------------------------------------------------
+    let password_hash = hash_password(password, &password_salt, spin_count, hash_alg).unwrap();
+    let verifier_iv = &password_salt[..block_size];
+
+    let verifier_input: Vec<u8> = b"abcdefghijklmnop".to_vec();
+    let verifier_hash: Vec<u8> = sha1::Sha1::digest(&verifier_input).to_vec();
+
+    let mut verifier_hash_value_plain = verifier_hash.clone();
+    verifier_hash_value_plain.extend_from_slice(&[0xA5u8; 12]); // garbage beyond hashSize
+    assert_eq!(verifier_hash_value_plain.len(), 32);
+
+    let encrypt_pw_blob = |block_key: &[u8], plaintext: &[u8]| -> Vec<u8> {
+        let k = derive_key(&password_hash, block_key, key_encrypt_key_len, hash_alg).unwrap();
+        encrypt_aes128_cbc_no_padding(&k, verifier_iv, plaintext)
+    };
+
+    let encrypted_verifier_hash_input = encrypt_pw_blob(&VERIFIER_HASH_INPUT_BLOCK, &verifier_input);
+    let encrypted_verifier_hash_value =
+        encrypt_pw_blob(&VERIFIER_HASH_VALUE_BLOCK, &verifier_hash_value_plain);
+    let encrypted_key_value = encrypt_pw_blob(&KEY_VALUE_BLOCK, &package_key);
+
+    // --- Build dataIntegrity fields ------------------------------------------------------------
+    let hmac_key_plain: Vec<u8> = vec![0x11u8; 16]; // shorter than hashSize=20
+    let actual_hmac = compute_hmac_sha1(&hmac_key_plain, &encrypted_package);
+    assert_eq!(actual_hmac.len(), hash_size);
+
+    // `encryptedHmacKey` decrypts to 16 bytes (one AES block), but we still compare the full
+    // `hashSize` bytes of the HMAC output against `encryptedHmacValue`.
+    let hmac_key_blob = hmac_key_plain;
+
+    // Non-zero garbage padding after hashSize.
+    let mut hmac_value_blob = actual_hmac.clone();
+    hmac_value_blob.extend_from_slice(&[0xC3u8; 12]);
+
+    let hmac_key_iv = derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, block_size, hash_alg).unwrap();
+    let encrypted_hmac_key = encrypt_aes128_cbc_no_padding(&package_key, &hmac_key_iv, &hmac_key_blob);
+    let hmac_val_iv = derive_iv(&key_data_salt, &HMAC_VALUE_BLOCK, block_size, hash_alg).unwrap();
+    let encrypted_hmac_value =
+        encrypt_aes128_cbc_no_padding(&package_key, &hmac_val_iv, &hmac_value_blob);
+
+    // --- Build EncryptionInfo stream -----------------------------------------------------------
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+           saltValue="{key_data_salt_b64}"/>
+  <dataIntegrity encryptedHmacKey="{ehk_b64}" encryptedHmacValue="{ehv_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
+                      spinCount="{spin_count}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{password_salt_b64}"
+                      encryptedVerifierHashInput="{evhi_b64}"
+                      encryptedVerifierHashValue="{evhv_b64}"
+                      encryptedKeyValue="{ekv_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+        key_data_salt_b64 = BASE64.encode(&key_data_salt),
+        password_salt_b64 = BASE64.encode(&password_salt),
+        ehk_b64 = BASE64.encode(&encrypted_hmac_key),
+        ehv_b64 = BASE64.encode(&encrypted_hmac_value),
+        evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+        evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+        ekv_b64 = BASE64.encode(&encrypted_key_value),
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // major
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // minor
+    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let decrypted =
+        decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
+    assert_eq!(decrypted, plain_zip);
+}
+
+#[test]
 fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
     // Synthetic Agile EncryptionInfo where the password-key-encryptor saltValue is shorter than
     // blockSize. Some producers still work by using the derived-IV mode (Hash(salt||blockKey))

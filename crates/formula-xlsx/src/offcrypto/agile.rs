@@ -913,14 +913,19 @@ pub fn decrypt_agile_keys_with_options(
             let hmac_len = info.key_data.hash_size as usize;
             (
                 Some(
-                    raw_key
-                        .get(..hmac_len)
-                        .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                            element: "dataIntegrity".to_string(),
-                            attr: "encryptedHmacKey".to_string(),
-                            reason: "decrypted HMAC key shorter than keyData.hashSize".to_string(),
-                        })?
-                        .to_vec(),
+                    {
+                        // HMAC keys are not required to be the same length as the hash output.
+                        // Some producers emit a shorter decrypted key than `hashSize`.
+                        let key_len = std::cmp::min(hmac_len, raw_key.len());
+                        if key_len == 0 {
+                            return Err(OffCryptoError::InvalidAttribute {
+                                element: "dataIntegrity".to_string(),
+                                attr: "encryptedHmacKey".to_string(),
+                                reason: "decrypted HMAC key is empty".to_string(),
+                            });
+                        }
+                        raw_key[..key_len].to_vec()
+                    },
                 ),
                 Some(
                     raw_val
