@@ -40,23 +40,21 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
     &rest[..end]
 }
 
-fn extract_tauri_scheme_protocol_asset_response_block<'a>(handler_block: &'a str) -> &'a str {
+fn extract_tauri_scheme_protocol_asset_resolver_block<'a>(handler_block: &'a str) -> &'a str {
     // The `tauri://` handler is expected to:
     // - resolve bundled assets via `AssetResolver`
     // - emit COOP/COEP headers on those asset responses (not just on the `--startup-bench` fast path)
     //
-    // This block intentionally avoids full brace parsing by slicing at the match-arm boundary.
-    let start_marker = "Some(asset)";
-    let start = handler_block
-        .find(start_marker)
-        .unwrap_or_else(|| panic!("failed to find `{start_marker}` in the `tauri://` handler block"));
+    // The handler also has a `--startup-bench` early return which can include COOP/COEP headers.
+    // This guardrail must ensure headers are applied on the *production* asset-serving path too.
+    //
+    // We avoid brittle brace parsing by slicing from the `asset_resolver().get(...)` call onwards.
+    let start_marker = "asset_resolver().get";
+    let start = handler_block.find(start_marker).unwrap_or_else(|| {
+        panic!("failed to find `{start_marker}` in the `tauri://` handler block")
+    });
 
-    let rest = &handler_block[start..];
-    let end = rest
-        .find("None =>")
-        .unwrap_or_else(|| panic!("failed to find `None =>` after `{start_marker}` in the `tauri://` handler block"));
-
-    &rest[..end]
+    &handler_block[start..]
 }
 
 #[test]
@@ -70,7 +68,7 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     );
 
     let handler_block = extract_tauri_scheme_protocol_handler_block(&main_rs_src);
-    let asset_response_block = extract_tauri_scheme_protocol_asset_response_block(handler_block);
+    let asset_resolver_block = extract_tauri_scheme_protocol_asset_resolver_block(handler_block);
 
     // 2) Ensure the handler applies COOP/COEP headers (required for cross-origin isolation).
     //
@@ -79,19 +77,19 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     //
     // Important: scan the `Some(asset)` response branch, not just the overall handler block, so a
     // `--startup-bench`-only header injection doesn't mask a production regression.
-    let has_apply_call = asset_response_block.contains("apply_cross_origin_isolation_headers(");
-    let has_header_strings = asset_response_block.contains("cross-origin-opener-policy")
-        && asset_response_block.contains("cross-origin-embedder-policy");
-    let has_header_constants = asset_response_block.contains("CROSS_ORIGIN_OPENER_POLICY")
-        && asset_response_block.contains("CROSS_ORIGIN_EMBEDDER_POLICY");
+    let has_apply_call = asset_resolver_block.contains("apply_cross_origin_isolation_headers(");
+    let has_header_strings = asset_resolver_block.contains("cross-origin-opener-policy")
+        && asset_resolver_block.contains("cross-origin-embedder-policy");
+    let has_header_constants = asset_resolver_block.contains("CROSS_ORIGIN_OPENER_POLICY")
+        && asset_resolver_block.contains("CROSS_ORIGIN_EMBEDDER_POLICY");
 
     assert!(
         has_apply_call || has_header_strings || has_header_constants,
         "expected the `tauri://` protocol handler to inject COOP/COEP headers.\n\
          Missing `apply_cross_origin_isolation_headers(...)` (or direct insertion of the COOP/COEP header names).\n\
          This is required for `globalThis.crossOriginIsolated` and SharedArrayBuffer in packaged desktop builds.\n\
-         Searched within the `Some(asset)` branch of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
-         {asset_response_block}"
+         Searched within the asset resolver block of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
+         {asset_resolver_block}"
     );
 
     // 3) Ensure we preserve Tauri's configured CSP header when available.
@@ -99,25 +97,25 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     // Dropping the CSP in the custom handler would reduce production parity with the stock Tauri
     // asset protocol and can break worker/module loading.
     assert!(
-        asset_response_block.contains("asset.csp_header"),
+        asset_resolver_block.contains("asset.csp_header"),
         "expected the `tauri://` protocol handler to reference `asset.csp_header` (to preserve the CSP computed by Tauri's AssetResolver)"
     );
     assert!(
-        asset_response_block.contains("Content-Security-Policy"),
+        asset_resolver_block.contains("Content-Security-Policy"),
         "expected the `tauri://` protocol handler to set the `Content-Security-Policy` header when `asset.csp_header` is present"
     );
 
-    let csp_is_conditional = (asset_response_block.contains("if let Some")
-        && asset_response_block.contains("asset.csp_header"))
-        || asset_response_block.contains("match asset.csp_header")
-        || asset_response_block.contains("asset.csp_header.map")
-        || asset_response_block.contains("asset.csp_header.is_some")
-        || asset_response_block.contains("asset.csp_header.is_some_and");
+    let csp_is_conditional = (asset_resolver_block.contains("if let Some")
+        && asset_resolver_block.contains("asset.csp_header"))
+        || asset_resolver_block.contains("match asset.csp_header")
+        || asset_resolver_block.contains("asset.csp_header.map")
+        || asset_resolver_block.contains("asset.csp_header.is_some")
+        || asset_resolver_block.contains("asset.csp_header.is_some_and");
 
     assert!(
         csp_is_conditional,
         "expected the `Content-Security-Policy` header to be set conditionally based on `asset.csp_header` (so we don't emit an empty/malformed CSP when absent).\n\
-         Searched within the `Some(asset)` branch of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
-         {asset_response_block}"
+         Searched within the asset resolver block of the `.register_uri_scheme_protocol(\"tauri\", ...)` handler:\n\
+         {asset_resolver_block}"
     );
 }
