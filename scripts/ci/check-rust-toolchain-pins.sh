@@ -94,6 +94,9 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /build-formula-wasm-node\.mjs/) return 1
       if (s ~ /packages\/engine\/scripts\/build-wasm\.mjs/) return 1
       if (s ~ /generate-function-catalog\.js/) return 1
+      if (s ~ /excel-oracle\/compat_gate\.py/) return 1
+      if (s ~ /tools\.corpus\.triage/) return 1
+      if (s ~ /tools\/corpus\/triage\.py/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1
