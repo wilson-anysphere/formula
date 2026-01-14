@@ -8241,7 +8241,7 @@ export class SpreadsheetApp {
       // stay consistent with the new anchor/transform. If we only persist anchors, exports that rely on the
       // preserved XML payload can drift.
       const afterKind: any = (after as any).kind;
-      const afterRawXml =
+      const afterRawXmlString =
         afterKind && typeof afterKind === "object"
           ? typeof afterKind.rawXml === "string"
             ? afterKind.rawXml
@@ -8249,10 +8249,10 @@ export class SpreadsheetApp {
               ? afterKind.raw_xml
               : null
           : null;
-      if (afterRawXml != null) {
+      if (afterRawXmlString != null) {
         const kindValue: any = (drawing as any).kind;
         if (kindValue && typeof kindValue === "object") {
-          next.kind = { ...kindValue, rawXml: afterRawXml, raw_xml: afterRawXml };
+          next.kind = { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
         }
       }
 
