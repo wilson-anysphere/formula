@@ -312,6 +312,54 @@ fn converting_inline_string_cell_with_trailing_bytes_to_formula_requires_explici
 }
 
 #[test]
+fn converting_inline_string_cell_with_trailing_bytes_and_low_byte_zero_to_formula_requires_explicit_new_rgcb()
+{
+    // Regression: for the "simple" BrtCellSt layout, the byte at offset 12 is the first UTF-16LE
+    // byte of the string. When that byte happens to look like a plausible flags byte (e.g. `0x00`
+    // for U+0100), we must still treat unexpected trailing bytes as trailing *payload* and require
+    // `CellEdit.new_rgcb` when converting to a formula (so we don't silently drop bytes).
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "Ā"); // U+0100 => UTF-16LE starts with 0x00
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, CELL_ST, &[0xAB]);
+
+    let rgce = encode_rgce("=1+1").expect("encode formula");
+    let edits_missing_rgcb = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(rgce.clone()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let err = patch_sheet_bin(&tweaked, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when converting CELL_ST record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut out, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when streaming convert CELL_ST record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+
+    let edits_with_rgcb = [CellEdit {
+        new_rgcb: Some(Vec::new()),
+        ..edits_missing_rgcb[0].clone()
+    }];
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits_with_rgcb).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed =
+        patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits_with_rgcb)
+            .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+}
+
+#[test]
 fn patching_value_cell_with_trailing_bytes_preserves_unknown_payload_bytes() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_cell_number(0, 0, 1.0);

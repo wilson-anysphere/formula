@@ -1688,11 +1688,81 @@ fn value_record_expected_payload_len(record_id: u32, payload: &[u8]) -> Result<u
             // This is intentionally conservative: misclassifying an exotic reserved-flags record
             // only makes conversion to formulas require an explicit `CellEdit.new_rgcb`, which is
             // safer than silently dropping bytes.
-            if payload.len() == expected_simple
-                || payload
-                    .get(12)
-                    .map_or(false, |&flags| flags & !0x83 != 0)
-            {
+            if payload.len() == expected_simple {
+                return Ok(expected_simple);
+            }
+            let flags_byte = *payload.get(12).ok_or(Error::UnexpectedEof)?;
+            if flags_byte & !0x83 != 0 {
+                return Ok(expected_simple);
+            }
+
+            // At this point the record could be either:
+            // - flagged layout: `[cch][flags:u8][utf16...]...`
+            // - simple layout with trailing bytes where the first UTF-16 byte happens to look like
+            //   a plausible flags byte (e.g. U+0100 -> 0x00 0x01).
+            //
+            // Disambiguate by scoring the decoded UTF-16 text for each possible start offset.
+            // Prefer the flagged layout only when it looks strictly more plausible; on ties, fall
+            // back to the simple layout so we don't accidentally treat trailing bytes as part of
+            // the string payload (and then silently drop them when converting to a formula).
+            let score_utf16_candidate = |raw: &[u8]| -> i32 {
+                const MAX_DECODED_CHARS: usize = 16;
+                let iter = raw
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                let mut score = 0i32;
+                for decoded in std::char::decode_utf16(iter).take(MAX_DECODED_CHARS) {
+                    match decoded {
+                        Ok(ch) => {
+                            let cp = ch as u32;
+                            if ch == '\0' {
+                                score -= 5;
+                                continue;
+                            }
+                            if ch.is_ascii() {
+                                if ch.is_ascii_graphic() || ch == ' ' {
+                                    // Strongly prefer ASCII-visible text.
+                                    score += 3;
+                                } else if ch == '\t' || ch == '\n' || ch == '\r' {
+                                    // Neutral: possible but uncommon.
+                                } else {
+                                    // Other ASCII control chars are suspicious.
+                                    score -= 2;
+                                }
+                                continue;
+                            }
+                            if ch.is_control() {
+                                score -= 2;
+                                continue;
+                            }
+                            // Penalize private-use characters; these are uncommon in typical cell
+                            // text and can indicate misalignment.
+                            if (0xE000..=0xF8FF).contains(&cp) {
+                                score -= 2;
+                                continue;
+                            }
+                            score += 1;
+                        }
+                        Err(_) => score -= 5,
+                    }
+                }
+                score
+            };
+
+            // Simple layout: UTF-16 begins immediately after the `cch` field.
+            let simple_utf16 = payload
+                .get(12..expected_simple)
+                .ok_or(Error::UnexpectedEof)?;
+            // Flagged layout (minimal): UTF-16 begins after the flags byte.
+            let flagged_utf16_end = 13usize
+                .checked_add(utf16_len)
+                .ok_or(Error::UnexpectedEof)?;
+            let flagged_utf16 = payload
+                .get(13..flagged_utf16_end)
+                .ok_or(Error::UnexpectedEof)?;
+            let simple_score = score_utf16_candidate(simple_utf16);
+            let flagged_score = score_utf16_candidate(flagged_utf16);
+            if flagged_score <= simple_score {
                 return Ok(expected_simple);
             }
 
