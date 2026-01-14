@@ -339,9 +339,8 @@ export class EncryptedRangeManager {
       if (!arr) return;
 
       // Delete back-to-front so indices remain stable when multiple duplicates exist.
-      const items = arr.toArray();
-      for (let i = items.length - 1; i >= 0; i -= 1) {
-        const entry = yRangeToEncryptedRange(items[i]);
+      for (let i = arr.length - 1; i >= 0; i -= 1) {
+        const entry = yRangeToEncryptedRange(arr.get(i));
         if (entry?.id === normalizedId) {
           arr.delete(i, 1);
         }
@@ -374,9 +373,9 @@ export class EncryptedRangeManager {
       const arr = getYArray(this.metadata.get(METADATA_KEY));
       if (!arr) return;
 
-      const items = arr.toArray();
-      for (let i = 0; i < items.length; i += 1) {
-        const yMap = getYMap(items[i]);
+      const len = arr.length;
+      for (let i = 0; i < len; i += 1) {
+        const yMap = getYMap(arr.get(i));
         if (!yMap) continue;
         const entryIdRaw = coerceString(yMap.get("id"))?.trim() ?? "";
         // Fast-path: if the range has an id and it doesn't match, skip without parsing.
