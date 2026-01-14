@@ -47,7 +47,7 @@
   gap: var(--conflict-ui-gap-sm);
   min-width: 240px;
   max-width: min(520px, calc(100vw - 32px));
-  padding: 8px 10px;
+  padding: var(--space-4) var(--conflict-ui-padding);
   background: var(--dialog-bg);
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
@@ -57,7 +57,7 @@
 .conflict-ui-toast-root > div > button,
 .structural-conflict-ui-toast-root > div > button {
   flex: 0 0 auto;
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
@@ -128,15 +128,15 @@
 
 .conflict-ui-dialog-root h2,
 .structural-conflict-ui-dialog-root h2 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
   font-size: 14px;
   line-height: 18px;
 }
 
 .conflict-ui-dialog-root pre,
 .structural-conflict-ui-dialog-root pre {
-  margin: 6px 0 0;
-  padding: 6px 8px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
@@ -155,7 +155,7 @@
 .conflict-ui-dialog-root button,
 .structural-conflict-ui-dialog-root button {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  padding: var(--space-3) var(--conflict-ui-padding);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
@@ -183,7 +183,7 @@
 .conflict-ui-dialog-root input,
 .structural-conflict-ui-dialog-root textarea,
 .structural-conflict-ui-dialog-root input {
-  padding: 6px 10px;
+  padding: var(--space-3) var(--conflict-ui-padding);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
