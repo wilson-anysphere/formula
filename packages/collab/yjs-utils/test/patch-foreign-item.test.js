@@ -1,25 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
 import { patchForeignItemConstructor } from "@formula/collab-yjs-utils";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
+import { requireYjsCjs } from "./require-yjs-cjs.js";
 
 test("collab-yjs-utils: patchForeignItemConstructor patches foreign Item structs to pass instanceof checks", () => {
   const Ycjs = requireYjsCjs();
@@ -45,4 +30,3 @@ test("collab-yjs-utils: patchForeignItemConstructor patches foreign Item structs
 
   assert.equal(item instanceof Y.Item, true);
 });
-
