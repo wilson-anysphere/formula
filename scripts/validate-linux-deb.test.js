@@ -444,6 +444,27 @@ test("validate-linux-deb fails when extracted .desktop lacks Parquet MIME type (
   assert.match(proc.stderr, /application\/vnd\.apache\.parquet/i);
 });
 
+test("validate-linux-deb fails when extracted .desktop Exec= lacks a file/URL placeholder", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopExecLine: `Exec=${expectedMainBinary}`,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /placeholder/i);
+});
+
 test("validate-linux-deb fails when extracted .desktop Exec= does not reference the expected binary", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");
