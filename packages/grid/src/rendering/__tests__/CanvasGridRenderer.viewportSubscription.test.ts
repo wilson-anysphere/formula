@@ -197,4 +197,53 @@ describe("CanvasGridRenderer.subscribeViewport", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("shrinks attached canvas backing stores on destroy()", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 100, colCount: 100, defaultRowHeight: 10, defaultColWidth: 10 });
+    // Skip heavy rendering work.
+    (renderer as unknown as { renderFrame: () => void }).renderFrame = vi.fn();
+
+    const grid = document.createElement("canvas");
+    const content = document.createElement("canvas");
+    const selection = document.createElement("canvas");
+    renderer.attach({ grid, content, selection });
+    renderer.resize(200, 100, 1);
+    flushRaf();
+
+    expect(grid.width).toBeGreaterThan(0);
+    expect(grid.height).toBeGreaterThan(0);
+    expect(content.width).toBeGreaterThan(0);
+    expect(selection.width).toBeGreaterThan(0);
+
+    renderer.destroy();
+
+    expect(grid.width).toBe(0);
+    expect(grid.height).toBe(0);
+    expect(content.width).toBe(0);
+    expect(content.height).toBe(0);
+    expect(selection.width).toBe(0);
+    expect(selection.height).toBe(0);
+  });
+
+  it("cancels a scheduled render frame on destroy()", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 100, colCount: 100, defaultRowHeight: 10, defaultColWidth: 10 });
+    const renderFrame = vi.fn();
+    (renderer as unknown as { renderFrame: () => void }).renderFrame = renderFrame;
+
+    const grid = document.createElement("canvas");
+    const content = document.createElement("canvas");
+    const selection = document.createElement("canvas");
+    renderer.attach({ grid, content, selection });
+    renderer.resize(200, 100, 1);
+    flushRaf();
+    renderFrame.mockClear();
+
+    renderer.requestRender();
+    renderer.destroy();
+    flushRaf();
+
+    expect(renderFrame).not.toHaveBeenCalled();
+  });
 });

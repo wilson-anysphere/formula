@@ -501,6 +501,7 @@ export class CanvasGridRenderer {
   };
 
   private scheduled = false;
+  private renderRafId: number | null = null;
   private forceFullRedraw = true;
 
   private lastRendered = {
@@ -974,6 +975,16 @@ export class CanvasGridRenderer {
 
   destroy(): void {
     this.destroyed = true;
+    // Cancel any pending render request scheduled via `requestRender()`.
+    if (this.renderRafId !== null) {
+      try {
+        globalThis.cancelAnimationFrame?.(this.renderRafId);
+      } catch {
+        // ignore
+      }
+      this.renderRafId = null;
+    }
+    this.scheduled = false;
     if (this.unsubscribeProvider) {
       this.unsubscribeProvider();
       this.unsubscribeProvider = undefined;
@@ -993,6 +1004,55 @@ export class CanvasGridRenderer {
       this.viewportListeners.clear();
     }
     this.clearImageCache();
+
+    // Drop caches and release backing stores so a destroyed renderer does not retain large
+    // allocations (text layout caches, offscreen canvases, etc) if it remains referenced
+    // after teardown (tests, hot reload, view swaps).
+    try {
+      this.textWidthCache.clear();
+    } catch {
+      // ignore
+    }
+    this.textLayoutEngine = undefined;
+    this.rowHeightOverridesBase.clear();
+    this.colWidthOverridesBase.clear();
+    this.referenceHighlights = [];
+    this.remotePresences = [];
+    this.imagePlaceholderPattern = null;
+    this.backgroundPatternImage = null;
+    this.backgroundPatternTile = null;
+    this.backgroundPatternTileKey = null;
+    this.mergedIndex = EMPTY_MERGED_INDEX;
+    this.mergedIndexKey = null;
+    this.mergedIndexDirty = true;
+    this.frameCellCache.clear();
+    this.frameBlockedCache.clear();
+    this.frameCellCacheNested.clear();
+    this.frameBlockedCacheNested.clear();
+
+    // Release any canvas backing stores (these can hold multi-megabyte buffers even after the
+    // canvases are removed from the DOM).
+    const shrinkCanvas = (canvas: HTMLCanvasElement | undefined) => {
+      if (!canvas) return;
+      try {
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch {
+        // ignore
+      }
+    };
+    shrinkCanvas(this.gridCanvas);
+    shrinkCanvas(this.contentCanvas);
+    shrinkCanvas(this.selectionCanvas);
+    shrinkCanvas(this.blitCanvas);
+    this.blitCanvas = undefined;
+    this.blitCtx = undefined;
+    this.gridCanvas = undefined;
+    this.gridCtx = undefined;
+    this.contentCanvas = undefined;
+    this.contentCtx = undefined;
+    this.selectionCanvas = undefined;
+    this.selectionCtx = undefined;
   }
 
   invalidateImage(imageId: string): void {
@@ -2136,14 +2196,18 @@ export class CanvasGridRenderer {
   }
 
   renderImmediately(): void {
+    if (this.destroyed) return;
     this.renderFrame();
   }
 
   requestRender(): void {
+    if (this.destroyed) return;
     if (this.scheduled) return;
     this.scheduled = true;
-    requestAnimationFrame(() => {
+    this.renderRafId = requestAnimationFrame(() => {
+      this.renderRafId = null;
       this.scheduled = false;
+      if (this.destroyed) return;
       this.renderFrame();
     });
   }
@@ -2160,6 +2224,7 @@ export class CanvasGridRenderer {
   }
 
   private renderFrame(): void {
+    if (this.destroyed) return;
     const perf = this.perfStats;
     const perfEnabled = perf.enabled;
     const frameStart = perfEnabled ? performance.now() : 0;
