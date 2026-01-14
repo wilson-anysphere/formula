@@ -18,11 +18,15 @@ import {
 import { validateTauriUpdaterManifest, verifyTauriManifestSignature } from "../tauri-updater-manifest.mjs";
 import {
   ActionableError,
+  expectedUpdaterExtensions,
   filenameFromUrl,
   findPlatformsObject,
+  isPrimaryBundleOrSig,
   isPrimaryBundleAssetName,
   normalizeVersion as normalizeVersionForVerify,
+  validateReleaseExpectations,
   validateLatestJson,
+  validateUpdaterFilenameForPlatform,
   verifyUpdaterManifestSignature,
 } from "../verify-desktop-release-assets.mjs";
 import { validatePlatformEntries } from "../ci/validate-updater-manifest.mjs";
@@ -167,6 +171,36 @@ test("verify-desktop-release-assets helpers: isPrimaryBundleAssetName matches ex
   assert.equal(isPrimaryBundleAssetName("Formula_0.1.0_amd64.deb"), true);
   assert.equal(isPrimaryBundleAssetName("latest.json"), false);
   assert.equal(isPrimaryBundleAssetName("latest.json.sig"), false);
+});
+
+test("verify-desktop-release-assets helpers: isPrimaryBundleOrSig honors includeSigs option", () => {
+  assert.equal(isPrimaryBundleOrSig("Formula_0.1.0_x64_en-US.msi", { includeSigs: false }), true);
+  assert.equal(isPrimaryBundleOrSig("Formula_0.1.0_x64_en-US.msi.sig", { includeSigs: false }), false);
+  assert.equal(isPrimaryBundleOrSig("Formula_0.1.0_x64_en-US.msi.sig", { includeSigs: true }), true);
+  // `latest.json.sig` should never be treated as a primary bundle signature.
+  assert.equal(isPrimaryBundleOrSig("latest.json.sig", { includeSigs: true }), false);
+});
+
+test("verify-desktop-release-assets helpers: expectedUpdaterExtensions encodes per-OS updater artifact rules", () => {
+  assert.deepEqual(expectedUpdaterExtensions("darwin-x86_64"), [".app.tar.gz", ".tar.gz", ".tgz"]);
+  assert.deepEqual(expectedUpdaterExtensions("linux-x86_64"), [".AppImage"]);
+  assert.deepEqual(expectedUpdaterExtensions("windows-x86_64"), [".msi"]);
+  assert.deepEqual(expectedUpdaterExtensions("windows-x86_64", { allowWindowsExe: true }), [".msi", ".exe"]);
+});
+
+test("verify-desktop-release-assets helpers: validateUpdaterFilenameForPlatform enforces per-OS rules", () => {
+  assert.equal(validateUpdaterFilenameForPlatform("darwin-x86_64", "Formula.app.tar.gz"), null);
+  assert.match(
+    validateUpdaterFilenameForPlatform("darwin-x86_64", "Formula.dmg") ?? "",
+    /must not reference \.dmg/i,
+  );
+
+  assert.equal(validateUpdaterFilenameForPlatform("linux-x86_64", "Formula.AppImage"), null);
+  assert.match(validateUpdaterFilenameForPlatform("linux-x86_64", "Formula.deb") ?? "", /\.deb/i);
+
+  assert.equal(validateUpdaterFilenameForPlatform("windows-x86_64", "Formula.msi"), null);
+  assert.match(validateUpdaterFilenameForPlatform("windows-x86_64", "Formula.exe") ?? "", /allow-windows-exe/i);
+  assert.equal(validateUpdaterFilenameForPlatform("windows-x86_64", "Formula.exe", { allowWindowsExe: true }), null);
 });
 
 test("mergeTauriUpdaterManifests unions platform keys and normalizes version", async () => {
@@ -348,6 +382,109 @@ test("verify-desktop-release-assets: validateLatestJson fails on wrong version",
     (err) => {
       assert.ok(err instanceof ActionableError);
       assert.match(err.message, /version mismatch/i);
+      return true;
+    },
+  );
+});
+
+test("verify-desktop-release-assets: validateReleaseExpectations passes when expected installers + updater keys exist", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const assetNames = [
+    "formula-desktop_0.1.0_x64_en-US.msi",
+    "formula-desktop_0.1.0_arm64_en-US.msi",
+  ];
+
+  assert.doesNotThrow(() =>
+    validateReleaseExpectations({ manifest, expectedVersion: "0.1.0", assetNames, expectedTargets }),
+  );
+});
+
+test("verify-desktop-release-assets: validateReleaseExpectations fails when an expected installer is missing", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const assetNames = ["formula-desktop_0.1.0_x64_en-US.msi"];
+
+  assert.throws(
+    () => validateReleaseExpectations({ manifest, expectedVersion: "0.1.0", assetNames, expectedTargets }),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.match(err.message, /\[windows-arm64\] Missing installer asset/i);
+      return true;
+    },
+  );
+});
+
+test("verify-desktop-release-assets: validateReleaseExpectations flags ambiguous multi-arch artifacts without an arch token", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const ambiguous = "formula-desktop_0.1.0_en-US.msi";
+  const assetNames = [
+    "formula-desktop_0.1.0_x64_en-US.msi",
+    "formula-desktop_0.1.0_arm64_en-US.msi",
+    ambiguous,
+  ];
+
+  assert.throws(
+    () => validateReleaseExpectations({ manifest, expectedVersion: "0.1.0", assetNames, expectedTargets }),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.match(err.message, /Ambiguous artifacts detected/i);
+      assert.ok(
+        err.message.includes(ambiguous),
+        `expected error message to mention ${ambiguous}, got:\n${err.message}`,
+      );
       return true;
     },
   );
