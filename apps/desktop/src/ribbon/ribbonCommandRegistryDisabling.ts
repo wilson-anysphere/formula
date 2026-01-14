@@ -103,11 +103,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.cells.delete.deleteSheet",
 
   // --- Home editing -----------------------------------------------------------
-  // Home → Editing → Clear dropdown uses ribbon-specific ids but routes to `format.clear*`
-  // commands via `homeEditingClearCommandRouting.ts`.
-  "home.editing.clear.clearAll",
-  "home.editing.clear.clearFormats",
-  "home.editing.clear.clearContents",
   // Legacy AutoSum trigger/menu ids (current schema uses `edit.autoSum`).
   "home.editing.autoSum",
   "home.editing.autoSum.sum",

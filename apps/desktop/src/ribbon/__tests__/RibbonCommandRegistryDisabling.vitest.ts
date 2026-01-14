@@ -189,8 +189,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps Home → Editing → Clear menu items enabled via the exemption list", () => {
+  it("keeps implemented Home → Editing → Clear menu items enabled when commands are registered", () => {
     const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("format.clearAll", "Clear All", () => {});
+    commandRegistry.registerBuiltinCommand("format.clearFormats", "Clear Formats", () => {});
+    commandRegistry.registerBuiltinCommand("edit.clearContents", "Clear Contents", () => {});
+
     const schema: RibbonSchema = {
       tabs: [
         {
@@ -207,10 +211,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   ariaLabel: "Clear",
                   kind: "dropdown",
                   menuItems: [
-                    { id: "home.editing.clear.clearAll", label: "Clear All", ariaLabel: "Clear All" },
-                    { id: "home.editing.clear.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats" },
-                    { id: "home.editing.clear.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents" },
+                    { id: "format.clearAll", label: "Clear All", ariaLabel: "Clear All" },
+                    { id: "format.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats" },
+                    { id: "edit.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents" },
                     { id: "home.editing.clear.clearComments", label: "Clear Comments", ariaLabel: "Clear Comments" },
+                    { id: "home.editing.clear.clearHyperlinks", label: "Clear Hyperlinks", ariaLabel: "Clear Hyperlinks" },
                   ],
                 },
               ],
@@ -222,15 +227,14 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
 
-    // These menu items are ribbon-specific ids but are routed to real `format.clear*` commands
-    // in `main.ts` (via `resolveHomeEditingClearCommandTarget`). They should not be auto-disabled
-    // just because the command registry doesn't have matching ids.
-    expect(disabledById["home.editing.clear.clearAll"]).not.toBe(true);
-    expect(disabledById["home.editing.clear.clearFormats"]).not.toBe(true);
-    expect(disabledById["home.editing.clear.clearContents"]).not.toBe(true);
+    // Implemented commands should remain enabled because they are registered in CommandRegistry.
+    expect(disabledById["format.clearAll"]).not.toBe(true);
+    expect(disabledById["format.clearFormats"]).not.toBe(true);
+    expect(disabledById["edit.clearContents"]).not.toBe(true);
 
     // Unimplemented variants should remain disabled by default.
     expect(disabledById["home.editing.clear.clearComments"]).toBe(true);
+    expect(disabledById["home.editing.clear.clearHyperlinks"]).toBe(true);
 
     // The trigger should not be disabled because at least one menu item is enabled.
     expect(disabledById["home.editing.clear"]).not.toBe(true);
