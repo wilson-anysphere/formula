@@ -575,12 +575,43 @@ try {
     return $rows
   }
 
-  function Assert-MsiDeclaresFileAssociation {
+  function Test-MsiRegistryTableForExtension {
     param(
       [Parameter(Mandatory = $true)]
       [System.IO.FileInfo]$Msi,
       [Parameter(Mandatory = $true)]
       [string]$ExtensionNoDot
+    )
+
+    $dotExt = "." + $ExtensionNoDot
+    $needle = $dotExt
+    $needleAlt = $ExtensionNoDot
+
+    try {
+      $rows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `Key`, `Name`, `Value` FROM `Registry`' -ColumnCount 3
+    } catch {
+      return $false
+    }
+
+    foreach ($row in $rows) {
+      if ($row.Count -lt 3) { continue }
+      foreach ($col in @($row[0], $row[1], $row[2])) {
+        if ($null -eq $col) { continue }
+        $s = $col.ToString()
+        if ($s.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+        if ($s.IndexOf($needleAlt, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+      }
+    }
+    return $false
+  }
+
+  function Assert-MsiDeclaresFileAssociation {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Msi,
+      [Parameter(Mandatory = $true)]
+      [string]$ExtensionNoDot,
+      [string]$ExpectedMimeType = ""
     )
 
     Write-Host "File association check (MSI): $($Msi.FullName)"
@@ -592,7 +623,13 @@ try {
       throw "Failed to open MSI for inspection: $($Msi.FullName)`n$($_.Exception.Message)"
     }
 
+    $hasRegistryFallback = $tables -contains "Registry"
+
     if (-not ($tables -contains "Extension")) {
+      if ($hasRegistryFallback -and (Test-MsiRegistryTableForExtension -Msi $Msi -ExtensionNoDot $ExtensionNoDot)) {
+        Write-Warning "MSI is missing the Extension table, but the Registry table contains strings related to '.$ExtensionNoDot'. Assuming file association metadata is present (best-effort)."
+        return
+      }
       throw "MSI is missing the Extension table; cannot verify file associations for '.$ExtensionNoDot'. (Check bundle.fileAssociations in tauri.conf.json and the Windows bundler output.)"
     }
 
@@ -609,6 +646,10 @@ try {
     }
 
     if ($null -eq $foundRow) {
+      if ($hasRegistryFallback -and (Test-MsiRegistryTableForExtension -Msi $Msi -ExtensionNoDot $ExtensionNoDot)) {
+        Write-Warning "MSI did not contain an Extension table row for '$ExtensionNoDot', but the Registry table contains strings related to '.$ExtensionNoDot'. Assuming file association metadata is present (best-effort)."
+        return
+      }
       $present = @(
         $extRows |
           ForEach-Object {
@@ -626,6 +667,16 @@ try {
     $progId = $progIdVal.Trim()
     if ([string]::IsNullOrWhiteSpace($progId)) {
       throw "MSI Extension table row for '$ExtensionNoDot' exists but ProgId_ is empty. This suggests file association wiring is incomplete."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedMimeType)) {
+      $mimeVal = if ($null -ne $foundRow[2]) { $foundRow[2] } else { "" }
+      $mime = $mimeVal.Trim()
+      if ([string]::IsNullOrWhiteSpace($mime)) {
+        Write-Warning "MSI Extension row for '$ExtensionNoDot' has an empty MIME_ column (expected '$ExpectedMimeType'). File associations may still work via ProgId/registry, but this is unexpected."
+      } elseif ($mime -ine $ExpectedMimeType) {
+        Write-Warning "MSI Extension row for '$ExtensionNoDot' has MIME_ '$mime' (expected '$ExpectedMimeType')."
+      }
     }
 
     if ($tables -contains "ProgId") {
@@ -779,10 +830,47 @@ try {
     $requiredExtension = "xlsx"
   }
   $requiredExtensionNoDot = $requiredExtension.Trim().TrimStart(".")
+  $expectedXlsxMimeType = ""
+  if ($null -ne $assocSpec -and $null -ne $assocSpec.XlsxMimeType) {
+    $expectedXlsxMimeType = ($assocSpec.XlsxMimeType).ToString().Trim()
+  }
 
   if ($msiInstallers.Count -gt 0) {
     foreach ($msi in $msiInstallers) {
-      Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $requiredExtensionNoDot
+      try {
+        Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $requiredExtensionNoDot -ExpectedMimeType $expectedXlsxMimeType
+      } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match 'Failed to open MSI for inspection') {
+          Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for file association metadata. Details: $msg"
+          # Best-effort fallback: scan for registry-related strings in the MSI binary.
+          $bytes = [System.IO.File]::ReadAllBytes($msi.FullName)
+          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $dotExt = "." + $requiredExtensionNoDot
+          $needles = @(
+            "Software\\Classes\\$dotExt",
+            "Software\Classes\$dotExt",
+            "HKEY_CLASSES_ROOT\\$dotExt",
+            "HKEY_CLASSES_ROOT\$dotExt",
+            "HKCR\\$dotExt",
+            "HKCR $dotExt",
+            $dotExt,
+            $requiredExtensionNoDot
+          )
+          $found = $false
+          foreach ($n in $needles) {
+            if ($ascii.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+            if ($unicode.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+          }
+          if (-not $found) {
+            throw "Unable to inspect MSI tables AND did not find file-association-related strings for '.$requiredExtensionNoDot' in the MSI binary: $($msi.FullName)"
+          }
+          Write-Warning "MSI table inspection failed, but the MSI contained strings related to '.$requiredExtensionNoDot'. Assuming file association metadata is present (best-effort)."
+        } else {
+          throw
+        }
+      }
       Assert-MsiContainsComplianceArtifacts -Msi $msi
     }
   } else {

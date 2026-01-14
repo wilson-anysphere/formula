@@ -56,6 +56,10 @@ note() {
   echo "${SCRIPT_NAME}: $*"
 }
 
+warn() {
+  echo "${SCRIPT_NAME}: WARN: $*" >&2
+}
+
 die() {
   err "$@"
   exit 1
@@ -184,6 +188,110 @@ abs_path() {
 # fallback to avoid false negatives across distros.
 REQUIRED_XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SPREADSHEET_MIME_REGEX='application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+
+validate_desktop_mime_associations_extracted() {
+  local rpm_path="$1"
+
+  if ! command -v rpm2cpio >/dev/null 2>&1; then
+    die "rpm2cpio not found. It is required to validate .desktop MimeType entries when running with --no-container. Install rpm2cpio (and cpio) or re-run without --no-container."
+  fi
+  if ! command -v cpio >/dev/null 2>&1; then
+    die "cpio not found. It is required to validate .desktop MimeType entries when running with --no-container. Install cpio (and rpm2cpio) or re-run without --no-container."
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  note "Static desktop integration validation (extract RPM payload): ${rpm_path}"
+
+  (
+    cd "$tmpdir"
+    rpm2cpio "$rpm_path" | cpio -idm --quiet --no-absolute-filenames
+  ) || {
+    err "Failed to extract RPM payload with rpm2cpio/cpio: ${rpm_path}"
+    return 1
+  }
+
+  declare -a desktop_files=()
+  local applications_dir="$tmpdir/usr/share/applications"
+  if [ -d "$applications_dir" ]; then
+    while IFS= read -r -d '' desktop_file; do
+      desktop_files+=("$desktop_file")
+    done < <(find "$applications_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+  fi
+
+  if [ "${#desktop_files[@]}" -eq 0 ]; then
+    # Fallback: accept any desktop file in the payload to aid debugging.
+    while IFS= read -r -d '' desktop_file; do
+      desktop_files+=("$desktop_file")
+    done < <(find "$tmpdir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+  fi
+
+  if [ "${#desktop_files[@]}" -eq 0 ]; then
+    err "RPM payload did not contain any .desktop files after extraction. Expected at least one under /usr/share/applications/."
+    return 1
+  fi
+
+  local has_any_mimetype=0
+  local has_spreadsheet_mime=0
+  local has_xlsx_mime=0
+
+  local desktop_file
+  for desktop_file in "${desktop_files[@]}"; do
+    local mime_line
+    mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    if [ -z "$mime_line" ]; then
+      continue
+    fi
+
+    has_any_mimetype=1
+
+    local mime_value
+    mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$REQUIRED_XLSX_MIME"; then
+      has_xlsx_mime=1
+    fi
+    if printf '%s' "$mime_value" | grep -Eqi "$SPREADSHEET_MIME_REGEX"; then
+      has_spreadsheet_mime=1
+    fi
+  done
+
+  if [ "$has_any_mimetype" -ne 1 ]; then
+    err "No extracted .desktop file contained a MimeType= entry (file associations missing)."
+    err "Expected MimeType= to advertise spreadsheet MIME types based on apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations."
+    err "Extracted .desktop files inspected:"
+    for desktop_file in "${desktop_files[@]}"; do
+      echo "  - ${desktop_file#${tmpdir}/}" >&2
+    done
+    return 1
+  fi
+
+  if [ "$has_spreadsheet_mime" -ne 1 ]; then
+    err "No extracted .desktop MimeType= entry advertised spreadsheet/xlsx support (file associations missing)."
+    err "Expected MimeType= to include '${REQUIRED_XLSX_MIME}' (xlsx) or another spreadsheet MIME type."
+    err "MimeType entries found:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${tmpdir}/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    return 1
+  fi
+
+  if [ "$has_xlsx_mime" -ne 1 ]; then
+    warn "No extracted .desktop file explicitly listed xlsx MIME '${REQUIRED_XLSX_MIME}'. Spreadsheet MIME types were present, but .xlsx double-click integration may be incomplete."
+  fi
+}
 
 find_rpms() {
   local -a rpms=()
@@ -338,13 +446,19 @@ validate_static() {
 
   # OSS/compliance artifacts should ship with the installed app.
   for filename in LICENSE NOTICE; do
-    if ! grep -qx "/usr/share/doc/formula-desktop/${filename}" <<<"${file_list}"; then
-      err "RPM payload missing compliance file: /usr/share/doc/formula-desktop/${filename}"
+    if ! grep -qx "/usr/share/doc/${EXPECTED_RPM_NAME}/${filename}" <<<"${file_list}"; then
+      err "RPM payload missing compliance file: /usr/share/doc/${EXPECTED_RPM_NAME}/${filename}"
       err "First 200 lines of rpm file list:"
       echo "${file_list}" | head -n 200 >&2
       exit 1
     fi
   done
+
+  # If we are skipping the container install step, still validate the `.desktop` file
+  # advertises spreadsheet (xlsx) associations by extracting the payload.
+  if [[ "${NO_CONTAINER}" -eq 1 ]]; then
+    validate_desktop_mime_associations_extracted "${rpm_path}"
+  fi
 }
 
 validate_container() {
