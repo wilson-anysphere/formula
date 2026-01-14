@@ -416,7 +416,13 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     // Ensure we clean up even on timeouts / crashes.
     try {
       if (process.platform === 'linux') {
+        // Even if the wrapper process already exited, lingering WebView/WebKit helper processes can
+        // remain in the same process group. Best-effort: signal the group first, then fall back to
+        // enumerating the /proc process tree.
+        terminateProcessTree(child, 'graceful');
         await killProcessTreeLinux(child.pid, 5000);
+        // Last resort: if any processes are still alive in the original process group, force-kill them.
+        terminateProcessTree(child, 'force');
       } else {
         terminateProcessTree(child, 'force');
       }
