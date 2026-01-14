@@ -19,6 +19,29 @@ const tauriConfig = JSON.parse(
 );
 const expectedIdentifier = String(tauriConfig?.identifier ?? "").trim();
 const expectedVersion = String(tauriConfig?.version ?? "").trim();
+const expectedFileExtensions = (() => {
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  const associations = tauriConfig?.bundle?.fileAssociations ?? [];
+  if (!Array.isArray(associations)) return out;
+
+  for (const assoc of associations) {
+    if (!assoc || typeof assoc !== "object") continue;
+    const raw = assoc.ext;
+    const exts = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+    for (const ext of exts) {
+      if (typeof ext !== "string") continue;
+      const normalized = ext.trim().toLowerCase().replace(/^\./, "");
+      if (!normalized) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+  }
+
+  return out;
+})();
 
 function writeFakeTool(binDir, name, content) {
   const toolPath = join(binDir, name);
@@ -63,7 +86,7 @@ function writeInfoPlist(
     identifier,
     version,
     urlSchemes = ["formula"],
-    fileExtensions = ["xlsx", "xls", "csv"],
+    fileExtensions = expectedFileExtensions.length > 0 ? expectedFileExtensions : ["xlsx", "xls", "csv"],
   },
 ) {
   const schemesXml = urlSchemes.map((scheme) => `        <string>${scheme}</string>`).join("\n");

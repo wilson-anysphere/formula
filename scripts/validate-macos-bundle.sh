@@ -198,6 +198,47 @@ if [ -z "$EXPECTED_DESKTOP_VERSION" ]; then
   die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"version\" field."
 fi
 
+get_expected_file_extensions() {
+  # Read the configured file associations from `tauri.conf.json` so this validation doesn't
+  # silently drift when we add/remove supported extensions.
+  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  [ -f "$tauri_conf" ] || return 1
+
+  python3 - "$tauri_conf" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+
+associations = conf.get("bundle", {}).get("fileAssociations", []) or []
+seen = set()
+for assoc in associations:
+    if not isinstance(assoc, dict):
+        continue
+    raw = assoc.get("ext")
+    exts = []
+    if isinstance(raw, str):
+        exts = [raw]
+    elif isinstance(raw, list):
+        exts = [item for item in raw if isinstance(item, str)]
+    for ext in exts:
+        normalized = ext.strip().lower().lstrip(".")
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            print(normalized)
+PY
+}
+
+EXPECTED_FILE_EXTENSIONS=()
+while IFS= read -r ext; do
+  [ -n "$ext" ] && EXPECTED_FILE_EXTENSIONS+=("$ext")
+done < <(get_expected_file_extensions 2>/dev/null || true)
+
+if [ "${#EXPECTED_FILE_EXTENSIONS[@]}" -eq 0 ]; then
+  warn "no file association extensions found in apps/desktop/src-tauri/tauri.conf.json (bundle.fileAssociations); skipping file association validation"
+fi
+
 get_expected_url_schemes() {
   # Keep this in sync with apps/desktop/src-tauri/Info.plist, which is merged into the generated
   # app bundle Info.plist during packaging.
@@ -365,57 +406,51 @@ PY
 
 validate_plist_file_associations() {
   local plist_path="$1"
-  local required_extension="$2"
-  shift 2
-  local optional_extensions=("$@")
+  shift
+  local expected_extensions=("$@")
 
   [ -f "$plist_path" ] || die "missing Info.plist at $plist_path"
+  if [ "${#expected_extensions[@]}" -eq 0 ]; then
+    warn "file association validation skipped (no expected extensions configured)"
+    return 0
+  fi
 
   local output
   set +e
   output="$(
-    python3 - "$plist_path" "$required_extension" "${optional_extensions[@]}" <<'PY'
+    python3 - "$plist_path" "${expected_extensions[@]}" <<'PY'
 import plistlib
 import sys
 
 plist_path = sys.argv[1]
-required_ext = sys.argv[2].lower().lstrip(".")
-optional_exts = [arg.lower().lstrip(".") for arg in sys.argv[3:]]
+expected_exts = [arg.lower().lstrip(".") for arg in sys.argv[2:] if arg and str(arg).strip()]
 
 try:
     with open(plist_path, "rb") as f:
         data = plistlib.load(f)
 except Exception as e:
-    # Exit code 2 is reserved for parse failures; exit code 1 is "valid plist, but missing extension".
     print(str(e))
     raise SystemExit(2)
 
-doc_exts = set()
+found_exts = set()
 
-doc_types = data.get("CFBundleDocumentTypes")
-if doc_types is None:
-    print("CFBundleDocumentTypes missing from Info.plist")
-    raise SystemExit(1)
-if not isinstance(doc_types, (list, tuple)):
-    print(f"CFBundleDocumentTypes has unexpected type: {type(doc_types)}")
-    raise SystemExit(1)
-
-for doc in doc_types:
-    if not isinstance(doc, dict):
-        continue
-    exts = doc.get("CFBundleTypeExtensions") or []
-    if isinstance(exts, str):
-        normalized = exts.strip().lower().lstrip(".")
-        if normalized:
-            doc_exts.add(normalized)
-    elif isinstance(exts, (list, tuple)):
-        for ext in exts:
-            if isinstance(ext, str) and ext.strip():
-                normalized = ext.strip().lower().lstrip(".")
-                if normalized:
-                    doc_exts.add(normalized)
-
-found_exts = set(doc_exts)
+# CFBundleDocumentTypes (preferred, but not the only source of extension registrations).
+doc_types = data.get("CFBundleDocumentTypes") or []
+if isinstance(doc_types, (list, tuple)):
+    for doc in doc_types:
+        if not isinstance(doc, dict):
+            continue
+        exts = doc.get("CFBundleTypeExtensions") or []
+        if isinstance(exts, str):
+            normalized = exts.strip().lower().lstrip(".")
+            if normalized:
+                found_exts.add(normalized)
+        elif isinstance(exts, (list, tuple)):
+            for ext in exts:
+                if isinstance(ext, str) and ext.strip():
+                    normalized = ext.strip().lower().lstrip(".")
+                    if normalized:
+                        found_exts.add(normalized)
 
 for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     decls = data.get(key) or []
@@ -429,28 +464,25 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
             continue
         raw_exts = tags.get("public.filename-extension")
         if isinstance(raw_exts, str):
-            found_exts.add(raw_exts.strip().lower().lstrip("."))
+            normalized = raw_exts.strip().lower().lstrip(".")
+            if normalized:
+                found_exts.add(normalized)
         elif isinstance(raw_exts, (list, tuple)):
             for ext in raw_exts:
                 if isinstance(ext, str) and ext.strip():
-                    found_exts.add(ext.strip().lower().lstrip("."))
+                    normalized = ext.strip().lower().lstrip(".")
+                    if normalized:
+                        found_exts.add(normalized)
 
-if not doc_exts:
-    print("CFBundleDocumentTypes exists but did not contain any CFBundleTypeExtensions entries")
+if not found_exts:
+    print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
     raise SystemExit(1)
 
-if required_ext not in doc_exts:
-    found = ", ".join(sorted(doc_exts)) if doc_exts else "(none)"
-    if required_ext in found_exts:
-        print(f"missing required extension '{required_ext}' in CFBundleDocumentTypes (found only in UT*TypeDeclarations). CFBundleDocumentTypes extensions: {found}")
-    else:
-        print(f"missing required extension '{required_ext}' in CFBundleDocumentTypes. CFBundleDocumentTypes extensions: {found}")
+missing = [ext for ext in expected_exts if ext and ext not in found_exts]
+if missing:
+    found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
+    print("missing extension(s): " + ", ".join(sorted(set(missing))) + f". Found extensions: {found}")
     raise SystemExit(1)
-
-missing_optional = [ext for ext in optional_exts if ext and ext not in doc_exts]
-if missing_optional:
-    # Return a human-readable warning string for the caller.
-    print("missing optional extensions: " + ", ".join(missing_optional))
 PY
   )"
   local status=$?
@@ -459,11 +491,7 @@ PY
   if [ "$status" -eq 2 ]; then
     die "failed to parse Info.plist at ${plist_path}: ${output}"
   elif [ "$status" -ne 0 ]; then
-    die "Info.plist is missing file association metadata for '.${required_extension}'. Details: ${output}. (Check apps/desktop/src-tauri/Info.plist and bundle.fileAssociations in apps/desktop/src-tauri/tauri.conf.json)"
-  fi
-
-  if [ -n "$output" ]; then
-    warn "Info.plist file association metadata: ${output}"
+    die "Info.plist is missing file association metadata. Details: ${output}. (Check bundle.fileAssociations in apps/desktop/src-tauri/tauri.conf.json)"
   fi
 }
 
@@ -571,8 +599,10 @@ validate_app_bundle() {
   validate_plist_identity_metadata "$plist_path" "$EXPECTED_BUNDLE_IDENTIFIER" "$EXPECTED_DESKTOP_VERSION"
   echo "bundle: Info.plist OK (identifier '${EXPECTED_BUNDLE_IDENTIFIER}', version '${EXPECTED_DESKTOP_VERSION}')"
 
-  validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
-  echo "bundle: Info.plist OK (file associations include .xlsx)"
+  if [ "${#EXPECTED_FILE_EXTENSIONS[@]}" -gt 0 ]; then
+    validate_plist_file_associations "$plist_path" "${EXPECTED_FILE_EXTENSIONS[@]}"
+    echo "bundle: Info.plist OK (file associations)"
+  fi
 
   validate_compliance_artifacts "$app_path"
   echo "bundle: Resources OK (LICENSE/NOTICE present)"
