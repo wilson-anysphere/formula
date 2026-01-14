@@ -10,8 +10,10 @@ pub struct CellAddr {
 impl CellAddr {
     /// Sentinel value used in range endpoints to indicate "the last row/column of the sheet".
     ///
-    /// This value is never produced by [`parse_a1`]: the largest valid A1 row is `u32::MAX`
-    /// (1-indexed), which parses to `u32::MAX - 1` when stored 0-indexed.
+    /// This value is never produced by [`parse_a1`]: the largest valid A1 row is `i32::MAX`
+    /// (1-indexed), which parses to `i32::MAX - 1` when stored 0-indexed. This matches the
+    /// eval IR (`eval::ast::Ref`) which stores absolute coordinates in `i32` with `i32::MAX`
+    /// reserved as a sheet-end sentinel.
     pub const SHEET_END: u32 = u32::MAX;
 
     /// Formats this 0-indexed address into an Excel-style A1 string (e.g. `A1`, `BC32`).
@@ -95,14 +97,17 @@ pub fn parse_a1(input: &str) -> Result<CellAddr, AddressParseError> {
     if row == 0 {
         return Err(AddressParseError::RowOutOfRange);
     }
+    if row > i32::MAX as u32 {
+        return Err(AddressParseError::RowOutOfRange);
+    }
 
     // Excel max is XFD (16,384) columns and 1,048,576 rows.
     //
     // We continue to enforce the Excel column bound because the engine data model (and
     // `formula-model::CellKey`) assumes a fixed 16,384-column grid.
     //
-    // Rows are not capped here: sheets can grow beyond Excel's default row count and out-of-bounds
-    // semantics are handled dynamically at evaluation time using per-sheet dimensions.
+    // Rows are capped at `i32::MAX` (1-indexed). This matches the engine's internal row limit and
+    // avoids overflow in internal row/col arithmetic which relies on signed `i32` offsets.
     if col > formula_model::EXCEL_MAX_COLS {
         return Err(AddressParseError::ColumnOutOfRange);
     }
@@ -130,5 +135,14 @@ mod tests {
             col: 0,
         };
         assert_eq!(addr.to_a1(), "A4294967296");
+    }
+
+    #[test]
+    fn parse_a1_caps_rows_at_i32_max() {
+        assert!(parse_a1("A2147483647").is_ok());
+        assert!(matches!(
+            parse_a1("A2147483648"),
+            Err(AddressParseError::RowOutOfRange)
+        ));
     }
 }
