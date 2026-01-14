@@ -9470,9 +9470,6 @@ function handleRibbonCommand(commandId: string): void {
   }
 
   switch (commandId) {
-    case "home.cells.format.organizeSheets":
-      openOrganizeSheets();
-      return;
     case "home.cells.format":
       // This command is a dropdown with menu items; the top-level command is not expected
       // to fire when the menu is present. Keep this as a fallback.
