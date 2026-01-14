@@ -26,6 +26,15 @@ fn default_schema_version() -> u32 {
     crate::SCHEMA_VERSION
 }
 
+fn default_codepage() -> u16 {
+    // Excel/Windows "ANSI" codepage.
+    1252
+}
+
+fn is_default_codepage(codepage: &u16) -> bool {
+    *codepage == default_codepage()
+}
+
 /// A workbook containing worksheets and shared style resources.
 #[derive(Clone, Debug, Serialize)]
 pub struct Workbook {
@@ -56,6 +65,12 @@ pub struct Workbook {
     /// Excel workbook date system (1900 vs 1904) used to interpret serial dates.
     #[serde(default)]
     pub date_system: DateSystem,
+
+    /// Workbook "ANSI" text codepage (BIFF `CODEPAGE` record).
+    ///
+    /// This is used when interpreting legacy 8-bit text (including Excel DBCS `*B` semantics).
+    #[serde(default = "default_codepage", skip_serializing_if = "is_default_codepage")]
+    pub codepage: u16,
 
     /// Workbook theme palette used to resolve `Color::Theme` references.
     #[serde(default, skip_serializing_if = "ThemePalette::is_default")]
@@ -184,6 +199,7 @@ impl Workbook {
             images: ImageStore::default(),
             calc_settings: CalcSettings::default(),
             date_system: DateSystem::default(),
+            codepage: default_codepage(),
             theme: ThemePalette::default(),
             workbook_protection: WorkbookProtection::default(),
             defined_names: Vec::new(),
@@ -1180,6 +1196,8 @@ impl<'de> Deserialize<'de> for Workbook {
             calc_settings: CalcSettings,
             #[serde(default)]
             date_system: DateSystem,
+            #[serde(default = "default_codepage")]
+            codepage: u16,
             #[serde(default)]
             theme: ThemePalette,
             #[serde(default)]
@@ -1246,6 +1264,7 @@ impl<'de> Deserialize<'de> for Workbook {
             images: helper.images,
             calc_settings: helper.calc_settings,
             date_system: helper.date_system,
+            codepage: helper.codepage,
             theme: helper.theme,
             workbook_protection: helper.workbook_protection,
             defined_names,

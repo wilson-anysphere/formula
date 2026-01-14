@@ -425,6 +425,7 @@ fn import_xls_path_with_biff_reader(
         let codepage = biff_codepage.unwrap_or_else(|| biff::parse_biff_codepage(workbook_stream));
         biff_version.get_or_insert(detected_biff_version);
         biff_codepage.get_or_insert(codepage);
+        out.codepage = codepage;
 
         if let Some(mut globals) = biff_globals.take() {
             out.date_system = globals.date_system;
