@@ -236,6 +236,33 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+
+    // Best-effort DAX identifier heuristic: unquoted table identifiers should be simple
+    // alphanumeric tokens (plus `_`) and must not start with a digit.
+    //
+    // Anything outside this "simple" set is rendered as a quoted identifier to produce
+    // an unambiguous DAX-like string (e.g. `Table Name` -> `'Table Name'`).
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return true;
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return true;
+        }
+    }
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // DAX escapes embedded `'` by doubling within `'...'`.
+    format!("'{}'", raw.replace('\'', "''"))
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
