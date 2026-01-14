@@ -8,6 +8,7 @@ type RejectionKind =
   | "formatDefaults"
   | "insertPictures"
   | "backgroundImage"
+  | "sort"
   | "rangeRun"
   | "drawing"
   | "chart"
@@ -63,6 +64,7 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
       kind === "formatDefaults" ||
       kind === "insertPictures" ||
       kind === "backgroundImage" ||
+      kind === "sort" ||
       kind === "rangeRun" ||
       kind === "drawing" ||
       kind === "chart" ||
@@ -107,6 +109,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     kind === "formatDefaults" ||
     kind === "insertPictures" ||
     kind === "backgroundImage" ||
+    kind === "sort" ||
     kind === "drawing" ||
     kind === "chart" ||
     kind === "undoRedo" ||
@@ -200,6 +203,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "backgroundImage") {
       return "Read-only: you don't have permission to change the sheet background.";
+    }
+
+    if (kind === "sort") {
+      return "Read-only: you don't have permission to sort.";
     }
 
     if (kind === "drawing") {

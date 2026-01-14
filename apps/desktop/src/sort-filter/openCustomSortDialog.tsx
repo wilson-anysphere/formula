@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import type { DocumentController } from "../document/documentController.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { showToast } from "../extensions/ui.js";
 import { markKeybindingBarrier } from "../keybindingBarrier.js";
 import type { Range } from "../selection/types";
@@ -155,11 +156,7 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
   if (openModal) return;
 
   if (host.isReadOnly?.() === true) {
-    try {
-      showToast("Read-only: you don't have permission to sort.", "warning");
-    } catch {
-      // ignore (toast root missing in tests/headless)
-    }
+    showCollabEditRejectedToast([{ rejectionKind: "sort", rejectionReason: "permission" }]);
     try {
       host.focusGrid();
     } catch {

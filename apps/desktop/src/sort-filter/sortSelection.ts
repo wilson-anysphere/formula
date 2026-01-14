@@ -5,6 +5,7 @@ import { normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import type { CellCoord, Range } from "../selection/types";
 import type { SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { parseImageCellValue } from "../shared/imageCellValue.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 
 import type { SortKey, SortOrder, SortSpec } from "./types";
 
@@ -163,11 +164,7 @@ export function sortSelection(app: SpreadsheetApp, options: { order: SortOrder }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const appAny = app as any;
     if (typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true) {
-      try {
-        showToast("Read-only: you don't have permission to sort.", "warning");
-      } catch {
-        // ignore (toast root missing in tests/headless)
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "sort", rejectionReason: "permission" }]);
       try {
         app.focus();
       } catch {

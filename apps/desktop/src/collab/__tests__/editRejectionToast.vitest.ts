@@ -137,6 +137,18 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("sheet background");
   });
 
+  it("shows a sort toast for rejected sort actions", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "sort",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("sort");
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {
