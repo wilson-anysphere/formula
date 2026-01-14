@@ -201,6 +201,19 @@ test("mergeTauriUpdaterManifests fails when versions do not match (after normali
   assert.throws(() => mergeTauriUpdaterManifests([a, b]), /version mismatch/i);
 });
 
+test("mergeTauriUpdaterManifests rejects malformed inputs (empty list / missing fields)", () => {
+  assert.throws(() => mergeTauriUpdaterManifests([]), /Expected one or more/i);
+  assert.throws(() => mergeTauriUpdaterManifests([/** @type {any} */ ({})]), /version/i);
+  assert.throws(
+    () => mergeTauriUpdaterManifests([/** @type {any} */ ({ version: "0.1.0" })]),
+    /platforms/i,
+  );
+  assert.throws(
+    () => mergeTauriUpdaterManifests([/** @type {any} */ ({ version: "0.1.0", platforms: {} }), null]),
+    /Manifest\[1\] is not an object/i,
+  );
+});
+
 test("verify-desktop-release-assets: validateLatestJson fails when a platform URL references a missing release asset", async () => {
   const manifest = await readJsonFixture("latest.multi-platform.json");
   const assetsByName = assetsMapFromManifest(manifest);
@@ -408,6 +421,46 @@ test("tauri-updater-manifest: verifyTauriManifestSignature supports minisign key
   // 3) Minisign signature file (comment + payload line)
   const sigFileText = `untrusted comment: minisign signature: ${keyIdHex}\n${sigPayload.toString("base64")}\n`;
   assert.equal(verifyTauriManifestSignature(manifestText, sigFileText, pubkeyBase64), true);
+});
+
+test("tauri-updater-manifest: verifyTauriManifestSignature returns false for a wrong signature", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const seed = Buffer.from(keypair.privateKeySeedBase64, "base64");
+  const privateKey = ed25519PrivateKeyFromSeed(seed);
+  const signatureBytes = crypto.sign(null, Buffer.from(manifestText, "utf8"), privateKey);
+
+  // Flip a byte to invalidate.
+  signatureBytes[0] ^= 0xff;
+
+  const ok = verifyTauriManifestSignature(manifestText, signatureBytes.toString("base64"), keypair.publicKeyBase64);
+  assert.equal(ok, false);
+});
+
+test("tauri-updater-manifest: verifyTauriManifestSignature fails fast on minisign key id mismatch", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const seed = Buffer.from(keypair.privateKeySeedBase64, "base64");
+  const privateKey = ed25519PrivateKeyFromSeed(seed);
+  const signatureBytes = crypto.sign(null, Buffer.from(manifestText, "utf8"), privateKey);
+
+  const rawPubkey = Buffer.from(keypair.publicKeyBase64, "base64");
+  const pubKeyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const pubKeyIdHex = Buffer.from(pubKeyIdLe).reverse().toString("hex").toUpperCase();
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), pubKeyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${pubKeyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  // Signature uses a different key id.
+  const sigKeyIdLe = Buffer.from([9, 9, 9, 9, 9, 9, 9, 9]);
+  const sigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), sigKeyIdLe, signatureBytes]);
+
+  assert.throws(
+    () => verifyTauriManifestSignature(manifestText, sigPayload.toString("base64"), pubkeyBase64),
+    /key id mismatch/i,
+  );
 });
 
 test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a test tauri.conf.json pubkey", async () => {
