@@ -203,6 +203,32 @@ deb_smoke_test_dir() {
       apt-get install -y --no-install-recommends /mounted/*.deb
 
       test -x /usr/bin/formula-desktop
+
+      # Validate that installer-time MIME integration ran successfully.
+      #
+      # Many distros do not ship a Parquet glob by default, so the package ships a
+      # shared-mime-info definition under /usr/share/mime/packages and relies on the
+      # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
+      test -f /usr/share/mime/packages/app.formula.desktop.xml
+      if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
+        echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
+        echo "Parquet-related globs2 lines:" >&2
+        grep -n parquet /usr/share/mime/globs2 || true
+        exit 1
+      fi
+
+      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*formula-desktop" /usr/share/applications 2>/dev/null | head -n 1 || true)"
+      if [ -z "${desktop_file}" ]; then
+        echo "No installed .desktop file found with Exec referencing formula-desktop under /usr/share/applications" >&2
+        ls -lah /usr/share/applications || true
+        exit 1
+      fi
+      echo "Installed desktop entry: ${desktop_file}"
+      grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
+      grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+      grep -qi "x-scheme-handler/formula" "${desktop_file}"
+      grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
+      grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e
       out="$(ldd /usr/bin/formula-desktop 2>&1)"
       status=$?
@@ -259,6 +285,28 @@ rpm_smoke_test_dir() {
       fi
 
       test -x /usr/bin/formula-desktop
+
+      # Validate that installer-time MIME integration ran successfully.
+      test -f /usr/share/mime/packages/app.formula.desktop.xml
+      if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
+        echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
+        echo "Parquet-related globs2 lines:" >&2
+        grep -n parquet /usr/share/mime/globs2 || true
+        exit 1
+      fi
+
+      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*formula-desktop" /usr/share/applications 2>/dev/null | head -n 1 || true)"
+      if [ -z "${desktop_file}" ]; then
+        echo "No installed .desktop file found with Exec referencing formula-desktop under /usr/share/applications" >&2
+        ls -lah /usr/share/applications || true
+        exit 1
+      fi
+      echo "Installed desktop entry: ${desktop_file}"
+      grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
+      grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+      grep -qi "x-scheme-handler/formula" "${desktop_file}"
+      grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
+      grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e
       out="$(ldd /usr/bin/formula-desktop 2>&1)"
       status=$?
