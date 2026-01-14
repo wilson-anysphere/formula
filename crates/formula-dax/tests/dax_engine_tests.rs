@@ -2664,6 +2664,36 @@ fn calculatetable_can_be_used_as_table_filter_argument() {
 }
 
 #[test]
+fn calculatetable_keepfilters_intersects_with_existing_column_filters() {
+    let model = build_model();
+    let east_filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+
+    let engine = DaxEngine::new();
+
+    // Default CALCULATETABLE filter arguments replace existing filters on the same column.
+    let override_count = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(CALCULATETABLE(Customers, Customers[Region] = \"West\"))",
+            &east_filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(override_count, 1.into());
+
+    // KEEPFILTERS forces intersection with the existing filter context.
+    let keep_count = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(CALCULATETABLE(Customers, KEEPFILTERS(Customers[Region] = \"West\")))",
+            &east_filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(keep_count, 0.into());
+}
+
+#[test]
 fn userelationship_activates_inactive_relationship_and_overrides_active() {
     let mut model = DataModel::new();
 
