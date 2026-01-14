@@ -1297,18 +1297,23 @@ payload variants, and MS-OVBA digest binding plan).
 
 ### Principle: Preserve What We Don't Understand
 
+In the current Rust implementation, there are multiple layers depending on the workload:
+
+- For **OPC-level round-trip** without inflating every ZIP entry into memory, use
+  `formula_xlsx::XlsxLazyPackage` (lazy reads + streaming ZIP rewrite on save).
+- For algorithms that need whole-package random access, use `formula_xlsx::XlsxPackage` (fully
+  materialized part map; writing generally re-packs the ZIP).
+
+Conceptually, the round-trip contract looks like:
+
 ```typescript
 interface XlsxDocument {
-  // Fully parsed and modeled
+  // Parsed workbook model (data + formulas + modeled metadata).
   workbook: Workbook;
-  sheets: Sheet[];
-  styles: StyleSheet;
-  
-  // Preserved as raw XML for round-trip
-  unknownParts: Map<PartPath, XmlDocument>;
-  
-  // Preserved byte-for-byte
-  binaryParts: Map<PartPath, Uint8Array>;  // vbaProject.bin, etc.
+
+  // Preserved OPC parts as raw (uncompressed) bytes for round-trip fidelity.
+  // This includes both XML parts we don't understand and binary parts like `xl/vbaProject.bin`.
+  preservedParts: Map<PartPath, Uint8Array>;
 }
 ```
 
