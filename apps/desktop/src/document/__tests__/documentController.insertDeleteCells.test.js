@@ -200,3 +200,63 @@ test("insert/delete cells shifts are undoable + redoable", () => {
   assert.equal(doc.getCell("Sheet1", "B1").value, afterDelete.B1.value);
   assert.equal(doc.getCell("Sheet1", "C1").value, afterDelete.C1.value);
 });
+
+test("insertCellsShiftRight applies formula rewrites at moved destinations", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellFormula("Sheet1", "B1", "=A1");
+
+  doc.insertCellsShiftRight("Sheet1", "A1", {
+    formulaRewrites: [{ sheet: "Sheet1", address: "C1", before: "=A1", after: "=B1" }],
+  });
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, null);
+  assert.equal(doc.getCell("Sheet1", "B1").value, 1);
+  assert.equal(doc.getCell("Sheet1", "C1").formula, "=B1");
+});
+
+test("deleteCellsShiftUp applies formula rewrites in other columns", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 10);
+  doc.setCellValue("Sheet1", "A2", 20);
+  doc.setCellFormula("Sheet1", "B1", "=A2");
+
+  doc.deleteCellsShiftUp("Sheet1", "A1", {
+    formulaRewrites: [{ sheet: "Sheet1", address: "B1", before: "=A2", after: "=A1" }],
+  });
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, 20);
+  assert.equal(doc.getCell("Sheet1", "A2").value, null);
+  assert.equal(doc.getCell("Sheet1", "B1").formula, "=A1");
+});
+
+test("deleteCellsShiftLeft applies formula rewrites in other rows", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "B1", 5);
+  doc.setCellFormula("Sheet1", "A2", "=B1");
+
+  doc.deleteCellsShiftLeft("Sheet1", "A1", {
+    formulaRewrites: [{ sheet: "Sheet1", address: "A2", before: "=B1", after: "=A1" }],
+  });
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, 5);
+  assert.equal(doc.getCell("Sheet1", "B1").value, null);
+  assert.equal(doc.getCell("Sheet1", "A2").formula, "=A1");
+});
+
+test("formula rewrites can target other sheets", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 42);
+  doc.setCellFormula("Sheet2", "A1", "=Sheet1!A1");
+
+  doc.insertCellsShiftDown("Sheet1", "A1", {
+    formulaRewrites: [{ sheet: "Sheet2", address: "A1", before: "=Sheet1!A1", after: "=Sheet1!A2" }],
+  });
+
+  assert.equal(doc.getCell("Sheet1", "A2").value, 42);
+  assert.equal(doc.getCell("Sheet2", "A1").formula, "=Sheet1!A2");
+});
