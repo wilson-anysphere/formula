@@ -20184,8 +20184,6 @@ export class SpreadsheetApp {
     if (this.gridMode !== "legacy") return;
     if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
-    const outline = this.getOutlineForSheet(this.sheetId);
-
     // If the engine instance was replaced (e.g. re-init), resync even if the outline state
     // appears unchanged.
     if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {

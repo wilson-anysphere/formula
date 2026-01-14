@@ -27,6 +27,44 @@ function createPngHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createJpegHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure: SOI + APP0 (dummy) + SOF0 with width/height.
+  // This is not a complete/valid JPEG, but it includes enough header structure for our
+  // dimension parser to extract the advertised size.
+  const bytes = new Uint8Array(33);
+  let o = 0;
+  // SOI
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xd8;
+  // APP0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xe0;
+  // APP0 length: 16 bytes (includes these 2 length bytes) + 14 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x10;
+  o += 14;
+  // SOF0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xc0;
+  // SOF0 length: 11 bytes (includes these 2 length bytes) = 9 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x0b;
+  // Precision
+  bytes[o++] = 0x08;
+  // Height (big-endian)
+  bytes[o++] = (height >> 8) & 0xff;
+  bytes[o++] = height & 0xff;
+  // Width (big-endian)
+  bytes[o++] = (width >> 8) & 0xff;
+  bytes[o++] = width & 0xff;
+  // Components (1) + component spec (3 bytes)
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x11;
+  bytes[o++] = 0x00;
+  return bytes;
+}
+
 describe("ImageBitmapCache", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -322,6 +360,17 @@ describe("ImageBitmapCache", () => {
 
     const cache = new ImageBitmapCache({ maxEntries: 10 });
     const entry: ImageEntry = { id: "png_bomb", bytes: createPngHeaderBytes(10_001, 1), mimeType: "image/png" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects JPEG images with huge dimensions without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry: ImageEntry = { id: "jpeg_bomb", bytes: createJpegHeaderBytes(10_001, 1), mimeType: "image/jpeg" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
     expect(createImageBitmapMock).not.toHaveBeenCalled();

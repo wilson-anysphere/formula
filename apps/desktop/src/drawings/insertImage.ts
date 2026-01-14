@@ -1,5 +1,6 @@
 import { createDrawingObjectId, type Anchor, type DrawingObject, type ImageEntry, type ImageStore } from "./types";
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "./pngDimensions";
 
 // Keep this in sync with the clipboard image guard (currently 5MiB raw PNG bytes).
 // This is only the *default* for base64 decoding helpers; callers may override via `opts.maxBytes`.
@@ -50,6 +51,16 @@ export async function insertImageFromFile(
     throw new Error(`insertImageFromFile: image too large (${file.size} bytes)`);
   }
   const bytes = await readFileBytes(file);
+  if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+    throw new Error(`insertImageFromFile: image too large (${bytes.byteLength} bytes)`);
+  }
+  const dims = readImageDimensions(bytes);
+  if (
+    dims &&
+    (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)
+  ) {
+    throw new Error(`insertImageFromFile: image dimensions too large (${dims.width}x${dims.height})`);
+  }
   const mimeType = file.type || guessMimeType(file.name);
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType };
   opts.images.set(image);
@@ -96,6 +107,22 @@ export function insertImageFromBytes(
     images: ImageStore;
   },
 ): { objects: DrawingObject[]; image: ImageEntry } {
+  // Defensive guard: callers should enforce limits upstream, but keep hard stops here so new
+  // entry points cannot accidentally persist oversized images.
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error("insertImageFromBytes: bytes must be a Uint8Array");
+  }
+  if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+    throw new Error(`insertImageFromBytes: image too large (${bytes.byteLength} bytes)`);
+  }
+  const dims = readImageDimensions(bytes);
+  if (
+    dims &&
+    (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)
+  ) {
+    throw new Error(`insertImageFromBytes: image dimensions too large (${dims.width}x${dims.height})`);
+  }
+
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType: opts.mimeType };
   opts.images.set(image);
 

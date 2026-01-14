@@ -1,39 +1,8 @@
 import type { SpreadsheetApp } from "../../app/spreadsheetApp";
+import { decodeBase64ToBytes, MAX_INSERT_IMAGE_BYTES } from "../../drawings/insertImage";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "../../drawings/pngDimensions";
 import type { WorkbookSheetStore } from "../../sheets/workbookSheetStore";
 import type { ImportedSheetBackgroundImageInfo } from "../../tauri/workbookBackend";
-
-function decodeBase64ToBytes(data: string): Uint8Array {
-  const trimmed = String(data ?? "").trim();
-  if (!trimmed) return new Uint8Array();
-
-  // Browser path.
-  if (typeof atob === "function") {
-    try {
-      const binary = atob(trimmed);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes;
-    } catch {
-      // Fall through to Node fallback (useful for tests).
-    }
-  }
-
-  // Node/test fallback (Vitest can run without a browser atob()).
-  const BufferCtor = (globalThis as any).Buffer as
-    | { from: (input: string, encoding: string) => { [Symbol.iterator](): Iterator<number> } }
-    | undefined;
-  if (BufferCtor?.from) {
-    try {
-      return Uint8Array.from(BufferCtor.from(trimmed, "base64"));
-    } catch {
-      // ignore
-    }
-  }
-
-  return new Uint8Array();
-}
 
 export async function hydrateSheetBackgroundImagesFromBackend(opts: {
   app: SpreadsheetApp;
@@ -80,8 +49,18 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
 
       if (!imagesById.has(imageId)) {
         try {
-          const bytes = decodeBase64ToBytes(bytesBase64);
-          if (bytes.byteLength === 0) continue;
+          const bytes = decodeBase64ToBytes(bytesBase64, { maxBytes: MAX_INSERT_IMAGE_BYTES });
+          if (!bytes || bytes.byteLength === 0) continue;
+          const dims = readImageDimensions(bytes);
+          if (dims) {
+            if (
+              dims.width > MAX_PNG_DIMENSION ||
+              dims.height > MAX_PNG_DIMENSION ||
+              dims.width * dims.height > MAX_PNG_PIXELS
+            ) {
+              continue;
+            }
+          }
           imagesById.set(imageId, { bytes, ...(mimeType ? { mimeType } : {}) });
         } catch {
           // ignore invalid base64

@@ -11,6 +11,8 @@ import type {
 } from "./types";
 import { graphicFramePlaceholderLabel } from "./shapeRenderer";
 import { parseDrawingTransformFromRawXml } from "./transform";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "./pngDimensions";
+import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 import { pxToEmu } from "../shared/emu.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -636,9 +638,17 @@ function decodeBase64ToBytes(base64: string): Uint8Array | null {
 }
 
 function parseBytes(value: unknown, context: string): Uint8Array {
-  if (value instanceof Uint8Array) return value;
+  if (value instanceof Uint8Array) {
+    if (value.byteLength > MAX_INSERT_IMAGE_BYTES) {
+      throw new Error(`${context} exceeds maximum image size (${value.byteLength} bytes)`);
+    }
+    return value;
+  }
 
   if (Array.isArray(value)) {
+    if (value.length > MAX_INSERT_IMAGE_BYTES) {
+      throw new Error(`${context} exceeds maximum image size (${value.length} bytes)`);
+    }
     const out = new Uint8Array(value.length);
     for (let i = 0; i < value.length; i++) {
       const n = readNumber(value[i], `${context}[${i}]`);
@@ -662,6 +672,9 @@ function parseBytes(value: unknown, context: string): Uint8Array {
       const declaredLength = readOptionalNumber((value as JsonRecord).length);
       const length =
         declaredLength != null && declaredLength >= maxIndex + 1 ? declaredLength : maxIndex + 1;
+      if (length > MAX_INSERT_IMAGE_BYTES) {
+        throw new Error(`${context} exceeds maximum image size (${length} bytes)`);
+      }
 
       const out = new Uint8Array(length);
       for (const k of numericKeys) {
@@ -674,8 +687,37 @@ function parseBytes(value: unknown, context: string): Uint8Array {
   }
 
   if (typeof value === "string") {
-    const decoded = decodeBase64ToBytes(value);
-    if (decoded) return decoded;
+    let trimmed = value.trim();
+    if (!trimmed) {
+      throw new Error(`${context} must be a byte array`);
+    }
+    // Strip `data:*;base64,` prefix if present.
+    if (trimmed.startsWith("data:")) {
+      const comma = trimmed.indexOf(",");
+      if (comma === -1) {
+        throw new Error(`${context} must be a byte array`);
+      }
+      trimmed = trimmed.slice(comma + 1).trim();
+      if (!trimmed) {
+        throw new Error(`${context} must be a byte array`);
+      }
+    }
+
+    // Rough size estimate before decode to avoid allocating huge buffers.
+    const len = trimmed.length;
+    const padding = trimmed.endsWith("==") ? 2 : trimmed.endsWith("=") ? 1 : 0;
+    const estimated = Math.max(0, Math.floor((len * 3) / 4) - padding);
+    if (estimated > MAX_INSERT_IMAGE_BYTES) {
+      throw new Error(`${context} exceeds maximum image size (${estimated} bytes)`);
+    }
+
+    const decoded = decodeBase64ToBytes(trimmed);
+    if (decoded) {
+      if (decoded.byteLength > MAX_INSERT_IMAGE_BYTES) {
+        throw new Error(`${context} exceeds maximum image size (${decoded.byteLength} bytes)`);
+      }
+      return decoded;
+    }
   }
 
   throw new Error(`${context} must be a byte array`);
@@ -720,6 +762,13 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
     const mimeType = contentType && contentType.length > 0 ? contentType : inferMimeTypeFromId(imageId);
     try {
       const bytes = parseBytes(bytesValue, `ImageStore.images[${imageId}].bytes`);
+      const dims = readImageDimensions(bytes);
+      if (
+        dims &&
+        (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)
+      ) {
+        continue;
+      }
       store.set({ id: imageId, bytes, mimeType });
     } catch {
       // Best-effort: ignore malformed image payloads rather than aborting conversion
