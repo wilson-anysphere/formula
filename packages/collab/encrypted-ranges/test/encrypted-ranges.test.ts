@@ -438,6 +438,47 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(mgr.list()).toHaveLength(0);
   });
 
+  it("manager normalization from legacy map schema is deterministic (sorted by key)", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Map<Y.Map<unknown>>();
+
+    const rA = new Y.Map<unknown>();
+    rA.set("sheetId", "s1");
+    rA.set("startRow", 0);
+    rA.set("startCol", 0);
+    rA.set("endRow", 0);
+    rA.set("endCol", 0);
+    rA.set("keyId", "kA");
+
+    const rB = new Y.Map<unknown>();
+    rB.set("sheetId", "s1");
+    rB.set("startRow", 1);
+    rB.set("startCol", 0);
+    rB.set("endRow", 1);
+    rB.set("endCol", 0);
+    rB.set("keyId", "kB");
+
+    doc.transact(() => {
+      // Insert in reverse order.
+      ranges.set("b", rB);
+      ranges.set("a", rA);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+
+    // Trigger normalization (map -> canonical array) by adding a new range.
+    mgr.add({ sheetId: "s1", startRow: 2, startCol: 0, endRow: 2, endCol: 0, keyId: "kC" });
+
+    const stored = metadata.get("encryptedRanges") as any;
+    expect(stored).toBeInstanceOf(Y.Array);
+    const storedIds = stored.toArray().map((e: any) => e?.get?.("id"));
+    expect(storedIds.slice(0, 2)).toEqual(["a", "b"]);
+  });
+
   it("policy helper supports legacy encryptedRanges entries without id", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
