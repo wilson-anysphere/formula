@@ -17,21 +17,32 @@ pub(crate) enum CryptoApiHashAlg {
 }
 
 impl CryptoApiHashAlg {
-    fn hash(self, data: &[u8]) -> Vec<u8> {
+    fn hash_parts(self, parts: &[&[u8]]) -> Vec<u8> {
         match self {
             CryptoApiHashAlg::Sha1 => {
                 let mut h = sha1::Sha1::new();
-                h.update(data);
+                for part in parts {
+                    h.update(part);
+                }
                 h.finalize().to_vec()
             }
             CryptoApiHashAlg::Md5 => {
                 let mut h = md5::Md5::new();
-                h.update(data);
+                for part in parts {
+                    h.update(part);
+                }
                 h.finalize().to_vec()
             }
         }
     }
+
+    fn hash(self, data: &[u8]) -> Vec<u8> {
+        self.hash_parts(&[data])
+    }
 }
+
+/// MS-OFFCRYPTO Standard (CryptoAPI) uses a fixed 50,000 iteration count for password hashing.
+const STANDARD_SPIN_COUNT: u32 = 50_000;
 
 fn password_utf16le_bytes(password: &str) -> Vec<u8> {
     // UTF-16LE with no BOM and no terminator.
@@ -91,9 +102,17 @@ impl Rc4 {
 /// Derive the RC4 key for a given `EncryptedPackage` block number (or 0 for the verifier).
 ///
 /// MS-OFFCRYPTO Standard/CryptoAPI RC4 key derivation:
-/// 1. `base_hash = Hash(salt || UTF16LE(password))`
-/// 2. `block_hash = Hash(base_hash || LE32(block_index))`
-/// 3. `rc4_key = block_hash[0..key_size_bytes]`
+/// 1. `H = Hash(salt || UTF16LE(password))`
+/// 2. For `i` in `0..50000`:
+///    `H = Hash(LE32(i) || H)`
+/// 3. `Hfinal = Hash(H || LE32(block_index))`
+/// 4. `rc4_key = Hfinal[0..key_size_bytes]`
+///
+/// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a padded 16-byte key where the
+/// high 88 bits are 0. Concretely, when `key_size_bytes == 5`, the RC4 key bytes passed into the
+/// RC4 KSA are:
+///
+/// `rc4_key = Hfinal[0..5] || 0x00 * 11` (16 bytes total)
 fn derive_rc4_key_for_block(
     password: &str,
     salt: &[u8],
@@ -109,19 +128,26 @@ fn derive_rc4_key_for_block(
     assert!(key_size_bytes > 0, "key size must be non-zero");
 
     let pw = password_utf16le_bytes(password);
-    let mut base_input = Vec::with_capacity(salt.len() + pw.len());
-    base_input.extend_from_slice(salt);
-    base_input.extend_from_slice(&pw);
-    let base_hash = hash_alg.hash(&base_input);
+    let mut h = hash_alg.hash_parts(&[salt, &pw]);
+    for i in 0u32..STANDARD_SPIN_COUNT {
+        let i_le = i.to_le_bytes();
+        h = hash_alg.hash_parts(&[&i_le, &h]);
+    }
 
-    let mut block_input = Vec::with_capacity(base_hash.len() + 4);
-    block_input.extend_from_slice(&base_hash);
-    block_input.extend_from_slice(&block_index.to_le_bytes());
-    let block_hash = hash_alg.hash(&block_input);
+    let block = block_index.to_le_bytes();
+    let h_final = hash_alg.hash_parts(&[&h, &block]);
+    assert!(
+        key_size_bytes <= h_final.len(),
+        "key size must be <= digest length (key={} bytes digest={} bytes)",
+        key_size_bytes,
+        h_final.len()
+    );
 
-    // Key size is guaranteed to be <= digest size for supported algorithms/bit-lengths
-    // (SHA1=20, MD5=16; common key sizes: 40/56/128 bits).
-    block_hash[..key_size_bytes.min(block_hash.len())].to_vec()
+    let mut key = h_final[..key_size_bytes].to_vec();
+    if key_size_bytes == 5 {
+        key.resize(16, 0);
+    }
+    key
 }
 
 /// Standard / CryptoAPI RC4 verifier bundle (MS-OFFCRYPTO `EncryptionVerifier`).
@@ -139,13 +165,8 @@ impl StandardRc4CryptoApiVerifier {
     /// Verify `password` using the MS-OFFCRYPTO Standard/CryptoAPI RC4 verifier check.
     pub(crate) fn verify_password(&self, password: &str) -> bool {
         // The verifier uses the same key derivation as `EncryptedPackage` block 0.
-        let rc4_key_block0 = derive_rc4_key_for_block(
-            password,
-            &self.salt,
-            self.hash_alg,
-            self.key_size_bits,
-            0,
-        );
+        let rc4_key_block0 =
+            derive_rc4_key_for_block(password, &self.salt, self.hash_alg, self.key_size_bits, 0);
 
         // Critical: one RC4 state across verifier + hash (single keystream).
         let mut rc4 = Rc4::new(&rc4_key_block0);
@@ -177,11 +198,11 @@ mod tests {
         salt: [u8; 16],
         verifier_plaintext: [u8; 16],
         hash_alg: CryptoApiHashAlg,
+        key_size_bits: u32,
     ) -> StandardRc4CryptoApiVerifier {
         let verifier_hash_plaintext = hash_alg.hash(&verifier_plaintext);
         let verifier_hash_size = verifier_hash_plaintext.len() as u32;
 
-        let key_size_bits = 128;
         let rc4_key_block0 = derive_rc4_key_for_block(password, &salt, hash_alg, key_size_bits, 0);
 
         // Encrypt verifier + verifierHash using *one* RC4 stream (no reset).
@@ -235,40 +256,57 @@ mod tests {
     fn standard_cryptoapi_rc4_verifier_uses_single_keystream_sha1() {
         let password = "correct horse battery staple";
         let salt = [
-            0xA9, 0x38, 0x13, 0x7C, 0x20, 0x54, 0xD2, 0xB6, 0x9D, 0x01, 0xFA, 0xEE, 0x8B,
-            0x3C, 0x47, 0x11,
+            0xA9, 0x38, 0x13, 0x7C, 0x20, 0x54, 0xD2, 0xB6, 0x9D, 0x01, 0xFA, 0xEE, 0x8B, 0x3C,
+            0x47, 0x11,
         ];
         let verifier_plaintext = [
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
-            0x1D, 0x1E, 0x1F,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+            0x1E, 0x1F,
         ];
 
-        let verifier = build_fixture(password, salt, verifier_plaintext, CryptoApiHashAlg::Sha1);
+        let verifier = build_fixture(
+            password,
+            salt,
+            verifier_plaintext,
+            CryptoApiHashAlg::Sha1,
+            128,
+        );
 
         assert!(verifier.verify_password(password));
         assert!(!verifier.verify_password("wrong password"));
 
         // Ensure the test detects the keystream-reset bug.
-        assert!(!verify_password_with_keystream_reset_bug(&verifier, password));
+        assert!(!verify_password_with_keystream_reset_bug(
+            &verifier, password
+        ));
     }
 
     #[test]
     fn standard_cryptoapi_rc4_verifier_uses_single_keystream_md5() {
         let password = "P@ssw0rd!";
         let salt = [
-            0x1B, 0x2A, 0x3C, 0x4D, 0x5E, 0x6F, 0x70, 0x81, 0x92, 0xA3, 0xB4, 0xC5, 0xD6,
-            0xE7, 0xF8, 0x09,
+            0x1B, 0x2A, 0x3C, 0x4D, 0x5E, 0x6F, 0x70, 0x81, 0x92, 0xA3, 0xB4, 0xC5, 0xD6, 0xE7,
+            0xF8, 0x09,
         ];
         let verifier_plaintext = [
-            0xFE, 0xED, 0xFA, 0xCE, 0xBA, 0xAD, 0xF0, 0x0D, 0x12, 0x34, 0x56, 0x78, 0x9A,
-            0xBC, 0xDE, 0xF0,
+            0xFE, 0xED, 0xFA, 0xCE, 0xBA, 0xAD, 0xF0, 0x0D, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+            0xDE, 0xF0,
         ];
 
-        let verifier = build_fixture(password, salt, verifier_plaintext, CryptoApiHashAlg::Md5);
+        // Use 40-bit key size to exercise the CryptoAPI 40-bit padding behavior.
+        let verifier = build_fixture(
+            password,
+            salt,
+            verifier_plaintext,
+            CryptoApiHashAlg::Md5,
+            40,
+        );
 
         assert!(verifier.verify_password(password));
         assert!(!verifier.verify_password("definitely not the password"));
-        assert!(!verify_password_with_keystream_reset_bug(&verifier, password));
+        assert!(!verify_password_with_keystream_reset_bug(
+            &verifier, password
+        ));
     }
 
     #[test]
@@ -306,4 +344,3 @@ mod tests {
         assert!(verifier.verify_password(password));
     }
 }
-
