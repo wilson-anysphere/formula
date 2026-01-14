@@ -598,3 +598,103 @@ If your implementation produces different bytes for this example, the most likel
 * Incorrect UTF‑16LE password encoding (BOM or NUL terminator accidentally included).
 * Reversed concatenation order (`Hash(block || H)` vs `Hash(H || block)`).
 * Incorrect `CryptDeriveKey` expansion (ipad/opad must use bytes `0x36` and `0x5c`).
+
+---
+
+## 9) End-to-end decryption pseudocode (standard OOXML wrapper)
+
+This appendix ties together parsing, key derivation, verifier validation, and `EncryptedPackage`
+decryption.
+
+```text
+function decrypt_standard_ooxml(ole, password):
+  encInfoBytes = ole.read_stream("EncryptionInfo")
+  encPkgBytes  = ole.read_stream("EncryptedPackage")
+
+  // ---------- parse EncryptionInfo ----------
+  major = U16LE(encInfoBytes[0:2])
+  minor = U16LE(encInfoBytes[2:4])
+  flags = U32LE(encInfoBytes[4:8])
+
+  if minor != 2:
+    error("not Standard/CryptoAPI")
+
+  headerSize = U32LE(encInfoBytes[8:12])
+  header     = encInfoBytes[12 : 12+headerSize]
+  verifier   = encInfoBytes[12+headerSize : ]
+
+  // parse EncryptionHeader fixed 8 DWORDs
+  algId      = U32LE(header[ 8:12])       // cipher
+  algIdHash  = U32LE(header[12:16])       // hash
+  keySizeBit = U32LE(header[16:20])
+  keyLen     = keySizeBit / 8
+
+  // parse EncryptionVerifier
+  saltSize = U32LE(verifier[0:4])
+  salt     = verifier[4 : 4+saltSize]
+  encVer   = verifier[4+saltSize : 4+saltSize+16]
+  hashSize = U32LE(verifier[4+saltSize+16 : 4+saltSize+20])
+  encVerHash = verifier[4+saltSize+20 : ]    // rest of stream (often padded)
+
+  // ---------- derive password hash (H_final) ----------
+  pw = UTF16LE(password)    // no BOM, no terminator
+  H = Hash( salt || pw )
+  for i in 0..49999:
+    H = Hash( LE32(i) || H )
+  H_final = H
+
+  // ---------- derive file/verifier key (block = 0) ----------
+  H_block0 = Hash( H_final || LE32(0) )
+  if algId == CALG_RC4:
+    fileKey = H_block0[0:keyLen]
+  else:
+    fileKey = CryptDeriveKey(Hash, H_block0, keyLen)
+
+  // ---------- verify password ----------
+  C = encVer || encVerHash
+  if algId is AES:
+    P = AES_ECB_Decrypt(fileKey, C)
+  else if algId == CALG_RC4:
+    P = RC4_Decrypt_Stream(fileKey, C)
+  else:
+    error("unsupported cipher")
+
+  verifierPlain = P[0:16]
+  verifierHashPlain = P[16 : 16+hashSize]
+  if Hash(verifierPlain)[0:hashSize] != verifierHashPlain:
+    error("invalid password")
+
+  // ---------- decrypt EncryptedPackage ----------
+  origSize = U64LE(encPkgBytes[0:8])
+  ciphertext = encPkgBytes[8:]
+
+  if algId is AES:
+    out = []
+    offset = 0
+    segmentIndex = 0
+    while len(out) < origSize:
+      // Read 0x1000-byte ciphertext chunks (except final chunk), but only as much as needed to
+      // reach origSize. Ciphertext lengths are always multiples of 16.
+      remainingCipher = len(ciphertext) - offset
+      if remainingCipher <= 0:
+        error("truncated ciphertext")
+
+      // decrypt a whole chunk or the remaining ciphertext; then truncate to origSize at the end
+      segCipherLen = min(0x1000, remainingCipher)
+      iv = Hash(salt || LE32(segmentIndex))[0:16]
+      segPlain = AES_CBC_Decrypt_NoPadding(fileKey, iv, ciphertext[offset : offset+segCipherLen])
+      out += segPlain
+      offset += segCipherLen
+      segmentIndex += 1
+
+    return out[0:origSize]
+
+  else if algId == CALG_RC4:
+    // RC4 has no padding; decrypt exactly origSize bytes.
+    out = ciphertext[0:origSize]
+    for blockIndex, block in enumerate(chunks(out, 0x200)):
+      H_block = Hash(H_final || LE32(blockIndex))
+      rc4Key  = H_block[0:keyLen]
+      block   = RC4_Decrypt_Block(rc4Key, block)
+    return out
+```
