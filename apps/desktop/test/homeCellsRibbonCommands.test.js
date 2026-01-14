@@ -12,28 +12,57 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-test("Ribbon schema includes Home → Cells → Insert/Delete Cells command ids", () => {
+test("Ribbon schema includes Home → Cells command ids", () => {
   const schema = readRibbonSchemaSource("homeTab.ts");
 
   const ids = [
+    "home.cells.format.organizeSheets",
     "home.cells.insert.insertCells",
     "home.cells.insert.insertSheetRows",
     "home.cells.insert.insertSheetColumns",
+    "home.cells.insert.insertSheet",
     "home.cells.delete.deleteCells",
     "home.cells.delete.deleteSheetRows",
     "home.cells.delete.deleteSheetColumns",
+    "home.cells.delete.deleteSheet",
   ];
   for (const id of ids) {
     assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
   }
 });
 
-test("Insert/Delete Cells ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
+test("Home → Cells ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const commands = fs.readFileSync(commandsPath, "utf8");
+
+  const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
+  const disabling = fs.readFileSync(disablingPath, "utf8");
+
+  const sheetStructureIds = [
+    "home.cells.format.organizeSheets",
+    "home.cells.insert.insertSheet",
+    "home.cells.delete.deleteSheet",
+  ];
+  for (const id of sheetStructureIds) {
+    assert.match(
+      commands,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerDesktopCommands.ts to register ${id}`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+    assert.doesNotMatch(
+      disabling,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
+    );
+  }
 
   const insertDeleteCellsIds = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
   for (const id of insertDeleteCellsIds) {
@@ -70,4 +99,9 @@ test("Insert/Delete Cells ribbon commands are registered in CommandRegistry and 
 
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(
+    main,
+    /\bsheetStructureHandlers\s*:/,
+    "Expected main.ts to pass sheetStructureHandlers to registerDesktopCommands so sheet-structure ribbon ids are registered",
+  );
 });

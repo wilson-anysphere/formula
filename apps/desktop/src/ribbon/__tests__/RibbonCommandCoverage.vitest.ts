@@ -213,6 +213,11 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
+      sheetStructureHandlers: {
+        insertSheet: () => {},
+        deleteActiveSheet: () => {},
+        openOrganizeSheets: () => {},
+      },
     });
 
     const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]

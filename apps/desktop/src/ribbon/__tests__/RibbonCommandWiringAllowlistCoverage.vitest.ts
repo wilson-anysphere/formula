@@ -705,6 +705,11 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
       notify: async () => {},
       focusAfterExecute: () => {},
     },
+    sheetStructureHandlers: {
+      insertSheet: () => {},
+      deleteActiveSheet: () => {},
+      openOrganizeSheets: () => {},
+    },
     themeController: { setThemePreference: () => {} } as any,
     refreshRibbonUiState: () => {},
     applyFormattingToSelection: () => {},

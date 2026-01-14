@@ -98,6 +98,11 @@ describe("Ribbon CommandRegistry exemptions drift-guards", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
+      sheetStructureHandlers: {
+        insertSheet: () => {},
+        deleteActiveSheet: () => {},
+        openOrganizeSheets: () => {},
+      },
     });
 
     return commandRegistry;
@@ -124,4 +129,3 @@ describe("Ribbon CommandRegistry exemptions drift-guards", () => {
     ).toEqual([]);
   });
 });
-

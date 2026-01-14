@@ -231,6 +231,11 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
       quit: () => {},
     },
     openCommandPalette: () => {},
+    sheetStructureHandlers: {
+      insertSheet: () => {},
+      deleteActiveSheet: () => {},
+      openOrganizeSheets: () => {},
+    },
   });
 }
 

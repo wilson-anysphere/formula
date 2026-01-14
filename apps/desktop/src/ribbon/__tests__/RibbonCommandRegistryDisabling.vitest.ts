@@ -87,6 +87,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
+      sheetStructureHandlers: {
+        insertSheet: () => {},
+        deleteActiveSheet: () => {},
+        openOrganizeSheets: () => {},
+      },
     });
 
     registerRibbonMacroCommands({
@@ -176,10 +181,6 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // so they must remain exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["file.save.save"]).toBeUndefined();
 
-    // Organize Sheets is now a real CommandRegistry command, so it should be disabled in the baseline
-    // state when the registry does not register it.
-    expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBe(true);
-
     // Home → Cells structural edit commands should be disabled when the CommandRegistry does not
     // register them (baseline allowlist behavior).
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBe(true);
@@ -190,6 +191,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBe(true);
+    expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBe(true);
   });
 
   it("registers Fill Up/Left/Series ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
@@ -375,14 +377,14 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     // must remain enabled even when the CommandRegistry does not register them.
                     { id: "file.save.save", label: "Save", ariaLabel: "Save" },
                   ],
-                 },
-                 // Non-exempt id to prove the baseline is still working.
-                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
-                ],
-              },
-           ],
-         },
-       ],
+                },
+                // Non-exempt id to prove the baseline is still working.
+                { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
+              ],
+            },
+          ],
+        },
+      ],
     };
 
     const commandRegistry = new CommandRegistry();
