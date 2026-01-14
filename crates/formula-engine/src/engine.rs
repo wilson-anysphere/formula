@@ -10770,6 +10770,10 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         self.get_value_on_sheet(&bytecode::SheetId::Local(self.sheet_id), coord)
     }
 
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        self.snapshot.sheet_order.iter().position(|id| *id == sheet_id)
+    }
+
     fn get_value_on_sheet(
         &self,
         sheet: &bytecode::SheetId,
@@ -16793,6 +16797,58 @@ mod tests {
         assert!(engine.reorder_sheet("Sheet1", 0));
         // Valid move should succeed.
         assert!(engine.reorder_sheet("Sheet2", 0));
+    }
+
+    #[test]
+    fn bytecode_concat_over_sheet_span_uses_tab_order_after_reorder() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.ensure_sheet(sheet);
+            }
+            engine.set_cell_value("Sheet1", "A1", "1").unwrap();
+            engine.set_cell_value("Sheet2", "A1", "2").unwrap();
+            engine.set_cell_value("Sheet3", "A1", "3").unwrap();
+
+            // Reorder tabs to [Sheet3, Sheet2, Sheet1].
+            let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+            let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+            let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+            engine
+                .workbook
+                .set_sheet_order(vec![sheet3_id, sheet2_id, sheet1_id]);
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=CONCAT(Sheet1:Sheet3!A1)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the formula is actually bytecode-compiled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let compiled_b1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(compiled_b1, CompiledFormula::Bytecode(_)),
+            "expected CONCAT(Sheet1:Sheet3!A1) to compile to bytecode"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_value = bytecode_engine.get_cell_value("Sheet1", "B1");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_value = ast_engine.get_cell_value("Sheet1", "B1");
+
+        assert_eq!(bc_value, ast_value, "bytecode/AST mismatch");
+        assert_eq!(bc_value, Value::from("321"));
     }
 
     #[test]

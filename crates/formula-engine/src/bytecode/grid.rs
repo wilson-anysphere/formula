@@ -8,6 +8,21 @@ const EXCEL_MAX_COLS_I32: i32 = EXCEL_MAX_COLS as i32;
 pub trait Grid: Sync {
     fn get_value(&self, coord: CellCoord) -> Value;
 
+    /// Returns the current worksheet tab order index for `sheet_id`.
+    ///
+    /// Excel defines the ordering of multi-area references (e.g. 3D sheet spans like
+    /// `Sheet1:Sheet3!A1`, or `INDEX(..., area_num)`) based on workbook sheet tab order, not the
+    /// internal numeric sheet id.
+    ///
+    /// Most single-sheet grid backends historically used sheet ids that matched tab order, so the
+    /// default implementation preserves the old behavior by treating the sheet id itself as the
+    /// order index. Multi-sheet backends with stable sheet ids should override this to return the
+    /// current tab position.
+    #[inline]
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        Some(sheet_id)
+    }
+
     /// Get a value from a specific sheet.
     ///
     /// Bytecode formulas that don't use explicit sheet-qualified references can ignore the sheet

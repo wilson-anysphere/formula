@@ -5656,9 +5656,16 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     })
                     .collect();
                 areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-                    a_area
-                        .sheet
-                        .cmp(&b_area.sheet)
+                    match (&a_area.sheet, &b_area.sheet) {
+                        (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+                            let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+                            let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+                            a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+                        }
+                        (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+                        (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+                        (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
+                    }
                         .then_with(|| a_range.row_start.cmp(&b_range.row_start))
                         .then_with(|| a_range.col_start.cmp(&b_range.col_start))
                         .then_with(|| a_range.row_end.cmp(&b_range.row_end))
