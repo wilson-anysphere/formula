@@ -4,6 +4,7 @@ import {
   getTauriDialogOrNull,
   getTauriDialogOrThrow,
   getTauriDialogConfirmOrNull,
+  getTauriDialogMessageOrNull,
   getTauriDialogOpenOrNull,
   getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
@@ -119,6 +120,16 @@ describe("tauri/api dynamic accessors", () => {
       const confirm = vi.fn();
       (globalThis as any).__TAURI__ = { dialog: { confirm } };
       expect(getTauriDialogConfirmOrNull()).toBe(confirm);
+    });
+
+    it("detects message() (or alert()) when available", () => {
+      const message = vi.fn();
+      (globalThis as any).__TAURI__ = { dialog: { message } };
+      expect(getTauriDialogMessageOrNull()).toBe(message);
+
+      const alert = vi.fn();
+      (globalThis as any).__TAURI__ = { dialog: { alert } };
+      expect(getTauriDialogMessageOrNull()).toBe(alert);
     });
   });
 

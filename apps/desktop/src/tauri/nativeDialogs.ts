@@ -18,8 +18,7 @@ export type AlertDialogOptions = {
 
 import { showQuickPick } from "../extensions/ui.js";
 
-type TauriDialogConfirm = (message: string, options?: Record<string, unknown>) => Promise<boolean>;
-type TauriDialogMessage = (message: string, options?: Record<string, unknown>) => Promise<void>;
+import { getTauriDialogConfirmOrNull, getTauriDialogMessageOrNull } from "./api";
 
 function isNativeDialogFn(fn: unknown): boolean {
   if (typeof fn !== "function") return false;
@@ -34,25 +33,6 @@ function isNativeDialogFn(fn: unknown): boolean {
     // Be conservative: if we cannot inspect it, assume it's native.
     return true;
   }
-}
-
-function getTauriDialogApi():
-  | {
-      confirm?: TauriDialogConfirm;
-      message?: TauriDialogMessage;
-      alert?: TauriDialogMessage;
-    }
-  | null {
-  const tauri = (() => {
-    try {
-      return (globalThis as any).__TAURI__ as unknown;
-    } catch {
-      return null;
-    }
-  })();
-  const dialog = (tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog) as unknown;
-  if (!dialog || typeof dialog !== "object") return null;
-  return dialog as any;
 }
 
 function getWindowConfirm(): ((message: string) => boolean) | null {
@@ -77,8 +57,7 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
   const { fallbackValue, ...dialogOpts } = opts;
   const fallback = fallbackValue ?? false;
 
-  const dialog = getTauriDialogApi();
-  const tauriConfirm = dialog?.confirm;
+  const tauriConfirm = getTauriDialogConfirmOrNull();
   if (typeof tauriConfirm === "function") {
     try {
       return await tauriConfirm(message, dialogOpts);
@@ -120,8 +99,7 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
 }
 
 export async function alert(message: string, opts: AlertDialogOptions = {}): Promise<void> {
-  const dialog = getTauriDialogApi();
-  const tauriMessage = dialog?.message ?? dialog?.alert;
+  const tauriMessage = getTauriDialogMessageOrNull();
   if (typeof tauriMessage === "function") {
     try {
       await tauriMessage(message, opts);
