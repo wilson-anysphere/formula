@@ -96,6 +96,7 @@ test("CellStructuralConflictMonitor caps age-prune work per pass and schedules f
   assert.equal(monitor._agePruneTimer != null, true);
 
   monitor.dispose();
+  assert.equal(monitor._agePruneTimer, null);
   doc.destroy();
 });
 
@@ -131,6 +132,7 @@ test("CellStructuralConflictMonitor schedules a deferred prune for late-arriving
   assert.equal(monitor._agePruneTimer != null, true);
 
   monitor.dispose();
+  assert.equal(monitor._agePruneTimer, null);
   doc.destroy();
 });
 
