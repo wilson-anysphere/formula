@@ -25,6 +25,18 @@ class TriagePrivacyTests(unittest.TestCase):
         self.assertEqual(step.error, expected)
         self.assertNotIn("secret.xlsx", step.error or "")
 
+    def test_redaction_helpers_are_idempotent_for_already_hashed_strings(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        self.assertEqual(
+            triage_mod._redact_run_url("sha256=abcd", privacy_mode="private"),  # noqa: SLF001
+            "sha256=abcd",
+        )
+        self.assertEqual(
+            triage_mod._redact_content_type("sha256=abcd", privacy_mode="private"),  # noqa: SLF001
+            "sha256=abcd",
+        )
+
     def test_triage_workbook_hashes_triage_error_step(self) -> None:
         import tools.corpus.triage as triage_mod
 
@@ -93,4 +105,3 @@ class TriagePrivacyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

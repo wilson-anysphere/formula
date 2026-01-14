@@ -652,6 +652,9 @@ def _is_safe_run_url_host(host: str | None) -> bool:
 def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
     if not url or privacy_mode != _PRIVACY_PRIVATE:
         return url
+    if isinstance(url, str) and url.startswith("sha256="):
+        # Already redacted (defense in depth / idempotence).
+        return url
 
     import urllib.parse
 
@@ -663,6 +666,9 @@ def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
 
 def _redact_content_type(value: str | None, *, privacy_mode: str) -> str | None:
     if not value or privacy_mode != _PRIVACY_PRIVATE:
+        return value
+    if isinstance(value, str) and value.startswith("sha256="):
+        # Already redacted (defense in depth / idempotence).
         return value
     lowered = value.strip().casefold()
     if any(lowered.startswith(prefix) for prefix in _SAFE_CONTENT_TYPE_PREFIXES):
