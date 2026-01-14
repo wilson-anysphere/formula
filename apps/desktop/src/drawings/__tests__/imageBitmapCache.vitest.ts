@@ -65,6 +65,52 @@ function createJpegHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createGifHeaderBytes(width: number, height: number): Uint8Array {
+  // GIF header (GIF89a) + logical screen width/height (little-endian).
+  const bytes = new Uint8Array(10);
+  bytes[0] = 0x47; // G
+  bytes[1] = 0x49; // I
+  bytes[2] = 0x46; // F
+  bytes[3] = 0x38; // 8
+  bytes[4] = 0x39; // 9
+  bytes[5] = 0x61; // a
+  bytes[6] = width & 0xff;
+  bytes[7] = (width >> 8) & 0xff;
+  bytes[8] = height & 0xff;
+  bytes[9] = (height >> 8) & 0xff;
+  return bytes;
+}
+
+function createWebpVp8xHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure:
+  //  - RIFF header + WEBP signature
+  //  - VP8X chunk type
+  //  - width/height minus one (24-bit little-endian)
+  const bytes = new Uint8Array(30);
+  bytes[0] = 0x52; // R
+  bytes[1] = 0x49; // I
+  bytes[2] = 0x46; // F
+  bytes[3] = 0x46; // F
+  bytes[8] = 0x57; // W
+  bytes[9] = 0x45; // E
+  bytes[10] = 0x42; // B
+  bytes[11] = 0x50; // P
+  bytes[12] = 0x56; // V
+  bytes[13] = 0x50; // P
+  bytes[14] = 0x38; // 8
+  bytes[15] = 0x58; // X
+
+  const w = Math.max(1, Math.floor(width)) - 1;
+  const h = Math.max(1, Math.floor(height)) - 1;
+  bytes[24] = w & 0xff;
+  bytes[25] = (w >> 8) & 0xff;
+  bytes[26] = (w >> 16) & 0xff;
+  bytes[27] = h & 0xff;
+  bytes[28] = (h >> 8) & 0xff;
+  bytes[29] = (h >> 16) & 0xff;
+  return bytes;
+}
+
 describe("ImageBitmapCache", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -371,6 +417,28 @@ describe("ImageBitmapCache", () => {
 
     const cache = new ImageBitmapCache({ maxEntries: 10 });
     const entry: ImageEntry = { id: "jpeg_bomb", bytes: createJpegHeaderBytes(10_001, 1), mimeType: "image/jpeg" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects GIF images with huge dimensions without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry: ImageEntry = { id: "gif_bomb", bytes: createGifHeaderBytes(10_001, 1), mimeType: "image/gif" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects WebP images with huge dimensions without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry: ImageEntry = { id: "webp_bomb", bytes: createWebpVp8xHeaderBytes(10_001, 1), mimeType: "image/webp" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
     expect(createImageBitmapMock).not.toHaveBeenCalled();

@@ -168,6 +168,52 @@ function createJpegHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createGifHeaderBytes(width: number, height: number): Uint8Array {
+  // GIF header (GIF89a) + logical screen width/height (little-endian).
+  const bytes = new Uint8Array(10);
+  bytes[0] = 0x47; // G
+  bytes[1] = 0x49; // I
+  bytes[2] = 0x46; // F
+  bytes[3] = 0x38; // 8
+  bytes[4] = 0x39; // 9
+  bytes[5] = 0x61; // a
+  bytes[6] = width & 0xff;
+  bytes[7] = (width >> 8) & 0xff;
+  bytes[8] = height & 0xff;
+  bytes[9] = (height >> 8) & 0xff;
+  return bytes;
+}
+
+function createWebpVp8xHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure:
+  //  - RIFF header + WEBP signature
+  //  - VP8X chunk type
+  //  - width/height minus one (24-bit little-endian)
+  const bytes = new Uint8Array(30);
+  bytes[0] = 0x52; // R
+  bytes[1] = 0x49; // I
+  bytes[2] = 0x46; // F
+  bytes[3] = 0x46; // F
+  bytes[8] = 0x57; // W
+  bytes[9] = 0x45; // E
+  bytes[10] = 0x42; // B
+  bytes[11] = 0x50; // P
+  bytes[12] = 0x56; // V
+  bytes[13] = 0x50; // P
+  bytes[14] = 0x38; // 8
+  bytes[15] = 0x58; // X
+
+  const w = Math.max(1, Math.floor(width)) - 1;
+  const h = Math.max(1, Math.floor(height)) - 1;
+  bytes[24] = w & 0xff;
+  bytes[25] = (w >> 8) & 0xff;
+  bytes[26] = (w >> 16) & 0xff;
+  bytes[27] = h & 0xff;
+  bytes[28] = (h >> 8) & 0xff;
+  bytes[29] = (h >> 16) & 0xff;
+  return bytes;
+}
+
 async function flushMicrotasks(): Promise<void> {
   // Several turns helps flush async chains that include multiple `await` boundaries
   // (resolver -> header sniff -> createImageBitmap -> finally handlers).
@@ -578,6 +624,267 @@ describe("CanvasGridRenderer image cells", () => {
     expect(createImageBitmapSpy).not.toHaveBeenCalled();
     expect(content.rec.drawImages.length).toBe(0);
     expect(content.rec.fillTexts.some((args) => args[0] === "JPEG blob bomb")).toBe(true);
+  });
+
+  it("rejects GIF images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "gif_bomb", altText: "GIF bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    // GIF dimensions are 16-bit; exceed the shared MAX_PNG_DIMENSION (10k).
+    const bytes = createGifHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => bytes);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("gif_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "GIF bomb")).toBe(true);
+  });
+
+  it("rejects GIF Blob images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "gif_bomb_blob", altText: "GIF blob bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createGifHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/gif" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("gif_bomb_blob") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "GIF blob bomb")).toBe(true);
+  });
+
+  it("rejects WebP images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "webp_bomb", altText: "WebP bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createWebpVp8xHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => bytes);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("webp_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "WebP bomb")).toBe(true);
+  });
+
+  it("rejects WebP Blob images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "webp_bomb_blob", altText: "WebP blob bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createWebpVp8xHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/webp" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("webp_bomb_blob") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "WebP blob bomb")).toBe(true);
   });
 
   it("rejects PNG Blob images that exceed the pixel limit without invoking createImageBitmap", async () => {
