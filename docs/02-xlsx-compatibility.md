@@ -1517,6 +1517,10 @@ low for large workbooks.
 is convenient for algorithms that need random access to many parts at once, but it has real memory
 cost (and enforces safety limits to avoid ZIP bombs).
 
+Unlike the streaming pipeline, writing an `XlsxPackage` generally **re-packs** the ZIP (recompresses
+entries). The *decompressed* part bytes are preserved, but the on-disk ZIP representation (compression
+method/levels, ordering, etc.) may change.
+
 Full materialization happens when:
 
 - you construct an `XlsxPackage` (e.g. `XlsxPackage::from_bytes` / `from_bytes_limited`), and/or

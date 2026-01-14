@@ -3429,8 +3429,9 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
 /// Save a workbook to disk.
 ///
 /// Notes:
-/// - [`Workbook::Xlsx`] is saved by writing the underlying OPC package back out,
-///   preserving unknown parts.
+/// - [`Workbook::Xlsx`] is saved by writing the underlying OPC package back out (via
+///   [`formula_xlsx::XlsxLazyPackage`]), preserving unknown parts. Unchanged ZIP entries are
+///   typically preserved via a streaming raw-copy path rather than being regenerated.
 /// - [`Workbook::Xls`] is exported as `.xlsx` (writing `.xls` is out of scope).
 /// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
 ///   or exported to `.xlsx` depending on the output extension.
