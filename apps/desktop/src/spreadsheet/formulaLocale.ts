@@ -123,6 +123,22 @@ function parseLocaleKey(key: string): LocaleKeyParts | null {
  * Returns `null` when the locale is unknown/unsupported.
  */
 export function normalizeFormulaLocaleId(localeId: string | null | undefined): FormulaLocaleId | null {
+  // Fast path: many callers (formula engine tooling, formula bar) already provide canonical
+  // engine locale IDs. Avoid the heavier normalization/parsing work in that common case.
+  switch (localeId) {
+    case "en-US":
+    case "ja-JP":
+    case "zh-CN":
+    case "ko-KR":
+    case "zh-TW":
+    case "de-DE":
+    case "fr-FR":
+    case "es-ES":
+      return localeId;
+    default:
+      break;
+  }
+
   const key = normalizeLocaleKey(localeId);
   if (!key) return null;
   const parts = parseLocaleKey(key);
