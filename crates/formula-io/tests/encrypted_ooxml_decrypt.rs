@@ -252,6 +252,7 @@ fn decrypts_agile_and_standard_fixtures_with_correct_password() {
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
+    let standard_4_2_path = fixture_path("standard-4.2.xlsx");
 
     let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
     assert_expected_contents(&plaintext);
@@ -264,6 +265,9 @@ fn decrypts_agile_and_standard_fixtures_with_correct_password() {
 
     let standard = open_model_with_password(&standard_path, "password");
     assert_expected_contents(&standard);
+
+    let standard_4_2 = open_model_with_password(&standard_4_2_path, "password");
+    assert_expected_contents(&standard_4_2);
 }
 
 #[test]
@@ -273,6 +277,7 @@ fn open_workbook_with_options_decrypts_agile_and_standard_fixtures() {
         ("agile-empty-password.xlsx", ""),
         ("agile-unicode.xlsx", "pässwörd"),
         ("standard.xlsx", "password"),
+        ("standard-4.2.xlsx", "password"),
     ] {
         let path = fixture_path(fixture);
         let wb = open_workbook_with_options(
@@ -372,6 +377,7 @@ fn errors_on_wrong_password_fixtures() {
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
+    let standard_4_2_path = fixture_path("standard-4.2.xlsx");
     let standard_unicode_path = fixture_path("standard-unicode.xlsx");
     let agile_unicode_path = fixture_path("agile-unicode.xlsx");
     let agile_unicode_excel_path = fixture_path("agile-unicode-excel.xlsx");
@@ -382,6 +388,7 @@ fn errors_on_wrong_password_fixtures() {
         &agile_path,
         &agile_empty_password_path,
         &standard_path,
+        &standard_4_2_path,
         &standard_unicode_path,
         &agile_unicode_path,
         &agile_unicode_excel_path,

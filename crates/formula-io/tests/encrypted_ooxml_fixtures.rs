@@ -45,14 +45,18 @@ fn detects_encrypted_ooxml_agile_fixture() {
 }
 
 #[test]
-fn detects_encrypted_ooxml_standard_fixture() {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/encrypted/ooxml/standard.xlsx"
-    ));
+fn detects_encrypted_ooxml_standard_fixtures() {
+    for (fixture, stem) in [("standard.xlsx", "standard"), ("standard-4.2.xlsx", "standard-4.2")] {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/encrypted/ooxml/"
+        ))
+        .join(fixture);
 
-    let bytes = std::fs::read(fixture_path).expect("read standard encrypted fixture");
-    assert_encrypted_ooxml_bytes_detected(&bytes, "standard");
+        let bytes =
+            std::fs::read(&fixture_path).unwrap_or_else(|err| panic!("read {fixture}: {err}"));
+        assert_encrypted_ooxml_bytes_detected(&bytes, stem);
+    }
 }
 
 #[test]

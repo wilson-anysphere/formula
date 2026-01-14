@@ -204,6 +204,7 @@ fn encrypted_ooxml_fixtures_require_password() {
     for rel in [
         "encrypted/ooxml/agile.xlsx",
         "encrypted/ooxml/standard.xlsx",
+        "encrypted/ooxml/standard-4.2.xlsx",
     ] {
         let path = fixture_path(rel);
 

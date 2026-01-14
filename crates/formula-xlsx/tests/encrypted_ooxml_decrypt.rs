@@ -146,6 +146,7 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
     for encrypted in [
         "agile.xlsx",
         "standard.xlsx",
+        "standard-4.2.xlsx",
         "standard-rc4.xlsx",
         "agile-large.xlsx",
         "standard-large.xlsx",
