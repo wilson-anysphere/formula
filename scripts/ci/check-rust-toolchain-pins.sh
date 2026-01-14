@@ -100,6 +100,10 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /scripts\/security\/ci\.sh/) return 1
       if (s ~ /desktop_size_report\.py/) return 1
       if (s ~ /desktop_binary_size_report\.py/) return 1
+      # pnpm wrapper scripts that transitively run Rust tooling (e.g. desktop prebuild hooks).
+      if (s ~ /pnpm[[:space:]]+build:desktop([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+build:wasm([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+-w[[:space:]]+build:wasm([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])wasm-pack([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
