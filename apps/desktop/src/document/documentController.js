@@ -741,6 +741,100 @@ function shiftAxisOverrides(overrides, index0, count, maxIndexInclusive, mode) {
 }
 
 /**
+ * Shift merged-cell ranges (SheetViewState.mergedRanges) for a structural row/col edit.
+ *
+ * This mirrors Excel's behavior:
+ * - Insert above/left of a merge shifts the merge.
+ * - Insert inside a merge expands the merge to include the inserted rows/cols.
+ * - Delete overlapping a merge shrinks the merge (or removes it if fully deleted).
+ *
+ * Ranges are inclusive (`endRow`/`endCol` are inclusive).
+ *
+ * @param {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }> | null | undefined} mergedRanges
+ * @param {"row" | "col"} axis
+ * @param {number} index0
+ * @param {number} count
+ * @param {number} maxRow
+ * @param {number} maxCol
+ * @param {"insert" | "delete"} mode
+ * @returns {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }> | undefined}
+ */
+function shiftMergedRangesForAxisEdit(mergedRanges, axis, index0, count, maxRow, maxCol, mode) {
+  if (!Array.isArray(mergedRanges) || mergedRanges.length === 0) return undefined;
+  const start = Number(index0);
+  const delta = Number(count);
+  if (!Number.isInteger(start) || start < 0) {
+    return mergedRanges.map((r) => ({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol }));
+  }
+  if (!Number.isInteger(delta) || delta <= 0) {
+    return mergedRanges.map((r) => ({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol }));
+  }
+
+  const axisInsert = (lo, hi) => {
+    if (hi < start) return [lo, hi];
+    // Insert at/before the start of the range shifts it down/right.
+    if (lo >= start) return [lo + delta, hi + delta];
+    // Insert inside the range expands it.
+    return [lo, hi + delta];
+  };
+
+  const axisDelete = (lo, hi) => {
+    const delEndExclusive = start + delta;
+    if (hi < start) return [lo, hi];
+    if (lo >= delEndExclusive) return [lo - delta, hi - delta];
+    // Overlap: shrink (or drop if fully deleted).
+    const nextLo = lo < start ? lo : start;
+    const nextHi = hi < delEndExclusive ? start - 1 : hi - delta;
+    if (nextHi < nextLo) return null;
+    return [nextLo, nextHi];
+  };
+
+  /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+  const out = [];
+  for (const r of mergedRanges) {
+    if (!r) continue;
+    const sr = Number(r.startRow);
+    const er = Number(r.endRow);
+    const sc = Number(r.startCol);
+    const ec = Number(r.endCol);
+    if (!Number.isInteger(sr) || sr < 0) continue;
+    if (!Number.isInteger(er) || er < 0) continue;
+    if (!Number.isInteger(sc) || sc < 0) continue;
+    if (!Number.isInteger(ec) || ec < 0) continue;
+
+    let startRow = Math.min(sr, er);
+    let endRow = Math.max(sr, er);
+    let startCol = Math.min(sc, ec);
+    let endCol = Math.max(sc, ec);
+
+    if (axis === "row") {
+      const shifted = mode === "insert" ? axisInsert(startRow, endRow) : axisDelete(startRow, endRow);
+      if (!shifted) continue;
+      [startRow, endRow] = shifted;
+    } else {
+      const shifted = mode === "insert" ? axisInsert(startCol, endCol) : axisDelete(startCol, endCol);
+      if (!shifted) continue;
+      [startCol, endCol] = shifted;
+    }
+
+    // Clamp to sheet bounds and drop out-of-bounds merges (Excel drops cells that move out of bounds).
+    if (startRow > maxRow || startCol > maxCol) continue;
+    if (endRow < 0 || endCol < 0) continue;
+    startRow = Math.max(0, startRow);
+    startCol = Math.max(0, startCol);
+    endRow = Math.min(maxRow, endRow);
+    endCol = Math.min(maxCol, endCol);
+
+    // Ignore single-cell merges (no-op).
+    if (startRow === endRow && startCol === endCol) continue;
+
+    out.push({ startRow, endRow, startCol, endCol });
+  }
+
+  return out.length > 0 ? out : undefined;
+}
+
+/**
  * Shift a Map<number, number> (rowStyleIds/colStyleIds) for axis insert/delete.
  *
  * @param {Map<number, number>} map
@@ -4002,6 +4096,13 @@ export class DocumentController {
       const next = shiftAxisOverrides(afterView.colWidths, index0, count, maxCol, mode);
       if (next) afterView.colWidths = next;
       else delete afterView.colWidths;
+    }
+
+    // Merged-cell regions should shift with their underlying cells during structural edits.
+    if (Array.isArray(afterView.mergedRanges) && afterView.mergedRanges.length > 0) {
+      const next = shiftMergedRangesForAxisEdit(afterView.mergedRanges, axis, index0, count, maxRow, maxCol, mode);
+      if (next) afterView.mergedRanges = next;
+      else delete afterView.mergedRanges;
     }
     const normalizedView = normalizeSheetViewState(afterView);
 

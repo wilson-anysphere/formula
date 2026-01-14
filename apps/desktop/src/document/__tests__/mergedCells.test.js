@@ -50,3 +50,40 @@ test("mergeCenter sets horizontal center alignment on the merged cell", () => {
   assert.equal(format?.alignment?.horizontal, "center");
 });
 
+test("merged ranges shift/expand with structural row edits", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }], { label: "Merge Cells" }); // A1:B1
+
+  // Insert a row above: merge should shift down.
+  doc.insertRows("Sheet1", 0, 1, { label: "Insert Rows" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 1, endRow: 1, startCol: 0, endCol: 1 }]);
+
+  // Insert a row inside the merge (between the merged row and below): merge should expand.
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }], { label: "Merge Cells" }); // A1:B2
+  doc.insertRows("Sheet1", 1, 1, { label: "Insert Rows" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 2, startCol: 0, endCol: 1 }]);
+
+  // Delete a row inside the merge: merge should shrink.
+  doc.deleteRows("Sheet1", 1, 1, { label: "Delete Rows" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+});
+
+test("merged ranges shift/expand with structural column edits", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }], { label: "Merge Cells" }); // A1:B1
+
+  // Insert a col to the left: merge should shift right.
+  doc.insertCols("Sheet1", 0, 1, { label: "Insert Columns" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 0, startCol: 1, endCol: 2 }]);
+
+  // Insert a col inside the merge: merge should expand.
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }], { label: "Merge Cells" }); // A1:B1
+  doc.insertCols("Sheet1", 1, 1, { label: "Insert Columns" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 0, startCol: 0, endCol: 2 }]);
+
+  // Delete a col inside the merge: merge should shrink.
+  doc.deleteCols("Sheet1", 1, 1, { label: "Delete Columns" });
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]);
+});
