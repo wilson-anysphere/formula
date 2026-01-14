@@ -8255,6 +8255,12 @@ export class SpreadsheetApp {
         const index = this.getDrawingHitTestIndex(objects);
         const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
         const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+        const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+        const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+        const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+        const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
+        const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+        const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
         // Treat right-clicks on selection handles/rotation handle as a hit for the selected drawing.
         // (Handles are centered on the outline and extend beyond the anchor rect, so `hitTestDrawings`
         // alone won't consider them.)
@@ -8262,26 +8268,24 @@ export class SpreadsheetApp {
           const selectedIndex = index.byId.get(selectedId);
           const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
           if (selectedObject) {
-            const sheetRect = index.bounds[selectedIndex!]!;
-            const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-            const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-            const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
-            const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
             const anchor = selectedObject.anchor;
-            const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
-            const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
-            const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
-            const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
-            scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
-            scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
-            scratchBounds.width = sheetRect.width;
-            scratchBounds.height = sheetRect.height;
-            const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
-            if (
-              (canRotate && hitTestRotationHandle(scratchBounds, x, y, selectedObject.transform)) ||
-              hitTestResizeHandle(scratchBounds, x, y, selectedObject.transform)
-            ) {
-              return { id: selectedId };
+            const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+            const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+            if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+              const sheetRect = index.bounds[selectedIndex!]!;
+              const scrollX = anchor.type === "absolute" ? viewport.scrollX : objInFrozenCols ? 0 : viewport.scrollX;
+              const scrollY = anchor.type === "absolute" ? viewport.scrollY : objInFrozenRows ? 0 : viewport.scrollY;
+              scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
+              scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
+              scratchBounds.width = sheetRect.width;
+              scratchBounds.height = sheetRect.height;
+              const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
+              if (
+                (canRotate && hitTestRotationHandle(scratchBounds, x, y, selectedObject.transform)) ||
+                hitTestResizeHandle(scratchBounds, x, y, selectedObject.transform)
+              ) {
+                return { id: selectedId };
+              }
             }
           }
         }
@@ -8350,22 +8354,28 @@ export class SpreadsheetApp {
         const selectedIndex = index.byId.get(selectedId);
         const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
         if (selectedObject) {
-          const sheetRect = index.bounds[selectedIndex!]!;
+          const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+          const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
+          const pointInFrozenCols = frozenCols > 0 && sx < frozenBoundaryX;
+          const pointInFrozenRows = frozenRows > 0 && sy < frozenBoundaryY;
           const anchor = selectedObject.anchor;
-          const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
-          const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
-          const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
-          const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
-          scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
-          scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
-          scratchBounds.width = sheetRect.width;
-          scratchBounds.height = sheetRect.height;
-          const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
-          if (
-            (canRotate && hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform)) ||
-            hitTestResizeHandle(scratchBounds, sx, sy, selectedObject.transform)
-          ) {
-            return { id: selectedId };
+          const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+          const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+          if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+            const sheetRect = index.bounds[selectedIndex!]!;
+            const scrollX = anchor.type === "absolute" ? viewport.scrollX : objInFrozenCols ? 0 : viewport.scrollX;
+            const scrollY = anchor.type === "absolute" ? viewport.scrollY : objInFrozenRows ? 0 : viewport.scrollY;
+            scratchBounds.x = sheetRect.x - scrollX + headerOffsetX;
+            scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
+            scratchBounds.width = sheetRect.width;
+            scratchBounds.height = sheetRect.height;
+            const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
+            if (
+              (canRotate && hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform)) ||
+              hitTestResizeHandle(scratchBounds, sx, sy, selectedObject.transform)
+            ) {
+              return { id: selectedId };
+            }
           }
         }
       }
@@ -13119,6 +13129,13 @@ export class SpreadsheetApp {
     const index = this.getDrawingHitTestIndex(objects);
     const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
     const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+    const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+    const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+    const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
+    const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+    const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+    const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
 
     // Treat clicks on selection handles/rotation handle as a hit for the current selection.
     // This keeps selection stable (and allows context menus) even when the pointer is slightly
@@ -13127,36 +13144,42 @@ export class SpreadsheetApp {
       const selectedIndex = index.byId.get(prevSelected);
       const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
       if (selected) {
-        const sheetRect = index.bounds[selectedIndex!]!;
-        const scroll = effectiveScrollForAnchor(selected.anchor, viewport);
-        const bounds = this.drawingHitTestScratchRect;
-        bounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
-        bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
-        bounds.width = sheetRect.width;
-        bounds.height = sheetRect.height;
+        const anchor = selected.anchor;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+        if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+          const sheetRect = index.bounds[selectedIndex!]!;
+          const scroll = effectiveScrollForAnchor(selected.anchor, viewport);
+          const bounds = this.drawingHitTestScratchRect;
+          bounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
+          bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+          bounds.width = sheetRect.width;
+          bounds.height = sheetRect.height;
 
-        const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
-        const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
-        if ((canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) || hitTestResizeHandle(bounds, x, y, selected.transform)) {
-          if (editorWasOpen) {
-            this.editor.commit("command");
-          }
+          const resizeHandle = hitTestResizeHandle(bounds, x, y, selected.transform);
+          const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+          const rotationHit = canRotate && hitTestRotationHandle(bounds, x, y, selected.transform);
+          if (rotationHit || resizeHandle) {
+            if (editorWasOpen) {
+              this.editor.commit("command");
+            }
 
-          if (this.sharedGrid && !isContextClick) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
+            if (this.sharedGrid && !isContextClick) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
 
-          if (this.selectedChartId != null) {
-            this.setSelectedChartId(null);
-          }
+            if (this.selectedChartId != null) {
+              this.setSelectedChartId(null);
+            }
 
-          if (isContextClick) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (e as any).__formulaDrawingContextClick = true;
+            if (isContextClick) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (e as any).__formulaDrawingContextClick = true;
+            }
+            this.focus();
+            return;
           }
-          this.focus();
-          return;
         }
       }
     }
@@ -16529,20 +16552,36 @@ export class SpreadsheetApp {
       return;
     }
 
-    const primaryButton = e.pointerType !== "mouse" || e.button === 0;
+    const pointerType = e.pointerType ?? "";
+    const button = typeof e.button === "number" ? e.button : 0;
+    const isMouse = pointerType === "mouse";
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
+    // On macOS, Ctrl+click is commonly treated as a right click and fires the `contextmenu` event.
+    const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+    const isContextClick = (isMouse && button !== 0) || isMacContextClick;
+    const primaryButton = !isContextClick && (!isMouse || button === 0);
     const formulaEditing = this.formulaBar?.isFormulaEditing() === true;
     if (!formulaEditing) {
       // Drawing hit testing must happen before cell-selection logic so clicks on
       // overlaid objects (charts/images/shapes) behave like Excel.
       const drawingViewport = this.getDrawingInteractionViewport();
+      const frozenRows = Number.isFinite(drawingViewport.frozenRows) ? Math.max(0, Math.trunc(drawingViewport.frozenRows!)) : 0;
+      const frozenCols = Number.isFinite(drawingViewport.frozenCols) ? Math.max(0, Math.trunc(drawingViewport.frozenCols!)) : 0;
       const drawings = this.listDrawingObjectsForSheet();
       const hitIndex = this.getDrawingHitTestIndex(drawings);
       const drawingBounds = this.drawingHitTestScratchRect;
 
-      // Allow grabbing a resize handle for the current drawing selection even when the
-      // pointer is slightly outside the object's bounds (handles extend beyond the
-      // selection outline).
-      if (primaryButton && this.selectedDrawingId != null) {
+      // Allow interacting with selection handles even when the pointer is slightly outside the
+      // object's bounds (handles extend beyond the selection outline). Context-clicking a handle
+      // should keep selection stable and allow the context menu to open without moving the active cell.
+      if (this.selectedDrawingId != null) {
         const selectedIndex = hitIndex.byId.get(this.selectedDrawingId);
         const selected = selectedIndex != null ? hitIndex.ordered[selectedIndex] ?? null : null;
         if (selected) {
@@ -16553,53 +16592,78 @@ export class SpreadsheetApp {
             ? Math.max(0, drawingViewport.headerOffsetY!)
             : 0;
           if (x >= headerOffsetX && y >= headerOffsetY) {
-            const sheetRect = hitIndex.bounds[selectedIndex!]!;
-            const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
-            drawingBounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
-            drawingBounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
-            drawingBounds.width = sheetRect.width;
-            drawingBounds.height = sheetRect.height;
-            const handle = hitTestResizeHandle(drawingBounds, x, y, selected.transform);
-            if (handle) {
-              if (editorWasOpen) {
-                this.editor.commit("command");
-              }
-              e.preventDefault();
-              this.renderSelection();
-              this.focus();
+            const frozenBoundaryX = Number.isFinite(drawingViewport.frozenWidthPx)
+              ? (drawingViewport.frozenWidthPx as number)
+              : headerOffsetX;
+            const frozenBoundaryY = Number.isFinite(drawingViewport.frozenHeightPx)
+              ? (drawingViewport.frozenHeightPx as number)
+              : headerOffsetY;
+            const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+            const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+            const anchor = selected.anchor;
+            const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+            const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+            if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+              const sheetRect = hitIndex.bounds[selectedIndex!]!;
+              const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
+              drawingBounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
+              drawingBounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+              drawingBounds.width = sheetRect.width;
+              drawingBounds.height = sheetRect.height;
 
-              const startSheetX = x - headerOffsetX + scroll.scrollX;
-              const startSheetY = y - headerOffsetY + scroll.scrollY;
-              let objectIndex = -1;
-              for (let i = 0; i < drawings.length; i += 1) {
-                if (drawings[i]!.id === selected.id) {
-                  objectIndex = i;
-                  break;
+              const resizeHandle = hitTestResizeHandle(drawingBounds, x, y, selected.transform);
+              const canRotate = this.drawingInteractionController != null && selected.kind.type !== "chart";
+              const rotationHit = canRotate && hitTestRotationHandle(drawingBounds, x, y, selected.transform);
+              if (resizeHandle || rotationHit) {
+                if (editorWasOpen) {
+                  this.editor.commit("command");
                 }
+
+                if (primaryButton && resizeHandle) {
+                  e.preventDefault();
+                  this.renderSelection();
+                  this.focus();
+
+                  const startSheetX = x - headerOffsetX + scroll.scrollX;
+                  const startSheetY = y - headerOffsetY + scroll.scrollY;
+                  let objectIndex = -1;
+                  for (let i = 0; i < drawings.length; i += 1) {
+                    if (drawings[i]!.id === selected.id) {
+                      objectIndex = i;
+                      break;
+                    }
+                  }
+                  this.drawingGesture = {
+                    pointerId: e.pointerId,
+                    mode: "resize",
+                    objectId: selected.id,
+                    objectIndex,
+                    handle: resizeHandle,
+                    startSheetX,
+                    startSheetY,
+                    startAnchor: selected.anchor,
+                    startWidthPx: drawingBounds.width,
+                    startHeightPx: drawingBounds.height,
+                    transform: selected.transform,
+                    aspectRatio:
+                      selected.kind.type === "image" && drawingBounds.width > 0 && drawingBounds.height > 0
+                        ? drawingBounds.width / drawingBounds.height
+                        : null,
+                  };
+                  try {
+                    this.root.setPointerCapture(e.pointerId);
+                  } catch {
+                    // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+                  }
+                  return;
+                }
+
+                // Context-click: keep selection and allow the context menu to open without
+                // changing the active cell selection.
+                this.renderSelection();
+                this.focus();
+                return;
               }
-              this.drawingGesture = {
-                pointerId: e.pointerId,
-                mode: "resize",
-                objectId: selected.id,
-                objectIndex,
-                handle,
-                startSheetX,
-                startSheetY,
-                startAnchor: selected.anchor,
-                startWidthPx: drawingBounds.width,
-                startHeightPx: drawingBounds.height,
-                transform: selected.transform,
-                aspectRatio:
-                  selected.kind.type === "image" && drawingBounds.width > 0 && drawingBounds.height > 0
-                    ? drawingBounds.width / drawingBounds.height
-                    : null,
-              };
-              try {
-                this.root.setPointerCapture(e.pointerId);
-              } catch {
-                // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-              }
-              return;
             }
           }
         }
@@ -16705,7 +16769,7 @@ export class SpreadsheetApp {
     // apply to the cell under the cursor when the click happens outside the current selection.
     // (Excel keeps selection when right-clicking inside it, but moves selection when right-clicking
     // outside.)
-    if (e.pointerType === "mouse" && e.button !== 0) {
+    if (isContextClick) {
       if (x >= this.rowHeaderWidth && y >= this.colHeaderHeight) {
         const cell = this.cellFromPoint(x, y);
         const inSelection = this.selection.ranges.some(
