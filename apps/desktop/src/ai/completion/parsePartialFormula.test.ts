@@ -317,6 +317,30 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     }
   });
 
+  it("does not treat semicolons inside array literals as argument separators in comma locales (en-US)", async () => {
+    setLocale("en-US");
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = { documentElement: { lang: "en-US" } };
+
+    try {
+      const parser = createLocaleAwarePartialFormulaParser({});
+      const fnRegistry = new FunctionRegistry();
+
+      // In en-US, semicolons are used as array row separators (inside `{...}`), not function arg separators.
+      // Ensure they don't affect argument indexing.
+      const input = "=SUM({1;2},";
+      const result = await parser(input, input.length, fnRegistry);
+
+      expect(result.isFormula).toBe(true);
+      expect(result.inFunctionCall).toBe(true);
+      expect(result.functionName).toBe("SUM");
+      expect(result.argIndex).toBe(1);
+      expect(result.currentArg?.text).toBe("");
+    } finally {
+      (globalThis as any).document = prevDocument;
+    }
+  });
+
   it("respects getLocaleId() overrides over document/i18n locale when choosing the formula locale", async () => {
     setLocale("en-US");
     const prevDocument = (globalThis as any).document;
