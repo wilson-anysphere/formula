@@ -225,6 +225,15 @@ export interface Viewport {
 
 export interface ChartRenderer {
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void;
+  /**
+   * Optional cache-pruning hook.
+   *
+   * Some chart renderers (e.g. `ChartRendererAdapter`) keep per-chart offscreen surfaces
+   * around to avoid re-rendering on scroll. `DrawingOverlay` calls this when the set of
+   * chart objects changes so implementations can drop surfaces for deleted or off-sheet
+   * charts.
+   */
+  pruneSurfaces?(keep: ReadonlySet<string>): void;
   destroy?(): void;
 }
 
@@ -466,7 +475,7 @@ export class DrawingOverlay {
     this.renderAbort = abort;
     const signal = abort?.signal;
 
-    const chartRenderer: any = this.chartRenderer as any;
+    const chartRenderer = this.chartRenderer;
     if (chartRenderer && typeof chartRenderer.pruneSurfaces === "function") {
       const sourceChanged =
         this.chartSurfacePruneSource !== objects || this.chartSurfacePruneLength !== objects.length;

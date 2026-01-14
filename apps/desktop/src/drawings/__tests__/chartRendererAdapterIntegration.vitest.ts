@@ -182,4 +182,38 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     expect(calls.some((call) => call.method === "drawImage")).toBe(true);
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
+
+  it("prunes cached chart surfaces when chart objects are removed", async () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const store = new FormulaChartModelStore();
+    const chartId = "sheet1:prune";
+    const model: ChartModel = {
+      chartType: { kind: "bar" },
+      title: "Chart",
+      legend: { position: "right", overlay: false },
+      axes: [
+        { kind: "category", position: "bottom" },
+        { kind: "value", position: "left", majorGridlines: true, formatCode: "0" },
+      ],
+      series: [
+        {
+          name: "Series 1",
+          categories: { cache: ["A", "B"] },
+          values: { cache: [1, 2] },
+        },
+      ],
+    };
+    store.setChartModel(chartId, model);
+
+    const chartRenderer = new ChartRendererAdapter(store);
+    const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
+
+    await overlay.render([createChartObject(chartId)], viewport);
+    expect(((chartRenderer as any).surfaces as Map<string, unknown>).size).toBe(1);
+
+    await overlay.render([], viewport);
+    expect(((chartRenderer as any).surfaces as Map<string, unknown>).size).toBe(0);
+  });
 });
