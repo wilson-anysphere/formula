@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { parseStartupLine, repoRoot, runOnce } from './desktopStartupUtil.ts';
@@ -73,6 +76,62 @@ describe('desktopStartupUtil.parseStartupLine', () => {
         '[startup] window_visible_ms=1 webview_loaded_ms=2 first_render_ms=3 tti_ms=wat',
       ),
     ).toBeNull();
+  });
+});
+
+describe('desktopStartupUtil.runOnce env isolation', () => {
+  test('redirects HOME and user-data directories under the profile dir', async () => {
+    const profileDir = `target/perf-home/vitest-env-isolation-${Date.now()}-${process.pid}`;
+    const profileAbs = resolve(repoRoot, profileDir);
+    const outFile = resolve(profileAbs, 'env.json');
+
+    const code = [
+      "const fs = require('node:fs');",
+      "const out = {",
+      "  HOME: process.env.HOME,",
+      "  USERPROFILE: process.env.USERPROFILE,",
+      "  XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,",
+      "  XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,",
+      "  XDG_STATE_HOME: process.env.XDG_STATE_HOME,",
+      "  XDG_DATA_HOME: process.env.XDG_DATA_HOME,",
+      "  APPDATA: process.env.APPDATA,",
+      "  LOCALAPPDATA: process.env.LOCALAPPDATA,",
+      "  TMPDIR: process.env.TMPDIR,",
+      "  TEMP: process.env.TEMP,",
+      "  TMP: process.env.TMP,",
+      "};",
+      "fs.writeFileSync(process.env.ENV_OUT_FILE, JSON.stringify(out), 'utf8');",
+      "console.log('[startup] window_visible_ms=1 webview_loaded_ms=n/a first_render_ms=n/a tti_ms=2');",
+      'setInterval(() => {}, 1000);',
+    ].join(' ');
+
+    await runOnce({
+      binPath: process.execPath,
+      timeoutMs: 5000,
+      xvfb: false,
+      profileDir,
+      argv: ['-e', code],
+      envOverrides: {
+        ENV_OUT_FILE: outFile,
+      },
+    });
+
+    const payload = JSON.parse(readFileSync(outFile, 'utf8')) as Record<string, string | undefined>;
+
+    expect(payload.HOME).toBe(profileAbs);
+    expect(payload.USERPROFILE).toBe(profileAbs);
+
+    expect(payload.XDG_CONFIG_HOME).toBe(resolve(profileAbs, 'xdg-config'));
+    expect(payload.XDG_CACHE_HOME).toBe(resolve(profileAbs, 'xdg-cache'));
+    expect(payload.XDG_STATE_HOME).toBe(resolve(profileAbs, 'xdg-state'));
+    expect(payload.XDG_DATA_HOME).toBe(resolve(profileAbs, 'xdg-data'));
+
+    expect(payload.APPDATA).toBe(resolve(profileAbs, 'AppData', 'Roaming'));
+    expect(payload.LOCALAPPDATA).toBe(resolve(profileAbs, 'AppData', 'Local'));
+
+    expect(payload.TMPDIR).toBe(resolve(profileAbs, 'tmp'));
+    expect(payload.TEMP).toBe(resolve(profileAbs, 'tmp'));
+    expect(payload.TMP).toBe(resolve(profileAbs, 'tmp'));
   });
 });
 
