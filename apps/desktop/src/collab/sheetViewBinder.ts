@@ -362,7 +362,19 @@ function ensureNestedYMap(parent: any, key: string): Y.Map<any> {
   const existingMap = getYMap(existing);
   if (existingMap) return existingMap;
 
-  const next = new Y.Map();
+  // Prefer constructing nested Yjs types using the parent's constructor to tolerate
+  // mixed-module environments (ESM + CJS) where multiple `yjs` instances exist.
+  const ParentCtor = (parent as any)?.constructor as { new (): any } | undefined;
+  const next = (() => {
+    if (typeof ParentCtor === "function" && ParentCtor !== Object) {
+      try {
+        return new ParentCtor();
+      } catch {
+        // Fall through.
+      }
+    }
+    return new Y.Map();
+  })();
 
   // Best-effort: if the existing value was a plain object, preserve entries.
   if (isRecord(existing)) {
