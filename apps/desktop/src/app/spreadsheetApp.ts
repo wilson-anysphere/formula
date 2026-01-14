@@ -7695,6 +7695,42 @@ export class SpreadsheetApp {
       this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
     }
+
+    // SpreadsheetApp-managed selection/fill/range-selection drags should not be allowed to
+    // "finish" (pointerup) on a different sheet than where they started. Cancel any active
+    // drag state so a later pointerup cannot commit edits (fill handle) into the new sheet.
+    const drag = this.dragState;
+    if (drag) {
+      this.dragState = null;
+      this.dragPointerPos = null;
+      this.fillPreviewRange = null;
+      if (this.dragAutoScrollRaf != null) {
+        if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+        else globalThis.clearTimeout(this.dragAutoScrollRaf);
+      }
+      this.dragAutoScrollRaf = null;
+      // Cancel formula-bar range selection mode if we were mid-drag while editing a formula.
+      if (drag.mode === "formula") {
+        try {
+          this.formulaBar?.endRangeSelection?.();
+        } catch {
+          // Best-effort; never fail sheet switching due to formula bar state.
+        }
+      }
+      try {
+        this.root.releasePointerCapture?.(drag.pointerId);
+      } catch {
+        // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+      }
+    }
+
+    // DesktopSharedGrid owns fill-handle dragging in shared-grid mode. Ensure any in-progress
+    // fill gesture is canceled so it cannot commit into the next sheet.
+    try {
+      this.sharedGrid?.cancelFillHandleDrag?.();
+    } catch {
+      // Best-effort.
+    }
   }
 
   activateSheet(sheetId: string): void {
