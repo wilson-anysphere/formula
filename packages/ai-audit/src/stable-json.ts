@@ -62,18 +62,35 @@ export function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unk
 
   if (ancestors.has(obj)) return CIRCULAR_PLACEHOLDER;
 
-  // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date), but guard
-  // against pathological implementations like `toJSON() { return this; }` by treating
-  // self-references as circular.
+  // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date), while
+  // staying resilient to pathological implementations.
+  //
+  // Notes:
+  // - Some `toJSON()` implementations return `this` (a no-op for JSON.stringify).
+  //   Treat that as "no toJSON" so we still serialize the object's enumerable
+  //   properties instead of collapsing to `[Circular]`.
+  // - Other `toJSON()` implementations can create recursion (e.g. `toJSON() { return { self: this } }`).
+  //   Track the object in `ancestors` while serializing the `toJSON()` result so any
+  //   references back to the original object are replaced with a stable placeholder.
   if (typeof (obj as { toJSON?: unknown }).toJSON === "function") {
-    ancestors.add(obj);
+    let replacement: unknown;
     try {
-      return stableJsonValue((obj as { toJSON: () => unknown }).toJSON(), ancestors);
+      replacement = (obj as { toJSON: () => unknown }).toJSON();
     } catch {
       return UNSERIALIZABLE_PLACEHOLDER;
-    } finally {
-      ancestors.delete(obj);
     }
+
+    if (replacement !== obj) {
+      ancestors.add(obj);
+      try {
+        return stableJsonValue(replacement, ancestors);
+      } catch {
+        return UNSERIALIZABLE_PLACEHOLDER;
+      } finally {
+        ancestors.delete(obj);
+      }
+    }
+    // replacement === obj => fall through to normal object serialization.
   }
 
   ancestors.add(obj);

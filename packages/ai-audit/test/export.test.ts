@@ -289,6 +289,6 @@ describe("serializeAuditEntries", () => {
 
     const output = serializeAuditEntries(entries, { format: "json", redactToolResults: false });
     const parsed = JSON.parse(output) as any[];
-    expect(parsed[0].input).toBe("[Circular]");
+    expect(parsed[0].input).toEqual({ a: 1 });
   });
 });
