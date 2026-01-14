@@ -311,6 +311,49 @@ describe("SecondaryGridView drawings overlay", () => {
     container.remove();
   });
 
+  it("shrinks canvas backing stores on destroy", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const doc = new DocumentController();
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+
+    const view = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+    });
+
+    const canvases = Array.from(container.querySelectorAll("canvas"));
+    expect(canvases.length).toBeGreaterThan(0);
+    expect(canvases.some((c) => c.width > 0 && c.height > 0)).toBe(true);
+
+    view.destroy();
+
+    // Canvases are removed from the DOM, but existing references should have their backing stores released.
+    for (const canvas of canvases) {
+      expect(canvas.width).toBe(0);
+      expect(canvas.height).toBe(0);
+    }
+
+    container.remove();
+  });
+
   it("invalidates the drawings spatial index when sheet view axis overrides change", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });

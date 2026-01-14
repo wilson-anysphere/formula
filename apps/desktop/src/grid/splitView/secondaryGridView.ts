@@ -529,6 +529,21 @@ export class SecondaryGridView {
     this.editingCell = null;
     this.editor.close();
     this.grid.destroy();
+    // Release canvas backing stores even if the SecondaryGridView instance is still referenced
+    // after destroy (tests, hot reload, split-pane toggling). Detached canvases can otherwise
+    // retain multi-megabyte buffers.
+    try {
+      for (const canvas of Array.from(this.container.querySelectorAll("canvas"))) {
+        try {
+          canvas.width = 0;
+          canvas.height = 0;
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
     // Remove any DOM we created (the container stays in place).
     this.container.replaceChildren();
   }
