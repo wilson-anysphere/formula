@@ -5,8 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Ribbon } from "../Ribbon";
 import type { RibbonActions } from "../ribbonSchema";
+import { setRibbonUiState } from "../ribbonUiState";
 
 afterEach(() => {
+  act(() => {
+    setRibbonUiState({
+      pressedById: Object.create(null),
+      labelById: Object.create(null),
+      disabledById: Object.create(null),
+      shortcutById: Object.create(null),
+      ariaKeyShortcutsById: Object.create(null),
+    });
+  });
   document.body.innerHTML = "";
   try {
     globalThis.localStorage?.removeItem?.("formula.ui.ribbonCollapsed");
@@ -96,6 +106,54 @@ describe("Ribbon a11y + keyboard navigation", () => {
     });
 
     expect(container.querySelector(".ribbon-dropdown__menu")).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it("skips disabled dropdown menu items during ArrowDown navigation", async () => {
+    const { container, root } = renderRibbon();
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: { "format.clearContents": true },
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const clearFormatting = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.clearFormatting"]');
+    expect(clearFormatting).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      clearFormatting?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const menu = container.querySelector<HTMLElement>(".ribbon-dropdown__menu");
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing dropdown menu");
+
+    const clearFormats = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearFormats"]');
+    const clearContents = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearContents"]');
+    const clearAll = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearAll"]');
+    expect(clearFormats).toBeInstanceOf(HTMLButtonElement);
+    expect(clearContents).toBeInstanceOf(HTMLButtonElement);
+    expect(clearAll).toBeInstanceOf(HTMLButtonElement);
+    expect(clearContents?.disabled).toBe(true);
+
+    // Focus should land on the first enabled item automatically, but explicitly set it
+    // so the test doesn't depend on timing quirks.
+    clearFormats?.focus();
+    expect(document.activeElement).toBe(clearFormats);
+
+    act(() => {
+      clearFormats?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+
+    // ArrowDown should skip the disabled middle item and land on the next enabled one.
+    expect(document.activeElement).toBe(clearAll);
 
     act(() => root.unmount());
   });
