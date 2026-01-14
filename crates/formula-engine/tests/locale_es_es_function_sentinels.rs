@@ -4,7 +4,7 @@ use formula_engine::locale;
 /// functions. If our translation tables are incomplete, these functions silently fall back to
 /// identity mappings (English), which breaks Excel compatibility.
 #[test]
-fn es_es_financial_function_spellings_match_excel() {
+fn locale_parsing_es_es_financial_function_spellings_match_excel() {
     let mappings = [
         // Source of truth: `src/locale/data/sources/es-ES.json` (extracted from Excel).
         ("NPV", "VNA"),
@@ -39,4 +39,3 @@ fn es_es_financial_function_spellings_match_excel() {
         );
     }
 }
-
