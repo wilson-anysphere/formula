@@ -681,6 +681,7 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents() {
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
+    // Ensure we're exercising the bytecode backend + bytecode dependency tracing.
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",
@@ -808,6 +809,7 @@ fn external_sheet_invalidation_dirties_dynamic_external_dependents_from_indirect
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
+    // Ensure we're exercising the bytecode backend + bytecode dependency tracing.
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",
