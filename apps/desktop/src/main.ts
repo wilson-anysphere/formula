@@ -2454,7 +2454,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
+      "home.number.numberFormat.ariaLabel": t("quickPick.numberFormat.placeholder"),
       "view.appearance.theme": themeLabel,
+      "view.appearance.theme.ariaLabel": t("quickPick.theme.placeholder"),
       // Localize dropdown menu item labels (schema labels are currently English-only).
       "format.numberFormat.general": t("command.format.numberFormat.general"),
       "format.numberFormat.number": t("command.format.numberFormat.number"),

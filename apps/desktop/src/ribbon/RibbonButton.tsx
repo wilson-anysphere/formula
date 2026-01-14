@@ -113,7 +113,9 @@ export const RibbonButton = React.memo(function RibbonButton({
     [button.id, domInstanceId],
   );
   const label = labelOverride ?? labelById?.[button.id] ?? button.label;
+  const ariaLabelOverride = labelById?.[`${button.id}.ariaLabel`];
   const ariaLabel =
+    ariaLabelOverride ??
     // For icon-only buttons, the label is visually hidden so it's especially important that
     // assistive technology uses a localized name when available. Prefer the label override
     // when provided (e.g. from desktop i18n `labelById` overrides).
@@ -126,10 +128,7 @@ export const RibbonButton = React.memo(function RibbonButton({
         ? disabledByIdOverride
         : Boolean(button.disabled);
   const shortcut = shortcutOverride ?? shortcutById?.[button.id];
-  const title = formatTooltipTitle(
-    size === "icon" && typeof labelOverride === "string" && labelOverride.trim() !== "" ? labelOverride : button.ariaLabel,
-    shortcut,
-  );
+  const title = formatTooltipTitle(ariaLabel, shortcut);
   const ariaKeyShortcuts = ariaKeyShortcutsOverride ?? ariaKeyShortcutsById?.[button.id];
 
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -386,6 +385,11 @@ function areRibbonButtonPropsEqual(prev, next) {
   if (prev.ariaKeyShortcutsOverride !== next.ariaKeyShortcutsOverride) return false;
   if (prev.ariaKeyShortcutsById !== next.ariaKeyShortcutsById) return false;
   if (prev.onActivate !== next.onActivate) return false;
+
+  // Custom aria-label overrides are stored in `labelById` with an `.ariaLabel` suffix so hosts
+  // can localize tooltips/screen-reader labels without changing the ribbon schema.
+  const ariaLabelKey = `${prev.button.id}.ariaLabel`;
+  if (prev.labelById?.[ariaLabelKey] !== next.labelById?.[ariaLabelKey]) return false;
 
   const menuItems = prev.button.menuItems;
   if (!menuItems?.length) return true;
