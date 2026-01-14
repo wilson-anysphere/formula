@@ -101,7 +101,8 @@ Example for Spanish (`es-ES`):
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId es-ES `
-  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json `
+  -FailOnSkipped
 ```
 
 Notes / caveats:

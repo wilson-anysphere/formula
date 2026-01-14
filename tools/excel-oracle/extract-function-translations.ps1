@@ -478,6 +478,13 @@ try {
     $orderedTranslations[$k] = [string]$translations[$k]
   }
 
+  if ($FailOnSkipped -and $skipped.Count -gt 0) {
+    $skippedSorted = @($skipped | Sort-Object)
+    throw ("Extraction failed because Excel rejected {0} functions: {1}`n" -f $skipped.Count, ($skippedSorted -join ", ")) +
+      "This usually indicates an unsupported/older Excel build or a missing language pack; " +
+      "retry on a modern Excel install configured for the requested locale."
+  }
+
   $payload = [ordered]@{
     # Keep this label stable across Excel updates so running the extractor does not create noisy diffs
     # when only the Office build number changes.
@@ -496,11 +503,6 @@ try {
   if ($skipped.Count -gt 0) {
     $skippedSorted = @($skipped | Sort-Object)
     Write-Warning ("Skipped {0} functions rejected by Excel: {1}" -f $skipped.Count, ($skippedSorted -join ", "))
-    if ($FailOnSkipped) {
-      throw ("Extraction failed because Excel rejected {0} functions (see warnings above). " -f $skipped.Count) +
-        "This usually indicates an unsupported/older Excel build or a missing language pack; " +
-        "retry on a modern Excel install configured for the requested locale."
-    }
   }
 } finally {
   if ($null -ne $workbook) {
