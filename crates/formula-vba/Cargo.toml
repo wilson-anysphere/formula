@@ -33,4 +33,6 @@ openssl = "0.10"
 
 [dev-dependencies]
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 formula-office-crypto = { path = "../formula-office-crypto" }
