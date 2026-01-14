@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchesRedirectUri } from "./oauthBroker.js";
+import { isLoopbackRedirectUrl, matchesRedirectUri } from "./oauthBroker.js";
 
 describe("matchesRedirectUri", () => {
   it("matches a custom-scheme deep link redirect (ignoring query params)", () => {
@@ -34,5 +34,12 @@ describe("matchesRedirectUri", () => {
   it("returns false for invalid URLs", () => {
     expect(matchesRedirectUri("not a url", "formula://oauth/callback?code=abc")).toBe(false);
     expect(matchesRedirectUri("formula://oauth/callback", "not a url")).toBe(false);
+  });
+});
+
+describe("isLoopbackRedirectUrl", () => {
+  it("rejects loopback URLs with fragments (not observable by HTTP servers)", () => {
+    expect(isLoopbackRedirectUrl(new URL("http://127.0.0.1:4242/callback#access_token=abc"))).toBe(false);
+    expect(isLoopbackRedirectUrl(new URL("http://[::1]:4242/callback#access_token=abc"))).toBe(false);
   });
 });

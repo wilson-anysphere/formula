@@ -62,7 +62,9 @@ export function isLoopbackRedirectUrl(url: URL): boolean {
     LOOPBACK_REDIRECT_HOSTS.has(url.hostname) &&
     url.port !== "" &&
     Number.isInteger(port) &&
-    port > 0
+    port > 0 &&
+    // Fragments are never sent to HTTP servers, so loopback redirect capture cannot observe them.
+    url.hash === ""
   );
 }
 

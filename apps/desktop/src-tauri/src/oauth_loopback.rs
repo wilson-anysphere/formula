@@ -29,6 +29,15 @@ pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirec
         ));
     }
 
+    // OAuth 2.0 requires redirect URIs to not contain URL fragments, and browsers never send
+    // fragments to loopback HTTP servers. Reject them early to avoid confusing, non-functional
+    // redirect URIs.
+    if parsed.fragment().is_some() {
+        return Err(format!(
+            "Invalid loopback OAuth redirect URI {raw:?}: must not include a URL fragment (the `#...` portion)"
+        ));
+    }
+
     let port = parsed
         .port()
         .ok_or_else(|| format!("Invalid loopback OAuth redirect URI {raw:?}: must include an explicit port"))?;
@@ -200,6 +209,13 @@ mod tests {
     fn rejects_port_zero() {
         let err = parse_loopback_redirect_uri("http://127.0.0.1:0/callback").unwrap_err();
         assert!(err.contains("must not be 0"));
+    }
+
+    #[test]
+    fn rejects_fragments() {
+        let err =
+            parse_loopback_redirect_uri("http://127.0.0.1:4242/callback#access_token=abc").unwrap_err();
+        assert!(err.to_ascii_lowercase().contains("fragment"));
     }
 
     #[test]
