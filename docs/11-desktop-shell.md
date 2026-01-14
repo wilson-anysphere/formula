@@ -147,7 +147,8 @@ The CI performance suite (`pnpm benchmark`) also reports this as a tracked bench
 
 - `desktop.memory.idle_rss_mb.p95` (unit: `mb`)
 
-CI uses `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` as an absolute budget for this metric (default is intentionally conservative;
+CI uses `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` as an absolute budget for this metric (alias: `FORMULA_DESKTOP_MEMORY_TARGET_MB`;
+default is intentionally conservative;
 tighten it as the desktop app’s idle footprint improves).
 
 The perf commands use a repo-local HOME (`target/perf-home`) by default:
