@@ -92,7 +92,7 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
   assert.match(css, /\.script-editor__fallback-editor\s*\{/);
   assert.match(
     css,
-    /\.script-editor__fallback-editor\s*\{[^}]*\bfont-family:\s*(?:var\(--font-mono\)|ui-monospace)[^}]*\}/s,
+    /\.script-editor__fallback-editor\s*\{[^}]*\b(?:font-family|font)\s*:[^;]*var\(--font-mono\)[^;]*;[^}]*\}/s,
   );
   assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*\bresize:\s*none\b[^}]*\}/s);
 
