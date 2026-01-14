@@ -556,6 +556,7 @@ export class CanvasGridRenderer {
   private selection: Selection | null = null;
   private selectionRanges: CellRange[] = [];
   private activeSelectionIndex = 0;
+  private readonly activeSelectionRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
   private fillHandleEnabled = true;
@@ -1596,6 +1597,99 @@ export class CanvasGridRenderer {
     if (rangesChanged || previousActiveIndex !== activeIndex || cellChanged) {
       this.markSelectionDirty();
     }
+  }
+
+  /**
+   * Update the currently active selection range while preserving all other ranges.
+   *
+   * This is intended for high-frequency interactions (e.g. pointer-driven selection drags)
+   * where repeatedly calling {@link setSelectionRanges} would allocate/clamp/expand every
+   * range on every pointer move.
+   *
+   * Returns `true` when the selection state actually changed.
+   */
+  setActiveSelectionRange(range: CellRange): boolean {
+    if (this.selectionRanges.length === 0) {
+      const prev = this.selectionRanges.length;
+      this.setSelectionRange(range);
+      return prev !== this.selectionRanges.length;
+    }
+
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+
+    let startRow = clampIndex(range.startRow, 0, rowCount);
+    let endRow = clampIndex(range.endRow, 0, rowCount);
+    let startCol = clampIndex(range.startCol, 0, colCount);
+    let endCol = clampIndex(range.endCol, 0, colCount);
+
+    if (startRow > endRow) [startRow, endRow] = [endRow, startRow];
+    if (startCol > endCol) [startCol, endCol] = [endCol, startCol];
+    if (startRow === endRow || startCol === endCol) return false;
+
+    const provider = this.provider;
+    if (provider.getMergedRangeAt || provider.getMergedRangesInRange) {
+      const scratch = this.activeSelectionRangeScratch;
+      scratch.startRow = startRow;
+      scratch.endRow = endRow;
+      scratch.startCol = startCol;
+      scratch.endCol = endCol;
+      const expanded = this.expandRangeToMergedCells(scratch);
+      startRow = expanded.startRow;
+      endRow = expanded.endRow;
+      startCol = expanded.startCol;
+      endCol = expanded.endCol;
+    }
+
+    const activeIndex = clampIndex(this.activeSelectionIndex, 0, this.selectionRanges.length - 1);
+    const activeRange = this.selectionRanges[activeIndex]!;
+
+    if (
+      activeRange.startRow === startRow &&
+      activeRange.endRow === endRow &&
+      activeRange.startCol === startCol &&
+      activeRange.endCol === endCol
+    ) {
+      return false;
+    }
+
+    activeRange.startRow = startRow;
+    activeRange.endRow = endRow;
+    activeRange.startCol = startCol;
+    activeRange.endCol = endCol;
+
+    // If we mutate the active range in-place, invalidate fill-handle memoization since it
+    // caches by range reference (not by coordinates).
+    this.fillHandleRectMemoRange = null;
+
+    // Preserve the existing active cell (Excel-style behavior: anchor cell remains active),
+    // but clamp it into the updated active range bounds.
+    let selection = this.selection;
+    if (selection) {
+      const nextRow = clamp(selection.row, startRow, endRow - 1);
+      const nextCol = clamp(selection.col, startCol, endCol - 1);
+      if (nextRow !== selection.row || nextCol !== selection.col) {
+        selection.row = nextRow;
+        selection.col = nextCol;
+      }
+    } else {
+      selection = { row: startRow, col: startCol };
+      this.selection = selection;
+    }
+
+    const resolvedActive = this.getMergedAnchorForCell(selection.row, selection.col);
+    if (resolvedActive && (resolvedActive.row !== selection.row || resolvedActive.col !== selection.col)) {
+      selection.row = resolvedActive.row;
+      selection.col = resolvedActive.col;
+    }
+
+    this.activeSelectionIndex = activeIndex;
+
+    // The active range changed, so selection overlays must repaint. We also repaint when the
+    // active cell was clamped or resolved into a merged anchor.
+    this.markSelectionDirty();
+
+    return true;
   }
 
   addSelectionRange(range: CellRange): void {

@@ -1283,28 +1283,12 @@ export class DesktopSharedGrid {
       return;
     }
 
-    const prevRange = renderer.getSelectionRange();
-    if (
-      prevRange &&
-      prevRange.startRow === startRow &&
-      prevRange.endRow === endRow &&
-      prevRange.startCol === startCol &&
-      prevRange.endCol === endCol
-    ) {
-      return;
-    }
-
     const range = this.selectionDragRangeScratch;
     range.startRow = startRow;
     range.endRow = endRow;
     range.startCol = startCol;
     range.endCol = endCol;
-
-    const ranges = renderer.getSelectionRanges();
-    const activeIndex = renderer.getActiveSelectionIndex();
-    const updatedRanges = ranges.length === 0 ? [range] : ranges;
-    updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
-    renderer.setSelectionRanges(updatedRanges, { activeIndex });
+    if (!renderer.setActiveSelectionRange(range)) return;
 
     const nextSelection = renderer.getSelection();
     const nextRange = renderer.getSelectionRange();

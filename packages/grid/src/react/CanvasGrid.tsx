@@ -1246,23 +1246,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       range.endRow = endRow;
       range.startCol = startCol;
       range.endCol = endCol;
-
-      const prevRange = renderer.getSelectionRange();
-      if (
-        prevRange &&
-        prevRange.startRow === startRow &&
-        prevRange.endRow === endRow &&
-        prevRange.startCol === startCol &&
-        prevRange.endCol === endCol
-      ) {
-        return;
-      }
-
-      const ranges = renderer.getSelectionRanges();
-      const activeIndex = renderer.getActiveSelectionIndex();
-      const updatedRanges = ranges.length === 0 ? [range] : ranges;
-      updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
-      renderer.setSelectionRanges(updatedRanges, { activeIndex });
+      if (!renderer.setActiveSelectionRange(range)) return;
 
       const nextSelection = renderer.getSelection();
       const nextRange = renderer.getSelectionRange();
