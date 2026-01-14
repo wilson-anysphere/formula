@@ -638,6 +638,40 @@ fn external_3d_sheet_span_allows_reversed_endpoints() {
 }
 
 #[test]
+fn sheet_and_sheets_over_external_3d_span_use_provider_tab_order() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet3:Sheet1!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SHEETS([Book.xlsx]Sheet3:Sheet1!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    // SHEET returns the first sheet in tab order for a multi-area reference.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+}
+
+#[test]
 fn external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
     let provider = Arc::new(TestExternalProvider::default());
 
