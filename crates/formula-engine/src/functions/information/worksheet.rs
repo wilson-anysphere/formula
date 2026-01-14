@@ -257,12 +257,12 @@ fn abs_a1(addr: CellAddr) -> String {
     format!("${col}${row}")
 }
 
-fn cell_number_format(
-    ctx: &dyn FunctionContext,
+fn cell_number_format<'a>(
+    ctx: &'a dyn FunctionContext,
     sheet_id: &SheetId,
     addr: CellAddr,
-) -> Option<String> {
-    ctx.effective_cell_style(sheet_id, addr).number_format
+) -> Option<&'a str> {
+    ctx.get_cell_number_format(sheet_id, addr)
 }
 
 fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {
@@ -404,7 +404,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 return Value::Error(ErrorKind::Ref);
             }
             let fmt = cell_number_format(ctx, &cell_ref.sheet_id, addr);
-            Value::Text(cell_format_code(fmt.as_deref()))
+            Value::Text(cell_format_code(fmt))
         }
         CellInfoType::Color => {
             let cell_ref = record_explicit_cell(ctx);
@@ -414,7 +414,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
-            let info = formula_format::cell_format_info(format_code.as_deref(), &options);
+            let info = formula_format::cell_format_info(format_code, &options);
             Value::Number(info.color as f64)
         }
         CellInfoType::Parentheses => {
@@ -425,7 +425,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
-            let info = formula_format::cell_format_info(format_code.as_deref(), &options);
+            let info = formula_format::cell_format_info(format_code, &options);
             Value::Number(info.parentheses as f64)
         }
         CellInfoType::Width => {
