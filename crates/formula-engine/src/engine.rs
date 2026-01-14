@@ -18346,6 +18346,87 @@ mod tests {
     }
 
     #[test]
+    fn indirect_constant_path_qualified_external_refs_are_indexed_for_invalidation() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Path-qualified external workbook reference:
+                // `'C:\path\[Book.xlsx]Sheet1'!B2` → `sheet = "[C:\path\Book.xlsx]Sheet1"`.
+                r#"=INDIRECT("'C:\path\[Book.xlsx]Sheet1'!B2")"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from(r"[C:\path\Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from(r"C:\path\Book.xlsx")])
+        );
+        assert!(
+            engine
+                .external_sheet_dependents
+                .get(r"[C:\path\Book.xlsx]Sheet1")
+                .is_some_and(|deps| deps.contains(&key)),
+            "reverse index should include the formula cell"
+        );
+        assert!(
+            engine
+                .external_workbook_dependents
+                .get(r"C:\path\Book.xlsx")
+                .is_some_and(|deps| deps.contains(&key)),
+            "workbook reverse index should include the formula cell"
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_r1c1_flag_is_literal() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // In R1C1 mode, `R2C2` is an absolute ref to `B2`.
+                r#"=INDIRECT("[Book.xlsx]Sheet1!R2C2",FALSE)"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
     fn rename_sheet_rejects_nfkc_case_insensitive_duplicates() {
         let mut workbook = Workbook::default();
         let sheet_a = workbook.ensure_sheet("Å");
