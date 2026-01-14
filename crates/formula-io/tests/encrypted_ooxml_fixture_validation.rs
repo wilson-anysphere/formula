@@ -63,10 +63,9 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
     ] {
         let path = fixture_path(name);
         let (major, minor, _flags) = read_encryption_info_header(&path);
-        assert_eq!(
-            (major, minor),
-            (3, 2),
-            "Standard-encrypted OOXML should have EncryptionInfo version 3.2 ({name})"
+        assert!(
+            minor == 2 && matches!(major, 2 | 3 | 4),
+            "Standard-encrypted OOXML should have EncryptionInfo version *.2 with major=2/3/4 ({name}); got {major}.{minor}"
         );
     }
 }

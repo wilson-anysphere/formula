@@ -30,7 +30,13 @@ pub fn decrypt_ooxml_encrypted_package(
             encrypted_package_stream,
             password,
         ),
-        (3, 2) => decrypt_standard(encryption_info_stream, encrypted_package_stream, password),
+        // MS-OFFCRYPTO identifies Standard (CryptoAPI) encryption via `versionMinor == 2`, but
+        // real-world files vary `versionMajor` across 2/3/4 (commonly 3.2 or 4.2).
+        (2 | 3 | 4, 2) => decrypt_standard(
+            encryption_info_stream,
+            encrypted_package_stream,
+            password,
+        ),
         _ => Err(OffCryptoError::UnsupportedEncryptionVersion { major, minor }),
     }
 }

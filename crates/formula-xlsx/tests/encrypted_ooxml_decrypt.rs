@@ -48,7 +48,10 @@ fn decrypt_fixture(encrypted_name: &str) -> Vec<u8> {
     let minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
     match encrypted_name {
         name if name.starts_with("agile") => assert_eq!((major, minor), (4, 4)),
-        name if name.starts_with("standard") => assert_eq!((major, minor), (3, 2)),
+        name if name.starts_with("standard") => assert!(
+            minor == 2 && matches!(major, 2 | 3 | 4),
+            "Standard-encrypted OOXML should have EncryptionInfo version *.2 with major=2/3/4"
+        ),
         _ => {}
     }
 

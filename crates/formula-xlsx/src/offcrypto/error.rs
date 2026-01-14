@@ -13,7 +13,7 @@ pub type Result<T> = std::result::Result<T, OffCryptoError>;
 pub enum OffCryptoError {
     // --- High-level capability / compatibility -------------------------------------------------
     #[error(
-        "unsupported OOXML encryption version {major}.{minor}; supported versions are Agile Encryption (4.4) and Standard Encryption (3.2)"
+        "unsupported OOXML encryption version {major}.{minor}; supported versions are Agile Encryption (4.4) and Standard Encryption (*.2 with major=2/3/4)"
     )]
     UnsupportedEncryptionVersion { major: u16, minor: u16 },
 

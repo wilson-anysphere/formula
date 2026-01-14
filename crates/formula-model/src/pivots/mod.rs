@@ -111,7 +111,6 @@ pub enum SortOrder {
     Descending,
     Manual,
 }
-
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
@@ -302,16 +301,6 @@ impl From<bool> for PivotValue {
     }
 }
 
-/// Configuration for a pivot table filter field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed values. `None` means allow all.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotField {
@@ -400,47 +389,6 @@ pub struct ValueField {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
 }
-
-/// Canonical pivot table configuration (field layout + display options).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    #[serde(default)]
-    pub row_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub column_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub value_fields: Vec<ValueField>,
-    #[serde(default)]
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    #[serde(default)]
-    pub layout: Layout,
-    #[serde(default)]
-    pub subtotals: SubtotalPosition,
-    #[serde(default)]
-    pub grand_totals: GrandTotals,
-}
-
-impl Default for PivotConfig {
-    fn default() -> Self {
-        Self {
-            row_fields: Vec::new(),
-            column_fields: Vec::new(),
-            value_fields: Vec::new(),
-            filter_fields: Vec::new(),
-            calculated_fields: Vec::new(),
-            calculated_items: Vec::new(),
-            layout: Layout::default(),
-            subtotals: SubtotalPosition::default(),
-            grand_totals: GrandTotals::default(),
-        }
-    }
-}
-
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())

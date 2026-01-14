@@ -124,7 +124,7 @@ fn decrypt_ooxml_encrypted_package<R: Read + Seek + std::io::Write>(
         EncryptionInfo::Unsupported { version } => Err(Box::new(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "unsupported EncryptionInfo version {}.{} (only Standard 3.2 and Agile 4.4 are supported)",
+                "unsupported EncryptionInfo version {}.{} (supported: Standard *.2 with major=2/3/4, and Agile 4.4)",
                 version.major, version.minor
             ),
         ))),
