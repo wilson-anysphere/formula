@@ -824,9 +824,46 @@ mod tests {
                     column: "Amount".to_string(),
                 },
             ),
+            // Quoted table name.
+            (
+                "'Dim Product'[Category]",
+                PivotFieldRef::DataModelColumn {
+                    table: "Dim Product".to_string(),
+                    column: "Category".to_string(),
+                },
+            ),
+            // Quoted table name with escaped quotes.
+            (
+                "'O''Reilly'[Name]",
+                PivotFieldRef::DataModelColumn {
+                    table: "O'Reilly".to_string(),
+                    column: "Name".to_string(),
+                },
+            ),
+            // Escaped `]` inside column identifiers.
+            (
+                "T[A]]B]",
+                PivotFieldRef::DataModelColumn {
+                    table: "T".to_string(),
+                    column: "A]B".to_string(),
+                },
+            ),
+            // Some pivot caches store raw (unescaped) `]` in column captions.
+            (
+                "'Sales Table'[A]B]",
+                PivotFieldRef::DataModelColumn {
+                    table: "Sales Table".to_string(),
+                    column: "A]B".to_string(),
+                },
+            ),
             (
                 "[Total Sales]",
                 PivotFieldRef::DataModelMeasure("Total Sales".to_string()),
+            ),
+            // Escaped `]` inside measure identifiers.
+            (
+                "[A]]B]",
+                PivotFieldRef::DataModelMeasure("A]B".to_string()),
             ),
         ] {
             assert_eq!(PivotFieldRef::from_unstructured(raw), expected);
