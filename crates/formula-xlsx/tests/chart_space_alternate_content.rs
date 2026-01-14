@@ -318,6 +318,124 @@ fn parses_legend_wrapped_in_mc_alternate_content() {
 }
 
 #[test]
+fn parses_style_id_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:AlternateContent>
+    <mc:Choice>
+      <c:spPr />
+    </mc:Choice>
+    <mc:Fallback>
+      <c:style val="42"/>
+    </mc:Fallback>
+  </mc:AlternateContent>
+  <c:chart>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert_eq!(model.style_id, Some(42));
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
+}
+
+#[test]
+fn parses_rounded_corners_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:AlternateContent>
+    <mc:Choice>
+      <c:spPr />
+    </mc:Choice>
+    <mc:Fallback>
+      <c:roundedCorners val="1"/>
+    </mc:Fallback>
+  </mc:AlternateContent>
+  <c:chart>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert_eq!(model.rounded_corners, Some(true));
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
+}
+
+#[test]
+fn parses_external_data_auto_update_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:AlternateContent>
+    <mc:Choice>
+      <c:spPr />
+    </mc:Choice>
+    <mc:Fallback>
+      <c:externalData id="rId1">
+        <mc:AlternateContent>
+          <mc:Choice>
+            <c:spPr />
+          </mc:Choice>
+          <mc:Fallback>
+            <c:autoUpdate val="0"/>
+          </mc:Fallback>
+        </mc:AlternateContent>
+      </c:externalData>
+    </mc:Fallback>
+  </mc:AlternateContent>
+  <c:chart>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert_eq!(model.external_data_rel_id.as_deref(), Some("rId1"));
+    assert_eq!(model.external_data_auto_update, Some(false));
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
+}
+
+#[test]
 fn chooses_fallback_when_choice_contains_unsupported_chart_type() {
     // If `mc:Choice` contains a chart type we don't yet support, but `mc:Fallback`
     // contains a supported chart, we should still parse the fallback chart.

@@ -49,8 +49,20 @@ pub fn parse_chart_space(
     let mut diagnostics = Vec::new();
 
     let chart_space = doc.root_element();
-    let style_id = child_attr(chart_space, "style", "val").and_then(|v| v.parse::<u32>().ok());
-    let rounded_corners = child_attr(chart_space, "roundedCorners", "val").map(parse_ooxml_bool);
+    let style_id = chart_space
+        .children()
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_style_node))
+        .find(|n| n.tag_name().name() == "style")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
+    let rounded_corners = chart_space
+        .children()
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_rounded_corners_node))
+        .find(|n| n.tag_name().name() == "roundedCorners")
+        .and_then(|n| n.attribute("val"))
+        .map(parse_ooxml_bool);
     let chart_space_ext_lst_xml = chart_space
         .children()
         .filter(|n| n.is_element())
@@ -60,7 +72,9 @@ pub fn parse_chart_space(
         .filter(|s| !s.is_empty());
     let chart_area_style = chart_space
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_sppr_node))
+        .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
     let external_data_node = chart_space
@@ -78,7 +92,9 @@ pub fn parse_chart_space(
     let external_data_auto_update = external_data_node
         .and_then(|n| {
             n.children()
-                .find(|c| c.is_element() && c.tag_name().name() == "autoUpdate")
+                .filter(|c| c.is_element())
+                .flat_map(|c| flatten_alternate_content(c, is_auto_update_node))
+                .find(|c| c.tag_name().name() == "autoUpdate")
         })
         // `<c:autoUpdate>` is a CT_Boolean where the `@val` attribute is optional (default=true).
         .map(|n| n.attribute("val").map_or(true, parse_ooxml_bool));
@@ -637,8 +653,20 @@ fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "layout"
 }
 
+fn is_style_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "style"
+}
+
+fn is_rounded_corners_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "roundedCorners"
+}
+
 fn is_external_data_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "externalData"
+}
+
+fn is_auto_update_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "autoUpdate"
 }
 
 fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
