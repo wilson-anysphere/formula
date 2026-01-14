@@ -180,6 +180,43 @@ describe("sheetStoreDocumentSync", () => {
     handle.dispose();
   });
 
+  test("auto-activates the next visible sheet when the active sheet is deleted (Excel-like)", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2", "Sheet3"];
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+      { id: "Sheet3", name: "Sheet3", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "Sheet2";
+    let activated: string | null = null;
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activated = id;
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+
+    // Remove the active sheet (Sheet2).
+    doc.emit("change");
+    doc.sheetIds = ["Sheet1", "Sheet3"];
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet3"]);
+    expect(activated).toBe("Sheet3");
+
+    handle.dispose();
+  });
+
   test("reorders the store to match doc sheet order when restoring via applyState", async () => {
     const doc = new MockDoc();
     doc.sheetIds = ["Sheet1", "Sheet2"];

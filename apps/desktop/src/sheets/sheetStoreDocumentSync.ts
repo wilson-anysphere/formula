@@ -1,4 +1,5 @@
 import type { WorkbookSheetStore } from "./workbookSheetStore";
+import { pickAdjacentVisibleSheetId } from "./sheetNavigation";
 
 type DocumentControllerLike = {
   getSheetIds(): string[];
@@ -249,9 +250,18 @@ export function startSheetStoreDocumentSync(
 
     // If the active sheet is no longer valid, fall back to the first visible sheet.
     if (activeSheetId && !docSet.has(activeSheetId)) {
-      const firstVisible = store.listVisible()[0] ?? store.listAll()[0] ?? null;
-      if (firstVisible && firstVisible.id !== activeSheetId) {
-        onActivateSheet(firstVisible.id);
+      // Mirror Excel: when the active sheet is deleted, activate the next visible sheet to the right if
+      // possible; otherwise fall back to the previous visible sheet.
+      //
+      // Use the pre-sync sheet ordering snapshot (`existing`) so we can pick the correct adjacent sheet
+      // even after we've removed the sheet metadata from the store.
+      const preferred = pickAdjacentVisibleSheetId(existing, activeSheetId);
+      const preferredMeta = preferred ? store.getById(preferred) : null;
+      const preferredIsValid = Boolean(preferred && preferredMeta && preferredMeta.visibility === "visible");
+
+      const fallback = preferredIsValid ? preferred : (store.listVisible()[0]?.id ?? store.listAll()[0]?.id ?? null);
+      if (fallback && fallback !== activeSheetId) {
+        onActivateSheet(fallback);
       }
     }
   };
