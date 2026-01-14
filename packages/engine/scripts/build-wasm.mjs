@@ -442,7 +442,7 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     "--release",
     // Binaryen's wasm-opt validator can lag behind newly-emitted wasm features
     // (e.g. bulk memory ops, non-trapping float-to-int). Skip wasm-opt so engine
-    // builds remain stable across environments.
+    // builds remain stable across environments and e2e workflows.
     "--no-opt",
     "--out-dir",
     buildOutDir,
@@ -451,10 +451,6 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     // Avoid generating a nested package.json in the output directory; consumers
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack",
-    // wasm-opt currently fails validating bulk memory / saturating float-to-int
-    // instructions emitted by newer Rust toolchains. Skip wasm-opt to keep
-    // `pnpm -w build:wasm` and e2e workflows functional.
-    "--no-opt",
     ...cargoExtraArgs,
   ];
 
