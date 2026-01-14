@@ -12,7 +12,6 @@ use crate::util::{
     checked_vec_len, ct_eq, decode_utf16le_nul_terminated, parse_encrypted_package_original_size,
     read_u32_le, EncryptionInfoHeader,
 };
-use zeroize::Zeroizing;
 // CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
 #[allow(dead_code)]
 const CALG_RC4: u32 = 0x0000_6801;
@@ -860,13 +859,13 @@ fn decrypt_standard_with_scheme(
     // but some producers appear to use AES-CBC for the verifier as well. To maximize
     // compatibility, we try the spec ECB verifier first, then fall back to scheme-specific CBC
     // verification for the non-ECB variants.
-    let mut verifier_ok = match verify_password_standard_with_key(
+    let mut verifier_ok = match verify_password_standard_with_key_and_mode(
         &info.header,
         &info.verifier,
         hash_alg,
         key0.as_slice(),
     ) {
-        Ok(()) => true,
+        Ok(_) => true,
         Err(OfficeCryptoError::InvalidPassword) => false,
         Err(other) => return Err(other),
     };
