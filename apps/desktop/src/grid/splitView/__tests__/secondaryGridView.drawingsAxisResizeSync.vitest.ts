@@ -180,5 +180,92 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     gridView.destroy();
     container.remove();
   });
-});
 
+  it("re-renders drawings when row heights change", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    const calls: CtxCall[] = [];
+    const drawingsCtx = createRecordingCanvasContext(calls);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement) {
+        if (this.classList.contains("grid-canvas--drawings")) return drawingsCtx;
+        return createMockCanvasContext();
+      },
+    });
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+
+    // Anchor at A2 so its y-position depends on the height of row 1 (doc row 0).
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "missing" },
+        zOrder: 0,
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 1, col: 0 }, offset: { xEmu: 0, yEmu: 0 } }, // A2
+          size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+        },
+      },
+    ];
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => objects,
+      images,
+    });
+
+    calls.splice(0, calls.length);
+    await (gridView as any).renderDrawings();
+
+    const firstStroke = calls.find((call) => call.method === "strokeRect");
+    expect(firstStroke).toBeTruthy();
+    const y1 = Number(firstStroke!.args[1]);
+    expect(Number.isFinite(y1)).toBe(true);
+
+    const renderer = gridView.grid.renderer;
+    const index = 1; // grid row 1 => doc row 0 (row 1)
+    const prevSize = renderer.getRowHeight(index);
+    const nextSize = prevSize + 30;
+    renderer.setRowHeight(index, nextSize);
+
+    calls.splice(0, calls.length);
+    const renderSpy = vi.spyOn(gridView as any, "renderDrawings");
+    renderSpy.mockClear();
+
+    (gridView as any).onAxisSizeChange({
+      kind: "row",
+      index,
+      size: nextSize,
+      previousSize: prevSize,
+      defaultSize: renderer.scroll.rows.defaultSize,
+      zoom: renderer.getZoom(),
+      source: "resize",
+    });
+
+    expect(renderSpy).toHaveBeenCalled();
+    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+
+    const secondStroke = calls.find((call) => call.method === "strokeRect");
+    expect(secondStroke).toBeTruthy();
+    const y2 = Number(secondStroke!.args[1]);
+    expect(y2).toBeCloseTo(y1 + (nextSize - prevSize), 6);
+
+    gridView.destroy();
+    container.remove();
+  });
+});

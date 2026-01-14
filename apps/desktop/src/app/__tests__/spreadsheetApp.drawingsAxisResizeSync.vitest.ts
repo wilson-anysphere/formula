@@ -215,4 +215,86 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("re-renders drawings when shared-grid row heights change", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
+      expect(drawingCanvas).toBeTruthy();
+
+      const objects: DrawingObject[] = [
+        {
+          id: 1,
+          kind: { type: "image", imageId: "missing" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 1, col: 0 }, offset: { xEmu: 0, yEmu: 0 } }, // A2
+            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+          },
+          zOrder: 0,
+        },
+      ];
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => objects;
+
+      const calls = ctxCallsByCanvas.get(drawingCanvas);
+      expect(calls).toBeTruthy();
+      calls!.splice(0, calls!.length);
+
+      const renderSpy = vi.spyOn(app as any, "renderDrawings");
+
+      // Initial render.
+      (app as any).renderDrawings();
+      const firstStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(firstStroke).toBeTruthy();
+      const y1 = Number(firstStroke!.args[1]);
+      expect(Number.isFinite(y1)).toBe(true);
+
+      // Resize row 1 (doc row 0 => grid row 1).
+      const sharedGrid = (app as any).sharedGrid;
+      const renderer = sharedGrid.renderer;
+      const index = 1;
+      const prevSize = renderer.getRowHeight(index);
+      const nextSize = prevSize + 30;
+      renderer.setRowHeight(index, nextSize);
+
+      // Clear previous calls and spy counts.
+      calls!.splice(0, calls!.length);
+      renderSpy.mockClear();
+
+      (app as any).onSharedGridAxisSizeChange({
+        kind: "row",
+        index,
+        size: nextSize,
+        previousSize: prevSize,
+        defaultSize: renderer.scroll.rows.defaultSize,
+        zoom: renderer.getZoom(),
+        source: "resize",
+      });
+
+      expect(renderSpy).toHaveBeenCalled();
+      const secondStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(secondStroke).toBeTruthy();
+      const y2 = Number(secondStroke!.args[1]);
+      expect(y2).toBeCloseTo(y1 + (nextSize - prevSize), 6);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
