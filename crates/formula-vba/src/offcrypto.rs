@@ -1174,4 +1174,32 @@ mod tests {
             .expect("should derive sha1 rc4 block key");
         assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
     }
+
+    #[test]
+    fn standard_cryptoapi_rc4_key_derivation_sha1_vectors() {
+        // Deterministic vectors to lock in MS-OFFCRYPTO Standard/CryptoAPI RC4 block key derivation:
+        // - password UTF-16LE (not UTF-8)
+        // - H0 = SHA1(salt || password)
+        // - spin loop: Hi = SHA1(LE32(i) || H(i-1)) for i in 0..50000
+        // - per-block key: key(b) = SHA1(H || LE32(b))[0..keySizeBytes]
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+
+        let expected = [
+            (0u32, "6ad7dedf2da3514b1d85eabee069d47d"),
+            (1u32, "2ed4e8825cd48aa4a47994cda7415b4a"),
+            (2u32, "9ce57d0699be3938951f47fa949361db"),
+            (3u32, "e65b2643eaba3815a37a61159f137840"),
+        ];
+
+        for (block, expected_hex) in expected {
+            let key = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, block, 128)
+                .expect("should derive sha1 rc4 block key");
+            assert_eq!(hex_lower(&key), expected_hex, "block={block}");
+        }
+
+        let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
+            .expect("should derive sha1 rc4 block key");
+        assert_eq!(hex_lower(&key_40), "6ad7dedf2d");
+    }
 }

@@ -255,6 +255,66 @@ mod tests {
     }
 
     #[test]
+    fn standard_key_derivation_rc4_cryptoapi_sha1_vectors() {
+        // Deterministic MS-OFFCRYPTO Standard/CryptoAPI RC4 key derivation vectors.
+        //
+        // These lock in:
+        // - password UTF-16LE encoding
+        // - initial hash input order: salt || password_utf16le
+        // - spin loop: H = SHA1(LE32(i) || H), i in 0..50000
+        // - per-block key: key(b) = SHA1(H || LE32(b))[0..keySizeBytes]
+        //
+        // Using multiple non-zero block indices catches mistakes in block-index encoding/order.
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        let deriver = StandardKeyDeriver::new(HashAlgorithm::Sha1, 128, &salt, password);
+        let expected = [
+            (
+                0u32,
+                [
+                    0x6a, 0xd7, 0xde, 0xdf, 0x2d, 0xa3, 0x51, 0x4b, 0x1d, 0x85, 0xea, 0xbe,
+                    0xe0, 0x69, 0xd4, 0x7d,
+                ],
+            ),
+            (
+                1u32,
+                [
+                    0x2e, 0xd4, 0xe8, 0x82, 0x5c, 0xd4, 0x8a, 0xa4, 0xa4, 0x79, 0x94, 0xcd,
+                    0xa7, 0x41, 0x5b, 0x4a,
+                ],
+            ),
+            (
+                2u32,
+                [
+                    0x9c, 0xe5, 0x7d, 0x06, 0x99, 0xbe, 0x39, 0x38, 0x95, 0x1f, 0x47, 0xfa,
+                    0x94, 0x93, 0x61, 0xdb,
+                ],
+            ),
+            (
+                3u32,
+                [
+                    0xe6, 0x5b, 0x26, 0x43, 0xea, 0xba, 0x38, 0x15, 0xa3, 0x7a, 0x61, 0x15,
+                    0x9f, 0x13, 0x78, 0x40,
+                ],
+            ),
+        ];
+
+        for (block, expected_key) in expected {
+            let key = deriver.derive_key_for_block(block).expect("derive key");
+            assert_eq!(key.as_slice(), expected_key.as_slice(), "block={block}");
+        }
+
+        // 40-bit key size => 5-byte key truncation.
+        let deriver_40 = StandardKeyDeriver::new(HashAlgorithm::Sha1, 40, &salt, password);
+        let key_40 = deriver_40.derive_key_for_block(0).expect("derive 40-bit key");
+        assert_eq!(key_40.as_slice(), &[0x6a, 0xd7, 0xde, 0xdf, 0x2d]);
+    }
+
+    #[test]
     fn oversized_encrypted_package_size_errors_without_large_allocation() {
         let total_size: u64 = if usize::BITS < 64 {
             (usize::MAX as u64) + 1
