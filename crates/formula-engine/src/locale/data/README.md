@@ -76,6 +76,14 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
   -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
 ```
 
+Example for Spanish (`es-ES`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId es-ES `
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+```
+
 Notes / caveats:
 
 - The extracted spellings reflect the **active Excel UI language** (Office language packs + Excel

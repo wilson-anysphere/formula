@@ -101,6 +101,14 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
 node scripts/generate-locale-function-tsv.js
 ```
 
+Example for Spanish (`es-ES`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId es-ES `
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+```
+
 Notes / caveats:
 
 - The output reflects the **active Excel UI language**. Install the corresponding Office language
