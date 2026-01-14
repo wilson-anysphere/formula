@@ -54,6 +54,9 @@ To update runner pins, open a PR that bumps the runner labels in
 `.github/workflows/release.yml` **after** validating that the release workflow succeeds on the new
 runner images (recommended: run the workflow via `workflow_dispatch` with `upload=false`).
 
+CI enforces this policy via `scripts/ci/check-gha-runner-pins.sh`, so PRs that reintroduce
+`macos-latest` / `windows-latest` / `ubuntu-latest` into the release workflow will fail.
+
 ## Testing the release pipeline (workflow_dispatch)
 
 To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
