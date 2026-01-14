@@ -192,11 +192,6 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
 
 
 def _find_default_corpus_summary(repo_root: Path) -> Path | None:
-    # Prefer the public corpus summary, which is what PR CI runs.
-    preferred = repo_root / "tools" / "corpus" / "out" / "public" / "summary.json"
-    if preferred.is_file():
-        return preferred
-
     out_root = repo_root / "tools" / "corpus" / "out"
     if not out_root.is_dir():
         return None
@@ -204,10 +199,8 @@ def _find_default_corpus_summary(repo_root: Path) -> Path | None:
     candidates = [p for p in out_root.glob("**/summary.json") if p.is_file()]
     if not candidates:
         return None
-    if len(candidates) == 1:
-        return candidates[0]
-
-    # Multiple corpora (public/private). Pick the newest output so local runs "just work".
+    # Multiple corpora (public/private/strict variants). Pick the newest output so local runs
+    # "just work" even when both public + private corpora are present.
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 
@@ -245,8 +238,8 @@ def main() -> int:
         "--corpus-summary",
         default="",
         help=(
-            "Path to corpus summary.json. Defaults to tools/corpus/out/public/summary.json if "
-            "present, else the newest tools/corpus/out/**/summary.json."
+            "Path to corpus summary.json. If omitted, selects the newest "
+            "tools/corpus/out/**/summary.json (public/private/strict variants)."
         ),
     )
     parser.add_argument(

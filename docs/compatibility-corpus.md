@@ -405,7 +405,7 @@ python tools/compat_scorecard.py --out-md compat_scorecard.md
 
 By default, `tools/compat_scorecard.py` looks for:
 
-- `tools/corpus/out/**/summary.json` (prefers `tools/corpus/out/public/summary.json` when present)
+- the newest `tools/corpus/out/**/summary.json` (public/private/strict variants)
 - `tests/compatibility/excel-oracle/reports/mismatch-report.json`
 
 If one input is missing, it exits non-zero and prints which file is missing (use
