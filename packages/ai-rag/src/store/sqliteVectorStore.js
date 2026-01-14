@@ -686,13 +686,14 @@ export class SqliteVectorStore {
       "token_count",
       "text",
     ];
+    const hasAnyStructuredColumn = required.some((c) => cols.has(c));
     const missingRequiredColumn = required.some((c) => !cols.has(c));
     if (Number.isFinite(current) && current >= SCHEMA_VERSION && !missingRequiredColumn) return;
 
     this._db.run("BEGIN;");
     try {
       // v1 -> v2: add structured metadata columns and shrink metadata_json.
-      this._migrateVectorsToV2({ preferExistingColumns: Number.isFinite(current) && current >= SCHEMA_VERSION });
+      this._migrateVectorsToV2({ preferExistingColumns: hasAnyStructuredColumn });
 
       this._setMetaValue("schema_version", String(SCHEMA_VERSION));
       this._db.run("COMMIT;");
