@@ -43,7 +43,6 @@ end_group() {
 }
 
 die() {
-  end_group
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
     # GitHub Actions log annotation.
     printf '::error::validate-macos-bundle: %s\n' "$*" >&2
