@@ -463,7 +463,7 @@ Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to 
 in-app updater downloads whatever assets `latest.json.platforms[*].url` points at (not “an installer
 chosen from the Release page”):
 
-- macOS: updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
+- macOS: `*.app.tar.gz` updater payload (not the `.dmg`)
 - Windows: `.msi` installer referenced in `latest.json` (CI expects the manifest to reference the MSI; NSIS `.exe` is shipped for manual install/downgrade)
 - Linux: `*.AppImage` updater payload (not `.deb`/`.rpm`)
 
