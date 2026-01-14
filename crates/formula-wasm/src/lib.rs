@@ -4583,15 +4583,13 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setCellStyleId")]
     pub fn set_cell_style_id(
         &mut self,
+        sheet: String,
         address: String,
         style_id: u32,
-        sheet: Option<String>,
     ) -> Result<(), JsValue> {
-        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = sheet.trim();
         let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
-        self.inner
-            .set_cell_style_id_internal(sheet, &address, style_id)
+        self.inner.set_cell_style_id_internal(sheet, &address, style_id)
     }
 
     #[wasm_bindgen(js_name = "setSheetOrigin")]

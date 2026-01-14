@@ -1369,7 +1369,8 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
         .unwrap();
-    wb.set_cell_style_id("A1".to_string(), 42, None).unwrap();
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), 42)
+        .unwrap();
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
@@ -1414,7 +1415,7 @@ fn null_inputs_preserve_cell_style_metadata_in_engine() {
         ..Default::default()
     };
     let style_id = wb.intern_style(to_js_value(&style)).unwrap();
-    wb.set_cell_style_id("A1".to_string(), style_id, None)
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_id)
         .unwrap();
 
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
@@ -2590,7 +2591,7 @@ fn cell_format_reflects_intern_style_and_set_cell_style_id() {
     let style_id_snake = wb.intern_style(fmt_snake.into()).unwrap();
     assert_eq!(style_id_camel, style_id_snake);
 
-    wb.set_cell_style_id("A1".to_string(), style_id_camel, None)
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_id_camel)
         .unwrap();
     wb.recalculate(None).unwrap();
 
