@@ -33,24 +33,43 @@ fn parses_title_and_legend_shape_properties() {
               <c:barChart/>
               <c:catAx>
                 <c:axId val="123"/>
-                <c:title>
-                  <c:tx><c:v>X Axis</c:v></c:tx>
-                  <mc:AlternateContent>
-                    <mc:Choice Requires="x16">
+                <mc:AlternateContent>
+                  <mc:Choice Requires="x16">
+                    <c:title>
+                      <mc:AlternateContent>
+                        <mc:Choice Requires="x16">
+                          <c:tx><c:v>X Axis</c:v></c:tx>
+                        </mc:Choice>
+                        <mc:Fallback>
+                          <c:tx><c:v>Fallback Axis</c:v></c:tx>
+                        </mc:Fallback>
+                      </mc:AlternateContent>
+                      <mc:AlternateContent>
+                        <mc:Choice Requires="x16">
+                          <c:spPr>
+                            <a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill>
+                            <a:ln w="25400">
+                              <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
+                            </a:ln>
+                          </c:spPr>
+                        </mc:Choice>
+                        <mc:Fallback>
+                          <c:spPr>
+                            <a:solidFill><a:srgbClr val="FF00FF"/></a:solidFill>
+                          </c:spPr>
+                        </mc:Fallback>
+                      </mc:AlternateContent>
+                    </c:title>
+                  </mc:Choice>
+                  <mc:Fallback>
+                    <c:title>
+                      <c:tx><c:v>Wrong Axis</c:v></c:tx>
                       <c:spPr>
-                        <a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill>
-                        <a:ln w="25400">
-                          <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
-                        </a:ln>
+                        <a:solidFill><a:srgbClr val="00FF00"/></a:solidFill>
                       </c:spPr>
-                    </mc:Choice>
-                    <mc:Fallback>
-                      <c:spPr>
-                        <a:solidFill><a:srgbClr val="FF00FF"/></a:solidFill>
-                      </c:spPr>
-                    </mc:Fallback>
-                  </mc:AlternateContent>
-                </c:title>
+                    </c:title>
+                  </mc:Fallback>
+                </mc:AlternateContent>
               </c:catAx>
             </c:plotArea>
           </c:chart>

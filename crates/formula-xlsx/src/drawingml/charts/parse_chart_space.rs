@@ -941,7 +941,9 @@ fn parse_axis(
 
     let title = axis_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "title")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_title_node))
+        .find(|n| n.tag_name().name() == "title")
         .and_then(|title| parse_axis_title(title, diagnostics, id));
     let ext_lst_xml = axis_node
         .children()
