@@ -306,14 +306,7 @@ def main() -> int:
         # Leak scanning is XLSX-zip based and cannot parse XLSB. However, allow idempotent
         # no-op runs on already-promoted public fixtures without requiring `--confirm-sanitized`.
         # This mirrors the "already_promoted" fast path behavior for XLSX fixtures.
-        if (
-            not args.force
-            and not args.sanitize
-            and args.input.suffix.lower() == ".b64"
-            and args.diff_limit == 25
-            and not args.recalc
-            and not args.render_smoke
-        ):
+        if not args.force and args.input.suffix.lower() == ".b64" and args.diff_limit == 25 and not args.recalc and not args.render_smoke:
             try:
                 public_dir: Path = args.public_dir
                 candidate_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=input_ext)
@@ -343,6 +336,57 @@ def main() -> int:
                             )
                         )
                         return 0
+            except Exception:
+                pass
+
+        # Also allow no-op runs when the input is a local copy of an already-promoted fixture
+        # (same bytes + expectations entry), even if it isn't the canonical `tools/corpus/public/*.b64` path.
+        if not args.force and args.diff_limit == 25 and not args.recalc and not args.render_smoke:
+            try:
+                public_dir: Path = args.public_dir
+
+                if args.name:
+                    candidate_name = _coerce_display_name(args.name, default_ext=input_ext)
+                else:
+                    try:
+                        in_public_dir = args.input.resolve().is_relative_to(public_dir.resolve())
+                    except Exception:
+                        in_public_dir = False
+
+                    if in_public_dir:
+                        candidate_name = _coerce_display_name(wb_in.display_name, default_ext=input_ext)
+                    else:
+                        candidate_name = f"workbook-{sha256_hex(workbook_bytes)[:16]}{input_ext}"
+
+                fixture_path = public_dir / f"{candidate_name}.b64"
+                expectations_path = public_dir / "expectations.json"
+                if fixture_path.exists() and expectations_path.exists():
+                    existing_fixture_bytes = read_workbook_input(fixture_path).data
+                    if existing_fixture_bytes == workbook_bytes:
+                        expectations = load_json(expectations_path)
+                        exp = expectations.get(candidate_name) if isinstance(expectations, dict) else None
+                        if (
+                            isinstance(exp, dict)
+                            and exp.get("open_ok") is True
+                            and isinstance(exp.get("round_trip_ok"), bool)
+                            and isinstance(exp.get("diff_critical_count"), int)
+                        ):
+                            print(
+                                json.dumps(
+                                    {
+                                        "fixture": str(fixture_path),
+                                        "expectations": str(expectations_path),
+                                        "expectations_changed": False,
+                                        "fixture_changed": False,
+                                        "needs_force": {"fixture": False, "expectations": False},
+                                        "dry_run": args.dry_run,
+                                        "triage_report": None,
+                                        "skipped": "already_promoted",
+                                    },
+                                    indent=2,
+                                )
+                            )
+                            return 0
             except Exception:
                 pass
 

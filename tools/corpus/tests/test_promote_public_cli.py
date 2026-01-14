@@ -568,6 +568,60 @@ class PromotePublicCLITests(unittest.TestCase):
             finally:
                 promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
 
+    def test_main_skips_xlsb_copy_without_confirm_when_already_promoted(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            public_dir.mkdir(parents=True, exist_ok=True)
+
+            xlsb_bytes = b"dummy-xlsb-bytes"
+            name = f"workbook-{sha256_hex(xlsb_bytes)[:16]}.xlsb"
+            (public_dir / f"{name}.b64").write_bytes(base64.encodebytes(xlsb_bytes))
+            (public_dir / "expectations.json").write_text(
+                json.dumps(
+                    {name: {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0}},
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            input_path = tmp / "input.xlsb"
+            input_path.write_bytes(xlsb_bytes)
+
+            called = {"triage": 0}
+            original_run_public_triage = promote_mod._run_public_triage
+            try:
+                def _triage_should_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    called["triage"] += 1
+                    raise RuntimeError("triage should not run")
+
+                promote_mod._run_public_triage = _triage_should_not_run  # type: ignore[assignment]
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    with mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "promote_public.py",
+                            "--input",
+                            str(input_path),
+                            "--public-dir",
+                            str(public_dir),
+                            "--triage-out",
+                            str(triage_out),
+                        ],
+                    ):
+                        rc = promote_mod.main()
+                self.assertEqual(rc, 0)
+                self.assertEqual(called["triage"], 0)
+                self.assertIn("already_promoted", stdout.getvalue())
+            finally:
+                promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
+
     def test_main_rejects_name_with_mismatched_extension(self) -> None:
         with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
             tmp = Path(td)

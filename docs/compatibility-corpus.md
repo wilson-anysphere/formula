@@ -393,7 +393,7 @@ triage and refresh the expectations entry.
 require `--force`.
 
 For `.xlsb` inputs, `--sanitize` and leak scanning are not supported; provide an already-sanitized workbook and pass
-`--confirm-sanitized`.
+`--confirm-sanitized` (unless `promote_public` can take the `already_promoted` fast path).
 
 Filename safety: if you omit `--name` when promoting from outside `tools/corpus/public/`, the command uses a
 hash-based name (`workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`) instead of the local filename to avoid leaking
