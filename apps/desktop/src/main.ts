@@ -8748,44 +8748,11 @@ mountRibbon(ribbonReactRoot, {
 });
 
 function handleRibbonCommand(commandId: string): void {
-    const doc = app.getDocument();
     const executeBuiltinCommand = (builtinId: string, ...args: any[]) => {
       void commandRegistry.executeCommand(builtinId, ...args).catch((err) => {
         showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     };
-
-    // Merge commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
-    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
-    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
-    if (
-      commandId === "home.alignment.mergeCenter.mergeCenter" ||
-      commandId === "home.alignment.mergeCenter.mergeAcross" ||
-      commandId === "home.alignment.mergeCenter.mergeCells" ||
-      commandId === "home.alignment.mergeCenter.unmergeCells"
-    ) {
-      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
-        return;
-      }
-    }
-
-    // Sort/filter commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
-    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
-    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
-    if (commandId === "home.editing.sortFilter.customSort" || commandId === "data.sortFilter.sort.customSort") {
-      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
-        return;
-      }
-    }
-
-    // Custom number formats are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
-    // but keep this id explicitly referenced here so ribbon wiring coverage can validate that
-    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
-    if (commandId === "home.number.moreFormats.custom") {
-      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
-        return;
-      }
-    }
     if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
       return;
     }
