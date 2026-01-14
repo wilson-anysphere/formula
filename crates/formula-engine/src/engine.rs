@@ -641,6 +641,13 @@ impl Workbook {
             self.rebuild_sheet_tab_index_by_id();
             return false;
         };
+        // Guard against stale `sheet_tab_index_by_id` caches. In normal operation,
+        // `sheet_order` and `sheet_tab_index_by_id` are always kept in sync, but callers/tests may
+        // simulate an inconsistent state (e.g. a live sheet missing from `sheet_order`). In that
+        // case we should fail without mutating the remaining order.
+        if self.sheet_order.get(current) != Some(&sheet) {
+            return false;
+        }
         if current == new_index {
             // Even in a no-op reorder, keep the cache aligned with `sheet_order` in case it became
             // stale.
