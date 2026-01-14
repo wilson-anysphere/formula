@@ -321,7 +321,7 @@ bash scripts/validate-linux-appimage.sh
 bash scripts/validate-linux-rpm.sh
 
 # Windows
-pwsh ./scripts/validate-windows-bundles.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1
 # (Note: NSIS `.exe` payload validation uses 7-Zip / `7z.exe` when available.)
 ```
 
