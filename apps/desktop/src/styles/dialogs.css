@@ -18,6 +18,10 @@
   background: var(--dialog-bg);
   color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
 }
 
 .dialog * {
@@ -26,6 +30,11 @@
 
 .dialog::backdrop {
   background: var(--dialog-backdrop);
+}
+
+.dialog__title {
+  margin: 0 0 var(--space-4);
+  font-weight: 700;
 }
 
 .dialog__controls {

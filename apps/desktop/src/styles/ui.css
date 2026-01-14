@@ -994,22 +994,6 @@ a:visited {
   color: var(--text-secondary);
 }
 
-.dialog {
-  background: var(--dialog-bg);
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
-  padding: calc(var(--space-4) + var(--space-1));
-  transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease);
-}
-
-.dialog__title {
-  margin: 0 0 var(--space-4);
-  font-weight: 700;
-}
-
 /* --- AI inline edit ------------------------------------------------------- */
 
 .ai-inline-edit-overlay {
