@@ -298,7 +298,7 @@ export function SheetTabStrip({
 
   useEffect(() => {
     return () => {
-      tabContextMenu.close();
+      tabContextMenu.destroy();
     };
   }, [tabContextMenu]);
 

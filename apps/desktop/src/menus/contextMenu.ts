@@ -55,6 +55,7 @@ export class ContextMenu {
   private submenu: HTMLDivElement | null = null;
   private submenuParent: HTMLButtonElement | null = null;
   private isShown = false;
+  private destroyed = false;
   private lastAnchor: Point | null = null;
   /**
    * Ignore external scroll events for a brief grace period after opening.
@@ -111,7 +112,23 @@ export class ContextMenu {
     return this.isShown;
   }
 
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    try {
+      this.close();
+    } catch {
+      // ignore
+    }
+    try {
+      this.overlay.remove();
+    } catch {
+      // ignore
+    }
+  }
+
   open({ x, y, items }: ContextMenuOpenOptions): void {
+    if (this.destroyed) return;
     this.close();
     this.isShown = true;
     this.lastAnchor = { x, y };

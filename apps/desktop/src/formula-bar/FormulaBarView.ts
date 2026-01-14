@@ -1831,7 +1831,7 @@ export class FormulaBarView {
       // ignore
     }
     try {
-      this.#nameBoxMenu?.close();
+      this.#nameBoxMenu?.destroy();
     } catch {
       // ignore
     }

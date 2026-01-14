@@ -36,8 +36,26 @@ describe("ContextMenu (DOM)", () => {
         "context menu should not override item buttons to role=menuitem (Playwright selectors depend on role=button)",
       ).toBeNull();
     } finally {
-      menu.close();
+      menu.destroy();
     }
+  });
+
+  it("destroy removes the overlay from the DOM", () => {
+    const menu = new ContextMenu({ testId: "context-menu-destroy" });
+    menu.open({
+      x: 0,
+      y: 0,
+      items: [
+        {
+          type: "item",
+          label: "Test Item",
+          onSelect: () => {},
+        },
+      ],
+    });
+    expect(document.querySelector('[data-testid="context-menu-destroy"]')).toBeTruthy();
+    menu.destroy();
+    expect(document.querySelector('[data-testid="context-menu-destroy"]')).toBeNull();
   });
 
   it("ignores outside scroll events immediately after open (prevents instant-dismiss flake)", () => {
@@ -75,7 +93,7 @@ describe("ContextMenu (DOM)", () => {
     } finally {
       nowSpy.mockRestore();
       scroller.remove();
-      menu.close();
+      menu.destroy();
     }
   });
 });
