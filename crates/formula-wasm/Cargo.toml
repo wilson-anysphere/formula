@@ -32,3 +32,10 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+# wasm-pack runs wasm-opt (Binaryen) in release builds. Our generated WASM can include post-MVP
+# instructions (e.g. bulk memory ops / saturating float-to-int conversions) that require feature
+# flags in older wasm-opt versions. Enable all features so the optimizer can validate and process
+# the module across environments.
+wasm-opt = ["-O", "--all-features"]
