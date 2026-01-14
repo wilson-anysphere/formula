@@ -5,7 +5,7 @@ use formula_engine::pivot::{
     SubtotalPosition, ValueField,
 };
 use formula_engine::Engine;
-use formula_model::Style;
+use formula_model::{Font, Style};
 
 #[test]
 fn engine_can_calculate_pivot_from_live_range_values() {
@@ -161,6 +161,63 @@ fn engine_pivot_infers_dates_from_cell_number_formats() {
             ],
             vec!["Grand Total".into(), 30.into()],
         ]
+    );
+}
+
+#[test]
+fn engine_pivot_infers_dates_from_column_number_formats_when_cell_styles_inherit_num_fmt() {
+    use chrono::NaiveDate;
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+    let mut engine = Engine::new();
+
+    // Source data: a date serial column.
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+
+    // Apply the date number format via the column default style.
+    let date_style_id = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    engine.set_col_style_id("Sheet1", 0, Some(date_style_id));
+
+    // Simulate an additional cell-level style (e.g. bold) that does *not* set a number format.
+    // Pivot typing should still treat the serial as a date by inheriting the column's number format.
+    let bold_style_id = engine.intern_style(Style {
+        font: Some(Font {
+            bold: true,
+            ..Font::default()
+        }),
+        ..Style::default()
+    });
+
+    let date1_serial =
+        ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+    let date2_serial =
+        ymd_to_serial(ExcelDate::new(2024, 2, 1), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+
+    engine.set_cell_value("Sheet1", "A2", date1_serial).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", bold_style_id)
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A3", date2_serial).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A3", bold_style_id)
+        .unwrap();
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:A3").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+    assert_eq!(cache.records.len(), 2);
+    assert_eq!(
+        cache.records[0][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
+    );
+    assert_eq!(
+        cache.records[1][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 2, 1).unwrap())
     );
 }
 

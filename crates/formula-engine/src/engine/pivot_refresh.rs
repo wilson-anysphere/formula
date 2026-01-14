@@ -3,9 +3,7 @@ use chrono::NaiveDate;
 use formula_model::Range;
 
 use crate::eval::CellAddr;
-use crate::pivot::source::{
-    coerce_pivot_value_with_number_format, resolve_number_format_from_style_id,
-};
+use crate::pivot::source::coerce_pivot_value_with_number_format;
 use crate::pivot::{PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
 use crate::value::{ErrorKind, Value};
 
@@ -88,11 +86,13 @@ fn materialize_range_as_pivot_values(
 }
 
 fn number_format_at<'a>(engine: &'a Engine, sheet_id: SheetId, addr: CellAddr) -> Option<&'a str> {
-    let style_id = engine.effective_style_id_at(CellKey {
+    // Pivot source typing should follow the same layered number-format resolution semantics as
+    // "precision as displayed" rounding: explicit per-cell overrides and spill-origin semantics,
+    // then sheet < col < row < cell style layers (per-property).
+    engine.number_format_pattern_for_rounding(CellKey {
         sheet: sheet_id,
         addr,
-    });
-    resolve_number_format_from_style_id(&engine.workbook.styles, style_id)
+    })
 }
 
 fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Value {
