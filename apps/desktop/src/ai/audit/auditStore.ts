@@ -83,12 +83,6 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   // Vite asset URLs are typically root-relative (`/node_modules/...` or `/assets/...`).
   // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
   // file:// URL rooted at the repository cwd.
-  //
-  // Vitest can also return Vite's dev-server `/@fs/<absolute-path>` form. Convert that
-  // directly to a file URL for the underlying absolute path.
-  if (href.startsWith("/@fs/")) {
-    return `file://${href.slice("/@fs".length)}`;
-  }
   if (href.startsWith("/")) {
     const cwd = typeof (globalThis as any).process?.cwd === "function" ? (globalThis as any).process.cwd() : "";
     if (cwd) return `file://${cwd}${href}`;

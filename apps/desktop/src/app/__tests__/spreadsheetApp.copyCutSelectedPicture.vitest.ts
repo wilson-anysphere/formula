@@ -369,6 +369,10 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
 
     const createImageBitmapMock = vi.fn(() => Promise.reject(new Error("should not be called")));
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+    // The drawing overlay can try to decode bitmaps for rendering when `createImageBitmap` exists.
+    // This test is scoped to the clipboard copy path, so keep overlay rendering disabled to avoid
+    // unrelated decode attempts.
+    vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
 
     const sheetId = app.getCurrentSheetId();
     const imageId = "img-wrong-mime";
