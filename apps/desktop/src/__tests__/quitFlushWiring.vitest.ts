@@ -21,8 +21,8 @@ describe("desktop quit wiring", () => {
     expect(content).toContain("flushCollabLocalPersistenceBestEffort");
 
     // Ensure the `registerAppQuitHandlers` quit/restart paths flush before quitting.
-    const quitAppIdx = findIndex(content, /\bquitApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/, 0);
-    const restartAppIdx = findIndex(content, /\brestartApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/, Math.max(0, quitAppIdx));
+    const quitAppIdx = findIndex(content, /^\s*quitApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/m, 0);
+    const restartAppIdx = findIndex(content, /^\s*restartApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/m, Math.max(0, quitAppIdx));
     expect(quitAppIdx).toBeGreaterThanOrEqual(0);
     expect(restartAppIdx).toBeGreaterThan(quitAppIdx);
 
@@ -36,8 +36,9 @@ describe("desktop quit wiring", () => {
     expect(quitAppQuitIdx).toBeGreaterThan(quitAppBinderIdleIdx);
     expect(quitAppQuitIdx).toBeGreaterThan(quitAppFlushIdx);
 
-    const restartMarker = "// OAuth PKCE redirect capture:";
-    const restartEndIdx = content.indexOf(restartMarker, restartAppIdx);
+    // Find a stable marker after `restartApp` that doesn't rely on nearby comments/whitespace.
+    // The OAuth redirect wiring comes immediately after `registerAppQuitHandlers({ ... })`.
+    const restartEndIdx = findIndex(content, /\blisten\s*\(\s*["']oauth-redirect["']/, Math.max(0, restartAppIdx));
     expect(restartEndIdx).toBeGreaterThan(restartAppIdx);
 
     const restartAppBody = content.slice(restartAppIdx, restartEndIdx);
