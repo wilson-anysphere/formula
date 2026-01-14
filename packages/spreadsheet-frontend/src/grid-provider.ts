@@ -105,7 +105,9 @@ export class EngineGridProvider implements CellProvider {
       this.prefetchScheduled = true;
       queueMicrotask(() => {
         this.prefetchScheduled = false;
-        void this.flushPrefetches();
+        void this.flushPrefetches().catch(() => {
+          // Best-effort: avoid unhandled rejections from the fire-and-forget prefetch flush.
+        });
       });
     }
 
