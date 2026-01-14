@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function collectNodeTestFiles(dir) {
@@ -24,13 +26,16 @@ test("node:test source-scanning guardrails strip comments when scanning main.ts"
   //
   // (We intentionally do not enforce this for other source files because some tests
   // may rely on comment markers as slicing anchors.)
-  const referencesMainTsLiteralRe = /["']main\.ts["']/;
+  const referencesMainTsRe = /\bmain\.ts\b/;
   const readsFileRe = /\breadFileSync\s*\(|\breadFile\s*\(/;
   const callsStripCommentsRe = /\bstripComments\s*\(/;
 
   for (const file of files) {
-    const text = fs.readFileSync(file, "utf8");
-    if (!referencesMainTsLiteralRe.test(text)) continue;
+    const raw = fs.readFileSync(file, "utf8");
+    // Strip comments before applying heuristics so commented-out code (including a commented-out
+    // `stripComments(...)` call) cannot satisfy this guardrail.
+    const text = stripComments(raw);
+    if (!referencesMainTsRe.test(text)) continue;
     if (!readsFileRe.test(text)) continue;
     if (!callsStripCommentsRe.test(text)) {
       offenders.push(path.relative(__dirname, file));
