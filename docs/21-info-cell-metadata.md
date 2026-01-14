@@ -17,9 +17,10 @@ As of today:
 - `INFO("system")` is implemented but currently hard-coded to `"pcdos"`.
 - Other `INFO()` keys listed below currently return `#N/A` (recognized but not available).
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
-- `CELL("protect")` and `CELL("prefix")` are recognized and return **best-effort defaults** today:
-  - `protect`: `1` (locked)
-  - `prefix`: `""` (no prefix)
+- `CELL("protect")` and `CELL("prefix")` are implemented based on the cell’s **effective style**
+  (layered style resolution), matching Excel semantics:
+  - `protect`: `1` if the effective style is locked (default), `0` if unlocked.
+  - `prefix`: single-character alignment prefix (`'`, `"`, `^`, `\`) or `""` for general/unspecified.
 - `CELL("width")` is **partially implemented**:
   - consults per-column metadata when available (`ColProperties.width` / `ColProperties.hidden`)
   - returns the column width in **Excel character units** (OOXML `col/@width`), defaulting to `8.43` when unset
@@ -90,8 +91,8 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
-| `protect` | number | **effective style** (`protection.locked`) | best-effort (currently always returns `1`) |
-| `prefix` | text | **effective style** (`alignment.horizontal`) | best-effort (currently always returns `""`) |
+| `protect` | number | **effective style** (`protection.locked`) | implemented |
+| `prefix` | text | **effective style** (`alignment.horizontal`) | implemented |
 | `width` | number | column width + column hidden state | **partially implemented** (consults `ColProperties.width` / `hidden`; defaults to `8.43`, returns `0` when hidden) |
 
 Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
@@ -129,25 +130,20 @@ Where this metadata comes from in this repo today:
 - Cross-platform workbook backends return `WorkbookInfo.path` (`@formula/workbook-backend`). Desktop implementations typically set it to an absolute path; the WASM backend currently returns `null` (no filesystem path in the browser).
 - For web, hosts generally only know a filename (e.g. from a file picker). When we implement workbook file metadata injection, web hosts should pass `fileName` only and leave `directory` empty.
 
-#### `CELL("protect")` (planned full semantics)
+#### `CELL("protect")`
 
 Excel returns:
 
 - `1` if the referenced cell is **locked**
 - `0` if the referenced cell is **unlocked**
 
-Current behavior:
+This is computed from the cell’s **effective style**:
 
-- Returns `1` (locked) for all cells.
+- Uses the merged style’s `protection.locked` field.
+- Default behavior matches Excel: if protection is unspecified, treat the cell as **locked**.
+- The result reflects formatting only and does **not** depend on whether sheet protection is enabled.
 
-Planned behavior:
-
-This should be computed from the cell’s **effective style**:
-
-- Use the merged style’s `protection.locked` field.
-- Default behavior should match Excel: if protection is unspecified, treat the cell as **locked**.
-
-#### `CELL("prefix")` (planned full semantics)
+#### `CELL("prefix")`
 
 Excel returns a **single-character prefix** describing the effective horizontal alignment.
 
@@ -161,13 +157,7 @@ Planned mapping (must match Excel exactly when implemented):
 | fill | `\` |
 | general/other/unspecified | `""` |
 
-Current behavior:
-
-- Returns `""` (empty string) for all cells.
-
-Planned behavior:
-
-This must use the cell’s **effective alignment** (layered style merge), not just a per-cell format.
+This uses the cell’s **effective alignment** (layered style merge), not just a per-cell format.
 
 #### `CELL("width")` (planned full semantics)
 
