@@ -20,7 +20,7 @@ pub mod locale;
 
 mod builtin;
 mod cell_format;
-mod datetime;
+pub mod datetime;
 mod literal;
 mod number;
 mod parse;

@@ -10,6 +10,7 @@ use crate::persistence::{
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotValue};
+use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
 use formula_engine::what_if::scenario_manager::{
@@ -4118,14 +4119,13 @@ fn refresh_pivot_registration(
             pivot.source_range.end_col,
         );
 
-        cells
-            .into_iter()
-            .map(|row| {
-                row.into_iter()
-                    .map(|cell| scalar_to_pivot_value(&cell.computed_value))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
+        build_pivot_source_range_with_number_formats(
+            source_rows,
+            source_cols,
+            |r, c| scalar_to_pivot_value(&cells[r][c].computed_value),
+            |r, c| cells[r][c].number_format.as_deref(),
+            engine.date_system(),
+        )
     };
 
     let cache =
@@ -7672,6 +7672,112 @@ mod tests {
         assert_eq!(
             state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
             CellScalar::Number(350.0)
+        );
+    }
+
+    #[test]
+    fn pivot_source_date_number_formats_are_inferred_as_dates() {
+        use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let date1_serial =
+            ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+        let date2_serial =
+            ymd_to_serial(ExcelDate::new(2024, 2, 1), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Date".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Amount".to_string()))),
+        );
+
+        let mut date_cell_1 = Cell::from_literal(Some(CellScalar::Number(date1_serial)));
+        date_cell_1.number_format = Some("m/d/yyyy".to_string());
+        sheet.set_cell(1, 0, date_cell_1);
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(10.0))));
+
+        let mut date_cell_2 = Cell::from_literal(Some(CellScalar::Number(date2_serial)));
+        date_cell_2.number_format = Some("m/d/yyyy".to_string());
+        sheet.set_cell(2, 0, date_cell_2);
+        sheet.set_cell(2, 1, Cell::from_literal(Some(CellScalar::Number(20.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Date")],
+            column_fields: Vec::new(),
+            value_fields: vec![ValueField {
+                source_field: "Amount".to_string(),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        state
+            .create_pivot_table(
+                "By Date".to_string(),
+                data_sheet_id,
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 2,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                cfg,
+            )
+            .unwrap();
+
+        // Row label values should be the ISO dates (not raw serial numbers).
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 0).unwrap().value,
+            CellScalar::Text("2024-01-15".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 0).unwrap().value,
+            CellScalar::Text("2024-02-01".to_string())
+        );
+
+        // Numeric measure column should remain numeric (no date inference).
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value,
+            CellScalar::Number(10.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 1).unwrap().value,
+            CellScalar::Number(20.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Number(30.0)
         );
     }
 

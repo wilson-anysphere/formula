@@ -24,6 +24,8 @@ use thiserror::Error;
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
+pub mod source;
+
 #[derive(Debug, Error)]
 pub enum PivotError {
     #[error("worksheet not found: {0}")]

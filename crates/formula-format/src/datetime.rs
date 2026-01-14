@@ -23,7 +23,12 @@ struct DateTimeParts {
     weekday: u32,
 }
 
-pub(crate) fn looks_like_datetime(section: &str) -> bool {
+/// Best-effort check for whether a number format section contains Excel date/time tokens.
+///
+/// This is intentionally lightweight: it does *not* fully parse Excel's number format grammar.
+/// It is used by higher-level tooling (e.g. pivot cache builders) to infer when a numeric value
+/// should be treated as a serial date/time based on its format.
+pub fn looks_like_datetime(section: &str) -> bool {
     let mut in_quotes = false;
     let mut escape = false;
     let mut chars = section.chars().peekable();
