@@ -442,6 +442,53 @@ describe("OrganizeSheetsDialog", () => {
     expect(activeSheetId).toBe("s2");
   });
 
+  it("deletes the active sheet and activates the next visible sheet (Excel-like)", async () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+      { id: "s3", name: "Sheet3", visibility: "visible" },
+    ]);
+    let activeSheetId = "s2";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const deleteBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-s2"]');
+    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      deleteBtn!.click();
+      await Promise.resolve();
+    });
+
+    const confirmBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-confirm-s2"]');
+    expect(confirmBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      confirmBtn!.click();
+      await Promise.resolve();
+    });
+
+    expect(store.getById("s2")).toBeUndefined();
+    expect(store.listAll().map((s) => s.id)).toEqual(["s1", "s3"]);
+    expect(activeSheetId).toBe("s3");
+  });
+
   it("rewrites formulas when deleting a sheet", async () => {
     const doc = new DocumentController();
     doc.setCellFormula("s1", { row: 0, col: 0 }, "=Budget!A1+1");

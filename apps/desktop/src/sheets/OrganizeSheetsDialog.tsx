@@ -304,6 +304,15 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
       const currentActive = host.getActiveSheetId();
       const wasActive = sheet.id === currentActive;
 
+      // Mirror Excel: when deleting the active sheet, activate the next visible sheet to the right
+      // if possible; otherwise fall back to the previous visible sheet.
+      let nextActiveId: string | null = null;
+      if (wasActive) {
+        const visibleSheets = allSheets.filter((s) => s.visibility === "visible");
+        const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
+        nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+      }
+
       try {
         store.remove(sheet.id);
       } catch (err) {
@@ -312,7 +321,8 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
       }
 
       if (wasActive) {
-        const next = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+        const fallback = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+        const next = nextActiveId ?? fallback;
         if (next && next !== sheet.id) {
           activate(next);
         }

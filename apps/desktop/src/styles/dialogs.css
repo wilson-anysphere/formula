@@ -302,7 +302,7 @@ dialog.custom-sort-dialog::backdrop {
   cursor: pointer;
 }
 
-.organize-sheets-dialog__actions button:hover {
+.organize-sheets-dialog__actions button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
