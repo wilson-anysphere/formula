@@ -122,7 +122,7 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     root.focus();
 
     const write = vi.fn(async () => {});
@@ -141,7 +141,7 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
       zOrder: 0,
     };
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
-    (app as any).selectedDrawingId = drawing.id;
+    app.selectDrawing(drawing.id);
 
     app.copy();
     await app.whenIdle();
@@ -152,6 +152,9 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     await app.whenIdle();
     expect(write).toHaveBeenCalledTimes(2);
     expect(app.getDocument().getSheetDrawings(sheetId)).toEqual([]);
+    expect((app as any).selectedDrawingId).toBe(null);
+    expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
+    expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
 
     app.destroy();
     root.remove();
@@ -198,6 +201,53 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
 
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
     expect(doc.getSheetDrawings(sheetId)).toEqual([]);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("does not write oversized pictures to the clipboard", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    root.focus();
+
+    const write = vi.fn(async () => {});
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const sheetId = app.getCurrentSheetId();
+    const imageId = "img-oversized";
+    const maxBytes = 5 * 1024 * 1024; // keep in sync with CLIPBOARD_LIMITS.maxImageBytes
+    const oversized = new Uint8Array(maxBytes + 1);
+    oversized[0] = 0x89;
+    oversized[1] = 0x50;
+    oversized[2] = 0x4e;
+    oversized[3] = 0x47;
+    oversized[4] = 0x0d;
+    oversized[5] = 0x0a;
+    oversized[6] = 0x1a;
+    oversized[7] = 0x0a;
+
+    (app as any).drawingImages.set({ id: imageId, bytes: oversized, mimeType: "image/png" });
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    app.selectDrawing(drawing.id);
+
+    app.copy();
+    await app.whenIdle();
+    expect(write).not.toHaveBeenCalled();
+    expect(app.getDocument().getSheetDrawings(sheetId)).toHaveLength(1);
 
     app.destroy();
     root.remove();

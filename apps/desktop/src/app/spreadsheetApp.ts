@@ -17569,6 +17569,17 @@ export class SpreadsheetApp {
       throw new Error("Copy picture not supported for this image type");
     }
 
+    const maxBytes = Number(CLIPBOARD_LIMITS?.maxImageBytes) > 0 ? Number(CLIPBOARD_LIMITS.maxImageBytes) : 5 * 1024 * 1024;
+    if (pngBytes.byteLength > maxBytes) {
+      const mb = Math.round(maxBytes / 1024 / 1024);
+      try {
+        showToast(`Image too large to copy (>${mb}MB).`, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      throw new Error("Copy picture failed: image exceeds clipboard size limit");
+    }
+
     const provider = await this.getClipboardProvider();
     await provider.write({ text: "", imagePng: pngBytes });
     // The system clipboard now contains an image; clear any stale "internal range copy" context.
@@ -17667,6 +17678,11 @@ export class SpreadsheetApp {
 
     this.selectedDrawingId = null;
     this.dispatchDrawingSelectionChanged();
+    this.drawingOverlay.setSelectedId(null);
+    this.drawingInteractionController?.setSelectedId(null);
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
     this.refresh();
     this.emitDrawingsChanged();
     if (this.getSelectedDrawingId() !== prevSelected) {
