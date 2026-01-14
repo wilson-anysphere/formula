@@ -40,6 +40,38 @@ function normalizeFrozenCount(value: unknown): number {
   return Math.max(0, Math.trunc(num));
 }
 
+// Defensive cap: drawing ids can be authored via remote/shared state (sheet view state). Keep
+// validation strict so workbook schema normalization doesn't deep-copy pathological ids (e.g.
+// multi-megabyte strings) when merging duplicate sheet entries.
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
+function sanitizeDrawingsJson(value: unknown): any[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: any[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const rawId = (entry as any).id;
+    let normalizedId: string | number;
+    if (typeof rawId === "string") {
+      if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) continue;
+      const trimmed = rawId.trim();
+      if (!trimmed) continue;
+      normalizedId = trimmed;
+    } else if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) continue;
+      normalizedId = rawId;
+    } else {
+      continue;
+    }
+    out.push({ ...entry, id: normalizedId });
+  }
+  return out;
+}
+
+function sanitizeDrawingsValue(value: unknown): any[] | null {
+  return sanitizeDrawingsJson(yjsValueToJson(value));
+}
+
 export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
   return {
     cells: getMapRoot<unknown>(doc, "cells"),
@@ -191,16 +223,21 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               "drawings",
             ];
 
-            for (const key of viewKeysToMerge) {
-              const winnerVal = winner.get(key);
-              const entryVal = entry.get(key);
+              for (const key of viewKeysToMerge) {
+                const winnerVal = winner.get(key);
+                const entryVal = entry.get(key);
 
-              if (winnerVal === undefined) {
-                if (entryVal !== undefined) {
-                  winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                if (winnerVal === undefined) {
+                  if (entryVal !== undefined) {
+                    if (key === "drawings") {
+                      const sanitized = sanitizeDrawingsValue(entryVal);
+                      winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
+                    } else {
+                      winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                    }
+                  }
+                  continue;
                 }
-                continue;
-              }
 
               // For legacy numeric view keys, prefer non-zero values over 0.
               if (key === "frozenRows" || key === "frozenCols") {
@@ -223,6 +260,15 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
 
               // For legacy list keys, prefer non-empty over empty/undefined.
               if (key === "drawings" || key === "mergedRanges" || key === "mergedCells" || key === "merged_cells") {
+                if (key === "drawings") {
+                  const winnerArr = sanitizeDrawingsValue(winnerVal) ?? [];
+                  const entryArr = sanitizeDrawingsValue(entryVal) ?? [];
+                  if (winnerArr.length === 0 && entryArr.length > 0) {
+                    winner.set(key, entryArr);
+                  }
+                  continue;
+                }
+
                 const winnerArr = Array.isArray(yjsValueToJson(winnerVal)) ? yjsValueToJson(winnerVal) : [];
                 const entryArr = Array.isArray(yjsValueToJson(entryVal)) ? yjsValueToJson(entryVal) : [];
                 if (winnerArr.length === 0 && entryArr.length > 0) {
@@ -253,7 +299,12 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                   const ev = entryViewMap.get(k);
 
                   if (wv === undefined) {
-                    winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    if (k === "drawings") {
+                      const sanitized = sanitizeDrawingsValue(ev);
+                      winnerViewMap.set(k, sanitized ?? cloneYjsValue(ev, cloneCtors));
+                    } else {
+                      winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    }
                     continue;
                   }
 
@@ -283,6 +334,15 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                   }
 
                   if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+                    if (k === "drawings") {
+                      const wArr = sanitizeDrawingsValue(wv) ?? [];
+                      const eArr = sanitizeDrawingsValue(ev) ?? [];
+                      if (wArr.length === 0 && eArr.length > 0) {
+                        winnerViewMap.set(k, eArr);
+                      }
+                      continue;
+                    }
+
                     const wArr = Array.isArray(yjsValueToJson(wv)) ? yjsValueToJson(wv) : [];
                     const eArr = Array.isArray(yjsValueToJson(ev)) ? yjsValueToJson(ev) : [];
                     if (wArr.length === 0 && eArr.length > 0) {
@@ -298,12 +358,16 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 if (isRecord(wJson) && isRecord(eJson)) {
                   /** @type {Record<string, any>} */
                   const merged = { ...wJson };
-                for (const [k, ev] of Object.entries(eJson)) {
-                  const wv = merged[k];
-                  if (wv === undefined) {
-                    merged[k] = structuredClone(ev);
-                    continue;
-                  }
+                  for (const [k, ev] of Object.entries(eJson)) {
+                    const wv = merged[k];
+                    if (wv === undefined) {
+                      if (k === "drawings") {
+                        merged[k] = sanitizeDrawingsJson(ev) ?? structuredClone(ev);
+                      } else {
+                        merged[k] = structuredClone(ev);
+                      }
+                      continue;
+                    }
 
                     if (k === "frozenRows" || k === "frozenCols") {
                       const wNum = normalizeFrozenCount(wv);
@@ -312,26 +376,33 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                       continue;
                     }
 
-                  if (k === "backgroundImageId" || k === "background_image_id") {
-                    const wStr = coerceString(wv)?.trim() ?? "";
-                    const eStr = coerceString(ev)?.trim() ?? "";
-                    if (!wStr && eStr) merged[k] = eStr;
-                    continue;
-                  }
-
-                  if (k === "colWidths" || k === "rowHeights") {
-                    const wObj = isRecord(wv) ? wv : {};
-                    const eObj = isRecord(ev) ? ev : {};
-                    if (Object.keys(wObj).length === 0 && Object.keys(eObj).length > 0) {
-                      merged[k] = structuredClone(ev);
+                    if (k === "backgroundImageId" || k === "background_image_id") {
+                      const wStr = coerceString(wv)?.trim() ?? "";
+                      const eStr = coerceString(ev)?.trim() ?? "";
+                      if (!wStr && eStr) merged[k] = eStr;
+                      continue;
                     }
-                    continue;
-                  }
 
-                  if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
-                    const wArr = Array.isArray(wv) ? wv : [];
-                    const eArr = Array.isArray(ev) ? ev : [];
-                    if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
+                    if (k === "colWidths" || k === "rowHeights") {
+                      const wObj = isRecord(wv) ? wv : {};
+                      const eObj = isRecord(ev) ? ev : {};
+                      if (Object.keys(wObj).length === 0 && Object.keys(eObj).length > 0) {
+                        merged[k] = structuredClone(ev);
+                      }
+                      continue;
+                    }
+
+                    if (k === "drawings") {
+                      const wArr = sanitizeDrawingsJson(wv) ?? [];
+                      const eArr = sanitizeDrawingsJson(ev) ?? [];
+                      if (wArr.length === 0 && eArr.length > 0) merged[k] = eArr;
+                      continue;
+                    }
+
+                    if (k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+                      const wArr = Array.isArray(wv) ? wv : [];
+                      const eArr = Array.isArray(ev) ? ev : [];
+                      if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
                       continue;
                     }
                   }
