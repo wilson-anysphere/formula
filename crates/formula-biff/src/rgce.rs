@@ -1253,6 +1253,36 @@ fn decode_rgce_impl(
                     is_missing: false,
                 });
             }
+            // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
+            0x3C | 0x5C | 0x7C => {
+                let needed = 8;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
+                }
+                i += needed;
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x3D | 0x5D | 0x7D => {
+                let needed = 14;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
+                }
+                i += needed;
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
             _ => {
                 return Err(DecodeRgceError::UnsupportedToken {
                     offset: ptg_offset,
