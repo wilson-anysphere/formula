@@ -3195,10 +3195,16 @@ export class FormulaBarView {
         const prev = this.#lastActiveReferenceIndex;
         const next = activeReferenceIndex;
         if (prev != null) {
-          this.#referenceElementsForIndex(prev).forEach((el) => el.classList.remove("formula-bar-reference--active"));
+          const els = this.#referenceElementsForIndex(prev);
+          for (let i = 0; i < els.length; i += 1) {
+            els[i]!.classList.remove("formula-bar-reference--active");
+          }
         }
         if (next != null) {
-          this.#referenceElementsForIndex(next).forEach((el) => el.classList.add("formula-bar-reference--active"));
+          const els = this.#referenceElementsForIndex(next);
+          for (let i = 0; i < els.length; i += 1) {
+            els[i]!.classList.add("formula-bar-reference--active");
+          }
         }
         this.#lastActiveReferenceIndex = next;
         // We updated class attributes without rebuilding the HTML string; invalidate the
