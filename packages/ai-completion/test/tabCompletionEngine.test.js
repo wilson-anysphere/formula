@@ -397,6 +397,48 @@ test("Typing =NORMD suggests NORMDIST( and a modern NORM.DIST( alternative", asy
   );
 });
 
+test("Typing =CHID suggests CHIDIST( and a modern CHISQ.DIST.RT( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHID";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHIDIST("),
+    `Expected a CHIDIST( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHISQ.DIST.RT("),
+    `Expected a CHISQ.DIST.RT( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =FINV suggests FINV( and a modern F.INV.RT( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FINV";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FINV("),
+    `Expected a FINV( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=F.INV.RT("),
+    `Expected a F.INV.RT( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 
