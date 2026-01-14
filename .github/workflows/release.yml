@@ -781,6 +781,9 @@ jobs:
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          restore-keys: |
+            pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-
+            pyodide-${{ runner.os }}-
 
       - name: Ensure Pyodide assets are present (populate cache on miss)
         shell: bash
