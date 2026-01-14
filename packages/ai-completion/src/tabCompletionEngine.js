@@ -1039,6 +1039,16 @@ const TEXT_INSTANCE_NUM_ENUM_1_2_NEG1 = [
   { replacement: "-1", displayText: "-1 (last match)", confidence: 0.64 },
 ];
 
+const START_NUM_ENUM_1_2 = [
+  { replacement: "1", displayText: "1 (start at 1)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (start at 2)", confidence: 0.65 },
+];
+
+const INSTANCE_NUM_ENUM_1_2 = [
+  { replacement: "1", displayText: "1 (1st occurrence)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd occurrence)", confidence: 0.65 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1206,6 +1216,26 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "TRUE", displayText: "TRUE (ignore empty)", confidence: 0.66 },
       { replacement: "FALSE", displayText: "FALSE (keep empty)", confidence: 0.62 },
     ],
+  },
+  SUBSTITUTE: {
+    // instance_num
+    3: INSTANCE_NUM_ENUM_1_2,
+  },
+  FIND: {
+    // start_num
+    2: START_NUM_ENUM_1_2,
+  },
+  SEARCH: {
+    // start_num
+    2: START_NUM_ENUM_1_2,
+  },
+  MID: {
+    // start_num
+    1: START_NUM_ENUM_1_2,
+  },
+  REPLACE: {
+    // start_num
+    1: START_NUM_ENUM_1_2,
   },
   UNIQUE: {
     // by_col

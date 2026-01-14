@@ -2890,6 +2890,61 @@ test("TEXTJOIN ignore_empty suggests TRUE/FALSE", async () => {
   );
 });
 
+test("SUBSTITUTE instance_num suggests 1 and 2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=SUBSTITUTE(A1, "x", "y", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected SUBSTITUTE to suggest instance_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect SUBSTITUTE to suggest instance_num=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Text start_num args suggest 1 and 2 (FIND/SEARCH/MID/REPLACE)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const cases = [
+    '=FIND("x", A1, ',
+    '=SEARCH("x", A1, ',
+    "=MID(A1, ",
+    "=REPLACE(A1, ",
+  ];
+
+  for (const currentInput of cases) {
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const v of ["1", "2"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${v}`),
+        `Expected ${currentInput}... to suggest ${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}0`),
+      `Did not expect ${currentInput}... to suggest 0, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("UNIQUE by_col suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
