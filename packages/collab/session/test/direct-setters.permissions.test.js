@@ -60,6 +60,8 @@ test("CollabSession direct setters reject non-string cell keys (no Yjs mutation)
     session.setCellFormula(123, "=HACK()"),
     /Invalid cellKey/,
   );
+  await assert.rejects(session.setCellValue("", "hacked"), /Invalid cellKey/);
+  await assert.rejects(session.setCellFormula("", "=HACK()"), /Invalid cellKey/);
 
   assert.deepEqual(session.cells.toJSON(), {});
 

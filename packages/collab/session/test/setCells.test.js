@@ -129,6 +129,7 @@ test("CollabSession setCells rejects non-string cell keys (no Yjs mutation)", as
     session.setCells([{ cellKey: null, value: "hacked" }]),
     /Invalid cellKey/,
   );
+  await assert.rejects(session.setCells([{ cellKey: "", value: "hacked" }]), /Invalid cellKey/);
 
   assert.deepEqual(session.cells.toJSON(), {});
 
