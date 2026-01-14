@@ -882,8 +882,9 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
 - Startup metrics:
   - `startup:window-visible` (payload: `number`)
   - `startup:webview-loaded` (payload: `number`)
+  - `startup:first-render` (payload: `number`)
   - `startup:tti` (payload: `number`)
-  - `startup:metrics` (payload: `{ window_visible_ms?, webview_loaded_ms?, tti_ms? }`)
+  - `startup:metrics` (payload: `{ window_visible_ms?, webview_loaded_ms?, first_render_ms?, tti_ms? }`)
 - Updates:
   - `update-check-started` (payload: `{ source }`)
   - `update-check-already-running` (payload: `{ source }`)
