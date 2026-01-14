@@ -75,3 +75,43 @@ test("blank typed values stringify as empty string (no [object Object])", async 
   assert.equal(matches[0].text, "");
 });
 
+test("rich values (images, rich text) stringify as plain text (no [object Object])", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+
+  sheet.setValue(0, 0, { type: "image", value: { imageId: "img_1", altText: "Kitten" } });
+  sheet.setValue(0, 1, { type: "image", value: { imageId: "img_2" } });
+  sheet.setValue(0, 2, { text: "Hello", runs: [{ start: 0, end: 5, style: {} }] });
+
+  // Default: search in values (display semantics). Rich values should match by their
+  // stable text representation (alt text / placeholder / rich text).
+  const kittenMatches = await findAll(wb, "Kitten", { scope: "sheet", currentSheetName: "Sheet1", matchEntireCell: true });
+  assert.deepEqual(kittenMatches.map((m) => m.address), ["Sheet1!A1"]);
+
+  const placeholderMatches = await findAll(wb, "[Image]", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    matchEntireCell: true,
+  });
+  assert.deepEqual(placeholderMatches.map((m) => m.address), ["Sheet1!B1"]);
+
+  const richTextMatches = await findAll(wb, "Hello", { scope: "sheet", currentSheetName: "Sheet1", matchEntireCell: true });
+  assert.deepEqual(richTextMatches.map((m) => m.address), ["Sheet1!C1"]);
+
+  // Look in formulas: constants should still stringify (Excel semantics). Ensure we don't
+  // regress to `[object Object]` for rich values.
+  const formulaLookMatches = await findAll(wb, "Kitten", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    lookIn: "formulas",
+    matchEntireCell: true,
+  });
+  assert.deepEqual(formulaLookMatches.map((m) => m.address), ["Sheet1!A1"]);
+
+  const objectMatches = await findAll(wb, "[object Object]", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    matchEntireCell: true,
+  });
+  assert.deepEqual(objectMatches.map((m) => m.address), []);
+});

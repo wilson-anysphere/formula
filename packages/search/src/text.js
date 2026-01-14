@@ -2,6 +2,37 @@ function isTypedValue(value) {
   return value != null && typeof value === "object" && typeof value.t === "string";
 }
 
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseImageValue(value) {
+  if (!isPlainObject(value)) return null;
+  /** @type {any} */
+  const obj = value;
+
+  /** @type {any} */
+  let payload = null;
+  // formula-model envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    // Direct payload shape.
+    payload = obj;
+  }
+
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+
+  return { imageId, altText };
+}
+
 function typedValueToString(value) {
   // The formula engine uses a stable JSON encoding (see tools/excel-oracle/value-encoding.md).
   switch (value.t) {
@@ -34,6 +65,25 @@ function typedValueToString(value) {
 export function formatCellValue(value) {
   if (value == null) return "";
   if (isTypedValue(value)) return typedValueToString(value);
+  // Some workbook adapters (desktop DocumentController) store rich cell values (rich text,
+  // in-cell images) as objects. Prefer a stable text representation over `[object Object]`.
+  if (value && typeof value === "object") {
+    const text = /** @type {any} */ (value)?.text;
+    if (typeof text === "string") return text;
+
+    const image = parseImageValue(value);
+    if (image) return image.altText ?? "[Image]";
+
+    // Fall back to a stable JSON representation when possible.
+    try {
+      const json = JSON.stringify(value);
+      // Avoid emitting useless empty object text into the search index.
+      if (json === "{}") return "";
+      return typeof json === "string" ? json : String(value);
+    } catch {
+      return String(value);
+    }
+  }
   return String(value);
 }
 
@@ -56,4 +106,3 @@ export function getCellText(cell, { lookIn = "values", valueMode = "display" } =
   // values
   return getValueText(cell, valueMode);
 }
-
