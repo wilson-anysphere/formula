@@ -159,6 +159,9 @@ These scripts are designed to be safe to run locally:
 - **`webview_loaded_ms`**: time from native process start until the WebView reports the initial page load finished
   (native callback; useful for separating “shell/webview” cost from frontend JS work).
 - **`first_render_ms`**: time from native process start until the grid becomes visible (first meaningful render).
+  - Reported from the frontend via `report_startup_first_render` (see `apps/desktop/src/tauri/startupMetrics.ts`).
+  - As a guardrail for the desktop startup benchmark, TTI reporting will best-effort ensure the first-render mark is
+    reported before `report_startup_tti` so the Rust `[startup] ...` line includes `first_render_ms`.
 - **`tti_ms`**: time-to-interactive (first input accepted); includes webview + frontend init.
 - **Startup benchmark kinds**:
   - **Full app** (`desktop.startup.*`): end-to-end UI startup (requires `apps/desktop/dist`); includes `first_render_ms`.
