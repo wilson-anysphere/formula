@@ -150,6 +150,27 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
 }
 
 #[test]
+fn xlsm_fixtures_surface_invalid_password_errors() {
+    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+        let encrypted = read_fixture(encrypted_name);
+
+        let err =
+            load_from_bytes_with_password(&encrypted, "wrong").expect_err("expected failure");
+        assert!(
+            matches!(err, ReadError::InvalidPassword),
+            "{encrypted_name}: expected ReadError::InvalidPassword, got {err:?}"
+        );
+
+        let err =
+            XlsxPackage::from_bytes_with_password(&encrypted, "wrong").expect_err("bad password");
+        assert!(
+            matches!(err, XlsxError::InvalidPassword),
+            "{encrypted_name}: expected XlsxError::InvalidPassword, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn unicode_password_normalization_mismatch_fails() {
     // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
     let nfd = "pa\u{0308}sswo\u{0308}rd";
