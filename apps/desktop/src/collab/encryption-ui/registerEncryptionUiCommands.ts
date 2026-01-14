@@ -105,27 +105,19 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const range = normalizeRange(ranges[0]!);
       const a1 = rangeToA1(range);
 
-      const keyId = await showInputBox({
+      const rawKeyId = await showInputBox({
         prompt: `Encrypt ${sheetName}!${a1} – Key ID`,
         value: randomKeyId(),
         placeHolder: "Key ID (for example: team-budget-q1)",
         okLabel: "Next",
       });
-      if (!keyId) return;
+      if (!rawKeyId) return;
+      const keyId = String(rawKeyId).trim();
+      if (!keyId) {
+        showToast("Key ID is required.", "warning");
+        return;
+      }
 
-      const confirmed = await showQuickPick(
-        [
-          {
-            label: `Encrypt ${sheetName}!${a1}`,
-            description: `Key ID: ${keyId}`,
-            value: "encrypt",
-          },
-        ],
-        { placeHolder: "Confirm encryption" },
-      );
-      if (!confirmed) return;
-
-      const keyBytes = randomKeyBytes();
       const docId = session.doc.guid;
       const keyStore = app.getCollabEncryptionKeyStore();
       if (!keyStore) {
@@ -133,13 +125,54 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      let storedKeyId = keyId;
+      // If the key id already exists, reuse the stored key bytes rather than overwriting
+      // them (overwriting would make previously-encrypted cells unrecoverable).
+      let existingKeyBytes: Uint8Array | null = null;
+      let existingStoredKeyId: string | null = null;
       try {
-        const result = await keyStore.set(docId, keyId, bytesToBase64(keyBytes));
-        storedKeyId = result.keyId;
+        const cached = keyStore.getCachedKey(docId, keyId);
+        if (cached?.keyBytes instanceof Uint8Array) {
+          existingKeyBytes = cached.keyBytes;
+          existingStoredKeyId = cached.keyId;
+        } else {
+          const entry = await keyStore.get(docId, keyId);
+          if (entry) {
+            existingKeyBytes = base64ToBytes(entry.keyBytesBase64);
+            existingStoredKeyId = entry.keyId;
+          }
+        }
       } catch {
-        showToast("Failed to store encryption key.", "error");
-        return;
+        // Best-effort: if key lookup fails, proceed as if missing (fallback to new key generation).
+      }
+      const isReusingKey = existingKeyBytes != null;
+      const displayKeyId = existingStoredKeyId ?? keyId;
+
+      const confirmed = await showQuickPick(
+        [
+          {
+            label: `Encrypt ${sheetName}!${a1}`,
+            description: isReusingKey ? `Key ID: ${displayKeyId} (reuse existing key)` : `Key ID: ${displayKeyId} (new key)`,
+            value: "encrypt",
+          },
+        ],
+        { placeHolder: "Confirm encryption" },
+      );
+      if (!confirmed) return;
+
+      let keyBytes: Uint8Array;
+      let storedKeyId = displayKeyId;
+      if (existingKeyBytes) {
+        keyBytes = existingKeyBytes;
+        storedKeyId = displayKeyId;
+      } else {
+        keyBytes = randomKeyBytes();
+        try {
+          const result = await keyStore.set(docId, keyId, bytesToBase64(keyBytes));
+          storedKeyId = result.keyId;
+        } catch {
+          showToast("Failed to store encryption key.", "error");
+          return;
+        }
       }
 
       const createdBy = session.getPermissions()?.userId ?? undefined;
