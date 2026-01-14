@@ -15,7 +15,8 @@ pub use model::{
     DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
 };
 pub use schema::{
-    CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig, SubtotalPosition,
+    CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
+    SubtotalPosition,
 };
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
