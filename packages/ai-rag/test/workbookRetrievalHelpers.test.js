@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { dedupeOverlappingResults, rerankWorkbookResults } from "../src/index.js";
+import { dedupeOverlappingResults, rerankWorkbookResults } from "../src/retrieval/rankResults.js";
 
 test("rerankWorkbookResults boosts table + namedRange above dataRegion when scores are similar", () => {
   const query = "unrelated query";

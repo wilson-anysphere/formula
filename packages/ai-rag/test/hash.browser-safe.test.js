@@ -49,7 +49,10 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
   assert.equal(source.includes(nodeCryptoSpecifier), false);
 
   // Ensure we didn't accidentally re-introduce a Node crypto import elsewhere in ai-rag.
-  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+  // Avoid using `new URL()` with `import.meta.url` on the src directory here so
+  // `scripts/run-node-tests.mjs` doesn't treat it as a module dependency on
+  // `src/index.js` (which conditionally depends on external packages like `sql.js`).
+  const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
   /** @type {string[]} */
   const files = [];
   await collectJsFiles(srcDir, files);

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { HashEmbedder, InMemoryVectorStore, indexWorkbook, searchWorkbookRag } from "../src/index.js";
+import { HashEmbedder } from "../src/embedding/hashEmbedder.js";
+import { indexWorkbook } from "../src/pipeline/indexWorkbook.js";
+import { searchWorkbookRag } from "../src/retrieval/searchWorkbookRag.js";
+import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
 
 function makeRevenueWorkbook(id) {
   return {
