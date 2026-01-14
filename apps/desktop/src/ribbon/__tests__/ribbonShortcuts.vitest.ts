@@ -104,4 +104,26 @@ describe("ribbonShortcuts", () => {
     expect(ariaById["formulas.formulaAuditing.tracePrecedents"]).toBe("Control+[");
     expect(ariaById["formulas.formulaAuditing.traceDependents"]).toBe("Control+]");
   });
+
+  it("maps accounting symbol number-format ids to the currency shortcut", () => {
+    const displayIndex = new Map<string, string[]>([["format.numberFormat.currency", ["Ctrl+Shift+$"]]]);
+    const shortcutById = deriveRibbonShortcutById(displayIndex);
+
+    expect(shortcutById["format.numberFormat.accounting"]).toBe("Ctrl+Shift+$");
+    expect(shortcutById["format.numberFormat.accounting.usd"]).toBe("Ctrl+Shift+$");
+    expect(shortcutById["format.numberFormat.accounting.eur"]).toBe("Ctrl+Shift+$");
+    expect(shortcutById["format.numberFormat.accounting.gbp"]).toBe("Ctrl+Shift+$");
+    expect(shortcutById["format.numberFormat.accounting.jpy"]).toBe("Ctrl+Shift+$");
+  });
+
+  it("maps accounting symbol number-format ids to the currency aria-keyshortcuts", () => {
+    const ariaIndex = new Map<string, string[]>([["format.numberFormat.currency", ["Control+Shift+$"]]]);
+    const ariaById = deriveRibbonAriaKeyShortcutsById(ariaIndex);
+
+    expect(ariaById["format.numberFormat.accounting"]).toBe("Control+Shift+$");
+    expect(ariaById["format.numberFormat.accounting.usd"]).toBe("Control+Shift+$");
+    expect(ariaById["format.numberFormat.accounting.eur"]).toBe("Control+Shift+$");
+    expect(ariaById["format.numberFormat.accounting.gbp"]).toBe("Control+Shift+$");
+    expect(ariaById["format.numberFormat.accounting.jpy"]).toBe("Control+Shift+$");
+  });
 });

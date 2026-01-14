@@ -48,6 +48,10 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   // Some ribbon controls use more specific commands (e.g. short/long date) but
   // share the classic Excel preset shortcut with a single canonical command.
   "format.numberFormat.accounting": "format.numberFormat.currency",
+  "format.numberFormat.accounting.usd": "format.numberFormat.currency",
+  "format.numberFormat.accounting.eur": "format.numberFormat.currency",
+  "format.numberFormat.accounting.gbp": "format.numberFormat.currency",
+  "format.numberFormat.accounting.jpy": "format.numberFormat.currency",
   "format.numberFormat.shortDate": "format.numberFormat.date",
   "format.numberFormat.longDate": "format.numberFormat.date",
 
