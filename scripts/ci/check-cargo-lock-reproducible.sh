@@ -17,6 +17,16 @@ fi
 
 desktop_manifest="apps/desktop/src-tauri/Cargo.toml"
 
+if [[ ! -f "Cargo.lock" ]]; then
+  echo "::error::Cargo.lock is missing at repo root. Generate it with 'cargo generate-lockfile' and commit it." >&2
+  exit 1
+fi
+
+if [[ ! -f "${desktop_manifest}" ]]; then
+  echo "::error::Desktop manifest not found at ${desktop_manifest} (repo layout unexpected)." >&2
+  exit 1
+fi
+
 mktemp_file() {
   # `mktemp` behavior differs between GNU and BSD (macOS). GNU mktemp supports
   # being called without a template; BSD mktemp requires one.
