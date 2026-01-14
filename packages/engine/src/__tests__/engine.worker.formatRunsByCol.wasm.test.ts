@@ -124,19 +124,25 @@ describeWasm("engine.worker range-run formatting integration (wasm)", () => {
     (globalThis as any).self = previousSelf;
   });
 
-  it('updates CELL("protect") results after setFormatRunsByCol', async () => {
+  it('updates CELL("protect"/"prefix"/"format") results after setFormatRunsByCol', async () => {
     const wasmModuleUrl = new URL("./fixtures/formulaWasmNodeWrapper.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
 
     try {
       await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
 
-      // Style that explicitly unlocks cells.
+      // Style that affects multiple CELL() metadata keys (protection + prefix + format).
       const styleResp = await sendRequest(port, {
         type: "request",
         id: 1,
         method: "internStyle",
-        params: { style: { protection: { locked: false, hidden: false } } },
+        params: {
+          style: {
+            protection: { locked: false, hidden: false },
+            alignment: { horizontal: "left" },
+            numberFormat: "0.00",
+          },
+        },
       });
       expect(styleResp.ok).toBe(true);
       const styleId = styleResp.result as number;
@@ -153,6 +159,10 @@ describeWasm("engine.worker range-run formatting integration (wasm)", () => {
             { address: "A2", value: "y", sheet: "Sheet1" },
             { address: "B1", value: '=CELL("protect",A1)', sheet: "Sheet1" },
             { address: "B2", value: '=CELL("protect",A2)', sheet: "Sheet1" },
+            { address: "C1", value: '=CELL("prefix",A1)', sheet: "Sheet1" },
+            { address: "C2", value: '=CELL("prefix",A2)', sheet: "Sheet1" },
+            { address: "D1", value: '=CELL("format",A1)', sheet: "Sheet1" },
+            { address: "D2", value: '=CELL("format",A2)', sheet: "Sheet1" },
           ],
         },
       });
@@ -177,6 +187,42 @@ describeWasm("engine.worker range-run formatting integration (wasm)", () => {
       });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe(1);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5_1,
+        method: "getCell",
+        params: { address: "C1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5_2,
+        method: "getCell",
+        params: { address: "C2", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5_3,
+        method: "getCell",
+        params: { address: "D1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("G");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5_4,
+        method: "getCell",
+        params: { address: "D2", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("G");
 
       // Apply a range-run only for row 0 (A1), not row 1 (A2).
       const applyResp = await sendRequest(port, {
@@ -208,6 +254,42 @@ describeWasm("engine.worker range-run formatting integration (wasm)", () => {
       // Row 1 is outside the run and should remain locked.
       expect(resp.result.value).toBe(1);
 
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9_1,
+        method: "getCell",
+        params: { address: "C1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("'");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9_2,
+        method: "getCell",
+        params: { address: "C2", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9_3,
+        method: "getCell",
+        params: { address: "D1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("F2");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9_4,
+        method: "getCell",
+        params: { address: "D2", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("G");
+
       // Clearing the runs should restore the default formatting.
       const clearResp = await sendRequest(port, {
         type: "request",
@@ -227,6 +309,24 @@ describeWasm("engine.worker range-run formatting integration (wasm)", () => {
       });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe(1);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 12_1,
+        method: "getCell",
+        params: { address: "C1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 12_2,
+        method: "getCell",
+        params: { address: "D1", sheet: "Sheet1" },
+      });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("G");
 
       // Validate wasm-side run parsing rejects invalid ranges.
       const invalidResp = await sendRequest(port, {
