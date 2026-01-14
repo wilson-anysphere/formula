@@ -2109,7 +2109,9 @@ fn encode_array_constant(
     let rows = arr.rows.len();
     let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
     if rows == 0 || cols == 0 {
-        return Err(EncodeRgceError::Unsupported("array literal cannot be empty"));
+        return Err(EncodeRgceError::Unsupported(
+            "array literal cannot be empty",
+        ));
     }
     if arr.rows.iter().any(|r| r.len() != cols) {
         return Err(EncodeRgceError::Unsupported(
@@ -2158,10 +2160,9 @@ fn encode_array_constant(
                 Expr::String(s) => {
                     rgcb.push(0x02);
                     let units: Vec<u16> = s.encode_utf16().collect();
-                    let cch: u16 = units
-                        .len()
-                        .try_into()
-                        .map_err(|_| EncodeRgceError::Unsupported("array string literal too long"))?;
+                    let cch: u16 = units.len().try_into().map_err(|_| {
+                        EncodeRgceError::Unsupported("array string literal too long")
+                    })?;
                     rgcb.extend_from_slice(&cch.to_le_bytes());
                     for u in units {
                         rgcb.extend_from_slice(&u.to_le_bytes());
@@ -2225,4 +2226,37 @@ fn encode_col_with_flags(col: u32, col_abs: bool, row_abs: bool) -> [u8; 2] {
         hi |= 0x40;
     }
     [lo, hi]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_rgce;
+
+    #[test]
+    fn decodes_ptg_name_to_parseable_placeholder() {
+        // PtgName (ref class) + name_id=1 + reserved u16.
+        let rgce = [0x23, 1, 0, 0, 0, 0, 0];
+        assert_eq!(decode_rgce(&rgce).unwrap(), "Name_1");
+    }
+
+    #[test]
+    fn decodes_ptg_name_value_class_preserves_implicit_intersection() {
+        // PtgName (value class) should conservatively emit `@`.
+        let rgce = [0x43, 1, 0, 0, 0, 0, 0];
+        assert_eq!(decode_rgce(&rgce).unwrap(), "@Name_1");
+    }
+
+    #[test]
+    fn decodes_ptg_namex_to_parseable_placeholder() {
+        // PtgNameX (ref class) + ixti=2 + nameIndex=3.
+        let rgce = [0x39, 2, 0, 3, 0];
+        assert_eq!(decode_rgce(&rgce).unwrap(), "ExternName_IXTI2_N3");
+    }
+
+    #[test]
+    fn decodes_ptg_namex_value_class_preserves_implicit_intersection() {
+        // PtgNameX (value class) should conservatively emit `@`.
+        let rgce = [0x59, 2, 0, 3, 0];
+        assert_eq!(decode_rgce(&rgce).unwrap(), "@ExternName_IXTI2_N3");
+    }
 }
