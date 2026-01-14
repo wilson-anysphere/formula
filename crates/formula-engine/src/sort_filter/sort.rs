@@ -325,7 +325,7 @@ fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
         CellValue::Blank => String::new(),
         CellValue::Number(n) => formula_format::format_value(
             FormatValue::Number(*n),
-            Some("General"),
+            None,
             &FormatOptions {
                 locale: value_locale.separators,
                 date_system: DateSystem::Excel1900,
