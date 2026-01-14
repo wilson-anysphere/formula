@@ -537,6 +537,20 @@ pub(crate) trait PivotRefreshContext {
         addr: &str,
         style_id: u32,
     ) -> Result<(), crate::EngineError>;
+    /// Bulk-apply per-cell style ids.
+    ///
+    /// Default implementation falls back to per-cell [`PivotRefreshContext::set_cell_style_id`]
+    /// calls.
+    fn set_cell_style_ids(
+        &mut self,
+        sheet: &str,
+        writes: &[(CellRef, u32)],
+    ) -> Result<(), crate::EngineError> {
+        for (cell, style_id) in writes {
+            self.set_cell_style_id(sheet, &cell.to_a1(), *style_id)?;
+        }
+        Ok(())
+    }
     fn write_cell(
         &mut self,
         sheet: &str,
@@ -721,6 +735,7 @@ pub(crate) fn refresh_pivot(
     let mut style_cache: HashMap<String, u32> = HashMap::new();
     let date_system = ctx.date_system();
     let mut values: Vec<Vec<crate::value::Value>> = Vec::with_capacity(rows as usize);
+    let mut style_writes: Vec<(CellRef, u32)> = Vec::new();
 
     for r in 0..rows as usize {
         let mut row_out: Vec<crate::value::Value> = Vec::with_capacity(cols as usize);
@@ -763,18 +778,23 @@ pub(crate) fn refresh_pivot(
                         style_id
                     }
                 };
-                let addr = CellRef::new(
-                    def.destination.cell.row + r as u32,
-                    def.destination.cell.col + c as u32,
-                )
-                .to_a1();
-                ctx.set_cell_style_id(&def.destination.sheet, &addr, style_id)
-                    .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+                style_writes.push((
+                    CellRef::new(
+                        def.destination.cell.row + r as u32,
+                        def.destination.cell.col + c as u32,
+                    ),
+                    style_id,
+                ));
             }
 
             row_out.push(pivot_value_to_engine_value(pv, date_system));
         }
         values.push(row_out);
+    }
+
+    if !style_writes.is_empty() {
+        ctx.set_cell_style_ids(&def.destination.sheet, &style_writes)
+            .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
     }
 
     ctx.set_range_values(&def.destination.sheet, output_range, &values)

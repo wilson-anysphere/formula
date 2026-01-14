@@ -8614,6 +8614,92 @@ impl PivotRefreshContext for Engine {
         Engine::set_cell_style_id(self, sheet, addr, style_id)
     }
 
+    fn set_cell_style_ids(
+        &mut self,
+        sheet: &str,
+        writes: &[(formula_model::CellRef, u32)],
+    ) -> Result<(), EngineError> {
+        if writes.is_empty() {
+            return Ok(());
+        }
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+
+        // Validate coordinates and ensure the sheet is large enough for all style targets.
+        let mut max_row = 0u32;
+        let mut max_col = 0u32;
+        for (cell, _) in writes {
+            if cell.row >= i32::MAX as u32 {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
+            }
+            if cell.col >= EXCEL_MAX_COLS {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::ColumnOutOfRange,
+                ));
+            }
+            max_row = max_row.max(cell.row);
+            max_col = max_col.max(cell.col);
+        }
+
+        let sheet_dims_changed = self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col: max_col });
+        if sheet_dims_changed {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let mut style_changed = false;
+        for (cell, style_id) in writes {
+            let addr = CellAddr {
+                row: cell.row,
+                col: cell.col,
+            };
+            let key = CellKey { sheet: sheet_id, addr };
+
+            let existing_style_id = self
+                .workbook
+                .get_cell(key)
+                .map(|cell| cell.style_id)
+                .unwrap_or(0);
+            if existing_style_id == *style_id {
+                continue;
+            }
+            style_changed = true;
+
+            let remove_cell = {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.style_id = *style_id;
+                cell.value == Value::Blank
+                    && cell.formula.is_none()
+                    && cell.style_id == 0
+                    && cell.phonetic.is_none()
+                    && cell.number_format.is_none()
+            };
+            if remove_cell {
+                if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+                    sheet_state.cells.remove(&addr);
+                }
+            }
+        }
+
+        // In "precision as displayed" mode, formatting can affect stored numeric values for formula
+        // cells, so conservatively refresh compiled results once after applying all style edits.
+        if style_changed && !sheet_dims_changed && !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        if (sheet_dims_changed || style_changed)
+            && self.calc_settings.calculation_mode != CalculationMode::Manual
+        {
+            self.recalculate();
+        }
+
+        Ok(())
+    }
+
     fn write_cell(&mut self, sheet: &str, addr: &str, value: Value) -> Result<(), EngineError> {
         self.set_cell_value(sheet, addr, value)
     }
