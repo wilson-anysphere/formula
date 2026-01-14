@@ -631,7 +631,14 @@ fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<Str
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
                 {
-                    return Ok(resolve_target("xl/workbook.xml", &rel.target));
+                    let target = resolve_target("xl/workbook.xml", &rel.target);
+                    // Best-effort: some producers emit workbook relationships that point to missing
+                    // worksheet parts (or otherwise non-canonical names). If the resolved target is
+                    // missing, fall back to the conventional `sheet{sheetId}.xml` filename when
+                    // present.
+                    if package.part(&target).is_some() {
+                        return Ok(target);
+                    }
                 }
             }
         }
@@ -2243,6 +2250,50 @@ mod tests {
         let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
 
         let part = resolve_worksheet_part(&pkg, "STRASSE").expect("resolve worksheet");
+        assert_eq!(part, "xl/worksheets/sheet1.xml");
+    }
+
+    #[test]
+    fn resolve_worksheet_part_falls_back_to_guess_when_workbook_rels_targets_missing_part() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Relationship is present but points to a missing worksheet part.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/missing.xml"/>
+</Relationships>"#;
+
+        // The conventional `sheet{sheetId}.xml` part exists and should be used as a fallback.
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let part = resolve_worksheet_part(&pkg, "Sheet1").expect("resolve worksheet");
         assert_eq!(part, "xl/worksheets/sheet1.xml");
     }
 
