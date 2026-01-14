@@ -197,6 +197,11 @@ function isSameRange(a: EncryptedRange, b: EncryptedRangeAddInput): boolean {
   );
 }
 
+function rangeSignature(range: Pick<EncryptedRange, "sheetId" | "startRow" | "startCol" | "endRow" | "endCol" | "keyId">): string {
+  // Use a delimiter that cannot appear in numbers to avoid ambiguous concatenations.
+  return `${range.sheetId}\n${range.startRow},${range.startCol},${range.endRow},${range.endCol}\n${range.keyId}`;
+}
+
 export class EncryptedRangeManager {
   private readonly doc: Y.Doc;
   private readonly metadata: Y.Map<unknown>;
@@ -384,33 +389,85 @@ export class EncryptedRangeManager {
     const existing = this.metadata.get(METADATA_KEY);
     if (existing == null) return;
 
-    // Fast-path: already the canonical local schema.
+    // Fast-path: already the canonical local schema *and* does not require cleanup.
     const existingArr = getYArray(existing);
     if (existingArr && existingArr instanceof Y.Array) {
       const items = existingArr.toArray();
-      let allLocal = true;
+      /** @type {Set<string>} */
+      const ids = new Set();
+      /** @type {Set<string>} */
+      const signatures = new Set();
+      let needsNormalize = false;
+
       for (const item of items) {
         const map = getYMap(item);
+        // Foreign constructors need normalization for UndoManager.
         if (!map || !(map instanceof Y.Map)) {
-          allLocal = false;
+          needsNormalize = true;
           break;
         }
-        // Canonical entries must include a stable `id` field. Older/buggy clients may
-        // omit it even when using a local Y.Map, so treat missing ids as non-canonical
-        // and normalize below.
-        const id = coerceString(map.get("id"))?.trim();
-        if (!id) {
-          allLocal = false;
+
+        const parsed = yRangeToEncryptedRange(map);
+        if (!parsed) {
+          // Malformed entries should be dropped during normalization.
+          needsNormalize = true;
           break;
         }
+
+        // Ensure ids are unique.
+        if (ids.has(parsed.id)) {
+          needsNormalize = true;
+          break;
+        }
+        ids.add(parsed.id);
+
+        // Dedupe identical ranges (can happen after concurrent inserts).
+        const sig = rangeSignature(parsed);
+        if (signatures.has(sig)) {
+          needsNormalize = true;
+          break;
+        }
+        signatures.add(sig);
+
+        // Canonicalize storage types + trims (e.g. avoid Y.Text and stringified numbers).
+        // We intentionally only verify required keys; any unknown keys will be dropped during normalization.
+        const idVal = map.get("id");
+        if (typeof idVal !== "string") needsNormalize = true;
+        else if (idVal.trim() !== parsed.id) needsNormalize = true;
+
+        const sheetIdVal = map.get("sheetId");
+        if (typeof sheetIdVal !== "string") needsNormalize = true;
+        else if (sheetIdVal.trim() !== parsed.sheetId) needsNormalize = true;
+
+        const keyIdVal = map.get("keyId");
+        if (typeof keyIdVal !== "string") needsNormalize = true;
+        else if (keyIdVal.trim() !== parsed.keyId) needsNormalize = true;
+
+        const startRowVal = map.get("startRow");
+        if (typeof startRowVal !== "number" || startRowVal !== parsed.startRow) needsNormalize = true;
+        const startColVal = map.get("startCol");
+        if (typeof startColVal !== "number" || startColVal !== parsed.startCol) needsNormalize = true;
+        const endRowVal = map.get("endRow");
+        if (typeof endRowVal !== "number" || endRowVal !== parsed.endRow) needsNormalize = true;
+        const endColVal = map.get("endCol");
+        if (typeof endColVal !== "number" || endColVal !== parsed.endCol) needsNormalize = true;
+
+        const createdAtVal = map.get("createdAt");
+        if (createdAtVal !== undefined) {
+          if (typeof createdAtVal !== "number") needsNormalize = true;
+          else if (!Number.isFinite(createdAtVal) || createdAtVal < 0) needsNormalize = true;
+        }
+
+        const createdByVal = map.get("createdBy");
+        if (createdByVal !== undefined && typeof createdByVal !== "string") needsNormalize = true;
+
+        if (needsNormalize) break;
       }
-      if (allLocal) return;
+
+      if (!needsNormalize) return;
     }
 
-    const cloneEntryToLocal = (value: unknown, fallbackId?: string): Y.Map<unknown> | null => {
-      const parsed = yRangeToEncryptedRange(value, fallbackId);
-      if (!parsed) return null;
-
+    const cloneRangeToLocal = (parsed: EncryptedRange): Y.Map<unknown> => {
       const out = new Y.Map<unknown>();
       out.set("id", parsed.id);
       out.set("sheetId", parsed.sheetId);
@@ -432,10 +489,15 @@ export class EncryptedRangeManager {
 
       const next = new Y.Array<Y.Map<unknown>>();
 
+      /** @type {Set<string>} */
+      const signatures = new Set();
       const pushFrom = (value: unknown, fallbackId?: string) => {
-        const cloned = cloneEntryToLocal(value, fallbackId);
-        if (!cloned) return;
-        next.push([cloned]);
+        const parsed = yRangeToEncryptedRange(value, fallbackId);
+        if (!parsed) return;
+        const sig = rangeSignature(parsed);
+        if (signatures.has(sig)) return;
+        signatures.add(sig);
+        next.push([cloneRangeToLocal(parsed)]);
       };
 
       const arr = getYArray(current);
@@ -444,9 +506,12 @@ export class EncryptedRangeManager {
       } else {
         const map = getYMap(current);
         if (map) {
-          map.forEach((value, key) => {
-            pushFrom(value, String(key));
-          });
+          const keys = Array.from(map.keys())
+            .map((k) => String(k))
+            .sort();
+          for (const key of keys) {
+            pushFrom(map.get(key), key);
+          }
         } else if (Array.isArray(current)) {
           for (const item of current) pushFrom(item);
         } else {
