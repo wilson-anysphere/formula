@@ -185,6 +185,7 @@ export class DrawingSpatialIndex {
   private readonly seenGenerationById = new Map<number, number>();
   private seenGeneration = 1;
   private readonly hitTestCandidatesScratch: DrawingObject[] = [];
+  private readonly changedScratch: DrawingObject[] = [];
 
   constructor(opts?: { tileSizePx?: number; maxBucketsPerObject?: number }) {
     const tileSizePx = opts?.tileSizePx ?? DEFAULT_DRAWING_SPATIAL_INDEX_TILE_SIZE_PX;
@@ -409,13 +410,15 @@ export class DrawingSpatialIndex {
     if (this.orderById.size !== prevObjects.length) return false;
     if (this.objectById.size !== prevObjects.length) return false;
 
-    const changed: DrawingObject[] = [];
+    const changed = this.changedScratch;
+    changed.length = 0;
     for (let i = 0; i < objects.length; i += 1) {
       const next = objects[i]!;
       const prev = prevObjects[i]!;
-      if (next.id !== prev.id) return false;
-      if (next.zOrder !== prev.zOrder) return false;
-      if (!this.objectById.has(next.id)) return false;
+      if (next.id !== prev.id || next.zOrder !== prev.zOrder || !this.objectById.has(next.id)) {
+        changed.length = 0;
+        return false;
+      }
       if (next !== prev) changed.push(next);
     }
 
@@ -426,10 +429,14 @@ export class DrawingSpatialIndex {
     }
 
     for (const obj of changed) {
-      if (!this.updateObject(obj, geom, zoom)) return false;
+      if (!this.updateObject(obj, geom, zoom)) {
+        changed.length = 0;
+        return false;
+      }
     }
 
     this.lastObjects = objects;
+    changed.length = 0;
     return true;
   }
 
