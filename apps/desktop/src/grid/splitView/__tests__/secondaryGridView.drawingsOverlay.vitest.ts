@@ -257,7 +257,7 @@ describe("SecondaryGridView drawings overlay", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
 
@@ -325,7 +325,7 @@ describe("SecondaryGridView drawings overlay", () => {
     });
 
     const doc = new DocumentController();
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     const view = new SecondaryGridView({
       container,
@@ -369,7 +369,7 @@ describe("SecondaryGridView drawings overlay", () => {
 
     const doc = new DocumentController();
     const sheetId = "Sheet1";
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
     const objects: DrawingObject[] = [
       {
         id: 1,
