@@ -55,7 +55,10 @@ describe("Ribbon UI state overrides (dropdown menu items)", () => {
     act(() => {
       setRibbonUiState({
         pressedById: Object.create(null),
-        labelById: { "clipboard.pasteSpecial.values": "Paste Values (Web)" },
+        labelById: {
+          "clipboard.pasteSpecial.values": "Paste Values (Web)",
+          "clipboard.pasteSpecial.values.ariaLabel": "Paste values (web override)",
+        },
         disabledById: { "clipboard.pasteSpecial.values": true },
         shortcutById: Object.create(null),
         ariaKeyShortcutsById: Object.create(null),
@@ -63,6 +66,7 @@ describe("Ribbon UI state overrides (dropdown menu items)", () => {
     });
 
     expect(getValuesItem()?.disabled).toBe(true);
+    expect(getValuesItem()?.getAttribute("aria-label")).toBe("Paste values (web override)");
     expect(getValuesLabel()).toBe("Paste Values (Web)");
 
     act(() => root.unmount());

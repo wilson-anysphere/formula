@@ -320,7 +320,8 @@ export const RibbonButton = React.memo(function RibbonButton({
         >
           {button.menuItems?.map((item) => {
             const menuItemLabel = labelById?.[item.id] ?? item.label;
-            const menuItemAriaLabel = labelById?.[item.id] ?? item.ariaLabel;
+            const menuItemAriaLabelKey = `${item.id}.ariaLabel`;
+            const menuItemAriaLabel = labelById?.[menuItemAriaLabelKey] ?? labelById?.[item.id] ?? item.ariaLabel;
             const menuItemDisabled =
               // Schema-disabled items must remain disabled; the UI state can only *add* additional
               // disabling (e.g. editing-mode guards), not re-enable schema-disabled items.
@@ -398,6 +399,7 @@ function areRibbonButtonPropsEqual(prev, next) {
 
   for (const item of menuItems) {
     if (prev.labelById?.[item.id] !== next.labelById?.[item.id]) return false;
+    if (prev.labelById?.[`${item.id}.ariaLabel`] !== next.labelById?.[`${item.id}.ariaLabel`]) return false;
     if (prev.disabledById?.[item.id] !== next.disabledById?.[item.id]) return false;
   }
 

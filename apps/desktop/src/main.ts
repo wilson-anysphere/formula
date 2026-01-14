@@ -2572,6 +2572,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.appearance.theme.light": t("ribbon.theme.light"),
       "view.appearance.theme.dark": t("ribbon.theme.dark"),
       "view.appearance.theme.highContrast": t("ribbon.theme.highContrast"),
+      "view.appearance.theme.system.ariaLabel": t("commandDescription.view.theme.system"),
+      "view.appearance.theme.light.ariaLabel": t("commandDescription.view.theme.light"),
+      "view.appearance.theme.dark.ariaLabel": t("commandDescription.view.theme.dark"),
+      "view.appearance.theme.highContrast.ariaLabel": t("commandDescription.view.theme.highContrast"),
     };
 
     // Font dropdown labels should reflect the current selection (Excel-style).
