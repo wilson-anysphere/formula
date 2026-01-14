@@ -4255,6 +4255,44 @@ mod tests {
     }
 
     #[test]
+    fn read_xlsx_or_xlsm_drops_oversized_vba_project_signature_bin() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let bytes = std::fs::read(fixture).expect("read xlsm fixture");
+
+        let signature_limit = 64u64;
+        let oversized_sig = vec![0u8; (signature_limit + 1) as usize];
+        let rewritten = upsert_zip_entry(&bytes, "xl/vbaProjectSignature.bin", &oversized_sig);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let workbook_path = tmp.path().join("oversized-signature.xlsm");
+        std::fs::write(&workbook_path, rewritten).expect("write workbook");
+
+        let workbook = read_xlsx_or_xlsm_blocking_with_limits(
+            &workbook_path,
+            1024 * 1024,
+            signature_limit,
+            1024 * 1024,
+        )
+        .expect("open workbook");
+
+        assert!(
+            workbook.vba_project_bin.is_some(),
+            "expected VBA project to remain present"
+        );
+        assert!(
+            workbook.vba_project_signature_bin.is_none(),
+            "expected oversized VBA signature part to be dropped"
+        );
+        assert!(
+            workbook.macro_fingerprint.is_some(),
+            "expected macro fingerprint to still be computed when VBA project is present"
+        );
+    }
+
+    #[test]
     fn patch_save_rewrites_workbook_xml_sheet_order_when_reordered() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let origin_path = tmp.path().join("origin.xlsx");
