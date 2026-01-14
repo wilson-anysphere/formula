@@ -1088,10 +1088,14 @@ fn build_parts(
             let existing_drawing_rels_xml = parts
                 .get(&drawing_rels_path)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok());
-            let mut drawing_part = crate::drawings::DrawingPart::from_objects(
+            let existing_drawing_xml = parts
+                .get(&drawing_part_path)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok());
+            let mut drawing_part = crate::drawings::DrawingPart::from_objects_with_existing_drawing_xml(
                 sheet_index,
                 drawing_part_path.clone(),
                 sheet.drawings.clone(),
+                existing_drawing_xml,
                 existing_drawing_rels_xml,
             )?;
             drawing_part.write_into_parts(&mut parts, &doc.workbook)?;

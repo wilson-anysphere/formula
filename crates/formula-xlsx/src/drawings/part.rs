@@ -155,6 +155,27 @@ impl DrawingPart {
         })
     }
 
+    /// Variant of [`Self::from_objects`] that also preserves the namespace declarations found on
+    /// the original drawing XML root (`<xdr:wsDr>`).
+    ///
+    /// This is important when the object list includes preserved raw XML fragments (e.g. SmartArt
+    /// `dgm:*` nodes) that rely on additional root-level namespace declarations.
+    pub fn from_objects_with_existing_drawing_xml(
+        sheet_index: usize,
+        path: String,
+        objects: Vec<DrawingObject>,
+        existing_drawing_xml: Option<&str>,
+        existing_rels_xml: Option<&str>,
+    ) -> Result<Self> {
+        let mut part = Self::from_objects(sheet_index, path, objects, existing_rels_xml)?;
+        if let Some(xml) = existing_drawing_xml {
+            if let Ok(doc) = Document::parse(xml) {
+                part.root_xmlns = extract_root_xmlns(doc.root_element());
+            }
+        }
+        Ok(part)
+    }
+
     pub fn parse_from_parts(
         sheet_index: usize,
         path: &str,
