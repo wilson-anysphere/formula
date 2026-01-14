@@ -149,6 +149,8 @@ describe("SpreadsheetApp drawings teardown", () => {
     const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
     const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const interactionTarget =
+      ((app as any).drawingInteractionController as { element?: EventTarget } | null)?.element ?? root;
 
     // Ensure the insert-image input (if created) is cleaned up on dispose.
     const input = (app as any).ensureInsertImageInput?.() as HTMLInputElement | undefined;
@@ -194,7 +196,6 @@ describe("SpreadsheetApp drawings teardown", () => {
     // End the gesture before disposing so teardown doesn't have to handle an in-flight drag.
     dispatchPointerEvent(interactionTarget, "pointerup", { clientX: 80, clientY: 55, pointerId: 1 });
 
-    setObjectsSpy.mockClear();
     clearSpy.mockClear();
 
     app.dispose();
@@ -206,6 +207,10 @@ describe("SpreadsheetApp drawings teardown", () => {
       expect(input.onchange).toBeNull();
       expect((app as any).insertImageInput).toBeNull();
     }
+
+    // Disposing while a drag gesture is in progress may cancel the gesture by restoring the
+    // pre-drag object list. Clear spies after dispose so we only assert on post-dispose events.
+    setObjectsSpy.mockClear();
 
     // Pointer events on the old root should not invoke drawing callbacks once disposed.
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
