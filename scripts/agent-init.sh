@@ -19,6 +19,37 @@ case $- in
 esac
 set -e
 
+# If wrapper-specific config variables are set without being exported (common in interactive shells),
+# export them so subprocesses (including `scripts/cargo_agent.sh`) can observe the intended
+# overrides.
+if [ -n "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ]; then
+  export FORMULA_ALLOW_GLOBAL_CARGO_HOME
+fi
+if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
+  export FORMULA_CARGO_JOBS
+fi
+if [ -n "${FORMULA_CARGO_TEST_JOBS:-}" ]; then
+  export FORMULA_CARGO_TEST_JOBS
+fi
+if [ -n "${FORMULA_CARGO_LIMIT_AS:-}" ]; then
+  export FORMULA_CARGO_LIMIT_AS
+fi
+if [ -n "${FORMULA_RUST_TEST_THREADS:-}" ]; then
+  export FORMULA_RUST_TEST_THREADS
+fi
+if [ -n "${FORMULA_RAYON_NUM_THREADS:-}" ]; then
+  export FORMULA_RAYON_NUM_THREADS
+fi
+if [ -n "${FORMULA_OPENSSL_VENDOR:-}" ]; then
+  export FORMULA_OPENSSL_VENDOR
+fi
+if [ -n "${FORMULA_CARGO_RETRY_ATTEMPTS:-}" ]; then
+  export FORMULA_CARGO_RETRY_ATTEMPTS
+fi
+if [ -n "${FORMULA_LLD_THREADS:-}" ]; then
+  export FORMULA_LLD_THREADS
+fi
+
 # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
 # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift.
 #

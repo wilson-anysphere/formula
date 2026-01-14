@@ -174,6 +174,34 @@ test('agent-init derives CARGO_BUILD_JOBS from FORMULA_CARGO_JOBS', { skip: !has
   assert.equal(rayon, '7');
 });
 
+test('agent-init exports FORMULA_CARGO_JOBS when set without export', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset FORMULA_CARGO_JOBS',
+      // Set but do not export (common interactive usage).
+      'FORMULA_CARGO_JOBS=7',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^FORMULA_CARGO_JOBS="',
+    ].join(' && '),
+  );
+  assert.equal(out, 'FORMULA_CARGO_JOBS=7');
+});
+
+test('agent-init exports FORMULA_ALLOW_GLOBAL_CARGO_HOME when set without export', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset FORMULA_ALLOW_GLOBAL_CARGO_HOME',
+      // Set but do not export (common interactive usage).
+      'FORMULA_ALLOW_GLOBAL_CARGO_HOME=1',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^FORMULA_ALLOW_GLOBAL_CARGO_HOME="',
+    ].join(' && '),
+  );
+  assert.equal(out, 'FORMULA_ALLOW_GLOBAL_CARGO_HOME=1');
+});
+
 test('agent-init does not enable errexit in bash when it was previously disabled', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -280,6 +308,21 @@ test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !h
 
   assert.equal(stderr, '');
   assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
+});
+
+test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset FORMULA_CARGO_JOBS',
+      'FORMULA_CARGO_JOBS=7',
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^FORMULA_CARGO_JOBS="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'FORMULA_CARGO_JOBS=7');
 });
 
 test('agent-init does not enable errexit in /bin/sh when it was previously disabled', { skip: !hasSh }, () => {
