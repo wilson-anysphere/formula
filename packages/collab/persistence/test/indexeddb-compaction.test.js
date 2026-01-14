@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import * as Y from "yjs";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import { storeState } from "y-indexeddb";
 
 import { IndexedDbCollabPersistence } from "../src/indexeddb.ts";
 
@@ -141,6 +142,52 @@ test("IndexedDbCollabPersistence compaction preserves updates written by other p
   docA.destroy();
   docB.destroy();
   await sleep(25);
+
+  await persistenceC.clear(docId);
+  docC.destroy();
+});
+
+test("IndexedDbCollabPersistence compaction keeps y-indexeddb storeState from dropping unseen updates", async () => {
+  const docId = `doc-${randomUUID()}`;
+
+  const docA = new Y.Doc({ guid: docId });
+  const persistenceA = new IndexedDbCollabPersistence();
+  persistenceA.bind(docId, docA);
+  await persistenceA.load(docId, docA);
+
+  docA.getMap("root").set("a", "one");
+  await sleep(25);
+
+  const docB = new Y.Doc({ guid: docId });
+  const persistenceB = new IndexedDbCollabPersistence();
+  persistenceB.bind(docId, docB);
+  await persistenceB.load(docId, docB);
+
+  // Persist an update after B loads, so B doesn't have it in memory.
+  docA.getMap("root").set("b", "two");
+  await sleep(25);
+
+  // B compacts (merges existing persisted updates into a single snapshot record).
+  await persistenceB.flush(docId);
+  await sleep(25);
+
+  // Now force y-indexeddb's own compaction logic to run. This should not drop the unseen
+  // persisted update for "b".
+  const entryB = persistenceB.entries.get(docId);
+  await storeState(entryB.persistence, true);
+  await sleep(25);
+
+  const docC = new Y.Doc({ guid: docId });
+  const persistenceC = new IndexedDbCollabPersistence();
+  persistenceC.bind(docId, docC);
+  await persistenceC.load(docId, docC);
+
+  const rootC = docC.getMap("root");
+  assert.equal(rootC.get("a"), "one");
+  assert.equal(rootC.get("b"), "two");
+
+  docA.destroy();
+  docB.destroy();
 
   await persistenceC.clear(docId);
   docC.destroy();

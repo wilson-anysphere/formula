@@ -184,7 +184,11 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       synced: false,
     };
 
-    entry.onDocUpdate = () => {
+    entry.onDocUpdate = (_update: Uint8Array, origin: unknown) => {
+      // Ignore updates applied by the underlying y-indexeddb instance (e.g. replaying
+      // persisted updates). We only want to count new in-memory edits that may need
+      // to be compacted.
+      if (origin === persistence) return;
       if (!entry.synced) return;
       if (this.maxUpdates <= 0) return;
 
@@ -423,7 +427,15 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       this.updateCounts.set(docId, 0);
       const internal = entry.persistence as any;
       if (typeof wroteKey === "number") {
-        internal._dbref = wroteKey + 1;
+        // Maintain y-indexeddb invariants: `_dbref` is the "next key to read". If we
+        // advance it past the rewritten snapshot without applying that snapshot into
+        // the live doc, y-indexeddb may later delete the snapshot during `storeState`
+        // and lose updates that only existed in IndexedDB (e.g. from another instance).
+        //
+        // Keeping `_dbref` at the snapshot key means `fetchUpdates()` (invoked by
+        // y-indexeddb's own compaction) will re-apply the snapshot before it deletes
+        // earlier keys.
+        internal._dbref = wroteKey;
         internal._dbsize = 1;
       }
     });
