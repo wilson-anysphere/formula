@@ -342,6 +342,7 @@ export class SecondaryGridView {
       const source = typeof payload?.source === "string" ? payload.source : "";
       if (source === "applyState") {
         this.grid.renderer.clearImageCache?.();
+        this.drawingsOverlay.clearImageCache();
       } else {
         const deltas = Array.isArray(payload?.imageDeltas)
           ? payload.imageDeltas
@@ -353,6 +354,7 @@ export class SecondaryGridView {
             typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
           if (!imageId) continue;
           this.grid.renderer.invalidateImage?.(imageId);
+          this.drawingsOverlay.invalidateImage(imageId);
         }
       }
 
@@ -361,6 +363,20 @@ export class SecondaryGridView {
       }
     });
     this.disposeFns.push(() => unsubscribeImages());
+
+    // Optional dedicated event streams (if/when DocumentController adds them).
+    const unsubscribeDrawings = this.document.on("drawings", (payload: any) => {
+      const sheetId = typeof payload?.sheetId === "string" ? payload.sheetId : null;
+      if (sheetId && sheetId !== this.getSheetId()) return;
+      void this.renderDrawings();
+    });
+    this.disposeFns.push(() => unsubscribeDrawings());
+
+    const unsubscribeImagesEvent = this.document.on("images", () => {
+      this.drawingsOverlay.clearImageCache();
+      void this.renderDrawings();
+    });
+    this.disposeFns.push(() => unsubscribeImagesEvent());
 
     // Excel behavior: clicking another cell while editing should commit the edit and move selection.
     // We rely on the editor's blur-to-commit handler above (which fires when DesktopSharedGrid
