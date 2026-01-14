@@ -53,7 +53,7 @@ test("what-if styles keep spacing on the shared --space-* scale", () => {
   assert.deepEqual(
     [...violations],
     [],
-    `Found pixel-based spacing declarations in what-if.css (use --space-* tokens for padding/margin/gap):\n${[...violations]
+    `Found hardcoded spacing values in what-if.css (use --space-* tokens for padding/margin/gap):\n${[...violations]
       .map((violation) => `- ${violation}`)
       .join("\n")}`,
   );
