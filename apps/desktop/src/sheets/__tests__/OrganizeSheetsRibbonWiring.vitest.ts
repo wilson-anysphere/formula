@@ -17,7 +17,7 @@ describe("Organize Sheets ribbon wiring", () => {
     expect(source.slice(caseIndex, caseIndex + 300)).toMatch(/openOrganizeSheets\s*\(/);
 
     // Ensure the helper exists and delegates to `openOrganizeSheetsDialog`.
-    const fnMatch = source.match(/function\s+openOrganizeSheets\s*\(/);
+    const fnMatch = source.match(/(?:function\s+openOrganizeSheets\s*\(|const\s+openOrganizeSheets\s*=\s*\(\)\s*=>)/);
     expect(fnMatch).not.toBeNull();
     const fnIndex = fnMatch?.index ?? -1;
     expect(fnIndex).toBeGreaterThanOrEqual(0);
