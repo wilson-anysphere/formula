@@ -606,17 +606,14 @@ function tryReadImplicitStructuredReference(input: string, start: number): { tex
   const next = input[scan] ?? "";
   if (next !== "@" && next !== "[") return null;
 
-  let bestEnd: number | null = null;
-  for (let j = start; j < input.length; j += 1) {
-    if (input[j] !== "]") continue;
-    const end = j + 1;
-    const text = input.slice(start, end);
-    if (!parseStructuredReferenceText(text)) continue;
-    bestEnd = end;
-  }
-
-  if (bestEnd == null) return null;
-  return { text: input.slice(start, bestEnd), end: bestEnd };
+  // Use the same `]]` disambiguation logic as table-qualified structured references, otherwise
+  // implicit refs like `[[#All],[Amount]]` could incorrectly "eat" into later string literals
+  // containing `]]` (e.g. `... & "]]"`).
+  const end = findBracketEnd(input, start);
+  if (!end) return null;
+  const text = input.slice(start, end);
+  if (!parseStructuredReferenceText(text)) return null;
+  return { text, end };
 }
 
 export function tokenizeFormula(input: string): FormulaToken[] {

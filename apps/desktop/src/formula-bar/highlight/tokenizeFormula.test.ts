@@ -208,6 +208,38 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("does not consume into string literals when tokenizing implicit structured references", () => {
+    const input = '=SUM([[#All],[Amount]] & "]]", 1)';
+    const tokens = tokenizeFormula(input).filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["function", "SUM"],
+      ["punctuation", "("],
+      ["reference", "[[#All],[Amount]]"],
+      ["operator", "&"],
+      ["string", '"]]"'],
+      ["punctuation", ","],
+      ["number", "1"],
+      ["punctuation", ")"],
+    ]);
+  });
+
+  it("does not consume into string literals when tokenizing nested implicit this-row references ([@[Column]])", () => {
+    const input = '=SUM([@[Total Amount]] & "]]", 1)';
+    const tokens = tokenizeFormula(input).filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["function", "SUM"],
+      ["punctuation", "("],
+      ["reference", "[@[Total Amount]]"],
+      ["operator", "&"],
+      ["string", '"]]"'],
+      ["punctuation", ","],
+      ["number", "1"],
+      ["punctuation", ")"],
+    ]);
+  });
+
   it("tokenizes structured table specifiers (#All/#Headers/#Data/#Totals) as single reference tokens", () => {
     const input = "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals])";
     const refs = tokenizeFormula(input)

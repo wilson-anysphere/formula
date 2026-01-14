@@ -133,4 +133,30 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(sharedRefs).toEqual(["Table1[@Amount]", "Table1[@[Total Amount]]", "[@Amount]", "[@[Total Amount]]"]);
     expect(consumerRefs).toEqual(sharedRefs);
   });
+
+  it("matches between packages for implicit structured refs followed by strings containing `]]`", () => {
+    const input = '=SUM([[#All],[Amount]] & "]]", 1)';
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["[[#All],[Amount]]"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
+  it("matches between packages for nested implicit this-row refs followed by strings containing `]]`", () => {
+    const input = '=SUM([@[Total Amount]] & "]]", 1)';
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["[@[Total Amount]]"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
 });
