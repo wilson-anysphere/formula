@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
+import { rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { resolve as resolveTsImportsLoader } from "./resolve-ts-imports-loader.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 
 // Include an explicit `.ts` specifier so `scripts/run-node-tests.mjs` can skip this
@@ -22,6 +25,29 @@ test("node:test runner resolves bundler-style + extensionless + directory TS spe
   assert.equal(valueFromBarExtensionless(), 42);
   assert.equal(valueFromDirImport(), 42);
   assert.equal(valueFromBarJsx(), 42);
+});
+
+test("resolve-ts-imports-loader resolves @formula/* workspace packages when default resolution fails", async () => {
+  const miss = new Error("ERR_MODULE_NOT_FOUND");
+  /** @type {any} */ (miss).code = "ERR_MODULE_NOT_FOUND";
+  const failingResolve = async () => {
+    throw miss;
+  };
+
+  const resolved = await resolveTsImportsLoader("@formula/collab-session?raw", { parentURL: import.meta.url }, failingResolve);
+  assert.equal(resolved.shortCircuit, true);
+  assert.ok(typeof resolved.url === "string" && resolved.url.includes("?raw"));
+
+  const url = new URL(resolved.url);
+  url.search = "";
+  url.hash = "";
+  const resolvedPath = fileURLToPath(url);
+  assert.ok(resolvedPath.startsWith(repoRoot), "expected resolved file to be within the repo");
+  assert.ok(
+    resolvedPath.includes(path.join("packages", "collab", "session")),
+    "expected resolved file to be under packages/collab/session",
+  );
+  assert.ok(statSync(resolvedPath).isFile(), "expected resolved workspace entrypoint to exist");
 });
 
 function getBuiltInTypeScriptSupport() {
@@ -94,7 +120,6 @@ test(
   "resolve-ts-imports-loader works under Node built-in TypeScript execution (no TypeScript dependency)",
   { skip: !builtInTypeScript.enabled },
   () => {
-    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const loaderUrl = pathToFileURL(path.join(repoRoot, "scripts", "resolve-ts-imports-loader.mjs")).href;
     const child = spawnSync(
       process.execPath,

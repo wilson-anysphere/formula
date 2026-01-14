@@ -395,15 +395,14 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
     `from\\s+["'][^"']+\\.(${extGroup})["']|import\\(\\s*["'][^"']+\\.(${extGroup})["']\\s*\\)`,
   );
 
-  // When TypeScript execution is unavailable (older Node versions without `--experimental-strip-types`
-  // and without a TS transpile loader), we still want to skip suites that depend on workspace packages
-  // whose entrypoints are authored as `.ts`/`.tsx` (even if the test itself doesn't import a `.ts`
-  // file directly).
+  // When TypeScript/TSX execution is unavailable (older Node versions without `--experimental-strip-types`
+  // or when running under Node's built-in TS execution which does not support `.tsx`), we still want to
+  // skip suites that depend on workspace packages whose entrypoints are authored as `.ts`/`.tsx` (even
+  // if the test itself doesn't import a `.ts`/`.tsx` file directly).
   //
-  // We only do this extra analysis when we're filtering `.ts` imports (not when we're *only* filtering
-  // `.tsx` imports due to strip-types limitations).
-  const shouldDetectWorkspaceTypeScriptEntrypoints = extensions.includes("ts");
-  const workspacePackages = shouldDetectWorkspaceTypeScriptEntrypoints ? await loadWorkspacePackageEntrypoints() : null;
+  // We treat `extensions` as the set of *disallowed* entrypoint extensions for this environment.
+  const workspacePackages = await loadWorkspacePackageEntrypoints();
+  const disallowedEntrypointExtensions = new Set(extensions.map((ext) => `.${ext}`));
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
@@ -491,13 +490,16 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
 
     for (const specifier of specifiers) {
       if (!specifier) continue;
-      const parsed = parseWorkspaceSpecifier(specifier);
+      const parsed = parseWorkspaceSpecifier(specifier.split("?")[0].split("#")[0]);
       if (!parsed) continue;
       const info = workspacePackages.get(parsed.packageName);
       if (!info) continue;
       const resolved = resolveExportPath(info.exports, parsed.exportKey, info.main);
       if (!resolved) continue;
-      if (resolved.endsWith(".ts") || resolved.endsWith(".tsx")) return true;
+      const resolvedBase = resolved.split("?")[0].split("#")[0];
+      for (const ext of disallowedEntrypointExtensions) {
+        if (resolvedBase.endsWith(ext)) return true;
+      }
     }
 
     return false;
@@ -507,7 +509,7 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
     const text = await readFile(file, "utf8").catch(() => "");
     // Heuristic: skip tests that import TypeScript modules when the runtime can't execute them.
     if (tsImportRe.test(text)) continue;
-    if (shouldDetectWorkspaceTypeScriptEntrypoints && importsWorkspaceTypeScriptEntrypoint(text)) continue;
+    if (importsWorkspaceTypeScriptEntrypoint(text)) continue;
     out.push(file);
   }
   return out;
@@ -929,15 +931,17 @@ async function filterExternalDependencyTests(files, opts) {
 }
 
 /**
- * Filter out node:test files that import workspace packages that aren't present in
- * the local `node_modules/` tree.
+ * Filter out node:test files that depend on workspace packages that can't be resolved.
  *
  * Some environments (including agent sandboxes) may have third-party dependencies
- * installed but only a subset of workspace package links. In that case, running
- * the full node:test suite would fail fast with `ERR_MODULE_NOT_FOUND` for the
- * missing workspace packages.
+ * installed but only a subset of workspace package links. In that case, running the
+ * full node:test suite would fail fast with `ERR_MODULE_NOT_FOUND` for the missing
+ * workspace packages.
  *
- * We conservatively skip tests that depend on missing `@formula/*` imports.
+ * This function first checks `require.resolve()` (so normal `node_modules` installs
+ * keep working), then falls back to a best-effort resolution via local workspace
+ * `package.json` `exports`/`main` entries. We skip tests only when a dependency still
+ * can't be resolved.
  *
  * @param {string[]} files
  * @param {{ canStripTypes: boolean, canExecuteTsx: boolean }} opts
