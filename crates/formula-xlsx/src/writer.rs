@@ -634,9 +634,26 @@ fn sheet_rels_xml(table_parts: &[(String, String)]) -> String {
 }
 
 fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    let outline_level_row = sheet
+        .outline
+        .rows
+        .iter()
+        .map(|(_, entry)| entry.level)
+        .max()
+        .unwrap_or(0);
+    let outline_level_col = sheet
+        .outline
+        .cols
+        .iter()
+        .map(|(_, entry)| entry.level)
+        .max()
+        .unwrap_or(0);
+
     if sheet.default_col_width.is_none()
         && sheet.default_row_height.is_none()
         && sheet.base_col_width.is_none()
+        && outline_level_row == 0
+        && outline_level_col == 0
     {
         return String::new();
     }
@@ -653,6 +670,12 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     if let Some(height) = sheet.default_row_height {
         // Format f32s directly to avoid casting noise like `0.100000001490116`.
         out.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    if outline_level_row > 0 {
+        out.push_str(&format!(r#" outlineLevelRow="{outline_level_row}""#));
+    }
+    if outline_level_col > 0 {
+        out.push_str(&format!(r#" outlineLevelCol="{outline_level_col}""#));
     }
     out.push_str("/>");
     out
