@@ -2,6 +2,8 @@ mod registry;
 mod translate;
 mod value_locale;
 
+use std::sync::OnceLock;
+
 pub use registry::{get_locale, iter_locales, FormulaLocale, DE_DE, EN_US, ES_ES, FR_FR};
 pub use translate::{
     canonicalize_formula, canonicalize_formula_with_style, localize_formula,
@@ -42,12 +44,14 @@ pub fn text_codepage_for_locale_id(locale_id: &str) -> u16 {
 /// The order is deterministic so downstreams can safely embed it in user-facing error messages and
 /// tests.
 pub fn supported_locale_ids() -> &'static [&'static str] {
-    SUPPORTED_LOCALE_IDS
+    static IDS: OnceLock<Box<[&'static str]>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let mut ids: Vec<&'static str> = iter_locales().map(|locale| locale.id).collect();
+        ids.sort_unstable();
+        ids.into_boxed_slice()
+    })
 }
 
-const SUPPORTED_LOCALE_IDS: &[&str] = &[
-    "en-US", "ja-JP", "zh-CN", "ko-KR", "zh-TW", "de-DE", "fr-FR", "es-ES",
-];
 #[derive(Debug, Clone, Copy)]
 struct LocaleKeyParts<'a> {
     lang: &'a str,
