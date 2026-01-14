@@ -68,3 +68,41 @@ fn decodes_sheet_scoped_ptgname_when_sheet_name_contains_apostrophe() {
     assert_eq!(formula, "'O''Brien'!LocalName");
     assert_parseable_formula(formula);
 }
+
+#[test]
+fn decodes_sheet_scoped_ptgname_when_sheet_name_is_true() {
+    let bytes = xls_fixture_builder::build_shared_formula_sheet_scoped_name_true_sheet_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result.workbook.sheet_by_name("TRUE").is_some(),
+        "expected TRUE sheet to be present"
+    );
+
+    let sheet = result.workbook.sheet_by_name("Ref").expect("Ref missing");
+    let formula = sheet
+        .formula(CellRef::from_a1("A2").unwrap())
+        .expect("expected formula in Ref!A2");
+
+    assert_eq!(formula, "'TRUE'!LocalName");
+    assert_parseable_formula(formula);
+}
+
+#[test]
+fn decodes_sheet_scoped_ptgname_when_sheet_name_looks_like_cell_reference() {
+    let bytes = xls_fixture_builder::build_shared_formula_sheet_scoped_name_a1_sheet_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result.workbook.sheet_by_name("A1").is_some(),
+        "expected A1 sheet to be present"
+    );
+
+    let sheet = result.workbook.sheet_by_name("Ref").expect("Ref missing");
+    let formula = sheet
+        .formula(CellRef::from_a1("A2").unwrap())
+        .expect("expected formula in Ref!A2");
+
+    assert_eq!(formula, "'A1'!LocalName");
+    assert_parseable_formula(formula);
+}

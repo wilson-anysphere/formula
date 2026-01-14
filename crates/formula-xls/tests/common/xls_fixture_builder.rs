@@ -13537,14 +13537,9 @@ fn build_shared_formula_sheet_scoped_name_sanitization_workbook_stream() -> Vec<
     globals
 }
 
-fn build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream() -> Vec<u8> {
-    // Like `build_shared_formula_sheet_scoped_name_sanitization_workbook_stream`, but the scoped
-    // sheet name contains an apostrophe which must be escaped in the decoded formula text.
-    //
-    // Sheets:
-    // - Sheet 0: `O'Brien` (valid, but requires quoting in formulas).
-    // - Sheet 1: `Ref`, with a shared formula A1:A2 whose shared rgce is `PtgName(1)` referencing a
-    //   sheet-scoped defined name on sheet 0.
+fn build_shared_formula_sheet_scoped_name_simple_workbook_stream(scoped_sheet_name: &str) -> Vec<u8> {
+    // Shared formula (`SHRFMLA` + `PtgExp`) whose shared rgce is `PtgName(1)`, referencing a
+    // sheet-scoped defined name on `scoped_sheet_name`.
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
@@ -13561,7 +13556,7 @@ fn build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream() -> Vec<u8
 
     // BoundSheet records.
     let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
-    for name in ["O'Brien", "Ref"] {
+    for name in [scoped_sheet_name, "Ref"] {
         let boundsheet_start = globals.len();
         let mut boundsheet = Vec::<u8>::new();
         boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
@@ -13571,7 +13566,7 @@ fn build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream() -> Vec<u8
         boundsheet_offset_positions.push(boundsheet_start + 4);
     }
 
-    // Sheet-scoped defined name on `O'Brien` (itab=1 => sheet index 0).
+    // Sheet-scoped defined name on `scoped_sheet_name` (itab=1 => sheet index 0).
     let name_rgce: Vec<u8> = vec![
         0x24, // PtgRef
         0x00, 0x00, // row = 0
@@ -13604,6 +13599,18 @@ fn build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream() -> Vec<u8
     globals.extend_from_slice(&build_shared_ptgname_shrfmla_sheet_stream(xf_cell));
 
     globals
+}
+
+fn build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream() -> Vec<u8> {
+    build_shared_formula_sheet_scoped_name_simple_workbook_stream("O'Brien")
+}
+
+fn build_shared_formula_sheet_scoped_name_true_sheet_workbook_stream() -> Vec<u8> {
+    build_shared_formula_sheet_scoped_name_simple_workbook_stream("TRUE")
+}
+
+fn build_shared_formula_sheet_scoped_name_a1_sheet_workbook_stream() -> Vec<u8> {
+    build_shared_formula_sheet_scoped_name_simple_workbook_stream("A1")
 }
 
 fn build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream() -> Vec<u8> {
@@ -16081,6 +16088,40 @@ pub fn build_shared_formula_sheet_scoped_name_sanitization_fixture_xls() -> Vec<
 /// (`'O''Brien'!LocalName`).
 pub fn build_shared_formula_sheet_scoped_name_apostrophe_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_sheet_scoped_name_apostrophe_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where the sheet containing the sheet-scoped `PtgName` is named
+/// `TRUE`, which Excel allows but requires quoting in formulas to avoid ambiguity with the boolean
+/// literal.
+pub fn build_shared_formula_sheet_scoped_name_true_sheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_scoped_name_true_sheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where the sheet containing the sheet-scoped `PtgName` is named
+/// `A1`, which Excel allows but requires quoting in formulas to avoid ambiguity with an A1-style
+/// cell reference.
+pub fn build_shared_formula_sheet_scoped_name_a1_sheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_scoped_name_a1_sheet_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
