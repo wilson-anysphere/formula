@@ -791,6 +791,51 @@ test("tauri-updater-manifest: validateTauriUpdaterManifest ignores installer-spe
   );
 });
 
+test("tauri-updater-manifest: validateTauriUpdaterManifest rejects Linux .rpm for runtime keys", () => {
+  assert.throws(
+    () =>
+      validateTauriUpdaterManifest({
+        version: "0.1.0",
+        platforms: {
+          "linux-x86_64": {
+            url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_amd64.rpm",
+          },
+        },
+      }),
+    /Linux updater artifact must be an AppImage bundle/i,
+  );
+});
+
+test("tauri-updater-manifest: validateTauriUpdaterManifest rejects Windows .exe for runtime keys", () => {
+  assert.throws(
+    () =>
+      validateTauriUpdaterManifest({
+        version: "0.1.0",
+        platforms: {
+          "windows-x86_64": {
+            url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64.exe",
+          },
+        },
+      }),
+    /Windows updater artifact must end with \.msi/i,
+  );
+});
+
+test("tauri-updater-manifest: validateTauriUpdaterManifest rejects macOS .dmg for runtime keys", () => {
+  assert.throws(
+    () =>
+      validateTauriUpdaterManifest({
+        version: "0.1.0",
+        platforms: {
+          "darwin-x86_64": {
+            url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0.dmg",
+          },
+        },
+      }),
+    /macOS updater artifact.*not an installer/i,
+  );
+});
+
 test("tauri-updater-manifest: verifyTauriManifestSignature returns false for a wrong signature", async () => {
   const manifestText = await readTextFixture("latest.multi-platform.json");
   const keypair = await readJsonFixture("test-keypair.json");
