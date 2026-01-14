@@ -209,6 +209,58 @@ fn insert_rows_matches_sheet_names_case_insensitively_for_unicode_text() {
 }
 
 #[test]
+fn insert_rows_matches_sheet_names_nfkc_case_insensitively() {
+    let mut engine = Engine::new();
+
+    // Use a Unicode sheet name that requires NFKC normalization to match.
+    // U+212A KELVIN SIGN (K) is NFKC-equivalent to ASCII 'K'.
+    seed_sales_data_on(&mut engine, "Kelvin");
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Kelvin".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Kelvin".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    // Apply the edit using a different spelling that should match under NFKC + Unicode case.
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "KELVIN".to_string(),
+            row: 0,
+            count: 2,
+        })
+        .unwrap();
+
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.cell, cell("D3"));
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Kelvin".to_string(),
+            range: Some(range("A3:B7")),
+        }
+    );
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(
+        engine.get_cell_value("Kelvin", "D3"),
+        Value::Text("Region".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Kelvin", "E6"), Value::Number(700.0));
+}
+
+#[test]
 fn insert_cols_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
     let mut engine = Engine::new();
     seed_sales_data(&mut engine);
