@@ -92,7 +92,8 @@ These TSVs are **committed artifacts** that are kept in sync with the engine’s
 
 **Runtime behavior:** [`FormulaLocale`] references an [`ErrorTranslations`] table backed by the
 committed `*.errors.tsv` files (wired up via `include_str!()` in `src/locale/registry.rs`). The
-engine parses these TSVs at runtime to translate between canonical and localized error literals.
+engine parses these TSVs lazily at runtime to translate between canonical and localized error
+literals.
 
 Upstream localized spellings (used to (re)generate the committed TSVs) live under:
 
@@ -269,6 +270,8 @@ Treating bracket content as opaque is also important for correctness because it 
      `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
 3. **Register the locale in code:**
      - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
+       in `crates/formula-engine/src/locale/registry.rs`.
+     - Add a `static <LOCALE>_ERRORS: ErrorTranslations = ...include_str!("data/<locale>.errors.tsv")`
        in `crates/formula-engine/src/locale/registry.rs`.
      - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
        error translations (`errors: &<LOCALE>_ERRORS`).
