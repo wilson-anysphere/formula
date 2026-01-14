@@ -113,14 +113,6 @@ pub struct Sheet {
     pub(crate) cells: HashMap<(usize, usize), Cell>,
     pub(crate) dirty_cells: HashSet<(usize, usize)>,
     pub(crate) columnar: Option<Arc<ColumnarTable>>,
-    /// Per-column width overrides imported from the source workbook (Excel character units).
-    ///
-    /// Keys are 0-based column indices.
-    pub(crate) col_widths: HashMap<usize, f32>,
-    /// User-hidden columns imported from the source workbook.
-    ///
-    /// Keys are 0-based column indices.
-    pub(crate) hidden_cols: HashSet<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -158,8 +150,6 @@ impl Sheet {
             cells: HashMap::new(),
             dirty_cells: HashSet::new(),
             columnar: None,
-            col_widths: HashMap::new(),
-            hidden_cols: HashSet::new(),
         }
     }
 
@@ -1389,15 +1379,6 @@ fn formula_model_sheet_to_app_sheet(
     out.tab_color = sheet.tab_color.clone();
     out.default_col_width = sheet.default_col_width;
     out.col_properties = sheet.col_properties.clone();
-
-    for (col, props) in &sheet.col_properties {
-        if let Some(width) = props.width {
-            out.col_widths.insert(*col as usize, width);
-        }
-        if props.hidden {
-            out.hidden_cols.insert(*col as usize);
-        }
-    }
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;
