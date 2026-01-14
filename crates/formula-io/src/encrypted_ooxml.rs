@@ -648,7 +648,8 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
         )),
     })?;
 
-    // The streaming decryptor currently supports the AES-CBC CryptoAPI variant.
+    // The streaming decryptor currently supports Standard/CryptoAPI AES `EncryptedPackage`
+    // decryption via AES-ECB (no IV). (It does not support the RC4 variant in this path.)
     match info.header.alg_id {
         offcrypto::CALG_AES_128 | offcrypto::CALG_AES_192 | offcrypto::CALG_AES_256 => {}
         other => {

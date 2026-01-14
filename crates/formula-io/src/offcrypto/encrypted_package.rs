@@ -720,8 +720,8 @@ pub fn decrypt_encrypted_package_standard_aes(
     Ok(out)
 }
 
-/// Convenience wrapper for the most common CBC-segmented Standard `EncryptedPackage` variant:
-/// AES-CBC with SHA-1 IV derivation.
+/// Convenience wrapper for the most common **non-standard** CBC-segmented `EncryptedPackage`
+/// fallback variant: AES-CBC with SHA-1 IV derivation.
 pub fn decrypt_encrypted_package_standard_aes_sha1(
     encrypted_package_stream: &[u8],
     key: &[u8],
