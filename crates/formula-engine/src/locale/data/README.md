@@ -31,6 +31,11 @@ This is important because:
   breaks round-tripping and localized editing;
 - keeping the TSVs complete lets us catch regressions any time a function is added/renamed.
 
+Note: Excel also exposes `TRUE()` and `FALSE()` as zero-arg worksheet functions, and their spellings
+are localized (e.g. `WAHR()` / `FALSCH()`, `VRAI()` / `FAUX()`, `VERDADERO()` / `FALSO()`). These
+need to be present in the TSVs just like any other function, even though localized boolean literals
+(`WAHR`, `VRAI`, `VERDADERO`, …) are handled separately by the parser.
+
 ### Function translation sources (`sources/<locale>.json`)
 
 The `*.tsv` files in this directory are **generated artifacts**.
