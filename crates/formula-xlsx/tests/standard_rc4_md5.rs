@@ -5,6 +5,7 @@
 
 use std::io::{Cursor, Write as _};
 
+use formula_offcrypto::{decrypt_encrypted_package, DecryptOptions, OffcryptoError};
 use formula_xlsx::offcrypto::{decrypt_ooxml_encrypted_package, OffCryptoError};
 use md5::{Digest as _, Md5};
 use zip::write::FileOptions;
@@ -192,6 +193,24 @@ fn decrypts_standard_cryptoapi_rc4_md5() {
     encrypted_package.extend_from_slice(&ciphertext);
 
     // --- Decrypt -------------------------------------------------------------------------------
+    let decrypted_offcrypto = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        PASSWORD,
+        DecryptOptions::default(),
+    )
+    .expect("decrypt EncryptedPackage (formula-offcrypto)");
+    assert_eq!(decrypted_offcrypto, plaintext);
+
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .expect_err("expected invalid password (formula-offcrypto)");
+    assert!(matches!(err, OffcryptoError::InvalidPassword));
+
     let decrypted = decrypt_ooxml_encrypted_package(&encryption_info, &encrypted_package, PASSWORD)
         .expect("decrypt EncryptedPackage");
     assert_eq!(decrypted, plaintext);
