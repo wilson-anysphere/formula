@@ -17,7 +17,7 @@ As of today, the following keys are implemented in `formula-engine`:
   - engine-internal: `INFO("recalc")`, `INFO("numfile")`
   - host-provided (via `EngineInfo`): `INFO("system")`, `INFO("directory")`, `INFO("osversion")`, `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`
     - `system` defaults to `"pcdos"` when unset (Excel-like).
-    - `directory` prefers `EngineInfo.directory`; otherwise it falls back to workbook file metadata (`setWorkbookFileMetadata`) and returns `#N/A` until the workbook has a filename.
+    - `directory` prefers `EngineInfo.directory`; otherwise it falls back to workbook file metadata (`setWorkbookFileMetadata`) and returns `#N/A` unless both a non-empty directory and filename are known.
     - `osversion` / `release` / `version` / `memavail` / `totmem` return `#N/A` when unset.
   - per-sheet view metadata (via `setSheetOrigin` / `Engine::set_sheet_origin`): `INFO("origin")` (defaults to `"$A$1"` when unset)
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
@@ -50,7 +50,7 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `recalc` | text | engine (`CalcSettings.calculation_mode`) | implemented | n/a |
 | `numfile` | number | engine (sheet count) | implemented | n/a |
 | `system` | text | host (`EngineInfo.system`) | implemented | defaults to `"pcdos"` when unset |
-| `directory` | text | host (`EngineInfo.directory`) **or** workbook file metadata | implemented | returns `#N/A` until the workbook has a filename (unless `EngineInfo.directory` is set) |
+| `directory` | text | host (`EngineInfo.directory`) **or** workbook file metadata | implemented | returns `#N/A` unless `EngineInfo.directory` is set, or workbook file metadata includes both a non-empty directory and filename |
 | `origin` | text | host (per-sheet origin cell) | implemented | defaults to `"$A$1"` when unset |
 | `osversion` | text | host (`EngineInfo.osversion`) | implemented | return `#N/A` when unset |
 | `release` | text | host (`EngineInfo.release`) | implemented | return `#N/A` when unset |
@@ -78,7 +78,7 @@ Hosts should supply a best-effort snapshot of:
 - `system`: `"pcdos"` (Windows-style) or `"mac"` (macOS-style). When unset, the engine defaults to `"pcdos"`.
 - `directory`:
   - host override via `EngineInfo.directory`
-  - otherwise supplied implicitly via workbook file metadata (`setWorkbookFileMetadata`)
+  - otherwise supplied implicitly via workbook file metadata (`setWorkbookFileMetadata`) when the host has an OS path (desktop); if only a filename is known (common on web), `INFO("directory")` remains `#N/A`
   - the engine returns a trailing path separator (e.g. `"/tmp/"`, `"C:\\Dir\\"`) to match Excel
 - `origin`: set per-sheet via `setSheetOrigin(sheet, originA1)`; the engine always returns an absolute A1 string with `$` markers (e.g. `"$C$5"`). When unset, the engine defaults to `"$A$1"`.
 - `osversion`: OS version string (exact string should match Excel as closely as feasible on that platform).
@@ -131,6 +131,7 @@ Behavior:
 - The engine treats the workbook as “saved” only once a **non-empty** `filename` is known; supplying a directory alone is not enough.
 - When only a filename is known (common on web), `CELL("filename")` returns:
   - `[Book.xlsx]Sheet1` (no directory prefix)
+- In this case, `INFO("directory")` returns `#N/A` (unless overridden via `EngineInfo.directory`).
 - When a directory is also known, the engine returns Excel’s `path[workbook]sheet` shape, ensuring the directory has a trailing separator:
   - `C:\Dir\[Book.xlsx]Sheet1`
   - `/dir/[Book.xlsx]Sheet1`
@@ -345,7 +346,7 @@ This section documents the “wiring points” for hosts.
 - Workbook file metadata (`CELL("filename")`, `INFO("directory")` fallback):
   - `EngineClient.setWorkbookFileMetadata(directory, filename)`
     - `CELL("filename")` returns `""` until `filename` is known (Excel unsaved behavior)
-    - `INFO("directory")` returns `#N/A` until `filename` is known (unless overridden via `EngineInfo.directory`)
+    - `INFO("directory")` returns `#N/A` unless `EngineInfo.directory` is set, or both `filename` and a non-empty `directory` are known
 
 - Formatting metadata (`CELL("protect")`, `CELL("prefix")`, `CELL("format")`, `CELL("color")`, `CELL("parentheses")`):
   - `EngineClient.internStyle(stylePatch)` → `styleId`
