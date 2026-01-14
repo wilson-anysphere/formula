@@ -876,21 +876,23 @@ export function bindSheetViewToCollabSession(options: {
                 endCol: r.endCol,
               }));
               // Store on both the nested view map (preferred) and the top-level for backwards compatibility.
+              // Keep this minimal (avoid writing the same payload under multiple alias keys) to prevent
+              // workbook bloat when many merged ranges exist.
               viewMap.set("mergedRanges", cloned);
               sheet.set("mergedRanges", cloned);
-              // Alternative key names (legacy).
-              viewMap.set("merged_ranges", cloned);
-              sheet.set("merged_ranges", cloned);
-              viewMap.set("mergedRegions", cloned);
-              sheet.set("mergedRegions", cloned);
-              viewMap.set("merged_regions", cloned);
-              sheet.set("merged_regions", cloned);
-              // Also write the legacy key so older clients can still render merged regions.
+              // Back-compat mirror: older clients used `mergedCells`.
               viewMap.set("mergedCells", cloned);
               sheet.set("mergedCells", cloned);
-              // Some legacy encodings use snake_case.
-              viewMap.set("merged_cells", cloned);
-              sheet.set("merged_cells", cloned);
+
+              // Converge any legacy/alternate key names to the canonical + legacy pair above.
+              viewMap.delete("merged_ranges");
+              sheet.delete("merged_ranges");
+              viewMap.delete("mergedRegions");
+              sheet.delete("mergedRegions");
+              viewMap.delete("merged_regions");
+              sheet.delete("merged_regions");
+              viewMap.delete("merged_cells");
+              sheet.delete("merged_cells");
             }
 
             if (!deepEquals(drawingsBefore, drawingsAfter)) {
