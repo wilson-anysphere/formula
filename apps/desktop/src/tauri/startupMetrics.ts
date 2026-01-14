@@ -69,7 +69,27 @@ function nowMs(): number {
 async function nextFrame(): Promise<void> {
   const raf = (globalThis as any)?.requestAnimationFrame;
   if (typeof raf === "function") {
-    await new Promise<void>((resolve) => raf(() => resolve()));
+    await new Promise<void>((resolve) => {
+      // Some environments can throttle or pause rAF (hidden webviews, headless runs, etc). Keep a
+      // short timeout fallback so best-effort startup instrumentation doesn't hang forever.
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+
+      const timeout = setTimeout(finish, 100);
+      try {
+        raf(() => {
+          clearTimeout(timeout);
+          finish();
+        });
+      } catch {
+        clearTimeout(timeout);
+        finish();
+      }
+    });
     return;
   }
   await new Promise<void>((resolve) => queueMicrotask(resolve));

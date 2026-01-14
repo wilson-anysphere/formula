@@ -101,6 +101,28 @@ describe("startupMetrics", () => {
     }
   });
 
+  it("does not hang TTI instrumentation if requestAnimationFrame never fires", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+
+      // Broken rAF implementation (never invokes callback).
+      (globalThis as any).requestAnimationFrame = vi.fn();
+
+      const promise = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
   it("notifies the host that the webview is ready (when running under Tauri)", async () => {
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
     reportStartupWebviewLoaded();
@@ -176,6 +198,28 @@ describe("startupMetrics", () => {
 
     await promise;
     expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+  });
+
+  it("does not hang first-render instrumentation if requestAnimationFrame never fires", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+
+      // Broken rAF implementation (never invokes callback).
+      (globalThis as any).requestAnimationFrame = vi.fn();
+
+      const promise = markStartupFirstRender();
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
   });
 
   it("retries for a short period when bootstrapped and __TAURI__ is injected late", async () => {
