@@ -154,6 +154,19 @@ test("validate-windows-bundles.ps1 validates all configured URL protocol schemes
   );
 });
 
+test("validate-windows-bundles.ps1 rejects invalid deep-link schemes in tauri.conf.json (e.g. formula://evil)", () => {
+  assert.match(
+    text,
+    /Invalid deep-link scheme configured in tauri\.conf\.json/i,
+    "Expected validator to throw a clear error when plugins.deep-link.desktop.schemes contains invalid values with ':' or '/'.",
+  );
+  // Ensure the check is present (not just the error string).
+  assert.ok(
+    text.includes("$v -match '[:/]'"),
+    "Expected validator to check for invalid characters in normalized schemes (contains $v -match '[:/]').",
+  );
+});
+
 test("validate-windows-bundles.ps1 asserts LICENSE/NOTICE are included in MSI installers", () => {
   assert.match(
     text,

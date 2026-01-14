@@ -790,6 +790,10 @@ try {
         # Normalize common user input like "formula://" to just the scheme name.
         $v = $v.TrimEnd("/").TrimEnd(":")
         $v = $v.ToLowerInvariant()
+        if ($v -match '[:/]') {
+          $raw = $s.ToString()
+          throw "Invalid deep-link scheme configured in tauri.conf.json. Expected scheme names only (no ':' or '/' characters). Found: $raw"
+        }
         if (-not [string]::IsNullOrWhiteSpace($v)) {
           $schemes += $v
         }
