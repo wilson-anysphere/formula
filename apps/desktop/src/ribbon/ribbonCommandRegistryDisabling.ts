@@ -183,14 +183,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
 ]);
 
 function isExemptViaPattern(commandId: string): boolean {
-  // Zoom menu items: "view.zoom.zoom.<percent>" or ".custom"
-  if (commandId.startsWith("view.zoom.zoom.")) {
-    const suffix = commandId.slice("view.zoom.zoom.".length);
-    if (suffix === "custom") return true;
-    const percent = Number(suffix);
-    return Number.isFinite(percent) && Number.isInteger(percent) && percent > 0;
-  }
-
   // Fill color presets.
   if (commandId.startsWith("home.font.fillColor.")) {
     const preset = commandId.slice("home.font.fillColor.".length);
