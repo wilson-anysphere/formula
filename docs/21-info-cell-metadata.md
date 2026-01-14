@@ -351,6 +351,11 @@ This section documents the “wiring points” for hosts.
   - This is metadata-only: it does **not** rewrite stored formulas and does **not** change the engine-facing sheet id/key.
   - For Excel-like rename semantics (rewrite formulas that reference a sheet), use `EngineClient.renameSheet(oldName, newName)` when available.
 
+- Sheet dimensions (worksheet bounds; affects `CELL(..., reference)` out-of-bounds `#REF!` behavior and whole-row/whole-column references like `A:A` / `1:1`):
+  - `EngineClient.setSheetDimensions(sheet, rows, cols)`
+  - `EngineClient.getSheetDimensions(sheet)` (debugging/introspection)
+  - When unset, the engine uses Excel’s default grid size (`1,048,576` rows × `16,384` cols).
+
 - Calculation mode (`INFO("recalc")`): exposed via `EngineClient.getCalcSettings()` / `EngineClient.setCalcSettings()`.
   - Note: the worker protocol typically runs edits in manual mode so JS callers can explicitly request `recalculate()` and receive deterministic value-change deltas.
 
