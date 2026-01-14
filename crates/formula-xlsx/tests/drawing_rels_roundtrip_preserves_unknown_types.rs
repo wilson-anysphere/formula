@@ -37,6 +37,12 @@ fn drawing_part_roundtrip_preserves_unknown_relationship_types_and_target_mode()
         original_rels.values().any(|rel| rel.type_uri.contains("diagramData")),
         "expected fixture rels to include diagram relationships"
     );
+    assert!(
+        original_rels
+            .values()
+            .any(|rel| rel.target_mode.as_deref() == Some("External")),
+        "expected test setup to inject a TargetMode=\"External\" relationship"
+    );
 
     let mut workbook = formula_model::Workbook::new();
     let part = DrawingPart::parse_from_parts(
@@ -127,6 +133,12 @@ fn drawing_part_from_objects_preserves_existing_relationships() {
         .expect("write drawing parts");
 
     let expected_rels = rels_by_id(openxml::parse_relationships(rels_xml.as_bytes()).unwrap());
+    assert!(
+        expected_rels
+            .values()
+            .any(|rel| rel.target_mode.as_deref() == Some("External")),
+        "expected test setup to inject a TargetMode=\"External\" relationship"
+    );
     let written_rels = rels_by_id(
         openxml::parse_relationships(parts.get(DRAWING_RELS).unwrap()).expect("parse written rels"),
     );
