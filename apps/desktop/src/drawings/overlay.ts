@@ -105,7 +105,10 @@ function resolveCssValue(
 
   let current = String(value ?? "").trim();
   let lastFallback: string | null = null;
-  const seen = opts?.seen ?? new Set<string>();
+  // Perf: resolving solid colors can be on the per-frame hot path when many
+  // shapes are present. Avoid allocating a `Set` unless we actually encounter
+  // a `var(--token)` indirection.
+  let seen = opts?.seen;
 
   for (let depth = 0; depth < maxDepth; depth += 1) {
     const parsed = parseCssVarFunction(current);
@@ -113,6 +116,8 @@ function resolveCssValue(
 
     const nextName = parsed.name;
     if (parsed.fallback != null) lastFallback = parsed.fallback;
+
+    if (!seen) seen = new Set<string>();
 
     // Handle cycles and enforce a max indirection depth.
     if (seen.has(nextName)) {
