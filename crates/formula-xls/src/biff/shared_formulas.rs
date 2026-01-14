@@ -56,7 +56,7 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
         }
 
         match record.record_id {
-            RECORD_SHRFMLA => match parse_shrfmla_record(record.data.as_ref()) {
+            RECORD_SHRFMLA => match parse_shrfmla_record(&record) {
                 Some(def) => out.shared_formulas.push(def),
                 None => out.warnings.push(format!(
                     "failed to parse SHRFMLA record at offset {}",
@@ -71,7 +71,8 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
     Ok(out)
 }
 
-fn parse_shrfmla_record(data: &[u8]) -> Option<SharedFormulaDef> {
+fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<SharedFormulaDef> {
+    let data = record.data.as_ref();
     // SHRFMLA [MS-XLS 2.4.255]
     //
     // Producers in the wild appear to vary slightly in their record layout. Try a small set of
@@ -90,7 +91,6 @@ fn parse_shrfmla_record(data: &[u8]) -> Option<SharedFormulaDef> {
         row_last: u16,
         col_first: u16,
         col_last: u16,
-        end: usize,
     }
 
     fn parse_refu(data: &[u8]) -> Option<RangeHeader> {
@@ -106,7 +106,6 @@ fn parse_shrfmla_record(data: &[u8]) -> Option<SharedFormulaDef> {
             row_last,
             col_first,
             col_last,
-            end: 6,
         })
     }
 
@@ -123,46 +122,25 @@ fn parse_shrfmla_record(data: &[u8]) -> Option<SharedFormulaDef> {
             row_last,
             col_first,
             col_last,
-            end: 8,
         })
     }
 
     let headers = [parse_refu(data), parse_ref8(data)];
+    let header = headers
+        .into_iter()
+        .flatten()
+        .find(|header| header.row_first <= header.row_last && header.col_first <= header.col_last)?;
 
-    for header in headers.into_iter().flatten() {
-        if header.row_first > header.row_last || header.col_first > header.col_last {
-            continue;
-        }
-
-        // In BIFF8, SHRFMLA usually includes a 2-byte `cUse` field before `cce`. Prefer that layout
-        // first so we don't misinterpret `cUse=0` as `cce=0` and return an empty rgce.
-        for prefix in [2usize, 0, 4] {
-            let cce_offset = match header.end.checked_add(prefix) {
-                Some(v) => v,
-                None => continue,
-            };
-            if data.len() < cce_offset + 2 {
-                continue;
-            }
-            let cce = u16::from_le_bytes([data[cce_offset], data[cce_offset + 1]]) as usize;
-            let rgce_start = cce_offset + 2;
-            let rgce_end = match rgce_start.checked_add(cce) {
-                Some(v) => v,
-                None => continue,
-            };
-            if rgce_end > data.len() {
-                continue;
-            }
-            let rgce = data.get(rgce_start..rgce_end)?.to_vec();
-            return Some(SharedFormulaDef {
-                row_first: header.row_first,
-                row_last: header.row_last,
-                col_first: header.col_first,
-                col_last: header.col_last,
-                rgce,
-            });
-        }
+    let parsed = super::worksheet_formulas::parse_biff8_shrfmla_record(record).ok()?;
+    if parsed.rgce.is_empty() {
+        return None;
     }
 
-    None
+    Some(SharedFormulaDef {
+        row_first: header.row_first,
+        row_last: header.row_last,
+        col_first: header.col_first,
+        col_last: header.col_last,
+        rgce: parsed.rgce,
+    })
 }

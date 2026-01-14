@@ -184,6 +184,59 @@ pub(crate) fn parse_biff8_shrfmla_record(
     Err("unrecognized SHRFMLA record layout".to_string())
 }
 
+/// Parse a BIFF8 `SHRFMLA` record into its `rgce` token stream plus any trailing `rgcb` bytes.
+///
+/// `rgcb` stores payloads for certain tokens (notably `PtgArray`) that are not embedded directly
+/// in the `rgce` token stream.
+///
+/// This parser is fragment-aware: if the `rgce` stream contains a continued `PtgStr`
+/// (ShortXLUnicodeString) whose character payload crosses a `CONTINUE` boundary, it skips the
+/// extra 1-byte continued-segment option flags prefix inserted at the boundary so the returned
+/// `rgce` bytes match the canonical stream.
+pub(crate) fn parse_biff8_shrfmla_record_with_rgcb(
+    record: &records::LogicalBiffRecord<'_>,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let fragments: Vec<&[u8]> = record.fragments().collect();
+    let cursor = FragmentCursor::new(&fragments, 0, 0);
+
+    // SHRFMLA layouts vary slightly between producers (RefU vs Ref8 for the shared range). Try a
+    // small set of plausible BIFF8 layouts.
+    // Layout A: RefU (6) + cUse (2) + cce (2).
+    let mut c = cursor.clone();
+    if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
+        if !rgce.is_empty() {
+            let rgcb = c.read_remaining_bytes()?;
+            return Ok((rgce, rgcb));
+        }
+    }
+    // Layout B: Ref8 (8) + cUse (2) + cce (2).
+    let mut c = cursor.clone();
+    if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
+        if !rgce.is_empty() {
+            let rgcb = c.read_remaining_bytes()?;
+            return Ok((rgce, rgcb));
+        }
+    }
+    // Layout C: RefU (6) + cce (2) (cUse omitted).
+    let mut c = cursor.clone();
+    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
+        if !rgce.is_empty() {
+            let rgcb = c.read_remaining_bytes()?;
+            return Ok((rgce, rgcb));
+        }
+    }
+    // Layout D: Ref8 (8) + cce (2) (cUse omitted).
+    let mut c = cursor;
+    if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
+        if !rgce.is_empty() {
+            let rgcb = c.read_remaining_bytes()?;
+            return Ok((rgce, rgcb));
+        }
+    }
+
+    Err("unrecognized SHRFMLA record layout".to_string())
+}
+
 pub(crate) fn parse_biff8_array_record(
     record: &records::LogicalBiffRecord<'_>,
 ) -> Result<ParsedArrayRecord, String> {
@@ -792,6 +845,23 @@ impl<'a> FragmentCursor<'a> {
             n -= take;
         }
         Ok(out)
+    }
+
+    fn remaining_total_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for (idx, frag) in self.fragments.iter().enumerate().skip(self.frag_idx) {
+            if idx == self.frag_idx {
+                total = total.saturating_add(frag.len().saturating_sub(self.offset));
+            } else {
+                total = total.saturating_add(frag.len());
+            }
+        }
+        total
+    }
+
+    fn read_remaining_bytes(&mut self) -> Result<Vec<u8>, String> {
+        let remaining = self.remaining_total_bytes();
+        self.read_bytes(remaining)
     }
 
     fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {

@@ -4371,35 +4371,15 @@ fn import_biff8_shared_formulas(
                     let Some((anchor_row, anchor_col)) = last_formula_cell.take() else {
                         continue;
                     };
-                    let data = record.data.as_ref();
-                    // SHRFMLA [MS-XLS 2.4.277] begins with a range reference and is followed by a
-                    // `cUse` field and a `cce` + `rgce` formula payload. However, some producers omit
-                    // `cUse`; treat both layouts as best-effort.
-                    //
-                    // Layout A (common): RefU (6) + cUse (2) + cce (2) + rgce
-                    // Layout B (seen in the wild/tests): RefU (6) + cce (2) + rgce
-                    // Layout C (common): Ref8 (8) + cUse (2) + cce (2) + rgce
-                    let parse_rgce =
-                        |cce_off: usize, rgce_off: usize| -> Option<(Vec<u8>, Vec<u8>)> {
-                        if data.len() < cce_off + 2 {
-                            return None;
-                        }
-                        let cce =
-                            u16::from_le_bytes([data[cce_off], data[cce_off + 1]]) as usize;
-                        if cce == 0 {
-                            return None;
-                        }
-                        let rgce_end = rgce_off.checked_add(cce)?;
-                        let rgce = data.get(rgce_off..rgce_end)?;
-                        let rgcb = data.get(rgce_end..).unwrap_or(&[]);
-                        Some((rgce.to_vec(), rgcb.to_vec()))
-                    };
-                    let parsed = parse_rgce(8, 10)
-                        .or_else(|| parse_rgce(6, 8))
-                        .or_else(|| parse_rgce(10, 12));
-                    let Some((rgce, rgcb)) = parsed else {
-                        continue;
-                    };
+                    // Use the fragment-aware SHRFMLA parser so BIFF8 `PtgStr` literals continued
+                    // across `CONTINUE` boundaries have the extra 1-byte continued-segment option
+                    // flags stripped out before downstream rgce decoding.
+                    let (rgce, rgcb) =
+                        match biff::worksheet_formulas::parse_biff8_shrfmla_record_with_rgcb(&record)
+                        {
+                            Ok(parsed) => parsed,
+                            Err(_) => continue,
+                        };
                     shared_by_anchor.insert(
                         (anchor_row, anchor_col),
                         SharedFormulaDef { rgce, rgcb },
