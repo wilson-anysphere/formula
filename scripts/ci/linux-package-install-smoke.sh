@@ -162,6 +162,11 @@ MAIN_BINARY_NAME="$(read_main_binary_name)"
 TAURI_IDENTIFIER="$(read_tauri_identifier)"
 DEEP_LINK_SCHEMES="$(read_deep_link_schemes)"
 
+if [[ "${TAURI_IDENTIFIER}" == */* || "${TAURI_IDENTIFIER}" == *\\* ]]; then
+  echo "::error::linux-package-install-smoke: invalid tauri identifier (contains path separators): ${TAURI_IDENTIFIER}" >&2
+  exit 1
+fi
+
 kind="${1:-all}"
 case "${kind}" in
   deb | rpm | all) ;;

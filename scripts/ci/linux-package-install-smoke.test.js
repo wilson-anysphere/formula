@@ -52,6 +52,11 @@ test("linux-package-install-smoke: uses identifier-based Parquet shared-mime-inf
   assert.doesNotMatch(script, /app\\.formula\\.desktop\\.xml/);
 });
 
+test("linux-package-install-smoke: rejects path separators in the Tauri identifier", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  assert.match(script, /invalid tauri identifier \(contains path separators\)/i);
+});
+
 test("linux-package-install-smoke: validates URL scheme handler(s) from tauri.conf.json (no hardcoded formula)", () => {
   const script = readFileSync(scriptPath, "utf8");
   assert.match(script, /FORMULA_DEEP_LINK_SCHEMES/);

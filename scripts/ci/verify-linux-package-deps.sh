@@ -145,6 +145,11 @@ fi
 if [[ "${PARQUET_ASSOCIATION}" -eq 1 && -z "${EXPECTED_IDENTIFIER}" ]]; then
   fail "Parquet file association configured in ${TAURI_CONF_PATH}, but tauri \"identifier\" is missing/empty (required for /usr/share/mime/packages/<identifier>.xml)."
 fi
+if [[ "${PARQUET_ASSOCIATION}" -eq 1 ]]; then
+  if [[ "${EXPECTED_IDENTIFIER}" == */* || "${EXPECTED_IDENTIFIER}" == *\\* ]]; then
+    fail "Parquet association configured but tauri identifier is not a valid filename (contains path separators): ${EXPECTED_IDENTIFIER}"
+  fi
+fi
 
 echo "verify-linux-package-deps: expected desktop version: ${EXPECTED_DESKTOP_VERSION}"
 echo "verify-linux-package-deps: expected package/binary name: ${EXPECTED_PACKAGE_NAME}"

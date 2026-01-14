@@ -243,6 +243,11 @@ test("verify-linux-package-deps passes when bundles include Parquet shared-mime-
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("verify-linux-package-deps guardrails validate identifier-derived MIME XML filename (no path separators)", { skip: !hasBash }, () => {
+  const script = readFileSync(path.join(repoRoot, "scripts", "ci", "verify-linux-package-deps.sh"), "utf8");
+  assert.match(script, /contains path separators/i);
+});
+
 test(
   "verify-linux-package-deps fails when Parquet association is configured but tauri identifier is missing",
   { skip: !hasBash },
