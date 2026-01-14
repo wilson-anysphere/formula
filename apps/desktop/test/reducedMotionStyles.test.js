@@ -110,12 +110,6 @@ test("Desktop CSS transitions use motion tokens (so reduced motion disables anim
     const relPath = path.relative(DESKTOP_ROOT, filePath);
     const isTokens = path.basename(filePath) === "tokens.css";
 
-    assert.equal(
-      /\banimation\s*:/.test(css) || /@keyframes\b/.test(css),
-      false,
-      `Unexpected CSS animations in ${relPath}; animations must be gated behind reduced-motion`,
-    );
-
     for (const transition of extractTransitionDeclarations(css)) {
       if (!transition || transition.toLowerCase() === "none") continue;
       assert.match(
@@ -138,6 +132,61 @@ test("Desktop CSS transitions use motion tokens (so reduced motion disables anim
         `Expected ${relPath} to avoid hard-coded time values; use motion tokens instead`,
       );
     }
+  }
+});
+
+test("Desktop CSS keyframe animations are gated behind reduced motion (if any exist)", () => {
+  const srcRoot = path.join(DESKTOP_ROOT, "src");
+  const files = collectCssFiles(srcRoot);
+
+  // Heuristic/guardrail test:
+  // - Animations are allowed, but they must be disabled when reduced motion is enabled.
+  // - This repo uses two signals:
+  //     1) `data-reduced-motion="true|false"` attribute on <html>
+  //     2) `@media (prefers-reduced-motion: reduce)`
+  //
+  // We intentionally keep this test regex-based (not a full CSS parser) so it can run
+  // in bare node environments without dependencies.
+  const reducedMotionTrueRe = /data-reduced-motion\s*=\s*(?:"true"|'true'|true)/;
+  const reducedMotionFalseRe = /data-reduced-motion\s*=\s*(?:"false"|'false'|false)/;
+  const prefersReducedMotionReduceRe = /prefers-reduced-motion\s*:\s*reduce/;
+  const prefersReducedMotionNoPrefRe = /prefers-reduced-motion\s*:\s*no-preference/;
+
+  const keyframesRe = /@keyframes\b/;
+  // Match the `animation:` shorthand property (but avoid custom properties like `--animation-foo`).
+  const animationPropertyRe = /(?:^|[;{\s])animation\s*:\s*([^;]+);/gm;
+  const animationNamePropertyRe = /(?:^|[;{\s])animation-name\s*:\s*([^;]+);/gm;
+  const disableAnimationRe = /(?:^|[;{\s])animation(?:-name)?\s*:\s*none\b/m;
+
+  for (const filePath of files) {
+    const rawCss = fs.readFileSync(filePath, "utf8");
+    const css = stripCssComments(rawCss);
+    const relPath = path.relative(DESKTOP_ROOT, filePath);
+
+    const hasKeyframes = keyframesRe.test(css);
+    const animationDecls = [...css.matchAll(animationPropertyRe)].map((m) => (m[1] ?? "").trim());
+    const hasNonNoneAnimation = animationDecls.some((value) => value !== "" && value.toLowerCase() !== "none");
+    const animationNameDecls = [...css.matchAll(animationNamePropertyRe)].map((m) => (m[1] ?? "").trim());
+    const hasNonNoneAnimationName = animationNameDecls.some((value) => value !== "" && value.toLowerCase() !== "none");
+    const hasAnimationUsage = hasNonNoneAnimation || hasNonNoneAnimationName;
+
+    // `@keyframes` declarations alone do not create motion; only consider this file an
+    // "animation surface" if it applies an animation to an element.
+    if (!hasAnimationUsage) continue;
+
+    // Accept either:
+    //  - gating animations behind the "false" runtime attribute / no-preference media query, OR
+    //  - an explicit disable under reduced motion ("true" attribute / reduce media query).
+    const hasNonReducedGate = reducedMotionFalseRe.test(css) || prefersReducedMotionNoPrefRe.test(css);
+    const hasReducedMotionDisable =
+      (reducedMotionTrueRe.test(css) || prefersReducedMotionReduceRe.test(css)) && disableAnimationRe.test(css);
+
+    assert.ok(
+      hasNonReducedGate || hasReducedMotionDisable,
+      `Found CSS animations in ${relPath} without a reduced-motion gate. ` +
+        `Gate via :root/html[data-reduced-motion="false"], prefers-reduced-motion: no-preference, ` +
+        `or disable via animation: none under data-reduced-motion="true"/prefers-reduced-motion: reduce.`,
+    );
   }
 });
 
