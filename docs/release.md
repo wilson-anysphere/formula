@@ -1327,7 +1327,9 @@ format the updater will apply:
 5. (Optional) Verify the manifest signature locally:
    - `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
    - Note: this uses the updater public key embedded in `apps/desktop/src-tauri/tauri.conf.json`.
-6. (Optional) Verify downloaded updater assets against `SHA256SUMS.txt`.
+6. (Optional) Verify updater payload signatures (slow; downloads the updater assets referenced in `latest.json`):
+   - `GITHUB_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo OWNER/REPO --dry-run --verify-assets`
+7. (Optional) Verify downloaded updater assets against `SHA256SUMS.txt`.
 
 ### One-liner: release smoke test
 
