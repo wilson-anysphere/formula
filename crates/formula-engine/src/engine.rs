@@ -7973,6 +7973,18 @@ impl PivotRefreshContext for Engine {
         }
         None
     }
+
+    fn pivot_cache_from_range(
+        &mut self,
+        sheet: &str,
+        range: Range,
+    ) -> Result<crate::pivot::PivotCache, crate::pivot::PivotError> {
+        Engine::pivot_cache_from_range(self, sheet, range)
+    }
+
+    fn clear_range(&mut self, sheet: &str, range: Range) -> Result<(), EngineError> {
+        Engine::clear_range(self, sheet, range, false)
+    }
 }
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {

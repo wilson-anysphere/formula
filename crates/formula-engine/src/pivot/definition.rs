@@ -12,7 +12,7 @@ use crate::editing::rewrite::{
 use crate::editing::EditOp;
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::CellAddr;
-use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style};
+use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style, EXCEL_MAX_COLS};
 
 use super::source::coerce_pivot_value_with_number_format;
 use super::{PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
@@ -542,6 +542,44 @@ pub(crate) trait PivotRefreshContext {
     ) -> Result<(), crate::EngineError>;
     fn clear_cell(&mut self, sheet: &str, addr: &str) -> Result<(), crate::EngineError>;
     fn resolve_table(&mut self, table_id: u32) -> Option<(String, Range)>;
+
+    /// Materialize a [`PivotCache`] from the current workbook state.
+    ///
+    /// Engines may override this to reuse an optimized cache builder (for example one that can
+    /// resolve number formats for date inference).
+    fn pivot_cache_from_range(
+        &mut self,
+        sheet: &str,
+        range: Range,
+    ) -> Result<PivotCache, PivotError> {
+        let mut data: Vec<Vec<PivotValue>> = Vec::new();
+        for row in range.start.row..=range.end.row {
+            let mut out_row = Vec::new();
+            for col in range.start.col..=range.end.col {
+                let addr = CellRef::new(row, col).to_a1();
+                let value = self.read_cell(sheet, &addr);
+                let pivot_value = engine_value_to_pivot_value(value);
+                let number_format = self.read_cell_number_format(sheet, &addr);
+                out_row.push(coerce_pivot_value_with_number_format(
+                    pivot_value,
+                    number_format.as_deref(),
+                    self.date_system(),
+                ));
+            }
+            data.push(out_row);
+        }
+        PivotCache::from_range(&data)
+    }
+
+    /// Bulk-clear a rectangular range of cells.
+    ///
+    /// Default implementation falls back to per-cell [`PivotRefreshContext::clear_cell`] calls.
+    fn clear_range(&mut self, sheet: &str, range: Range) -> Result<(), crate::EngineError> {
+        for cell in range.iter() {
+            self.clear_cell(sheet, &cell.to_a1())?;
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn refresh_pivot(
@@ -560,41 +598,19 @@ pub(crate) fn refresh_pivot(
             .ok_or(PivotRefreshError::TableNotFound(*table_id))?,
     };
 
-    let mut data: Vec<Vec<PivotValue>> = Vec::new();
-    for row in source_range.start.row..=source_range.end.row {
-        let mut out_row = Vec::new();
-        for col in source_range.start.col..=source_range.end.col {
-            let addr = CellRef::new(row, col).to_a1();
-            let value = ctx.read_cell(&source_sheet, &addr);
-            let pivot_value = engine_value_to_pivot_value(value);
-            let number_format = ctx.read_cell_number_format(&source_sheet, &addr);
-            out_row.push(coerce_pivot_value_with_number_format(
-                pivot_value,
-                number_format.as_deref(),
-                ctx.date_system(),
-            ));
-        }
-        data.push(out_row);
-    }
-
-    let cache = PivotCache::from_range(&data)?;
+    let cache = ctx.pivot_cache_from_range(&source_sheet, source_range)?;
     // Note: computed pivot caches may be reused in the future; for MVP we rebuild each time.
     let result = PivotEngine::calculate(&cache, &def.config)?;
 
-    // Clear old output footprint.
-    if let Some(prev) = def.last_output_range {
-        for row in prev.start.row..=prev.end.row {
-            for col in prev.start.col..=prev.end.col {
-                let addr = CellRef::new(row, col).to_a1();
-                ctx.clear_cell(&def.destination.sheet, &addr).ok();
-            }
-        }
-    }
+    let rows = u32::try_from(result.data.len()).map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+    let cols = u32::try_from(result.data.first().map(|r| r.len()).unwrap_or(0))
+        .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
 
-    let rows = result.data.len() as u32;
-    let cols = result.data.first().map(|r| r.len()).unwrap_or(0) as u32;
     if rows == 0 || cols == 0 {
         // Treat empty results as clearing output.
+        if let Some(prev) = def.last_output_range {
+            ctx.clear_range(&def.destination.sheet, prev).ok();
+        }
         def.last_output_range = None;
         def.needs_refresh = false;
         return Ok(PivotRefreshOutput {
@@ -603,6 +619,8 @@ pub(crate) fn refresh_pivot(
         });
     }
 
+    // Compute and validate the new output footprint *before* clearing any existing output so that
+    // out-of-bounds failures don't wipe the previously rendered pivot.
     let end_row = def
         .destination
         .cell
@@ -615,7 +633,15 @@ pub(crate) fn refresh_pivot(
         .col
         .checked_add(cols.saturating_sub(1))
         .ok_or(PivotRefreshError::OutputOutOfBounds)?;
+    if end_row >= i32::MAX as u32 || end_col >= EXCEL_MAX_COLS {
+        return Err(PivotRefreshError::OutputOutOfBounds);
+    }
     let output_range = Range::new(def.destination.cell, CellRef::new(end_row, end_col));
+
+    // Clear the previous output footprint now that the new output range has been validated.
+    if let Some(prev) = def.last_output_range {
+        ctx.clear_range(&def.destination.sheet, prev).ok();
+    }
 
     let pivot_cell_writes = result.to_cell_writes_with_formats(
         super::CellRef {
@@ -671,11 +697,16 @@ fn engine_value_to_pivot_value(value: crate::value::Value) -> PivotValue {
         Value::Bool(b) => PivotValue::Bool(b),
         Value::Entity(e) => PivotValue::Text(e.display),
         Value::Record(r) => PivotValue::Text(r.display),
-        // Dates are represented as numbers in the core engine today.
-        Value::Error(_) => PivotValue::Blank,
+        // Errors are treated as text for pivot purposes (so aggregations won't treat them as numbers).
+        Value::Error(e) => PivotValue::Text(e.as_code().to_string()),
         Value::Reference(_) => PivotValue::Blank,
         Value::ReferenceUnion(_) => PivotValue::Blank,
-        Value::Array(_) => PivotValue::Blank,
+        Value::Array(arr) => {
+            // If a dynamic array somehow lands in a cell value, match Excel's visible behavior
+            // (top-left value shown in the origin cell).
+            let top_left = arr.top_left();
+            engine_value_to_pivot_value(top_left)
+        }
         Value::Lambda(_) => PivotValue::Blank,
         Value::Spill { .. } => PivotValue::Blank,
     }

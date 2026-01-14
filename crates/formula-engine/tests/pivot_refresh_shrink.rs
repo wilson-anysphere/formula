@@ -130,3 +130,45 @@ fn pivot_refresh_after_shrink_does_not_clear_cells_outside_latest_output() {
         Value::Text("Note".to_string())
     );
 }
+
+#[test]
+fn pivot_refresh_failure_does_not_clear_previous_output() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B3")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
+
+    // Move the pivot destination anchor beyond the engine's supported row bounds so refresh fails.
+    {
+        let pivot = engine.pivot_table_mut(pivot_id).unwrap();
+        pivot.destination.cell.row = i32::MAX as u32;
+        pivot.needs_refresh = true;
+    }
+
+    let err = engine.refresh_pivot_table(pivot_id).unwrap_err();
+    assert!(matches!(
+        err,
+        formula_engine::pivot::PivotRefreshError::OutputOutOfBounds
+    ));
+
+    // The previous pivot output should remain intact because the refresh never applied.
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
+}
