@@ -273,6 +273,47 @@ test("ChunkedLocalStorageBinaryStorage clears absurd chunk counts in meta (corru
   }
 });
 
+test("ChunkedLocalStorageBinaryStorage works with minimal Storage implementations (no key/length/removeItem)", async () => {
+  const jsdomWindow = (globalThis as any)?.jsdom?.window as Window | undefined;
+  if (!jsdomWindow) throw new Error("Expected vitest jsdom environment to provide globalThis.jsdom.window");
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(jsdomWindow, "localStorage");
+
+  const data = new Map<string, string>();
+  const minimalStorage = {
+    getItem(key: string) {
+      return data.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      data.set(key, String(value));
+    },
+  } as any;
+
+  Object.defineProperty(jsdomWindow, "localStorage", { value: minimalStorage, configurable: true });
+
+  try {
+    const storage = new ChunkedLocalStorageBinaryStorage({
+      namespace: "formula.test.rag",
+      workbookId: "minimal-storage",
+      chunkSizeChars: 8,
+    });
+
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 255]);
+    await storage.save(bytes);
+    const loaded = await storage.load();
+    expect(Array.from(loaded ?? [])).toEqual(Array.from(bytes));
+
+    // Should not throw even though removeItem/key/length are missing.
+    await expect(storage.remove()).resolves.toBeUndefined();
+  } finally {
+    if (originalLocalStorage) {
+      Object.defineProperty(jsdomWindow, "localStorage", originalLocalStorage);
+    } else {
+      // eslint-disable-next-line no-undef
+      delete (jsdomWindow as any).localStorage;
+    }
+  }
+});
+
 test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag",
