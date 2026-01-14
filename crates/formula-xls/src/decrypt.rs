@@ -267,6 +267,15 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Decrypt
         DecryptError::InvalidFormat("EncryptionVerifier missing SaltSize".to_string())
     })? as usize;
 
+    // `.xls` CryptoAPI RC4 uses a fixed 16-byte salt, but cap this defensively so malformed files
+    // can't force huge allocations.
+    const MAX_SALT_SIZE: usize = 64;
+    if salt_size > MAX_SALT_SIZE {
+        return Err(DecryptError::InvalidFormat(format!(
+            "EncryptionVerifier SaltSize {salt_size} exceeds max {MAX_SALT_SIZE}",
+        )));
+    }
+
     let salt_start = 4usize;
     let salt_end = salt_start
         .checked_add(salt_size)
@@ -290,13 +299,19 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Decrypt
     let salt = bytes[salt_start..salt_end].to_vec();
     let mut encrypted_verifier = [0u8; 16];
     encrypted_verifier.copy_from_slice(&bytes[verifier_start..verifier_end]);
-    let verifier_hash_size =
-        read_u32_le(bytes, hash_size_start).ok_or_else(|| {
-            DecryptError::InvalidFormat("EncryptionVerifier missing VerifierHashSize".to_string())
-        })?;
+    let verifier_hash_size = read_u32_le(bytes, hash_size_start).ok_or_else(|| {
+        DecryptError::InvalidFormat("EncryptionVerifier missing VerifierHashSize".to_string())
+    })?;
+    const MAX_VERIFIER_HASH_SIZE: usize = 64;
+    let verifier_hash_size_usize = verifier_hash_size as usize;
+    if verifier_hash_size_usize > MAX_VERIFIER_HASH_SIZE {
+        return Err(DecryptError::InvalidFormat(format!(
+            "EncryptionVerifierHash VerifierHashSize {verifier_hash_size_usize} exceeds max {MAX_VERIFIER_HASH_SIZE}",
+        )));
+    }
     let encrypted_hash_start = hash_size_end;
     let encrypted_hash_end = encrypted_hash_start
-        .checked_add(verifier_hash_size as usize)
+        .checked_add(verifier_hash_size_usize)
         .ok_or_else(|| DecryptError::InvalidFormat("VerifierHashSize overflow".to_string()))?;
     if encrypted_hash_end > bytes.len() {
         return Err(DecryptError::InvalidFormat(format!(
