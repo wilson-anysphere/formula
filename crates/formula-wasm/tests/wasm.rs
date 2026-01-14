@@ -1662,6 +1662,47 @@ fn null_inputs_preserve_cell_style_metadata_in_engine() {
 }
 
 #[wasm_bindgen_test]
+fn cell_protect_respects_explicit_locked_overrides() {
+    let mut wb = WasmWorkbook::new();
+
+    wb.set_cell("A1".to_string(), JsValue::from_str("x"), None)
+        .unwrap();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str(r#"=CELL("protect",A1)"#),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 1.0);
+
+    // Row-level style marks the cell as unlocked.
+    let unlocked = wb
+        .intern_style(to_js_value(&json!({ "protection": { "locked": false } })))
+        .unwrap();
+    wb.set_row_style_id(DEFAULT_SHEET.to_string(), 0, Some(unlocked));
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 0.0);
+
+    // Cell-level style should be able to override the inherited unlocked flag by explicitly
+    // clearing the lock flag back to Excel's default locked=true.
+    let clear = wb
+        .intern_style(to_js_value(&json!({ "protection": { "locked": null } })))
+        .unwrap();
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), clear)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 1.0);
+}
+
+#[wasm_bindgen_test]
 fn cell_prefix_respects_effective_alignment_and_explicit_clears() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("x"), None)

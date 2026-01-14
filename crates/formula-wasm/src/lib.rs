@@ -301,13 +301,15 @@ fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
 
 fn parse_protection_from_js(value: &JsValue) -> Option<Protection> {
     let obj = js_value_to_object(value)?;
-    let explicit_locked_clear = has_js_prop(&obj, "locked")
-        && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null());
+    let explicit_clear = (has_js_prop(&obj, "locked")
+        && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null()))
+        || (has_js_prop(&obj, "hidden")
+            && get_js_prop_raw(&obj, "hidden").is_some_and(|v| v.is_null()));
     let locked = get_js_bool(&obj, &["locked"]).unwrap_or(true);
     let hidden = get_js_bool(&obj, &["hidden"]).unwrap_or(false);
 
     // Avoid interning redundant "default" protection structs; Excel default is locked.
-    if locked && !hidden && !explicit_locked_clear {
+    if locked && !hidden && !explicit_clear {
         return None;
     }
 
@@ -467,14 +469,16 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
             // Treat those as an alias for `{ protection: { ... } }`.
             let locked = get_js_bool(&obj, &["locked"]);
             let hidden = get_js_bool(&obj, &["hidden"]);
-            let explicit_locked_clear = has_js_prop(&obj, "locked")
-                && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null());
-            if locked.is_none() && hidden.is_none() && !explicit_locked_clear {
+            let explicit_clear = (has_js_prop(&obj, "locked")
+                && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null()))
+                || (has_js_prop(&obj, "hidden")
+                    && get_js_prop_raw(&obj, "hidden").is_some_and(|v| v.is_null()));
+            if locked.is_none() && hidden.is_none() && !explicit_clear {
                 return None;
             }
             let locked = locked.unwrap_or(true);
             let hidden = hidden.unwrap_or(false);
-            if locked && !hidden && !explicit_locked_clear {
+            if locked && !hidden && !explicit_clear {
                 None
             } else {
                 Some(Protection { locked, hidden })
@@ -640,12 +644,14 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
         .and_then(|p| p.get("hidden"))
         .or_else(|| obj.get("hidden"));
     let explicit_locked_clear = locked_value.is_some_and(|v| v.is_null());
+    let explicit_hidden_clear = hidden_value.is_some_and(|v| v.is_null());
+    let explicit_clear = explicit_locked_clear || explicit_hidden_clear;
     let locked = locked_value.and_then(|v| v.as_bool());
     let hidden = hidden_value.and_then(|v| v.as_bool());
-    if locked.is_some() || hidden.is_some() || explicit_locked_clear {
+    if locked.is_some() || hidden.is_some() || explicit_clear {
         let locked = locked.unwrap_or(true);
         let hidden = hidden.unwrap_or(false);
-        if locked && !hidden && !explicit_locked_clear {
+        if locked && !hidden && !explicit_clear {
             out.protection = None;
         } else {
             out.protection = Some(Protection { locked, hidden });
@@ -9325,6 +9331,18 @@ mod tests {
                 .unwrap_or(HorizontalAlignment::Left),
             HorizontalAlignment::General
         );
+    }
+
+    #[test]
+    fn style_json_to_model_style_treats_nested_null_locked_as_explicit_default_override() {
+        let style = style_json_to_model_style(&json!({ "protection": { "locked": null } }));
+        assert_eq!(style.protection, Some(Protection::default()));
+    }
+
+    #[test]
+    fn style_json_to_model_style_treats_null_hidden_as_explicit_default_override() {
+        let style = style_json_to_model_style(&json!({ "hidden": null }));
+        assert_eq!(style.protection, Some(Protection::default()));
     }
 
     #[test]
