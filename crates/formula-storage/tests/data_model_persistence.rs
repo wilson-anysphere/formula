@@ -281,7 +281,7 @@ fn data_model_round_trip_columnar_calculated_columns() {
             "#,
         )
         .expect("prepare calculated columns query");
-    let calc_rows: Vec<(String, String, String)> = calc_stmt
+    let mut calc_rows: Vec<(String, String, String)> = calc_stmt
         .query_map(params![&workbook_id_str], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -292,21 +292,21 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .expect("query calculated columns")
         .map(|row| row.expect("row"))
         .collect();
-    assert_eq!(
-        calc_rows,
-        vec![
-            (
-                "FactSales".to_string(),
-                "Double Amount".to_string(),
-                "[Amount] * 2".to_string(),
-            ),
-            (
-                "FactSales".to_string(),
-                "Category From Dim".to_string(),
-                "RELATED(DimProduct[Category])".to_string(),
-            ),
-        ]
-    );
+    calc_rows.sort();
+    let mut expected_calc_rows = vec![
+        (
+            "FactSales".to_string(),
+            "Double Amount".to_string(),
+            "[Amount] * 2".to_string(),
+        ),
+        (
+            "FactSales".to_string(),
+            "Category From Dim".to_string(),
+            "RELATED(DimProduct[Category])".to_string(),
+        ),
+    ];
+    expected_calc_rows.sort();
+    assert_eq!(calc_rows, expected_calc_rows);
 
     // Verify the calculated column values were persisted as physical column chunks.
     let mut chunk_stmt = conn
