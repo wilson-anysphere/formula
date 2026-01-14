@@ -489,9 +489,11 @@ fn import_xls_path_with_biff_reader(
                         sst_phonetics = Some(phonetics);
                     }
                 }
-                Err(err) => warnings.push(ImportWarning::new(format!(
-                    "failed to parse `.xls` shared string phonetics: {err}"
-                ))),
+                Err(err) => push_import_warning(
+                    &mut warnings,
+                    format!("failed to parse `.xls` shared string phonetics: {err}"),
+                    &mut warnings_suppressed,
+                ),
             }
         }
 
@@ -1150,11 +1152,15 @@ fn import_xls_path_with_biff_reader(
                                 if !parsed.ranges.is_empty() {
                                     merge_ranges.append(&mut parsed.ranges);
                                 }
-                                warnings.extend(parsed.warnings.into_iter().map(|w| {
-                                    ImportWarning::new(format!(
-                                        "failed to import `.xls` merged cells for sheet `{sheet_name}`: {w}"
-                                    ))
-                                }));
+                                for w in parsed.warnings.drain(..) {
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "failed to import `.xls` merged cells for sheet `{sheet_name}`: {w}"
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
+                                }
                             }
                             Err(err) => push_import_warning(
                                 &mut warnings,
@@ -1241,10 +1247,14 @@ fn import_xls_path_with_biff_reader(
         ) {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                        sheet_info.offset
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                            sheet_info.offset
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 } else {
                     match biff::parse_biff_sheet_labelsst_indices(workbook_stream, sheet_info.offset)
                     {
@@ -1279,9 +1289,13 @@ fn import_xls_path_with_biff_reader(
                                 cell.phonetic = Some(phonetic.clone());
                             }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -1813,9 +1827,13 @@ fn import_xls_path_with_biff_reader(
                                     sheet.set_formula(anchor, Some(formula));
                                 }
                             }
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` BIFF8 formulas for sheet `{sheet_name}`: {err}"
-                            ))),
+                            Err(err) => push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` BIFF8 formulas for sheet `{sheet_name}`: {err}"
+                                ),
+                                &mut warnings_suppressed,
+                            ),
                         }
                     }
                 }
@@ -2684,9 +2702,13 @@ fn import_xls_path_with_biff_reader(
             };
 
             let Some(sheet) = out.sheet_mut(sheet_id) else {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `.xls` AutoFilter post-processing for missing sheet id {sheet_id}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "skipping `.xls` AutoFilter post-processing for missing sheet id {sheet_id}"
+                    ),
+                    &mut warnings_suppressed,
+                );
                 continue;
             };
             let sheet_name = sheet.name.clone();
@@ -2742,9 +2764,13 @@ fn import_xls_path_with_biff_reader(
                 if af.sort_state.is_none() {
                     if let Some(&offset) = sheet_stream_offsets_by_sheet_id.get(&sheet.id) {
                         if offset >= workbook_stream_bytes.len() {
-                            warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` sort state for sheet `{sheet_name}`: out-of-bounds stream offset {offset}",
-                            )));
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` sort state for sheet `{sheet_name}`: out-of-bounds stream offset {offset}",
+                                ),
+                                &mut warnings_suppressed,
+                            );
                         } else {
                             match biff::parse_biff_sheet_sort_state(
                                 workbook_stream_bytes,
@@ -2752,16 +2778,24 @@ fn import_xls_path_with_biff_reader(
                                 af.range,
                             ) {
                                 Ok(mut parsed) => {
-                                    warnings.extend(
-                                        parsed.warnings.drain(..).map(ImportWarning::new),
-                                    );
+                                    for w in parsed.warnings.drain(..) {
+                                        push_import_warning(
+                                            &mut warnings,
+                                            w,
+                                            &mut warnings_suppressed,
+                                        );
+                                    }
                                     if af.sort_state.is_none() {
                                         af.sort_state = parsed.sort_state;
                                     }
                                 }
-                                Err(err) => warnings.push(ImportWarning::new(format!(
-                                    "failed to import `.xls` sort state for sheet `{sheet_name}`: {err}"
-                                ))),
+                                Err(err) => push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to import `.xls` sort state for sheet `{sheet_name}`: {err}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                ),
                             }
                         }
                     }
