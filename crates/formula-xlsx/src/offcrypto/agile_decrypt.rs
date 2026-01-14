@@ -1,15 +1,16 @@
 //! MS-OFFCRYPTO Agile decryption for OOXML `EncryptedPackage`.
 
-use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD};
+use base64::engine::general_purpose::{
+    STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD,
+};
 use base64::Engine as _;
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
 
 use super::aes_cbc::decrypt_aes_cbc_no_padding;
 use super::crypto::{
-    derive_iv, derive_key, hash_password, HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK,
-    KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
-    segment_block_key,
+    derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
+    HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
 use super::error::{OffCryptoError, Result};
 
@@ -77,7 +78,8 @@ pub fn decrypt_agile_encrypted_package(
         reason: e.to_string(),
     })?;
 
-    let key_encrypt_key_len = key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
+    let key_encrypt_key_len =
+        key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
 
     // The IV for the password key encryptor fields is the saltValue itself (truncated to blockSize).
@@ -98,12 +100,16 @@ pub fn decrypt_agile_encrypted_package(
             key_encrypt_key_len,
             info.password_key.hash_algorithm,
         )?;
-        let decrypted = decrypt_aes_cbc_no_padding(&k, verifier_iv, &info.password_key.encrypted_verifier_hash_input)
-            .map_err(|e| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashInput".to_string(),
-                reason: e.to_string(),
-            })?;
+        let decrypted = decrypt_aes_cbc_no_padding(
+            &k,
+            verifier_iv,
+            &info.password_key.encrypted_verifier_hash_input,
+        )
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashInput".to_string(),
+            reason: e.to_string(),
+        })?;
         decrypted
             .get(..info.password_key.block_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -121,12 +127,16 @@ pub fn decrypt_agile_encrypted_package(
             key_encrypt_key_len,
             info.password_key.hash_algorithm,
         )?;
-        let decrypted = decrypt_aes_cbc_no_padding(&k, verifier_iv, &info.password_key.encrypted_verifier_hash_value)
-            .map_err(|e| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashValue".to_string(),
-                reason: e.to_string(),
-            })?;
+        let decrypted = decrypt_aes_cbc_no_padding(
+            &k,
+            verifier_iv,
+            &info.password_key.encrypted_verifier_hash_value,
+        )
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashValue".to_string(),
+            reason: e.to_string(),
+        })?;
         decrypted
             .get(..info.password_key.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -138,14 +148,13 @@ pub fn decrypt_agile_encrypted_package(
     };
 
     let computed_verifier_hash_full = hash_bytes(info.password_key.hash_algorithm, &verifier_input);
-    let computed_verifier_hash =
-        computed_verifier_hash_full
-            .get(..info.password_key.hash_size)
-            .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "hashAlgorithm".to_string(),
-                reason: "hash output shorter than hashSize".to_string(),
-            })?;
+    let computed_verifier_hash = computed_verifier_hash_full
+        .get(..info.password_key.hash_size)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "hashAlgorithm".to_string(),
+            reason: "hash output shorter than hashSize".to_string(),
+        })?;
     if !ct_eq(computed_verifier_hash, &verifier_hash) {
         return Err(OffCryptoError::WrongPassword);
     }
@@ -158,13 +167,12 @@ pub fn decrypt_agile_encrypted_package(
             info.password_key.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&k, verifier_iv, &info.password_key.encrypted_key_value).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            decrypt_aes_cbc_no_padding(&k, verifier_iv, &info.password_key.encrypted_key_value)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "p:encryptedKey".to_string(),
                     attr: "encryptedKeyValue".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
         decrypted
             .get(..package_key_len)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -221,13 +229,12 @@ pub fn decrypt_agile_encrypted_package(
             info.key_data.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_key)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
         decrypted
             .get(..info.key_data.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -245,16 +252,13 @@ pub fn decrypt_agile_encrypted_package(
             info.key_data.block_size,
             info.key_data.hash_algorithm,
         )?;
-        let decrypted = decrypt_aes_cbc_no_padding(
-            &key_value,
-            &iv,
-            &info.data_integrity.encrypted_hmac_value,
-        )
-        .map_err(|e| OffCryptoError::InvalidAttribute {
-            element: "dataIntegrity".to_string(),
-            attr: "encryptedHmacValue".to_string(),
-            reason: e.to_string(),
-        })?;
+        let decrypted =
+            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_value)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacValue".to_string(),
+                    reason: e.to_string(),
+                })?;
         decrypted
             .get(..info.key_data.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -269,13 +273,13 @@ pub fn decrypt_agile_encrypted_package(
     // (length prefix + ciphertext). This matches the reference implementation used by Excel and
     // the `ms-offcrypto-writer` crate.
     let actual_hmac = compute_hmac(info.key_data.hash_algorithm, &hmac_key, encrypted_package)?;
-    let actual_hmac = actual_hmac
-        .get(..info.key_data.hash_size)
-        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+    let actual_hmac = actual_hmac.get(..info.key_data.hash_size).ok_or_else(|| {
+        OffCryptoError::InvalidAttribute {
             element: "dataIntegrity".to_string(),
             attr: "hashAlgorithm".to_string(),
             reason: "HMAC output shorter than hashSize".to_string(),
-        })?;
+        }
+    })?;
 
     if !ct_eq(actual_hmac, &expected_hmac) {
         return Err(OffCryptoError::IntegrityMismatch);
@@ -295,11 +299,12 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
         .try_into()
         .expect("slice length already checked");
     let declared_len_u64 = u64::from_le_bytes(len_bytes);
-    let declared_len = usize::try_from(declared_len_u64).map_err(|_| OffCryptoError::InvalidAttribute {
-        element: "EncryptedPackage".to_string(),
-        attr: "original_package_size".to_string(),
-        reason: format!("declared size {declared_len_u64} does not fit in usize"),
-    })?;
+    let declared_len =
+        usize::try_from(declared_len_u64).map_err(|_| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "original_package_size".to_string(),
+            reason: format!("declared size {declared_len_u64} does not fit in usize"),
+        })?;
 
     Ok((declared_len, &encrypted_package[8..]))
 }
@@ -403,44 +408,128 @@ fn parse_password_key_encryptor(node: roxmltree::Node<'_, '_>) -> Result<Passwor
 }
 
 fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<()> {
-    let cipher_alg = required_attr(node, "cipherAlgorithm")?;
+    let cipher_alg = required_attr(node, "cipherAlgorithm")?.trim();
     if !cipher_alg.eq_ignore_ascii_case("AES") {
         return Err(OffCryptoError::UnsupportedCipherAlgorithm {
             cipher: cipher_alg.to_string(),
         });
     }
-    let chaining = required_attr(node, "cipherChaining")?;
+    let chaining = required_attr(node, "cipherChaining")?.trim();
     if !chaining.eq_ignore_ascii_case("ChainingModeCBC") {
-        return Err(OffCryptoError::UnsupportedChainingMode {
+        return Err(OffCryptoError::UnsupportedCipherChaining {
             chaining: chaining.to_string(),
         });
     }
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wrap_encryption_info(xml: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&4u16.to_le_bytes()); // major
+        out.extend_from_slice(&4u16.to_le_bytes()); // minor
+        out.extend_from_slice(&0u32.to_le_bytes()); // flags
+        out.extend_from_slice(xml.as_bytes());
+        out
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_key_data() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
+                       keyBits="128" blockSize="16" />
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let encryption_info = wrap_encryption_info(xml);
+        let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("only") && msg.contains("ChainingModeCBC"),
+            "expected message to mention only CBC is supported, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_encrypted_key() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let encryption_info = wrap_encryption_info(xml);
+        let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+    }
+}
+
 fn required_attr<'a>(node: roxmltree::Node<'a, '_>, attr: &str) -> Result<&'a str> {
-    node.attribute(attr).ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
-        element: node.tag_name().name().to_string(),
-        attr: attr.to_string(),
-    })
+    node.attribute(attr)
+        .ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+            element: node.tag_name().name().to_string(),
+            attr: attr.to_string(),
+        })
 }
 
 fn parse_usize_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<usize> {
     let val = required_attr(node, attr)?;
-    val.trim().parse::<usize>().map_err(|e| OffCryptoError::InvalidAttribute {
-        element: node.tag_name().name().to_string(),
-        attr: attr.to_string(),
-        reason: e.to_string(),
-    })
+    val.trim()
+        .parse::<usize>()
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: node.tag_name().name().to_string(),
+            attr: attr.to_string(),
+            reason: e.to_string(),
+        })
 }
 
 fn parse_u32_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<u32> {
     let val = required_attr(node, attr)?;
-    val.trim().parse::<u32>().map_err(|e| OffCryptoError::InvalidAttribute {
-        element: node.tag_name().name().to_string(),
-        attr: attr.to_string(),
-        reason: e.to_string(),
-    })
+    val.trim()
+        .parse::<u32>()
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: node.tag_name().name().to_string(),
+            attr: attr.to_string(),
+            reason: e.to_string(),
+        })
 }
 
 fn parse_base64_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8>> {
@@ -535,46 +624,42 @@ fn hash_bytes(alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
 fn compute_hmac(alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     match alg {
         HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<sha1::Sha1> = Hmac::new_from_slice(key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            let mut mac: Hmac<sha1::Sha1> =
+                Hmac::new_from_slice(key).map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<sha2::Sha256> = Hmac::new_from_slice(key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            let mut mac: Hmac<sha2::Sha256> =
+                Hmac::new_from_slice(key).map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<sha2::Sha384> = Hmac::new_from_slice(key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            let mut mac: Hmac<sha2::Sha384> =
+                Hmac::new_from_slice(key).map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<sha2::Sha512> = Hmac::new_from_slice(key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            let mut mac: Hmac<sha2::Sha512> =
+                Hmac::new_from_slice(key).map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
