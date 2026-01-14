@@ -175,6 +175,11 @@ CI also enforces a **multi-arch safety** rule for Windows releases: when buildin
 include an arch token** (for example `x64`/`x86_64`/`amd64` vs `arm64`/`aarch64`). This prevents
 multi-target runs from overwriting/clobbering assets on the draft GitHub Release.
 
+CI also enforces the same rule for Linux releases: the uploaded `.AppImage` / `.deb` / `.rpm` assets
+for `x86_64` and `aarch64` must have **distinct filenames that include an arch token** (for example
+`x86_64`/`amd64` vs `arm64`/`aarch64`). This prevents multi-target runs from overwriting/clobbering
+assets and ensures `latest.json` can safely reference arch-specific updater payloads.
+
 CI runs:
 
 ```bash
@@ -1130,6 +1135,10 @@ wired to the correct **updater-consumed** artifacts:
    - macOS: `*.app.tar.gz` (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
+   - Multi-arch correctness:
+     - macOS: it is normal for `darwin-x86_64` and `darwin-aarch64` to point at the **same** universal `*.app.tar.gz`.
+     - Windows: `windows-x86_64` and `windows-aarch64` should point at **different** `.msi` files whose filenames include an arch token (e.g. `x64`/`x86_64`/`amd64` vs `arm64`/`aarch64`).
+     - Linux: `linux-x86_64` and `linux-aarch64` should point at **different** `.AppImage` files whose filenames include an arch token (e.g. `x86_64`/`amd64` vs `arm64`/`aarch64`).
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
 5. (Optional) Verify the manifest signature locally:
    - `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
