@@ -8286,7 +8286,6 @@ export class SpreadsheetApp {
           next.kind = { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
         }
       }
-
       // Ensure stable identity + z-order even if callers accidentally include them in `after`.
       if (stableId != null) next.id = stableId;
       if (stableZOrder != null) {
