@@ -62,6 +62,10 @@ let minor = u16::from_le_bytes([ver[2], ver[3]]);
 println!("EncryptionInfo version: {major}.{minor}");
 ```
 
+If you just need a yes/no classification (without parsing OLE streams yourself), `formula-io` also
+exposes `detect_workbook_encryption(path)` which returns `WorkbookEncryptionKind` (e.g.
+`OoxmlOleEncryptedPackage` vs legacy `.xls` `FILEPASS`).
+
 ## Supported encryption schemes
 
 MS-OFFCRYPTO defines multiple encryption “containers” for OOXML packages. For Excel-encrypted
