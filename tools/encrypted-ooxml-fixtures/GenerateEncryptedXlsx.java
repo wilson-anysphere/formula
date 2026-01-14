@@ -1,5 +1,5 @@
-import java.io.OutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -90,6 +90,19 @@ public final class GenerateEncryptedXlsx {
       // Encrypt the raw OOXML ZIP bytes directly (avoid parsing/repacking and avoid mutating the input).
       try (InputStream plaintext = Files.newInputStream(inPath);
           OutputStream encryptedStream = enc.getDataStream(fs)) {
+        // XLSX is a ZIP file, so the payload should begin with "PK". If it doesn't, still proceed
+        // (the user may intentionally encrypt arbitrary bytes), but warn to avoid accidental misuse.
+        byte[] first2 = new byte[2];
+        int n = plaintext.read(first2);
+        if (n == 2) {
+          if (first2[0] != 'P' || first2[1] != 'K') {
+            System.err.println("Warning: input does not look like a ZIP/OOXML package (missing PK signature).");
+          }
+          encryptedStream.write(first2);
+        } else if (n > 0) {
+          encryptedStream.write(first2, 0, n);
+        }
+
         byte[] buf = new byte[16 * 1024];
         int read;
         while ((read = plaintext.read(buf)) != -1) {
