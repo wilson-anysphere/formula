@@ -5255,6 +5255,13 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Some(SheetId::Local(thread_current_sheet_id() as usize))
             }
             crate::eval::SheetReference::Sheet(name) => {
+                // Excel's INDIRECT does not resolve references into external workbooks. Some
+                // grids may resolve bracketed external sheet keys like `"[Book.xlsx]Sheet1"` via
+                // `resolve_sheet_name`, so block them here to ensure `INDIRECT` consistently
+                // returns `#REF!`.
+                if name.starts_with('[') {
+                    return None;
+                }
                 Some(SheetId::Local(grid.resolve_sheet_name(name)?))
             }
             crate::eval::SheetReference::SheetRange(start, end) => {
