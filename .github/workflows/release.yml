@@ -912,6 +912,17 @@ jobs:
         if: runner.os == 'Linux'
         run: node scripts/check-tauri-permissions.mjs
 
+      # Ensure release builds produce separate debug symbol files for crash symbolication
+      # without bloating installer assets. We keep this as a workflow-only override (instead
+      # of changing the workspace-wide Cargo profile) so Linux builds remain size-focused.
+      - name: Configure Cargo release debug symbols (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CARGO_PROFILE_RELEASE_DEBUG=1" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed" >> "$GITHUB_ENV"
+
       - name: Build and upload release assets (macOS universal)
         id: tauri_release_macos
         if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true'
@@ -1142,6 +1153,13 @@ jobs:
         uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
         with:
           arch: amd64_arm64
+
+      - name: Configure Cargo release debug symbols (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          "CARGO_PROFILE_RELEASE_DEBUG=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build and upload release assets
         id: tauri_release_non_macos
