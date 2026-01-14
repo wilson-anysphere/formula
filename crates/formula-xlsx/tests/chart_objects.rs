@@ -179,4 +179,14 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
         !model.series.is_empty(),
         "expected non-empty series from chartSpace when chartEx is minimal"
     );
+
+    // Ensure other classic chartSpace details are also preserved when ChartEx is minimal.
+    assert!(
+        !model.axes.is_empty(),
+        "expected non-empty axes from chartSpace when chartEx is minimal"
+    );
+    assert_eq!(
+        model.title.as_ref().map(|t| t.rich_text.text.as_str()),
+        Some("Example Chart")
+    );
 }
