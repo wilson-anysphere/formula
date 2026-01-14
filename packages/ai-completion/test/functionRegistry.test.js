@@ -64,10 +64,13 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("CONCATENATE", 0), "Expected CONCATENATE text1 to be a range");
   assert.ok(registry.isRangeArg("REPT", 0), "Expected REPT text to be a range");
   assert.equal(registry.getFunction("REPT")?.args?.[1]?.name, "number_times", "Expected REPT arg2 to be number_times");
+  assert.equal(registry.getArgType("REPT", 1), "value", "Expected REPT number_times to be value-like");
   assert.ok(registry.isRangeArg("DOLLAR", 0), "Expected DOLLAR number to be a range");
   assert.ok(registry.getFunction("DOLLAR")?.args?.[1]?.optional, "Expected DOLLAR decimals to be optional");
+  assert.equal(registry.getArgType("DOLLAR", 1), "value", "Expected DOLLAR decimals to be value-like");
   assert.ok(registry.isRangeArg("BAHTTEXT", 0), "Expected BAHTTEXT number to be a range");
   assert.ok(registry.isRangeArg("FIXED", 0), "Expected FIXED number to be a range");
+  assert.equal(registry.getArgType("FIXED", 1), "value", "Expected FIXED decimals to be value-like");
   assert.equal(registry.getArgType("FIXED", 2), "boolean", "Expected FIXED no_commas to be boolean");
 
   // Common scalar math functions should treat numeric inputs as value-like (often cell-referenced).
@@ -187,6 +190,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("IMSUM")?.args?.[0]?.repeating, "Expected IMSUM to accept repeating inumber args");
   assert.equal(registry.getArgType("RTD", 0), "string", "Expected RTD prog_id to be string-like");
   assert.ok(registry.getFunction("CUBEVALUE")?.args?.[1]?.repeating, "Expected CUBEVALUE member args to repeat");
+  assert.equal(registry.getArgType("CUBERANKEDMEMBER", 2), "value", "Expected CUBERANKEDMEMBER rank to be value-like");
+  assert.equal(registry.getArgType("CUBESET", 3), "value", "Expected CUBESET sort_order to be value-like");
 
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
@@ -310,6 +315,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("RANDARRAY")?.args?.[0]?.optional, "Expected RANDARRAY rows to be optional");
   assert.equal(registry.getArgType("RANDARRAY", 4), "boolean", "Expected RANDARRAY whole_number to be boolean");
   assert.equal(registry.getFunction("RANDARRAY")?.args?.[4]?.name, "whole_number", "Expected RANDARRAY arg5 to be whole_number");
+  assert.equal(registry.getArgType("SEQUENCE", 2), "value", "Expected SEQUENCE start to be value-like");
+  assert.equal(registry.getArgType("SEQUENCE", 3), "value", "Expected SEQUENCE step to be value-like");
+  assert.equal(registry.getArgType("RANDARRAY", 2), "value", "Expected RANDARRAY min to be value-like");
+  assert.equal(registry.getArgType("RANDARRAY", 3), "value", "Expected RANDARRAY max to be value-like");
 
   // Conditional logic with repeating (test/value) pairs
   const ifs = registry.getFunction("IFS");

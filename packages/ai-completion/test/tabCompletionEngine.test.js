@@ -5332,6 +5332,74 @@ test("IMPOWER exponent suggests a left-cell reference (value-like arg)", async (
   );
 });
 
+test("SEQUENCE start suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SEQUENCE(5, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SEQUENCE(5, 1, B1"),
+    `Expected SEQUENCE to suggest B1 for start, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("RANDARRAY min suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANDARRAY(5, 5, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDARRAY(5, 5, B1"),
+    `Expected RANDARRAY to suggest B1 for min, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("DOLLAR decimals suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DOLLAR(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DOLLAR(A1, B1"),
+    `Expected DOLLAR to suggest B1 for decimals, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("REPT number_times suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=REPT(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=REPT(A1, B1"),
+    `Expected REPT to suggest B1 for number_times, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

@@ -3740,7 +3740,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "connection", type: "string" },
       { name: "set_expression", type: "string" },
-      { name: "rank", type: "number" },
+      { name: "rank", type: "value" },
       { name: "caption", type: "string", optional: true },
     ],
   },
@@ -3751,7 +3751,7 @@ const CURATED_FUNCTIONS = [
       { name: "connection", type: "string" },
       { name: "set_expression", type: "string" },
       { name: "caption", type: "string", optional: true },
-      { name: "sort_order", type: "number", optional: true },
+      { name: "sort_order", type: "value", optional: true },
       { name: "sort_by", type: "string", optional: true },
     ],
   },
@@ -3888,8 +3888,8 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "rows", type: "number" },
       { name: "columns", type: "number", optional: true },
-      { name: "start", type: "number", optional: true },
-      { name: "step", type: "number", optional: true },
+      { name: "start", type: "value", optional: true },
+      { name: "step", type: "value", optional: true },
     ],
   },
   {
@@ -3898,8 +3898,8 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "rows", type: "number", optional: true },
       { name: "columns", type: "number", optional: true },
-      { name: "min", type: "number", optional: true },
-      { name: "max", type: "number", optional: true },
+      { name: "min", type: "value", optional: true },
+      { name: "max", type: "value", optional: true },
       { name: "whole_number", type: "boolean", optional: true },
     ],
   },
@@ -4149,7 +4149,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a number to text using currency format.",
     args: [
       { name: "number", type: "range" },
-      { name: "decimals", type: "number", optional: true },
+      { name: "decimals", type: "value", optional: true },
     ],
   },
   {
@@ -4164,7 +4164,7 @@ const CURATED_FUNCTIONS = [
     description: "Rounds a number to the specified number of decimals and formats it as text.",
     args: [
       { name: "number", type: "range" },
-      { name: "decimals", type: "number", optional: true },
+      { name: "decimals", type: "value", optional: true },
       { name: "no_commas", type: "boolean", optional: true },
     ],
   },
@@ -4173,7 +4173,7 @@ const CURATED_FUNCTIONS = [
     description: "Repeats text a given number of times.",
     args: [
       { name: "text", type: "range" },
-      { name: "number_times", type: "number" },
+      { name: "number_times", type: "value" },
     ],
   },
   {
