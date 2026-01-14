@@ -112,7 +112,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run binder perf
+        id: binder_perf
         if: inputs.suite == 'binder' || inputs.suite == 'both'
+        continue-on-error: true
         env:
           FORMULA_RUN_COLLAB_BINDER_PERF: "1"
         run: |
@@ -120,17 +122,90 @@ jobs:
           pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js | tee binder-perf.log
 
       - name: Run session+binder perf
+        id: session_perf
         if: inputs.suite == 'session' || inputs.suite == 'both'
+        continue-on-error: true
         env:
           FORMULA_RUN_COLLAB_SESSION_BINDER_PERF: "1"
         run: |
           set -euo pipefail
           pnpm test:node packages/collab/session/test/perf/session-binder-perf.test.js | tee session-binder-perf.log
 
+      - name: Write perf summary
+        if: always()
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          if (!summaryPath) process.exit(0);
+          
+          const results = [];
+          for (const file of ["binder-perf.log", "session-binder-perf.log"]) {
+            if (!fs.existsSync(file)) continue;
+            const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) continue;
+              try {
+                const obj = JSON.parse(trimmed);
+                if (!obj || typeof obj !== "object") continue;
+                if (typeof obj.suite !== "string" || typeof obj.scenario !== "string") continue;
+                results.push(obj);
+              } catch {
+                // ignore
+              }
+            }
+          }
+          
+          if (results.length === 0) {
+            fs.appendFileSync(summaryPath, "\n## Collab perf summary\n\n(no PERF_JSON output found in logs)\n");
+            process.exit(0);
+          }
+          
+          const runtime = results.find((r) => r && typeof r === "object" && r.runtime)?.runtime ?? null;
+          const fmtMiB = (bytes) => (Number.isFinite(bytes) ? (bytes / 1024 / 1024).toFixed(1) : "");
+          const fmtMs = (ms) => (Number.isFinite(ms) ? Number(ms).toFixed(1) : "");
+          
+          let md = "\n## Collab perf summary\n\n";
+          if (runtime && typeof runtime === "object") {
+            md += `- runtime: ${runtime.node ?? ""} (${runtime.platform ?? ""}/${runtime.arch ?? ""})\n\n`;
+          }
+          
+          md +=
+            "| suite | scenario | updates | batch | cols | keyEnc | format | guards | total ms | peak heap (MiB) | peak rss (MiB) |\n" +
+            "| --- | --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: |\n";
+          
+          for (const r of results) {
+            const timing = r.timingMs ?? {};
+            const mem = r.mem ?? {};
+            const totalMs = timing.total;
+            const heapPeak = mem.heapUsed?.peak;
+            const rssPeak = mem.rss?.peak;
+            const format = r.format ? `variants=${r.format.variants ?? ""}` : "";
+            const guards = r.guards == null ? "" : String(r.guards);
+            md += `| ${r.suite} | ${r.scenario} | ${r.updates ?? ""} | ${r.batchSize ?? ""} | ${r.cols ?? ""} | ${r.keyEncoding ?? ""} | ${format} | ${guards} | ${fmtMs(totalMs)} | ${fmtMiB(heapPeak)} | ${fmtMiB(rssPeak)} |\n`;
+          }
+          
+          md += "\n";
+          fs.appendFileSync(summaryPath, md);
+          NODE
+
       - name: Upload perf logs
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: collab-perf-logs
           path: |
             binder-perf.log
             session-binder-perf.log
+          if-no-files-found: ignore
+
+      - name: Fail if perf benchmarks failed
+        if: always()
+        run: |
+          if [[ "${{ steps.binder_perf.outcome }}" == "failure" || "${{ steps.session_perf.outcome }}" == "failure" ]]; then
+            echo "One or more collab perf steps failed." >&2
+            echo "binder_perf:  ${{ steps.binder_perf.outcome }}" >&2
+            echo "session_perf: ${{ steps.session_perf.outcome }}" >&2
+            exit 1
+          fi
