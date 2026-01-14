@@ -56,6 +56,19 @@ describe("WorkbookSheetStore", () => {
     expect(store2.listVisible().map((s) => s.id)).toEqual(["s1"]);
   });
 
+  it("prevents deleting the last visible sheet (even if hidden sheets remain)", () => {
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Hidden", visibility: "hidden" },
+    ]);
+
+    expect(() => store.remove("s1")).toThrow(/last visible/i);
+
+    // Deleting hidden sheets is allowed when at least one visible sheet remains.
+    store.remove("s2");
+    expect(store.listAll().map((s) => s.id)).toEqual(["s1"]);
+  });
+
   it("reorders sheets with move()", () => {
     const store = new WorkbookSheetStore([
       { id: "a", name: "Sheet1", visibility: "visible" },

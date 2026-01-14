@@ -274,6 +274,12 @@ export class WorkbookSheetStore {
     if (this.sheets.length <= 1) throw new Error("Cannot delete the last sheet");
     const idx = this.sheets.findIndex((s) => s.id === id);
     if (idx === -1) throw new Error("Sheet not found");
+    const sheet = this.sheets[idx]!;
+    // Mirror Excel behavior: prevent deleting the last visible sheet, even if hidden sheets remain.
+    if (sheet.visibility === "visible") {
+      const visibleCount = this.sheets.reduce((count, s) => count + (s.visibility === "visible" ? 1 : 0), 0);
+      if (visibleCount <= 1) throw new Error("Cannot delete the last visible sheet");
+    }
     const next = this.sheets.slice();
     next.splice(idx, 1);
     this.sheets = next;
