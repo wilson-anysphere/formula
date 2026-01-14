@@ -141,6 +141,8 @@ Notes / caveats:
   deterministic casing:
   - `node scripts/normalize-locale-function-sources.js` (or `pnpm normalize:locale-function-sources`)
   - CI-style check: `node scripts/normalize-locale-function-sources.js --check` (or `pnpm check:locale-function-sources`)
+  - Note: after normalization, the committed `sources/<locale>.json` will typically contain fewer
+    entries than `shared/functionCatalog.json`, since identity mappings are omitted.
 - After extracting, regenerate + verify with:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`

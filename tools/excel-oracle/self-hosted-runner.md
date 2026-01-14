@@ -109,6 +109,8 @@ Verification checklist (especially for `es-ES`):
   - Ensure you did not use `-MaxFunctions` when generating committed sources (debugging only).
 - Normalize sources before committing (omits identity mappings + enforces stable casing):
   - `node scripts/normalize-locale-function-sources.js`
+  - Note: after normalization, the committed `sources/es-ES.json` will typically contain fewer
+    entries than `shared/functionCatalog.json`, since identity mappings are omitted.
 - Run `node scripts/generate-locale-function-tsv.js --check`.
 - Spot-check that Spanish-localized spellings are present in
   `crates/formula-engine/src/locale/data/es-ES.tsv` (not silently falling back to English), including
