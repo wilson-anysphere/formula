@@ -306,7 +306,6 @@ impl PivotCache {
         if let Some(idx) = self.field_index(canonical.as_ref()) {
             return Some(idx);
         }
-
         let label = pivot_field_ref_name(field);
         if let Some(idx) = self.field_index(label.as_ref()) {
             return Some(idx);
@@ -3360,6 +3359,15 @@ impl FieldIndices {
         cfg: &PivotConfig,
     ) -> Result<Self, PivotError> {
         let resolve_field_index = |field: &PivotFieldRef| -> Result<usize, PivotError> {
+            // Most pivots are cache-backed; use the cache's matching heuristics first so
+            // Data Model field refs can resolve against cache headers that might use alternate
+            // textual forms (e.g. measures stored as `Total Sales` vs `[Total Sales]`).
+            if let Some(cache) = source.as_pivot_cache() {
+                if let Some(idx) = cache.field_index_ref(field) {
+                    return Ok(idx);
+                }
+            }
+
             // Most pivots are cache-backed; try the cache-field name / legacy string form first.
             let field_name = pivot_field_ref_name(field);
             if let Some(idx) = source.field_index(field_name.as_ref()) {
@@ -3400,9 +3408,18 @@ impl FieldIndices {
 
             // Best-effort fallback: try the `Display` rendering (used by some Data Model producers).
             let label = field.to_string();
-            source
-                .field_index(&label)
-                .ok_or_else(|| PivotError::MissingField(field_name.to_string()))
+            if let Some(idx) = source.field_index(&label) {
+                return Ok(idx);
+            }
+
+            // Some sources may store Data Model measures without the DAX-style brackets.
+            if let PivotFieldRef::DataModelMeasure(name) = field {
+                if let Some(idx) = source.field_index(name) {
+                    return Ok(idx);
+                }
+            }
+
+            Err(PivotError::MissingField(field_name.to_string()))
         };
 
         let mut row_indices = Vec::new();
@@ -3564,7 +3581,6 @@ mod tests {
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
         values.to_vec()
     }
-
     #[test]
     fn pivot_cache_field_index_ref_resolves_quoted_data_model_column_headers() {
         let data = vec![
@@ -3579,7 +3595,6 @@ mod tests {
         };
         assert_eq!(cache.field_index_ref(&field), Some(0));
     }
-
     #[test]
     fn pivot_value_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints()
     {
