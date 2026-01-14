@@ -5151,7 +5151,7 @@ impl WasmWorkbook {
                     if message.contains("ZIP archive") =>
                 {
                     js_err(
-                        "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` is supported for now",
+                        "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks are supported for now",
                     )
                 }
                 other => office_crypto_err(other),
@@ -5163,7 +5163,7 @@ impl WasmWorkbook {
         // - `.xlsb`: `xl/workbook.bin`
         if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
             return Err(js_err(
-                "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` is supported for now",
+                "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks are supported for now",
             ));
         }
 
