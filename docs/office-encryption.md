@@ -253,8 +253,10 @@ Agile includes a `dataIntegrity` block that authenticates the package bytes:
   from `keyData.saltValue` and `HMAC_VALUE_BLOCK` (truncate/pad to `blockSize`).
 * Compute `HMAC-(keyData.hashAlgorithm)(hmacKey, EncryptedPackageStreamBytes)` and compare it to the
   decrypted `hmacValue` (constant-time compare).
-  - Note: in our implementations, the HMAC input is the **entire `EncryptedPackage` stream bytes**
-    (8-byte length prefix + ciphertext), not the decrypted ZIP bytes.
+  - Note: MS-OFFCRYPTO/Excel authenticates the **entire `EncryptedPackage` stream bytes** (8-byte
+    length prefix + ciphertext). For compatibility with some non-Excel producers, our decryptors may
+    also accept alternative HMAC targets (e.g. plaintext ZIP bytes, ciphertext-only). For the exact
+    per-crate acceptance behavior, see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 Implementation status:
 
