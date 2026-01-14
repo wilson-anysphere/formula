@@ -2158,10 +2158,33 @@ jobs:
             exit 1
           }
 
-          $dumpbin = Get-ChildItem -Path $msvcRoot -Filter dumpbin.exe -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\bin\\Hostx64\\x64\\dumpbin\.exe$' } |
-            Sort-Object -Property FullName -Descending |
-            Select-Object -First 1
+          # Prefer predictable MSVC layout (avoid recursively scanning the entire tools directory).
+          # Typical path:
+          #   <msvcRoot>/<version>/bin/Hostx64/x64/dumpbin.exe
+          $dumpbin = $null
+          $versionDirs = @()
+          try {
+            $versionDirs = @(
+              Get-ChildItem -Path $msvcRoot -Directory -ErrorAction SilentlyContinue |
+                Sort-Object -Property Name -Descending
+            )
+          } catch {
+            $versionDirs = @()
+          }
+          foreach ($v in $versionDirs) {
+            $candidate = Join-Path $v.FullName (Join-Path 'bin' (Join-Path 'Hostx64' (Join-Path 'x64' 'dumpbin.exe')))
+            if (Test-Path $candidate) {
+              $dumpbin = Get-Item -LiteralPath $candidate
+              break
+            }
+          }
+          if (!$dumpbin) {
+            # Fallback: recursive search (slower) in case MSVC layout differs.
+            $dumpbin = Get-ChildItem -Path $msvcRoot -Filter dumpbin.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\bin\\Hostx64\\x64\\dumpbin\.exe$' } |
+              Sort-Object -Property FullName -Descending |
+              Select-Object -First 1
+          }
 
           if (!$dumpbin) {
             Write-Error "dumpbin.exe not found under: $msvcRoot"
