@@ -446,6 +446,39 @@ fn is_ident_cont_char(c: char) -> bool {
     matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
 }
 
+fn starts_like_a1_cell_ref(s: &str) -> bool {
+    // The lexer tokenizes A1-style cell references even when followed by additional identifier
+    // characters (e.g. `A1B`), so treat any sheet name *starting* with a valid A1 ref as requiring
+    // quotes. This matches `ast.rs` sheet-name formatting rules.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    if bytes.get(i) == Some(&b'$') {
+        i += 1;
+    }
+
+    let start_letters = i;
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+    if i == start_letters {
+        return false;
+    }
+
+    if bytes.get(i) == Some(&b'$') {
+        i += 1;
+    }
+
+    let start_digits = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == start_digits {
+        return false;
+    }
+
+    crate::eval::parse_a1(&s[..i]).is_ok()
+}
+
 fn quote_sheet_name(name: &str) -> String {
     if name.is_empty() {
         return String::new();
@@ -454,14 +487,14 @@ fn quote_sheet_name(name: &str) -> String {
     let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
     let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
         && matches!(name.chars().nth(1), Some('0'..='9' | '['));
-    let looks_like_a1 = crate::eval::parse_a1(name).is_ok();
+    let starts_like_a1 = starts_like_a1_cell_ref(name);
     // The formula lexer treats TRUE/FALSE as booleans rather than identifiers; quoting is required
     // to disambiguate sheet names that match those keywords.
     let is_reserved = name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE");
     let needs_quote = starts_like_number
         || is_reserved
         || starts_like_r1c1
-        || looks_like_a1
+        || starts_like_a1
         || name.chars().any(|c| !is_ident_cont_char(c));
 
     if !needs_quote {

@@ -128,6 +128,18 @@ fn address_formats_a1_and_r1c1_styles() {
         sheet.eval("=ADDRESS(1,1,1,TRUE,\"2024\")"),
         Value::Text("'2024'!$A$1".to_string())
     );
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,TRUE,\"TRUE\")"),
+        Value::Text("'TRUE'!$A$1".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,TRUE,\"FALSE\")"),
+        Value::Text("'FALSE'!$A$1".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,TRUE,\"A1B\")"),
+        Value::Text("'A1B'!$A$1".to_string())
+    );
 
     // `sheet_text` is coerced to text using the workbook value locale.
     sheet.set_value_locale(ValueLocaleConfig::de_de());

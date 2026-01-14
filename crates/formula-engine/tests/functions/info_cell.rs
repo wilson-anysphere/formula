@@ -2313,6 +2313,7 @@ fn cell_address_quotes_sheet_names_when_needed() {
     let mut engine = Engine::new();
     engine.set_cell_value("My Sheet", "A1", 1.0).unwrap();
     engine.set_cell_value("A1", "A1", 1.0).unwrap();
+    engine.set_cell_value("A1B", "A1", 1.0).unwrap();
     engine.set_cell_value("O'Brien", "A1", 1.0).unwrap();
     engine.set_cell_value("TRUE", "A1", 1.0).unwrap();
     engine.set_cell_value("FALSE", "A1", 1.0).unwrap();
@@ -2331,6 +2332,9 @@ fn cell_address_quotes_sheet_names_when_needed() {
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "B5", "=CELL(\"address\",'FALSE'!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=CELL(\"address\",'A1B'!A1)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -2354,6 +2358,10 @@ fn cell_address_quotes_sheet_names_when_needed() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "B5"),
         Value::Text("'FALSE'!$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B6"),
+        Value::Text("'A1B'!$A$1".to_string())
     );
 }
 
