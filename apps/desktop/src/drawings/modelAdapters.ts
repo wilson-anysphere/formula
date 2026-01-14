@@ -369,20 +369,22 @@ function convertModelEmuSize(model: unknown, context: string): EmuSize {
 }
 
 function convertModelCellOffset(model: unknown, context: string): CellOffset {
-  if (!isRecord(model)) throw new Error(`${context} must be an object`);
+  // Best-effort: older/partial snapshots may omit offsets entirely. Treat missing/invalid offsets
+  // as 0 so we can still hydrate drawings rather than dropping them.
+  if (!isRecord(model)) return { xEmu: 0, yEmu: 0 };
   const record = model as JsonRecord;
 
-  const readFirst = (keys: string[], fieldContext: string): number => {
+  const readFirst = (keys: string[]): number | undefined => {
     for (const key of keys) {
       const candidate = readOptionalNumber(record[key]);
       if (candidate != null) return candidate;
     }
-    throw new Error(`${fieldContext} must be a number`);
+    return undefined;
   };
 
   return {
-    xEmu: readFirst(["x_emu", "xEmu", "dxEmu", "offsetXEmu", "offset_x_emu"], `${context}.x_emu`),
-    yEmu: readFirst(["y_emu", "yEmu", "dyEmu", "offsetYEmu", "offset_y_emu"], `${context}.y_emu`),
+    xEmu: readFirst(["x_emu", "xEmu", "dxEmu", "offsetXEmu", "offset_x_emu"]) ?? 0,
+    yEmu: readFirst(["y_emu", "yEmu", "dyEmu", "offsetYEmu", "offset_y_emu"]) ?? 0,
   };
 }
 
@@ -418,8 +420,21 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
           try {
             return convertModelEmuSize(extValue, "Anchor.OneCell.ext");
           } catch {
-            return convertModelEmuSize(sizeValue, "Anchor.OneCell.size");
+            // ignore
           }
+          try {
+            return convertModelEmuSize(sizeValue, "Anchor.OneCell.size");
+          } catch {
+            // ignore
+          }
+          // Some snapshots may store EMU size fields directly on the anchor payload.
+          try {
+            return convertModelEmuSize(value, "Anchor.OneCell");
+          } catch {
+            // ignore
+          }
+          // Fallback to a small default size so the drawing remains selectable.
+          return { cx: pxToEmu(100), cy: pxToEmu(100) };
         })();
       return { type: "oneCell", from, size };
     }
@@ -437,8 +452,19 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
           try {
             return convertModelEmuSize(extValue, "Anchor.Absolute.ext");
           } catch {
-            return convertModelEmuSize(sizeValue, "Anchor.Absolute.size");
+            // ignore
           }
+          try {
+            return convertModelEmuSize(sizeValue, "Anchor.Absolute.size");
+          } catch {
+            // ignore
+          }
+          try {
+            return convertModelEmuSize(value, "Anchor.Absolute");
+          } catch {
+            // ignore
+          }
+          return { cx: pxToEmu(100), cy: pxToEmu(100) };
         })();
       return { type: "absolute", pos, size };
     }
