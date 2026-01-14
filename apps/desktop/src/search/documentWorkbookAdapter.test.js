@@ -222,6 +222,10 @@ test("DocumentWorkbookAdapter resolves display names for unmaterialized sheets w
   // `getSheet` should not create a sheet in the DocumentController; it only resolves names.
   assert.deepEqual(doc.getSheetIds(), []);
 
+  // Accessors that probe for cell values should also avoid materializing the sheet.
+  assert.equal(sheet.getCell(0, 0), null);
+  assert.deepEqual(doc.getSheetIds(), []);
+
   // Accessors that are used by search (usedRange iteration) should also avoid materializing.
   assert.equal(sheet.getUsedRange(), null);
   assert.deepEqual(doc.getSheetIds(), []);

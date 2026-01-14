@@ -229,6 +229,13 @@ class DocumentSheetAdapter {
    */
   getMergedRanges() {
     const doc = /** @type {any} */ (this.document);
+    // Avoid creating phantom sheets when callers hold stale sheet adapters.
+    if (typeof doc.getSheetMeta === "function") {
+      const meta = doc.getSheetMeta(this.sheetId);
+      if (!meta) return [];
+    } else if (doc?.model?.sheets instanceof Map && !doc.model.sheets.has(this.sheetId)) {
+      return [];
+    }
     if (typeof doc.getMergedRanges === "function") {
       return doc.getMergedRanges(this.sheetId) ?? [];
     }
@@ -250,6 +257,13 @@ class DocumentSheetAdapter {
    */
   getMergedMasterCell(row, col) {
     const doc = /** @type {any} */ (this.document);
+    // Avoid creating phantom sheets when callers hold stale sheet adapters.
+    if (typeof doc.getSheetMeta === "function") {
+      const meta = doc.getSheetMeta(this.sheetId);
+      if (!meta) return null;
+    } else if (doc?.model?.sheets instanceof Map && !doc.model.sheets.has(this.sheetId)) {
+      return null;
+    }
     if (typeof doc.getMergedMasterCell === "function") {
       return doc.getMergedMasterCell(this.sheetId, { row, col });
     }
@@ -265,7 +279,18 @@ class DocumentSheetAdapter {
   }
 
   getCell(row, col) {
-    const state = this.document.getCell(this.sheetId, { row, col });
+    const doc = /** @type {any} */ (this.document);
+    const coord = { row, col };
+    // `DocumentController.getCell()` creates sheets lazily. Prefer `peekCell` when available so
+    // probing for values does not resurrect deleted sheets or create phantom sheets from a
+    // stale sheetNameResolver mapping.
+    const state =
+      typeof doc.peekCell === "function"
+        ? doc.peekCell(this.sheetId, coord)
+        : doc?.model?.sheets instanceof Map && !doc.model.sheets.has(this.sheetId)
+          ? null
+          : doc.getCell(this.sheetId, coord);
+    if (!state) return null;
     const formula = normalizeFormula(state.formula);
     const value = state.value ?? null;
 
@@ -276,6 +301,17 @@ class DocumentSheetAdapter {
   }
 
   setCell(row, col, cell) {
+    const doc = /** @type {any} */ (this.document);
+    // Avoid resurrecting deleted sheets (or creating new ones) via search/replace edits.
+    if (typeof doc.getSheetMeta === "function") {
+      const meta = doc.getSheetMeta(this.sheetId);
+      if (!meta) {
+        throw new Error(`Unknown sheet: ${this.sheetId}`);
+      }
+    } else if (doc?.model?.sheets instanceof Map && !doc.model.sheets.has(this.sheetId)) {
+      throw new Error(`Unknown sheet: ${this.sheetId}`);
+    }
+
     if (!cell || (cell.value == null && (cell.formula == null || cell.formula === ""))) {
       this.document.clearCell(this.sheetId, { row, col });
       return;
