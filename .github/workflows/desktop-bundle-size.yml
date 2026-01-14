@@ -52,13 +52,17 @@ env:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    # Pin runner image versions for reproducibility. GitHub's `*-latest` labels move
+    # over time, which can cause unexpected workflow failures.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
+      - name: "Guard: release workflow runner images are pinned (no *-latest)"
+        run: bash scripts/ci/check-gha-runner-pins.sh
       - name: "Guard: Node version pins match CI/release workflows"
         run: bash scripts/ci/check-node-version-pins.sh
       - name: "Guard: pnpm version pins match package.json"
