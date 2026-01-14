@@ -19743,7 +19743,11 @@ export class SpreadsheetApp {
     }
   }
 
-  private async pasteClipboardImageAsDrawing(content: unknown): Promise<boolean> {
+  private async pasteClipboardImageAsDrawing(
+    content: unknown,
+    options?: { sheetId?: string; baseCell?: { row: number; col: number } },
+  ): Promise<boolean> {
+    const sheetId = typeof options?.sheetId === "string" && options.sheetId.trim() !== "" ? String(options.sheetId) : this.sheetId;
     const maxBytes = Number(CLIPBOARD_LIMITS?.maxImageBytes) > 0 ? Number(CLIPBOARD_LIMITS.maxImageBytes) : 5 * 1024 * 1024;
     const mb = Math.round(maxBytes / 1024 / 1024);
     const anyContent = content as any;
@@ -19842,14 +19846,14 @@ export class SpreadsheetApp {
       if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
     }
 
-    const base = this.selection.active;
-    const startRow = base.row;
-    const startCol = base.col;
+    const base = options?.baseCell ?? this.selection.active;
+    const startRow = typeof base?.row === "number" && Number.isFinite(base.row) ? base.row : this.selection.active.row;
+    const startCol = typeof base?.col === "number" && Number.isFinite(base.col) ? base.col : this.selection.active.col;
 
     const imageId = `image_${uuid()}.png`;
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
-    for (const obj of this.listDrawingObjectsForSheet(this.sheetId)) {
+    for (const obj of this.listDrawingObjectsForSheet(sheetId)) {
       usedDrawingIds.add(obj.id);
       if (obj.id > maxDrawingId) maxDrawingId = obj.id;
     }
@@ -19897,39 +19901,42 @@ export class SpreadsheetApp {
       } catch {
         // Best-effort: never fail paste due to collab image propagation.
       }
-      docAny.insertDrawing(this.sheetId, drawing);
+      docAny.insertDrawing(sheetId, drawing);
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();
       throw err;
     }
 
-    this.drawingObjectsCache = null;
-    this.canvasChartCombinedDrawingObjectsCache = null;
-    this.invalidateDrawingHitTestIndexCaches();
-    const prevDrawingSelected = this.selectedDrawingId;
-    this.selectedDrawingId = drawingId;
-    {
-      const objects = this.listDrawingObjectsForSheet();
-      let idx = -1;
-      for (let i = 0; i < objects.length; i += 1) {
-        if (objects[i]!.id === drawingId) {
-          idx = i;
-          break;
+    const stillOnSheet = this.sheetId === sheetId;
+    if (stillOnSheet) {
+      this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
+      this.invalidateDrawingHitTestIndexCaches();
+      const prevDrawingSelected = this.selectedDrawingId;
+      this.selectedDrawingId = drawingId;
+      {
+        const objects = this.listDrawingObjectsForSheet(sheetId);
+        let idx = -1;
+        for (let i = 0; i < objects.length; i += 1) {
+          if (objects[i]!.id === drawingId) {
+            idx = i;
+            break;
+          }
         }
+        this.selectedDrawingIndex = idx >= 0 ? idx : null;
       }
-      this.selectedDrawingIndex = idx >= 0 ? idx : null;
+      if (this.selectedChartId != null) {
+        this.setSelectedChartId(null);
+      }
+      this.drawingOverlay.setSelectedId(drawingId);
+      this.drawingInteractionController?.setSelectedId(drawingId);
+      if (prevDrawingSelected !== drawingId) {
+        this.dispatchDrawingSelectionChanged();
+      }
+      this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+      this.dispatchDrawingsChanged();
     }
-    if (this.selectedChartId != null) {
-      this.setSelectedChartId(null);
-    }
-    this.drawingOverlay.setSelectedId(drawingId);
-    this.drawingInteractionController?.setSelectedId(drawingId);
-    if (prevDrawingSelected !== drawingId) {
-      this.dispatchDrawingSelectionChanged();
-    }
-    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-    this.dispatchDrawingsChanged();
     this.focus();
     return true;
   }
@@ -19945,6 +19952,8 @@ export class SpreadsheetApp {
       return;
     }
     try {
+      const pasteSheetId = this.sheetId;
+      const pasteBaseCell = { ...this.selection.active };
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
       const start = { ...this.selection.active };
@@ -20013,7 +20022,7 @@ export class SpreadsheetApp {
             if (hasMeaningfulCell) break;
           }
           if (!hasMeaningfulCell) {
-            const handled = await this.pasteClipboardImageAsDrawing(content);
+            const handled = await this.pasteClipboardImageAsDrawing(content, { sheetId: pasteSheetId, baseCell: pasteBaseCell });
             if (handled) return;
           }
         }
@@ -20023,7 +20032,7 @@ export class SpreadsheetApp {
         // tabular text/HTML), paste it as a floating picture anchored at the
         // active cell.
         if (mode === "all" && !internalCells) {
-          const handled = await this.pasteClipboardImageAsDrawing(content);
+          const handled = await this.pasteClipboardImageAsDrawing(content, { sheetId: pasteSheetId, baseCell: pasteBaseCell });
           if (handled) return;
         }
         return;

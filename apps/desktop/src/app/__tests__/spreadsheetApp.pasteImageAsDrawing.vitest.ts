@@ -259,4 +259,68 @@ describe("SpreadsheetApp paste image clipboard", () => {
     app.destroy();
     root.remove();
   });
+
+  it("pastes images into the original sheet even if the user switches sheets mid-paste", async () => {
+    // 1x1 transparent PNG.
+    const pngBytes = new Uint8Array(
+      // eslint-disable-next-line no-undef
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+FeAAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({ width: 64, height: 32 })),
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+
+    // Ensure Sheet2 exists so we can switch away while the clipboard read is still in-flight.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    let resolveRead: ((value: any) => void) | null = null;
+    const readPromise = new Promise<any>((resolve) => {
+      resolveRead = resolve;
+    });
+    const provider = {
+      read: vi.fn(async () => readPromise),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    const pastePromise = app.pasteClipboardToSelection();
+
+    // Switch sheets while paste is waiting on clipboard bytes.
+    app.activateSheet("Sheet2");
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+
+    resolveRead?.({ imagePng: pngBytes });
+    await pastePromise;
+
+    const sheet1Drawings = Array.isArray(doc.getSheetDrawings?.(sheet1)) ? doc.getSheetDrawings(sheet1) : [];
+    const sheet2Drawings = Array.isArray(doc.getSheetDrawings?.("Sheet2")) ? doc.getSheetDrawings("Sheet2") : [];
+    expect(sheet1Drawings).toHaveLength(1);
+    expect(sheet2Drawings).toHaveLength(0);
+
+    // Pasting into a non-active sheet should not disrupt the active sheet's drawing selection.
+    const state = app.getDrawingsDebugState();
+    expect(state.sheetId).toBe("Sheet2");
+    expect(state.drawings).toHaveLength(0);
+    expect(state.selectedId).toBe(null);
+    expect(app.getSelectedDrawingId()).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
 });
