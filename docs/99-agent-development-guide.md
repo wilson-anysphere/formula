@@ -22,7 +22,7 @@ text is pasted into Markdown) with real newlines (best-effort; tune for your spe
 you can run:
 
 ```bash
-python -c 'from pathlib import Path; import re; p=Path("scratchpad.md"); s=p.read_text(encoding="utf-8", errors="surrogateescape"); p.write_text(re.sub(r"\\\\n\\+ ?", "\\n", s), encoding="utf-8", errors="surrogateescape")'
+python -c 'from pathlib import Path; import re; p=Path("scratchpad.md"); s=p.read_text(encoding="utf-8", errors="surrogateescape"); p.write_text(re.sub(r"\\{1,2}n\+ ?", "\n", s), encoding="utf-8", errors="surrogateescape")'
 ```
 
 ---
