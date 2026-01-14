@@ -26,6 +26,9 @@ Commands:
 Environment (shared):
   FORMULA_PERF_HOME             Override the isolated HOME dir (default: target/perf-home)
   FORMULA_PERF_PRESERVE_HOME=1  Skip clearing FORMULA_PERF_HOME before running benchmarks
+  FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1
+                               Allow clearing FORMULA_PERF_HOME even when it is outside target/
+                               (DANGEROUS: could delete user directories if misconfigured)
 
 Environment (startup):
   FORMULA_DESKTOP_STARTUP_MODE=cold|warm
@@ -54,6 +57,15 @@ function isTruthyEnv(value) {
   return v !== "" && v !== "0" && v !== "false" && v !== "no";
 }
 
+function isSubpath(parentDir, maybeChild) {
+  const rel = path.relative(parentDir, maybeChild);
+  if (rel === "") return true;
+  if (rel.startsWith("..")) return false;
+  // On Windows, `path.relative()` can return an absolute path when drives differ.
+  if (path.isAbsolute(rel)) return false;
+  return true;
+}
+
 function resolvePerfHome() {
   const fromEnv = process.env.FORMULA_PERF_HOME;
   if (fromEnv && fromEnv.trim() !== "") {
@@ -63,11 +75,34 @@ function resolvePerfHome() {
 }
 
 function ensureCleanPerfHome(perfHome) {
-  mkdirSync(path.dirname(perfHome), { recursive: true });
   if (isTruthyEnv(process.env.FORMULA_PERF_PRESERVE_HOME)) {
     mkdirSync(perfHome, { recursive: true });
     return;
   }
+
+  const safeRoot = path.resolve(repoRoot, "target");
+  const allowUnsafe = isTruthyEnv(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN);
+  const safeToDelete = perfHome !== safeRoot && isSubpath(safeRoot, perfHome);
+  if (!safeToDelete && !allowUnsafe) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[perf-desktop] WARN refusing to delete FORMULA_PERF_HOME=${perfHome} because it is outside ${safeRoot}.\n` +
+        `  - To suppress this warning and reuse the directory, set FORMULA_PERF_PRESERVE_HOME=1\n` +
+        `  - To use a clean dir, pick a path under target/ (recommended)\n` +
+        `  - To force deletion anyway, set FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1 (DANGEROUS)\n`,
+    );
+    mkdirSync(perfHome, { recursive: true });
+    return;
+  }
+
+  if (!safeToDelete && allowUnsafe) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[perf-desktop] WARN FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1: deleting perf home outside target/: ${perfHome}`,
+    );
+  }
+
+  mkdirSync(path.dirname(perfHome), { recursive: true });
   rmSync(perfHome, { recursive: true, force: true });
   mkdirSync(perfHome, { recursive: true });
 }

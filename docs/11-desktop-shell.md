@@ -78,6 +78,8 @@ Notes:
   - uses a repo-local HOME (`target/perf-home`) so runs don't touch your real `~/.config` / `~/Library`
     - override with `FORMULA_PERF_HOME=/path/to/dir`
     - set `FORMULA_PERF_PRESERVE_HOME=1` to reuse the perf HOME between invocations
+    - safety: `pnpm perf:desktop-*` only auto-clears perf homes under `target/` by default; set
+      `FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1` to allow clearing a custom path outside `target/`
 
   Shell-only startup (fast CI mode; does **not** require `apps/desktop/dist`):
   ```bash

@@ -122,8 +122,8 @@ pnpm perf:desktop-startup
 # Builds the desktop frontend + binary, then measures idle memory (RSS) after TTI.
 pnpm perf:desktop-memory
 
- # Reports size of apps/desktop/dist, the desktop binary, and (if present) Tauri bundle artifacts.
- pnpm perf:desktop-size
+# Reports size of apps/desktop/dist, the desktop binary, and (if present) Tauri bundle artifacts.
+pnpm perf:desktop-size
 ```
 
 These scripts are designed to be safe to run locally:
@@ -131,6 +131,8 @@ These scripts are designed to be safe to run locally:
 - they use a repo-local HOME directory (`target/perf-home`) so they don't touch your real user config/caches
 - you can override it with `FORMULA_PERF_HOME=/path/to/dir`
 - set `FORMULA_PERF_PRESERVE_HOME=1` to avoid clearing the perf HOME between runs
+- safety: `pnpm perf:desktop-*` will only auto-delete perf homes under `target/` by default; set
+  `FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1` to allow clearing a custom path outside `target/`
 
 #### What the metrics mean
 
