@@ -635,10 +635,16 @@ fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<Str
                     // Best-effort: some producers emit workbook relationships that point to missing
                     // worksheet parts (or otherwise non-canonical names). If the resolved target is
                     // missing, fall back to the conventional `sheet{sheetId}.xml` filename when
-                    // present.
+                    // present. If neither part exists, still return the relationship target so
+                    // downstream callers can surface a MissingPart error with the expected part
+                    // name (and tests can validate the name-resolution logic in isolation).
                     if package.part(&target).is_some() {
                         return Ok(target);
                     }
+                    if package.part(&guess).is_some() {
+                        return Ok(guess);
+                    }
+                    return Ok(target);
                 }
             }
         }
