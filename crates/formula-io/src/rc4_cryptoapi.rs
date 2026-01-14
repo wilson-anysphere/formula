@@ -787,6 +787,52 @@ mod tests {
     }
 
     #[test]
+    fn sha1_padded_40_bit_vector_hello_rc4_cryptoapi() {
+        // Deterministic 40-bit (padded) vector derived from `docs/offcrypto-standard-cryptoapi-rc4.md`:
+        //
+        // - H (spun SHA-1 password hash):
+        //   1b5972284eab6481eb6565a0985b334b3e65e041
+        // - block 0 digest = SHA1(H || LE32(0)):
+        //   6ad7dedf2da3514b1d85eabee069d47dd058967f
+        // - 40-bit key material = first 5 bytes of digest:
+        //   6ad7dedf2d
+        // - RC4 key = key_material || 0x00 * 11 (16 bytes total)
+        //
+        // If the implementation incorrectly uses the raw 5-byte key for RC4 KSA, ciphertext and
+        // decrypted plaintext will not match.
+        let h: Vec<u8> = vec![
+            0x1b, 0x59, 0x72, 0x28, 0x4e, 0xab, 0x64, 0x81, 0xeb, 0x65, 0x65, 0xa0, 0x98, 0x5b,
+            0x33, 0x4b, 0x3e, 0x65, 0xe0, 0x41,
+        ];
+        let key_len = 5usize;
+        let plaintext = b"Hello, RC4 CryptoAPI!";
+        let expected_ciphertext: Vec<u8> = vec![
+            0x7a, 0x8b, 0xd0, 0x00, 0x71, 0x3a, 0x6e, 0x30, 0xba, 0x99, 0x16, 0x47, 0x6d,
+            0x27, 0xb0, 0x1d, 0x36, 0x70, 0x7a, 0x6e, 0xf8,
+        ];
+
+        // Encrypt with the spec-correct padded key and assert the ciphertext matches the known
+        // value.
+        let got_ciphertext = encrypt_rc4_cryptoapi(plaintext, &h, key_len, HashAlg::Sha1);
+        assert_eq!(got_ciphertext, expected_ciphertext);
+
+        // Decrypt via the streaming reader under test.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&expected_ciphertext);
+
+        let mut cursor = Cursor::new(stream);
+        cursor.seek(SeekFrom::Start(8)).unwrap();
+
+        let mut reader =
+            Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.clone(), key_len)
+                .unwrap();
+        let mut out = vec![0u8; plaintext.len()];
+        reader.read_exact(&mut out).unwrap();
+        assert_eq!(&out[..], plaintext);
+    }
+
+    #[test]
     fn md5_sequential_reads_and_seek_work() {
         let h = b"0123456789ABCDEF".to_vec(); // 16 bytes
         let key_len = 16;
