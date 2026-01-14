@@ -7413,6 +7413,13 @@ export class SpreadsheetApp {
   }
 
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     const sheetId = this.sheetId;
     const a1 = rangeToA1(range);
@@ -7435,6 +7442,13 @@ export class SpreadsheetApp {
   }
 
   async deleteCells(range: Range, direction: "left" | "up"): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     const sheetId = this.sheetId;
     const a1 = rangeToA1(range);

@@ -233,6 +233,25 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("shows a read-only toast when invoking Insert Cells in read-only collab mode", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    await app.insertCells({ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "right");
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a read-only toast when opening inline AI edit in read-only collab mode", () => {
     const root = createRoot();
     const status = {
