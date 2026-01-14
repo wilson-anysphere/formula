@@ -358,3 +358,41 @@ fn record_batch_to_columnar_accepts_more_integer_widths_as_number(
 
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_accepts_date_and_timestamp_types_as_datetime(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::{Date32Array, Date64Array, TimestampMicrosecondArray};
+    use arrow_schema::TimeUnit;
+
+    let date32: ArrayRef = Arc::new(Date32Array::from(vec![Some(1), None, Some(-1)]));
+    let date64: ArrayRef = Arc::new(Date64Array::from(vec![Some(1_000), None, Some(-2_000)]));
+    let ts: ArrayRef =
+        Arc::new(TimestampMicrosecondArray::from(vec![Some(10), None, Some(20)]));
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("d32", DataType::Date32, true),
+        Field::new("d64", DataType::Date64, true),
+        Field::new("ts", DataType::Timestamp(TimeUnit::Microsecond, None), true),
+    ]));
+    let batch = RecordBatch::try_new(schema, vec![date32, date64, ts])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::DateTime);
+    assert_eq!(table.schema()[1].column_type, ColumnType::DateTime);
+    assert_eq!(table.schema()[2].column_type, ColumnType::DateTime);
+
+    assert_eq!(table.get_cell(0, 0), Value::DateTime(1));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::DateTime(-1));
+
+    assert_eq!(table.get_cell(0, 1), Value::DateTime(1_000));
+    assert_eq!(table.get_cell(1, 1), Value::Null);
+    assert_eq!(table.get_cell(2, 1), Value::DateTime(-2_000));
+
+    assert_eq!(table.get_cell(0, 2), Value::DateTime(10));
+    assert_eq!(table.get_cell(1, 2), Value::Null);
+    assert_eq!(table.get_cell(2, 2), Value::DateTime(20));
+
+    Ok(())
+}

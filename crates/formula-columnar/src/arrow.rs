@@ -49,7 +49,7 @@ use arrow_array::builder::{
     BooleanBuilder, Float64Builder, Int64Builder, StringDictionaryBuilder,
 };
 use arrow_array::{Array, ArrayRef, RecordBatch};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -256,6 +256,7 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
         | DataType::Decimal128(_, _) => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
+        DataType::Date32 | DataType::Date64 | DataType::Timestamp(_, _) => ColumnType::DateTime,
         DataType::Dictionary(_, value) => match value.as_ref() {
             DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
             other => return Err(ArrowInteropError::UnsupportedDictionaryValueType(other.clone())),
@@ -558,11 +559,83 @@ pub(crate) fn value_from_array(
             other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
         },
         ColumnType::DateTime => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<arrow_array::Int64Array>()
-                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
-            Ok(Value::DateTime(arr.value(row)))
+            match array.data_type() {
+                DataType::Int64 => {
+                    let arr = array
+                        .as_any()
+                        .downcast_ref::<arrow_array::Int64Array>()
+                        .ok_or_else(|| {
+                            ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                        })?;
+                    Ok(Value::DateTime(arr.value(row)))
+                }
+                DataType::Int32 => {
+                    let arr = array
+                        .as_any()
+                        .downcast_ref::<arrow_array::Int32Array>()
+                        .ok_or_else(|| {
+                            ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                        })?;
+                    Ok(Value::DateTime(arr.value(row) as i64))
+                }
+                DataType::Date32 => {
+                    let arr = array
+                        .as_any()
+                        .downcast_ref::<arrow_array::Date32Array>()
+                        .ok_or_else(|| {
+                            ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                        })?;
+                    Ok(Value::DateTime(arr.value(row) as i64))
+                }
+                DataType::Date64 => {
+                    let arr = array
+                        .as_any()
+                        .downcast_ref::<arrow_array::Date64Array>()
+                        .ok_or_else(|| {
+                            ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                        })?;
+                    Ok(Value::DateTime(arr.value(row)))
+                }
+                DataType::Timestamp(unit, _) => match unit {
+                    TimeUnit::Second => {
+                        let arr = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampSecondArray>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        Ok(Value::DateTime(arr.value(row)))
+                    }
+                    TimeUnit::Millisecond => {
+                        let arr = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampMillisecondArray>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        Ok(Value::DateTime(arr.value(row)))
+                    }
+                    TimeUnit::Microsecond => {
+                        let arr = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampMicrosecondArray>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        Ok(Value::DateTime(arr.value(row)))
+                    }
+                    TimeUnit::Nanosecond => {
+                        let arr = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampNanosecondArray>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        Ok(Value::DateTime(arr.value(row)))
+                    }
+                },
+                other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+            }
         }
         ColumnType::Currency { scale } => match array.data_type() {
             DataType::Int64 => {
