@@ -797,6 +797,184 @@ fn cell_format_classifies_currency_formats() {
 }
 
 #[test]
+fn cell_color_and_parentheses_match_excel_number_format_semantics() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    let style_red_one_section = engine.intern_style(Style {
+        number_format: Some("[Red]0".to_string()),
+        ..Style::default()
+    });
+    let style_parens_one_section = engine.intern_style(Style {
+        number_format: Some("(0)".to_string()),
+        ..Style::default()
+    });
+    let style_parens_two_section = engine.intern_style(Style {
+        number_format: Some("0;(0)".to_string()),
+        ..Style::default()
+    });
+    let style_red_two_section = engine.intern_style(Style {
+        number_format: Some("0;[Red]0".to_string()),
+        ..Style::default()
+    });
+    let style_conditional_first_section = engine.intern_style(Style {
+        number_format: Some("[<0][Red]0;0".to_string()),
+        ..Style::default()
+    });
+    let style_conditional_second_section = engine.intern_style(Style {
+        number_format: Some("[>=0]0;[Red]0".to_string()),
+        ..Style::default()
+    });
+    let style_parentheses_quoted_literal = engine.intern_style(Style {
+        number_format: Some(r#"0;"(neg)"0"#.to_string()),
+        ..Style::default()
+    });
+    let style_parentheses_escaped = engine.intern_style(Style {
+        number_format: Some(r#"0;\(0\)"#.to_string()),
+        ..Style::default()
+    });
+    let style_bracket_token_parentheses = engine.intern_style(Style {
+        number_format: Some(r#"0;[$(USD)-409]0"#.to_string()),
+        ..Style::default()
+    });
+
+    // Attach the formats to a few cells (the values do not matter for these flags).
+    for addr in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"] {
+        engine.set_cell_value("Sheet1", addr, 1.0).unwrap();
+    }
+
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_red_one_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", style_parens_one_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A3", style_parens_two_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A4", style_red_two_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A5", style_conditional_first_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A6", style_conditional_second_section)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A7", style_parentheses_quoted_literal)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A8", style_parentheses_escaped)
+        .unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A9", style_bracket_token_parentheses)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"parentheses\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"color\",A4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=CELL(\"color\",A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=CELL(\"color\",A6)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B7", "=CELL(\"parentheses\",A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B8", "=CELL(\"parentheses\",A8)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B9", "=CELL(\"parentheses\",A9)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    // One-section formats: Excel reports 0/0 even if the only section contains a color token or
+    // parentheses literals (negatives use the first section with an automatic '-' sign).
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+
+    // Two-section formats.
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B4"), 1.0);
+
+    // Conditional sections.
+    assert_number(&engine.get_cell_value("Sheet1", "B5"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B6"), 1.0);
+
+    // Parentheses inside quotes / escaped / inside bracket tokens should not count.
+    assert_number(&engine.get_cell_value("Sheet1", "B7"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B8"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B9"), 0.0);
+}
+
+#[test]
+fn cell_color_and_parentheses_resolve_row_and_column_styles() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    // Row style makes negatives red; column style is default.
+    let style_row = engine.intern_style(Style {
+        number_format: Some("0;[Red]0".to_string()),
+        ..Style::default()
+    });
+    let style_col = engine.intern_style(Style {
+        number_format: Some("0".to_string()),
+        ..Style::default()
+    });
+    let style_cell_override = engine.intern_style(Style {
+        number_format: Some("0".to_string()),
+        ..Style::default()
+    });
+
+    engine.set_row_style_id("Sheet1", 0, Some(style_row));
+    engine.set_col_style_id("Sheet1", 0, Some(style_col));
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 1.0);
+
+    // Explicit cell formatting should override row/column defaults.
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_cell_override)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+
+    // Column style applies when row style is not present.
+    engine.set_row_style_id("Sheet1", 0, None);
+    engine.set_cell_style_id("Sheet1", "A1", 0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+
+    // Now apply the red negative style to the column and ensure CELL picks it up.
+    engine.set_col_style_id("Sheet1", 0, Some(style_row));
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+}
+
+#[test]
 fn nonvolatile_formulas_are_not_recalculated_when_nothing_is_dirty() {
     use formula_engine::Engine;
 
