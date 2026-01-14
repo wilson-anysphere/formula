@@ -87,6 +87,16 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
       `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
     );
+
+    // Insert/Delete Cells are structural edits and should respect `registerDesktopCommands`'s
+    // `isEditing` override (split-view secondary editor state).
+    const idx = commands.indexOf(`\"${id}\"`);
+    assert.notEqual(idx, -1, `Expected registerDesktopCommands.ts to include ${id} literal`);
+    assert.match(
+      commands.slice(idx, idx + 600),
+      /\bisEditingFn\(\)/,
+      `Expected ${id} command handler to guard edit mode via isEditingFn()`,
+    );
   }
 
   const sheetRowColumnIds = [

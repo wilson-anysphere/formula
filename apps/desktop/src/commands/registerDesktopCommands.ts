@@ -526,6 +526,10 @@ export function registerDesktopCommands(params: {
     "home.cells.insert.insertCells",
     "Insert Cells…",
     async () => {
+      // `handleHomeCellsInsertDeleteCommand` checks `app.isEditing()`, but the desktop shell may
+      // provide a custom `isEditing` predicate (e.g. split view secondary editor state). Respect
+      // that here so we don't attempt structural edits while any editor is active.
+      if (isEditingFn()) return;
       await handleHomeCellsInsertDeleteCommand({
         app,
         commandId: "home.cells.insert.insertCells",
@@ -544,6 +548,7 @@ export function registerDesktopCommands(params: {
     "home.cells.delete.deleteCells",
     "Delete Cells…",
     async () => {
+      if (isEditingFn()) return;
       await handleHomeCellsInsertDeleteCommand({
         app,
         commandId: "home.cells.delete.deleteCells",
