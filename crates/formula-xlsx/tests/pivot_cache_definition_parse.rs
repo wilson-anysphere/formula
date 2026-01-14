@@ -101,6 +101,22 @@ fn pivot_cache_definition_for_cache_id_returns_none_when_workbook_is_missing() {
     );
 }
 
+#[test]
+fn pivot_cache_definition_for_cache_id_falls_back_to_filename_when_workbook_is_malformed() {
+    let bytes = build_synthetic_package_with_malformed_workbook();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let (part_name, def) = pkg
+        .pivot_cache_definition_for_cache_id(7)
+        .expect("resolve by cacheId")
+        .expect("cache present");
+
+    assert_eq!(part_name, "xl/pivotCache/pivotCacheDefinition7.xml");
+    assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+    assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet1"));
+    assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:C5"));
+}
+
 fn build_synthetic_workbook_cache_id_package() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -170,7 +186,6 @@ fn build_synthetic_workbook_cache_id_package_with_malformed_rels() -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml">
 </Relationships>"#;
-
     let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <cacheSource type="worksheet">
@@ -186,14 +201,35 @@ fn build_synthetic_workbook_cache_id_package_with_malformed_rels() -> Vec<u8> {
     for (name, xml) in [
         ("xl/workbook.xml", workbook_xml),
         ("xl/_rels/workbook.xml.rels", workbook_rels),
-        (
-            "xl/pivotCache/pivotCacheDefinition7.xml",
-            cache_definition_xml,
-        ),
+        ("xl/pivotCache/pivotCacheDefinition7.xml", cache_definition_xml),
     ] {
         zip.start_file(name, options).unwrap();
         zip.write_all(xml.as_bytes()).unwrap();
     }
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_synthetic_package_with_malformed_workbook() -> Vec<u8> {
+    let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="A1:C5" sheet="Sheet1"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    // A malformed workbook that should not cause cacheId lookups to error.
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(b"<workbook").unwrap();
+
+    zip.start_file("xl/pivotCache/pivotCacheDefinition7.xml", options)
+        .unwrap();
+    zip.write_all(cache_definition_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
 }
