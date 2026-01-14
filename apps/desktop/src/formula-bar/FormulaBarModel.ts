@@ -1147,19 +1147,39 @@ function splitSheetQualifier(input: string): { sheetName: string | null; ref: st
   const lastIndex = raw.length - 1;
   const s = isWhitespaceChar(raw[0] ?? "") || isWhitespaceChar(raw[lastIndex] ?? "") ? raw.trim() : raw;
 
-  const quoted = s.match(/^'((?:[^']|'')+)'!(.+)$/);
-  if (quoted) {
-    return {
-      sheetName: quoted[1].replace(/''/g, "'"),
-      ref: quoted[2],
-    };
+  // Fast path: unquoted `Sheet!A1` (including workbook prefixes like `[Book.xlsx]Sheet1!A1`).
+  // Avoid regex allocations in this hot hover-preview path.
+  if (s[0] !== "'") {
+    const bang = s.indexOf("!");
+    if (bang > 0 && bang < s.length - 1) {
+      return { sheetName: s.slice(0, bang), ref: s.slice(bang + 1) };
+    }
+    return { sheetName: null, ref: s };
   }
 
-  const unquoted = s.match(/^([^!]+)!(.+)$/);
-  if (unquoted) {
-    return { sheetName: unquoted[1] ?? null, ref: unquoted[2] ?? "" };
+  // Quoted sheet: `'My Sheet'!A1` with doubled apostrophes inside the name: `'O''Hare'!A1`.
+  let i = 1;
+  let sheetName = "";
+  while (i < s.length) {
+    const ch = s[i] ?? "";
+    if (ch === "'") {
+      if (s[i + 1] === "'") {
+        sheetName += "'";
+        i += 2;
+        continue;
+      }
+      i += 1;
+      break;
+    }
+    sheetName += ch;
+    i += 1;
   }
 
+  if (i < s.length - 1 && s[i] === "!") {
+    return { sheetName, ref: s.slice(i + 1) };
+  }
+
+  // Unterminated or missing `!`; treat as an unqualified reference.
   return { sheetName: null, ref: s };
 }
 
