@@ -668,4 +668,27 @@ mod tests {
         assert_eq!(decoded.grand_totals.rows, false);
         assert_eq!(decoded.grand_totals.columns, true);
     }
+
+    #[test]
+    fn pivot_field_ref_from_and_str_eq_helpers() {
+        let from_str: PivotFieldRef = "Region".into();
+        assert_eq!(
+            from_str,
+            PivotFieldRef::CacheFieldName("Region".to_string())
+        );
+        assert!(from_str == "Region");
+
+        let from_string: PivotFieldRef = "Sales".to_string().into();
+        assert_eq!(
+            from_string,
+            PivotFieldRef::CacheFieldName("Sales".to_string())
+        );
+        assert!(from_string == "Sales");
+
+        // Non-cache refs should never compare equal to a plain field name.
+        assert_ne!(
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string()),
+            "Total Sales"
+        );
+    }
 }
