@@ -80,7 +80,11 @@ Supported parameters (as enforced by decryptors today):
 - `hashAlgorithm`: `SHA1` / `SHA256` / `SHA384` / `SHA512`
 - `keyBits`: `128` / `192` / `256` (must match AES key size)
 - `blockSize`: `16` (AES block size; parsed from file and used for IV truncation)
-- `saltSize`: typically `16` (parsed; we do not require a fixed value but many writers use 16)
+- `saltSize`/`saltValue`: commonly `16` bytes
+  - `crates/formula-xlsx` enforces `saltValue.len() == saltSize`.
+  - `crates/formula-offcrypto` currently requires 16-byte salts for Agile password/keyData parsing.
+  - `crates/formula-office-crypto` is permissive (it does not use `saltSize`, and only requires the
+    salt to be long enough for the relevant IV derivations).
 - `spinCount`: file-provided `u32` (guard with a DoS max; see [Spin count limits](#spin-count-dos-limits))
 
 Not implemented:
@@ -100,7 +104,9 @@ Supported subset (CryptoAPI AES + RC4):
   - Standard AES (`CALG_AES_*`): Excel-default is `CALG_SHA1`. In this repo:
     - `crates/formula-offcrypto` gates to **AES + SHA-1** only.
     - `crates/formula-office-crypto` also supports `CALG_SHA_256`/`CALG_SHA_384`/`CALG_SHA_512` for compatibility.
-- Salt size: file-provided (`EncryptionVerifier.saltSize`, typically 16).
+- Salt size: file-provided (`EncryptionVerifier.saltSize`, typically 16)
+  - `crates/formula-offcrypto` currently requires a 16-byte verifier salt for Standard parsing.
+  - `crates/formula-office-crypto` accepts other salt sizes within a conservative bound.
 
 Other Standard combinations (mismatched key sizes, non-CryptoAPI flags, etc.) are treated as
 unsupported by the current code.
@@ -322,6 +328,8 @@ Implementation status:
       decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
   `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).
+  - When enabled, it requires `<dataIntegrity>` to be present; missing `dataIntegrity` surfaces an
+    `InvalidEncryptionInfo` error (integrity cannot be checked).
   - When enabled, it validates the spec/Excel HMAC target (**full `EncryptedPackage` stream bytes**:
     8-byte size prefix + ciphertext) and also accepts common real-world compatibility variants
     (ciphertext-only, plaintext-only, and size-prefix + plaintext).
