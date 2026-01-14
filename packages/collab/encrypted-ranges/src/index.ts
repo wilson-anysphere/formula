@@ -281,18 +281,12 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   if (!id) return null;
 
   const createdAtRaw = get("createdAt");
-  const createdAtNum =
-    typeof createdAtRaw === "number"
-      ? createdAtRaw
-      : typeof createdAtRaw === "string" && createdAtRaw.trim()
-        ? Number(createdAtRaw)
-        : undefined;
+  const createdAtStr = coerceString(createdAtRaw)?.trim() ?? "";
+  const createdAtNum = createdAtStr ? Number(createdAtStr) : undefined;
   const createdAt =
     createdAtNum != null && Number.isFinite(createdAtNum) && createdAtNum >= 0 ? createdAtNum : undefined;
 
-  const createdByRaw = get("createdBy");
-  const createdBy = typeof createdByRaw === "string" ? createdByRaw : createdByRaw != null ? String(createdByRaw) : undefined;
-  const createdByTrimmed = createdBy?.trim() || undefined;
+  const createdByTrimmed = coerceString(get("createdBy"))?.trim() || undefined;
 
   return {
     id,

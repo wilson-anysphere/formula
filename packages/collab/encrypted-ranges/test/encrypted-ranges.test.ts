@@ -349,6 +349,37 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
   });
 
+  it("manager list parses createdAt/createdBy stored as Y.Text", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    const r = new Y.Map<any>();
+    r.set("id", "r1");
+    r.set("sheetId", "s1");
+    r.set("startRow", 0);
+    r.set("startCol", 0);
+    r.set("endRow", 0);
+    r.set("endCol", 0);
+    r.set("keyId", "k1");
+
+    const createdAt = new Y.Text();
+    createdAt.insert(0, "123");
+    const createdBy = new Y.Text();
+    createdBy.insert(0, "user-1");
+    r.set("createdAt", createdAt);
+    r.set("createdBy", createdBy);
+    ranges.push([r]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    expect(mgr.list()).toMatchObject([{ id: "r1", createdAt: 123, createdBy: "user-1" }]);
+  });
+
   it("policy helper supports legacy map schema (encryptedRanges as Y.Map<id, Y.Map>)", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
