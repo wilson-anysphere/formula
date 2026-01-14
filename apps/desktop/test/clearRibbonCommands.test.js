@@ -83,6 +83,8 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   const dropdown = fs.readFileSync(dropdownPath, "utf8");
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
   const disabling = fs.readFileSync(disablingPath, "utf8");
+  const editingDisabledPath = path.join(__dirname, "..", "src", "ribbon", "ribbonEditingDisabledById.ts");
+  const editingDisabled = fs.readFileSync(editingDisabledPath, "utf8");
 
   // Clear Contents is an editing command (used by Delete key + ribbon), so it should be registered as `edit.clearContents`.
   assert.match(
@@ -148,4 +150,27 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
       `Expected ${id} to not be in COMMAND_REGISTRY_EXEMPT_IDS`,
     );
   }
+
+  // Editing mode should disable Clear actions (Excel behavior).
+  const shouldDisableWhileEditing = [
+    "home.editing.clear",
+    "format.clearAll",
+    "format.clearFormats",
+    "edit.clearContents",
+    // Unimplemented items still show in the dropdown; ensure they're also disabled while editing.
+    "home.editing.clear.clearComments",
+    "home.editing.clear.clearHyperlinks",
+  ];
+  for (const id of shouldDisableWhileEditing) {
+    assert.match(
+      editingDisabled,
+      new RegExp(`["']${escapeRegExp(id)}["']\\s*:\\s*true`),
+      `Expected ribbonEditingDisabledById.ts to disable ${id} while editing`,
+    );
+  }
+  assert.doesNotMatch(
+    editingDisabled,
+    /["']format\.clearContents["']\s*:\s*true/,
+    "Expected ribbonEditingDisabledById.ts to not reference legacy format.clearContents",
+  );
 });
