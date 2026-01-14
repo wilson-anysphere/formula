@@ -3611,8 +3611,10 @@ export class FormulaBarView {
     }
 
     if (kind === "reference") {
-      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : null;
-      const nextRange = cachedRange ?? this.model.resolveReferenceText(text);
+      // `#hoverOverride` can legitimately be null (unresolvable reference). Use `undefined` as
+      // the "no cache" sentinel so we can reuse cached nulls across mousemove events.
+      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : undefined;
+      const nextRange = cachedRange === undefined ? this.model.resolveReferenceText(text) : cachedRange;
       const prevRange = this.#lastEmittedHoverRange;
       const sameRange =
         nextRange == null
@@ -3664,9 +3666,9 @@ export class FormulaBarView {
     }
 
     if (kind === "identifier") {
-      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : null;
-      let nextRange: RangeAddress | null = cachedRange;
-      if (!nextRange) {
+      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : undefined;
+      let nextRange: RangeAddress | null = cachedRange === undefined ? null : cachedRange;
+      if (cachedRange === undefined) {
         const resolved = this.model.resolveNameRange(text);
         if (!resolved) {
           this.#clearHoverOverride();
