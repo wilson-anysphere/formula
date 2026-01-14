@@ -201,7 +201,7 @@ describe("IndexedDbAIAuditStore", () => {
         id: "e1",
         timestamp_ms: base - 4000,
         session_id: "session-1",
-        workbook_id: "workbook-1",
+        workbook_id: "  workbook-1  ",
         mode: "chat"
       })
     );
@@ -238,6 +238,7 @@ describe("IndexedDbAIAuditStore", () => {
 
     const workbook1 = await store.listEntries({ workbook_id: "workbook-1" });
     expect(workbook1.map((e) => e.id)).toEqual(["e4", "e3", "e1"]);
+    expect(workbook1.every((e) => e.workbook_id === "workbook-1")).toBe(true);
 
     const chatOnly = await store.listEntries({ mode: "chat" });
     expect(chatOnly.map((e) => e.id)).toEqual(["e4", "e2", "e1"]);

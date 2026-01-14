@@ -410,7 +410,8 @@ function createUpperBoundRange(value: number, open: boolean): IDBKeyRange | null
 function normalizeEntry(entry: AIAuditEntry): AIAuditEntry {
   // Ensure workbook_id is persisted for efficient filtering via IndexedDB indexes,
   // even when older integrations omitted the field.
-  const workbookId = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
+  const workbookIdRaw = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
+  const workbookId = typeof workbookIdRaw === "string" ? workbookIdRaw.trim() : "";
   if (!workbookId) return entry;
   if (entry.workbook_id === workbookId) return entry;
   return { ...entry, workbook_id: workbookId };
@@ -420,24 +421,31 @@ function extractWorkbookIdFromInput(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
   const obj = input as Record<string, unknown>;
   const workbookId = obj.workbook_id ?? obj.workbookId;
-  return typeof workbookId === "string" && workbookId.trim() ? workbookId : null;
+  const trimmed = typeof workbookId === "string" ? workbookId.trim() : "";
+  return trimmed ? trimmed : null;
 }
 
 function extractWorkbookIdFromSessionId(sessionId: string): string | null {
   const match = sessionId.match(/^([^:]+):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
   if (!match) return null;
   const workbookId = match[1];
-  return workbookId && workbookId.trim() ? workbookId : null;
+  const trimmed = workbookId?.trim() ?? "";
+  return trimmed ? trimmed : null;
 }
 
 function matchesWorkbookFilter(entry: AIAuditEntry, workbookId: string): boolean {
-  if (typeof entry.workbook_id === "string" && entry.workbook_id.trim()) {
-    return entry.workbook_id === workbookId;
+  const filterId = typeof workbookId === "string" ? workbookId.trim() : "";
+  if (!filterId) return false;
+
+  if (typeof entry.workbook_id === "string") {
+    const entryId = entry.workbook_id.trim();
+    if (entryId) return entryId === filterId;
   }
 
   const input = entry.input as unknown;
   if (!input || typeof input !== "object") return false;
   const obj = input as Record<string, unknown>;
   const legacyWorkbookId = obj.workbook_id ?? obj.workbookId;
-  return typeof legacyWorkbookId === "string" ? legacyWorkbookId === workbookId : false;
+  const legacyId = typeof legacyWorkbookId === "string" ? legacyWorkbookId.trim() : "";
+  return legacyId ? legacyId === filterId : false;
 }

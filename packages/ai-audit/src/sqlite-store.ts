@@ -102,7 +102,9 @@ export class SqliteAIAuditStore implements AIAuditStore {
   async logEntry(entry: AIAuditEntry): Promise<void> {
     this.assertOpen();
     const tokenUsage = normalizeTokenUsage(entry.token_usage);
-    const workbookId = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
+    const workbookIdRaw =
+      entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
+    const workbookId = typeof workbookIdRaw === "string" ? workbookIdRaw.trim() : "";
     const stmt = this.db.prepare(
       `INSERT INTO ai_audit_log (
         id,
@@ -127,7 +129,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
       entry.id,
       entry.timestamp_ms,
       entry.session_id,
-      workbookId ?? null,
+      workbookId || null,
       entry.user_id ?? null,
       entry.mode,
       stableStringify(entry.input ?? null),
@@ -178,9 +180,10 @@ export class SqliteAIAuditStore implements AIAuditStore {
       where.push("session_id = ?");
       params.push(filters.session_id);
     }
-    if (filters.workbook_id) {
+    const workbookIdFilter = typeof filters.workbook_id === "string" ? filters.workbook_id.trim() : "";
+    if (workbookIdFilter) {
       where.push("workbook_id = ?");
-      params.push(filters.workbook_id);
+      params.push(workbookIdFilter);
     }
     if (filters.mode) {
       const modes = Array.isArray(filters.mode) ? filters.mode : [filters.mode];
@@ -517,7 +520,8 @@ function extractWorkbookIdFromInput(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
   const obj = input as Record<string, unknown>;
   const workbookId = obj.workbook_id ?? obj.workbookId;
-  return typeof workbookId === "string" && workbookId.trim() ? workbookId : null;
+  const trimmed = typeof workbookId === "string" ? workbookId.trim() : "";
+  return trimmed ? trimmed : null;
 }
 
 function extractWorkbookIdFromInputJson(encoded: unknown): string | null {
@@ -530,7 +534,8 @@ function extractWorkbookIdFromSessionId(sessionId: string): string | null {
   const match = sessionId.match(/^([^:]+):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
   if (!match) return null;
   const workbookId = match[1];
-  return workbookId && workbookId.trim() ? workbookId : null;
+  const trimmed = workbookId?.trim() ?? "";
+  return trimmed ? trimmed : null;
 }
 
 function ensureColumnExists(db: SqlJsDatabase, table: string, column: string, type: string): boolean {

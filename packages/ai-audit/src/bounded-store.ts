@@ -289,16 +289,19 @@ function extractWorkbookIdFromInput(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return undefined;
   const obj = input as Record<string, unknown>;
   const workbookId = obj.workbook_id ?? obj.workbookId;
-  return typeof workbookId === "string" && workbookId.trim() ? workbookId : undefined;
+  const trimmed = typeof workbookId === "string" ? workbookId.trim() : "";
+  return trimmed ? trimmed : undefined;
 }
 
 function extractWorkbookIdFromSessionId(sessionId: string): string | undefined {
   const match = sessionId.match(/^([^:]+):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
   if (!match) return undefined;
   const workbookId = match[1];
-  return workbookId && workbookId.trim() ? workbookId : undefined;
+  const trimmed = workbookId?.trim() ?? "";
+  return trimmed ? trimmed : undefined;
 }
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed ? trimmed : undefined;
 }

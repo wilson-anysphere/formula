@@ -132,7 +132,7 @@ describe("SqliteAIAuditStore", () => {
       id: keptInlineEditId,
       timestamp_ms: baseTime - 2000,
       session_id: "session-2",
-      workbook_id: "workbook-1",
+      workbook_id: "  workbook-1  ",
       mode: "inline_edit",
       input: { prompt: "mid" },
       model: "unit-test-model",
@@ -157,6 +157,7 @@ describe("SqliteAIAuditStore", () => {
 
     const workbook1 = await store.listEntries({ workbook_id: "workbook-1" });
     expect(workbook1.map((e) => e.id)).toEqual([keptInlineEditId]);
+    expect(workbook1[0]!.workbook_id).toBe("workbook-1");
 
     const chatOnly = await store.listEntries({ mode: "chat" });
     expect(chatOnly.map((e) => e.id)).toEqual([keptChatId]);
@@ -248,7 +249,7 @@ describe("SqliteAIAuditStore", () => {
             "session-legacy",
             null,
             "chat",
-            JSON.stringify({ prompt: "hello", workbookId: "workbook-legacy" }),
+            JSON.stringify({ prompt: "hello", workbookId: "  workbook-legacy  " }),
             "unit-test-model",
             null,
             null,
@@ -314,7 +315,7 @@ describe("SqliteAIAuditStore", () => {
           [
             legacyId,
             1700000000000,
-            `${workbookId}:550e8400-e29b-41d4-a716-446655440000`,
+            `  ${workbookId}  :550e8400-e29b-41d4-a716-446655440000`,
             null,
             "chat",
             "{not-valid-json",

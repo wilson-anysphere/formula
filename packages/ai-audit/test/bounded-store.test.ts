@@ -196,7 +196,7 @@ describe("BoundedAIAuditStore", () => {
       session_id: "session-derive-1",
       workbook_id: "   ",
       mode: "chat",
-      input: { workbookId: "workbook-from-input", prompt: huge },
+      input: { workbookId: "  workbook-from-input  ", prompt: huge },
       model: "unit-test-model",
       tool_calls: [{ name: "tool", parameters: { payload: huge } }]
     });
@@ -205,7 +205,7 @@ describe("BoundedAIAuditStore", () => {
     await store.logEntry({
       id: "entry-derive-2",
       timestamp_ms: Date.now(),
-      session_id: "workbook-from-session:550e8400-e29b-41d4-a716-446655440000",
+      session_id: "  workbook-from-session  :550e8400-e29b-41d4-a716-446655440000",
       mode: "chat",
       input: { prompt: huge },
       model: "unit-test-model",

@@ -51,7 +51,8 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
-    const { session_id, workbook_id, mode } = filters;
+    const { session_id, mode } = filters;
+    const workbook_id = typeof filters.workbook_id === "string" ? filters.workbook_id.trim() : "";
     const after_timestamp_ms =
       typeof filters.after_timestamp_ms === "number" && Number.isFinite(filters.after_timestamp_ms)
         ? filters.after_timestamp_ms
@@ -226,13 +227,18 @@ function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
 }
 
 function matchesWorkbookFilter(entry: AIAuditEntry, workbookId: string): boolean {
-  if (typeof entry.workbook_id === "string" && entry.workbook_id.trim()) {
-    return entry.workbook_id === workbookId;
+  const filterId = typeof workbookId === "string" ? workbookId.trim() : "";
+  if (!filterId) return false;
+
+  if (typeof entry.workbook_id === "string") {
+    const entryId = entry.workbook_id.trim();
+    if (entryId) return entryId === filterId;
   }
 
   const input = entry.input as unknown;
   if (!input || typeof input !== "object") return false;
   const obj = input as Record<string, unknown>;
   const legacyWorkbookId = obj.workbook_id ?? obj.workbookId;
-  return typeof legacyWorkbookId === "string" ? legacyWorkbookId === workbookId : false;
+  const legacyId = typeof legacyWorkbookId === "string" ? legacyWorkbookId.trim() : "";
+  return legacyId ? legacyId === filterId : false;
 }

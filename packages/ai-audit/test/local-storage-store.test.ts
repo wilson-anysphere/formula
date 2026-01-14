@@ -56,7 +56,7 @@ describe("workbook_id filtering (legacy fallback)", () => {
         timestamp_ms: Date.now(),
         session_id: "session-legacy",
         mode: "chat",
-        input: { workbookId: "workbook-1", prompt: "hello" },
+        input: { workbookId: "  workbook-1  ", prompt: "hello" },
         model: "unit-test-model",
         tool_calls: [],
       };
@@ -81,7 +81,7 @@ describe("workbook_id filtering (legacy fallback)", () => {
       timestamp_ms: Date.now(),
       session_id: "session-legacy",
       mode: "chat",
-      input: { workbookId: "workbook-1", prompt: "hello" },
+      input: { workbookId: "  workbook-1  ", prompt: "hello" },
       model: "unit-test-model",
       tool_calls: [],
     };
