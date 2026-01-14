@@ -154,8 +154,15 @@ test("CollabSession setCells ignorePermissions allows writing to unparseable cel
   const session = createCollabSession({ doc, schema: { autoInit: false } });
   session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
 
-  await session.setCells([{ cellKey: "bad-key", value: "allowed" }], { ignorePermissions: true });
-  assert.equal((await session.getCell("bad-key"))?.value, "allowed");
+  await session.setCells(
+    [
+      { cellKey: "bad-key-value", value: "allowed" },
+      { cellKey: "bad-key-formula", formula: "=1+1" },
+    ],
+    { ignorePermissions: true },
+  );
+  assert.equal((await session.getCell("bad-key-value"))?.value, "allowed");
+  assert.equal((await session.getCell("bad-key-formula"))?.formula, "=1+1");
 
   session.destroy();
   doc.destroy();

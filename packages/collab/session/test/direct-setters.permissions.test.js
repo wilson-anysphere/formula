@@ -196,8 +196,11 @@ test("CollabSession direct setter escape hatch allows writing to unparseable cel
   const session = createCollabSession({ doc, schema: { autoInit: false } });
   session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
 
-  await session.setCellValue("bad-key", "allowed", { ignorePermissions: true });
-  assert.equal((await session.getCell("bad-key"))?.value, "allowed");
+  await session.setCellValue("bad-key-value", "allowed", { ignorePermissions: true });
+  assert.equal((await session.getCell("bad-key-value"))?.value, "allowed");
+
+  await session.setCellFormula("bad-key-formula", "=1+1", { ignorePermissions: true });
+  assert.equal((await session.getCell("bad-key-formula"))?.formula, "=1+1");
 
   session.destroy();
   doc.destroy();
