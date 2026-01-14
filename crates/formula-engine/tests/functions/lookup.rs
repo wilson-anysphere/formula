@@ -1452,7 +1452,9 @@ fn getpivotdata_column_item_criteria_is_case_insensitive_for_unicode_text() {
     // GETPIVOTDATA implementation treats unknown fields as column criteria. Use "Product" as a
     // placeholder field name (matching other tests); the important part is the item match.
     assert_eq!(
-        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\", \"Product\", \"MASS\")"),
+        sheet.eval(
+            "=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\", \"Product\", \"MASS\")"
+        ),
         Value::Number(100.0)
     );
 }
@@ -1591,22 +1593,22 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     let cfg = PivotConfig {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![PivotField::new("Product")],
-         value_fields: vec![
-             ValueField {
-                 source_field: "Sales".into(),
-                 name: "Sum of Sales".to_string(),
-                 aggregation: AggregationType::Sum,
-                 number_format: None,
-                 show_as: None,
+        value_fields: vec![
+            ValueField {
+                source_field: "Sales".into(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
                 base_field: None,
                 base_item: None,
-             },
-             ValueField {
-                 source_field: "Units".into(),
-                 name: "Sum of Units".to_string(),
-                 aggregation: AggregationType::Sum,
-                 number_format: None,
-                 show_as: None,
+            },
+            ValueField {
+                source_field: "Units".into(),
+                name: "Sum of Units".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
                 base_field: None,
                 base_item: None,
             },
@@ -1728,6 +1730,72 @@ fn getpivotdata_registry_resolves_data_model_field_refs_against_quoted_cache_hea
 }
 
 #[test]
+fn getpivotdata_registry_resolves_data_model_measure_refs_against_unbracketed_cache_headers() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
+        PivotValue, SubtotalPosition, ValueField,
+    };
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    // The pivot config uses a Data Model measure ref (which has a canonical string form of
+    // `[Total Sales]`), but the worksheet/pivot-cache header stores the measure as a plain string
+    // (`Total Sales`). Pivot registry matching should still be able to map the measure ref to the
+    // cache column.
+    let source = vec![
+        pv_row(&["Region".into(), "Total Sales".into()]),
+        pv_row(&["East".into(), 100.into()]),
+        pv_row(&["West".into(), 200.into()]),
+        pv_row(&["East".into(), 150.into()]),
+    ];
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: PivotFieldRef::DataModelMeasure("Total Sales".to_string()),
+            name: "Total Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: false,
+        },
+    };
+
+    let pivot = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
+    let result = pivot.calculate().expect("calculate pivot");
+
+    // Register this pivot as if it were rendered starting at A1.
+    let start = CellRef::new(0, 0);
+    let end = CellRef::new(
+        start.row + result.data.len() as u32 - 1,
+        start.col + result.data[0].len() as u32 - 1,
+    );
+    let destination = Range::new(start, end);
+
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination, pivot);
+
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Total Sales\", A1, \"Region\", \"East\")"),
+        Value::Number(250.0)
+    );
+}
+
+#[test]
 fn getpivotdata_falls_back_to_scan_when_pivot_not_registered() {
     let mut sheet = TestSheet::new();
 
@@ -1799,7 +1867,10 @@ fn getpivotdata_tracks_dynamic_dependency_on_pivot_destination_via_registry() {
 
     // Evaluate once so the dependency graph captures GETPIVOTDATA's dynamic reference to the full
     // pivot destination.
-    sheet.set_formula("C1", "=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")");
+    sheet.set_formula(
+        "C1",
+        "=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")",
+    );
     sheet.recalc();
     assert_eq!(sheet.get("C1"), Value::Number(100.0));
 
