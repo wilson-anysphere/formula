@@ -107,6 +107,9 @@ Currently supported in `formula-xls`:
 
 - BIFF8 `FILEPASS` with `wEncryptionType=0x0001` (RC4) and `wEncryptionSubType=0x0002` (CryptoAPI)
 - RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi))
+- RC4 `KeySizeBits` values: `40`, `56`, `128`
+  - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
+    (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
 
 Not implemented:
 
@@ -341,6 +344,36 @@ Implementation nuance:
 - `crates/formula-office-crypto` implements end-to-end Standard decryption and is intentionally more
   permissive about Standard parameter variants for compatibility.
 
+### Standard (CryptoAPI): RC4 `EncryptedPackage` decryption (0x200 blocks, CryptoAPI 40-bit padding)
+
+MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES). We do not currently
+plumb this through the primary `formula-io` open APIs, but the codebase contains RC4 CryptoAPI
+helpers and tests.
+
+Critical nuance: for **40-bit** RC4 (`KeySize == 40`), CryptoAPI represents the key as a **16-byte**
+RC4 key where the low 40 bits come from the derived key material and the remaining 88 bits are zero.
+
+High-level shape (SHA-1; per MS-OFFCRYPTO Standard RC4):
+
+```text
+pw = UTF16LE(password)                      // no BOM, no NUL
+H  = SHA1(salt || pw)
+for i in 0..50000:
+  H = SHA1(LE32(i) || H)
+
+for blockIndex = 0, 1, 2, ...:              // 0x200-byte blocks
+  Hb = SHA1(H || LE32(blockIndex))
+  key_material = Hb[0..KeySize/8]
+  if KeySize == 40:
+    rc4_key = key_material || 0x00 * 11     // 16 bytes total (CryptoAPI quirk)
+  else:
+    rc4_key = key_material                  // 7 bytes (56-bit) or 16 bytes (128-bit)
+  plaintext_block = RC4(rc4_key, ciphertext_block)
+```
+
+See `docs/offcrypto-standard-cryptoapi-rc4.md` for a full writeup and an example that shows raw
+5-byte vs padded-16-byte keys produce different ciphertext.
+
 ## Interop notes / fixture generation
 
 ### Which Excel versions produce which scheme?
@@ -446,10 +479,11 @@ for i in 0..50000:
 // set and the remaining 88 bits zero. Using a raw 5-byte RC4 key changes RC4 KSA and yields the
 // wrong keystream.
 H_block = SHA1(H || LE32(blockIndex))
+key_material = H_block[0..keyLen]
 if KeySizeBits == 40:
-  K_block = H_block[0..5] || 0x00 * 11   // 16 bytes total
+  K_block = key_material || 0x00 * 11    // 16 bytes total
 else:
-  K_block = H_block[0..keyLen]
+  K_block = key_material                                 // 7 bytes (56-bit) or 16 bytes (128-bit)
 ```
 
 ### Payload decryption model (record-payload-only RC4 stream)

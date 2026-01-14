@@ -128,7 +128,16 @@ For each ciphertext block index `block` (0-based):
 
 ```text
 h_block = Hash(h || LE32(block))
-rc4_key = h_block[0..key_size_bytes]   // truncate to key size
+key_material = h_block[0..key_size_bytes]   // key_size_bytes = KeySize/8
+
+// CryptoAPI RC4 quirk: 40-bit keys are padded to 16 bytes for the RC4 KSA.
+//
+// If you use the raw 5-byte key_material directly, you will generate a different RC4 keystream
+// than CryptoAPI/Office and the plaintext will be garbage.
+if key_size_bytes == 5:                     // KeySize == 40 bits
+  rc4_key = key_material || 0x00 * 11       // 16 bytes total
+else:
+  rc4_key = key_material                    // 7 bytes (56-bit) or 16 bytes (128-bit)
 ```
 
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
@@ -191,6 +200,30 @@ block 1 rc4_key =
 RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   e7c9974140e69857dbdec656c7ccb4f9283d723236
 ```
+
+### 40-bit RC4 key padding example (raw 5-byte key vs CryptoAPI padded key)
+
+Using the same parameters as above but with `KeySize = 40` bits (`key_size_bytes = 5`):
+
+```text
+block 0 H_block (SHA1(H || LE32(0))) =
+  6ad7dedf2da3514b1d85eabee069d47dd058967f
+
+key_material (5 bytes) =
+  6ad7dedf2d
+
+rc4_key used for KSA (CryptoAPI padded to 16 bytes) =
+  6ad7dedf2d0000000000000000000000
+
+RC4(key=raw 5-byte key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+  d1fa444913b4839b06eb4851750a07761005f025bf
+
+RC4(key=CryptoAPI padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+  7a8bd000713a6e30ba9916476d27b01d36707a6ef8
+```
+
+These ciphertexts differ, demonstrating why a **raw 5-byte RC4 key is not CryptoAPI-compatible**
+when `KeySize == 40`.
 
 ### MD5 (`CALG_MD5`)
 

@@ -179,12 +179,11 @@ The `EncryptionHeader` `AlgID` and `AlgIDHash` are CryptoAPI `ALG_ID` values.
 | AES-192 | `CALG_AES_192` | `0x0000660F` | 24 |
 | AES-256 | `CALG_AES_256` | `0x00006610` | 32 |
 
-**RC4 40-bit interoperability note:** CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit
-RC4 key with the low 40 bits set and the remaining 88 bits zero. Concretely, when `KeySize = 40`,
-the RC4 key bytes passed into the RC4 KSA are:
+**RC4 40-bit interoperability note:** derive `key_material = H_block[0..KeySize/8]`. If
+`KeySize == 40`, CryptoAPI/Office run RC4 KSA with:
 
 ```text
-rc4_key = H_block[0..5] || 0x00 * 11   // 16 bytes total
+rc4_key = key_material || 0x00 * 11   // 16 bytes total
 ```
 
 ### 3.2) Hash `AlgIDHash` values
@@ -281,15 +280,24 @@ This `H_block` is the per-block hash input from which the actual symmetric key b
 
 ### 5.2) Deriving the symmetric key bytes (AES vs RC4)
 
-#### 5.2.1) RC4 (`CALG_RC4`): key = truncate(`H_block`)
+#### 5.2.1) RC4 (`CALG_RC4`): key material = truncate(`H_block`) (+ 40-bit padding quirk)
 
 For Standard **RC4** encryption, the per-block RC4 key is derived by truncating the hash:
 
 ```text
-rc4_key(block) = H_block[0 : keyLen]    // keyLen = KeySize/8
+key_material(block) = H_block[0 : keyLen]    // keyLen = KeySize/8
+
+if KeySize == 40:
+  rc4_key(block) = key_material(block) || 0x00 * 11   // 16 bytes total
+else:
+  rc4_key(block) = key_material(block)                // 7 bytes (56-bit) or 16 bytes (128-bit)
 ```
 
 This matches the common Standard RC4 “re-key per 0x200-byte block” scheme (see §7.2.2).
+
+Important: the `KeySize == 40` padding behavior is a **CryptoAPI/Office interoperability quirk**.
+RC4’s KSA depends on *both the key bytes and the key length*, so `key_material` (5 bytes) and
+`key_material || 0x00*11` (16 bytes) yield different keystreams.
 
 #### 5.2.2) AES (`CALG_AES_*`): CryptoAPI `CryptDeriveKey` (ipad/opad expansion)
 
@@ -372,7 +380,11 @@ H_block0 = Hash( H_final || LE32(0) )                             // §5.1
 keyLen   = KeySize / 8
 
 if AlgID == CALG_RC4:
-  key = H_block0[0:keyLen]                                        // §5.2.1
+  key_material = H_block0[0:keyLen]
+  if KeySize == 40:
+    key = key_material || 0x00 * 11                               // §5.2.1
+  else:
+    key = key_material                                            // §5.2.1
 else:
   key = CryptDeriveKey(Hash, H_block0, keyLen=keyLen)             // §5.2.2
 ```
@@ -533,8 +545,10 @@ segmentSize = 0x200   // 512
 For segment index `i = 0, 1, 2, ...`:
 
 1. Derive `H_block = Hash(H_final || LE32(i))`.
-2. `key_i = H_block[0 : KeySize/8]` (truncate to the configured key size).
-3. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of
+2. `key_material_i = H_block[0 : KeySize/8]` (truncate to the configured key size).
+3. If `KeySize == 40`, set `key_i = key_material_i || 0x00*11` (16 bytes).
+   Otherwise set `key_i = key_material_i`.
+4. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of
    ciphertext.
 
 Concatenate segments and truncate to `OriginalPackageSize`.
