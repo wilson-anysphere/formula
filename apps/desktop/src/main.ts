@@ -9554,6 +9554,11 @@ function reapplyRibbonAutoFiltersForActiveSheet(): void {
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
+  toggleOverrides: {
+    "view.toggleShowFormulas": async (pressed) => {
+      await commandRegistry.executeCommand("view.toggleShowFormulas", pressed);
+    },
+  },
   onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
   onBeforeExecuteCommand: async (_commandId, source) => {
     if (source.kind !== "extension") return;
