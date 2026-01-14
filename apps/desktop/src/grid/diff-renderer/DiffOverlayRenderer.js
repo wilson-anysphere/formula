@@ -36,46 +36,10 @@ export function computeDiffHighlights(diff) {
  * @typedef {{ getCellRect: (row: number, col: number) => Rect | null }} DiffOverlayOptions
  */
 
-function withAlpha(color, alpha) {
-  // Accept CSS color strings (e.g. hex or computed channel values) by falling back to a
-  // `globalAlpha` approach. This exists for callers that want to pass raw token values.
-  return { color, alpha };
-}
-
 function readCssVarColor(varName, root = null, fallback = "transparent") {
   return resolveCssVar(varName, { root, fallback });
 }
 
-function drawCellHighlight(ctx, rect, style, options) {
-  const { fill = null, stroke = null, strokeWidth = 2, removed = false } = options ?? {};
-
-  ctx.save();
-
-  if (fill) {
-    ctx.fillStyle = fill.color;
-    ctx.globalAlpha = fill.alpha;
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  }
-
-  if (stroke) {
-    ctx.strokeStyle = stroke.color;
-    ctx.globalAlpha = stroke.alpha;
-    ctx.lineWidth = strokeWidth;
-    ctx.strokeRect(rect.x + strokeWidth / 2, rect.y + strokeWidth / 2, rect.width - strokeWidth, rect.height - strokeWidth);
-  }
-
-  if (removed) {
-    ctx.globalAlpha = 0.9;
-    ctx.strokeStyle = style.removedStroke;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(rect.x, rect.y + rect.height / 2);
-    ctx.lineTo(rect.x + rect.width, rect.y + rect.height / 2);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
 
 export class DiffOverlayRenderer {
   constructor(options) {
@@ -122,7 +86,12 @@ export class DiffOverlayRenderer {
   }
 
   clear(ctx) {
+    // `clearRect` is affected by the current transform. Reset to identity to
+    // clear the full backing store regardless of DPR scaling.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
   }
 
   /**
@@ -134,75 +103,114 @@ export class DiffOverlayRenderer {
     const { getCellRect } = options ?? {};
     if (typeof getCellRect !== "function") return;
 
-    const style = {
-      removedStroke: this.removedStrikethrough,
-    };
+    const strokeWidth = this.strokeWidth;
+    const halfStroke = strokeWidth / 2;
+
+    ctx.save();
+    ctx.lineWidth = strokeWidth;
+
+    const fillAlpha = this.fillAlpha;
+    const strokeAlpha = this.strokeAlpha;
+    const removedStroke = this.removedStrikethrough;
+    const removedLineAlpha = 0.9;
 
     // Added
+    ctx.fillStyle = this.addedFill;
+    ctx.strokeStyle = this.addedStroke;
     for (const change of diff.added) {
       const rect = getCellRect(change.cell.row, change.cell.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, style, {
-        fill: withAlpha(this.addedFill, this.fillAlpha),
-        stroke: withAlpha(this.addedStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-      });
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = strokeAlpha;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
     }
 
     // Removed
+    ctx.fillStyle = this.removedFill;
     for (const change of diff.removed) {
       const rect = getCellRect(change.cell.row, change.cell.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, style, {
-        fill: withAlpha(this.removedFill, this.fillAlpha),
-        stroke: withAlpha(this.removedStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-        removed: true,
-      });
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = strokeAlpha;
+      ctx.lineWidth = strokeWidth;
+      ctx.strokeStyle = this.removedStroke;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
+
+      ctx.globalAlpha = removedLineAlpha;
+      ctx.strokeStyle = removedStroke;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(rect.x, rect.y + rect.height / 2);
+      ctx.lineTo(rect.x + rect.width, rect.y + rect.height / 2);
+      ctx.stroke();
     }
 
     // Modified
+    ctx.fillStyle = this.modifiedFill;
+    ctx.strokeStyle = this.modifiedStroke;
+    ctx.lineWidth = strokeWidth;
     for (const change of diff.modified) {
       const rect = getCellRect(change.cell.row, change.cell.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, style, {
-        fill: withAlpha(this.modifiedFill, this.fillAlpha),
-        stroke: withAlpha(this.modifiedStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-      });
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = strokeAlpha;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
     }
 
     // Format-only
+    ctx.fillStyle = this.formatFill;
+    ctx.strokeStyle = this.formatStroke;
+    ctx.lineWidth = strokeWidth;
     for (const change of diff.formatOnly) {
       const rect = getCellRect(change.cell.row, change.cell.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, style, {
-        fill: withAlpha(this.formatFill, this.fillAlpha),
-        stroke: withAlpha(this.formatStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-      });
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = strokeAlpha;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
     }
 
     // Moved: render old location as removed-ish, new location as added-ish.
+    ctx.fillStyle = this.movedFill;
+    ctx.strokeStyle = this.movedStroke;
     for (const move of diff.moved) {
       const oldRect = getCellRect(move.oldLocation.row, move.oldLocation.col);
       if (oldRect) {
-        drawCellHighlight(ctx, oldRect, style, {
-          fill: withAlpha(this.movedFill, this.fillAlpha),
-          stroke: withAlpha(this.movedStroke, this.strokeAlpha),
-          strokeWidth: this.strokeWidth,
-          removed: true,
-        });
+        ctx.globalAlpha = fillAlpha;
+        ctx.fillRect(oldRect.x, oldRect.y, oldRect.width, oldRect.height);
+        ctx.globalAlpha = strokeAlpha;
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = this.movedStroke;
+        ctx.strokeRect(
+          oldRect.x + halfStroke,
+          oldRect.y + halfStroke,
+          oldRect.width - strokeWidth,
+          oldRect.height - strokeWidth,
+        );
+
+        ctx.globalAlpha = removedLineAlpha;
+        ctx.strokeStyle = removedStroke;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(oldRect.x, oldRect.y + oldRect.height / 2);
+        ctx.lineTo(oldRect.x + oldRect.width, oldRect.y + oldRect.height / 2);
+        ctx.stroke();
       }
 
       const newRect = getCellRect(move.newLocation.row, move.newLocation.col);
       if (newRect) {
-        drawCellHighlight(ctx, newRect, style, {
-          fill: withAlpha(this.movedFill, this.fillAlpha),
-          stroke: withAlpha(this.movedStroke, this.strokeAlpha),
-          strokeWidth: this.strokeWidth,
-        });
+        ctx.globalAlpha = fillAlpha;
+        ctx.fillRect(newRect.x, newRect.y, newRect.width, newRect.height);
+        ctx.globalAlpha = strokeAlpha;
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = this.movedStroke;
+        ctx.strokeRect(newRect.x + halfStroke, newRect.y + halfStroke, newRect.width - strokeWidth, newRect.height - strokeWidth);
       }
     }
+
+    ctx.restore();
   }
 }

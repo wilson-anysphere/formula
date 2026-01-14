@@ -20,6 +20,9 @@ function makeFakeCtx() {
     restore() {
       calls.push(["restore"]);
     },
+    setTransform(a, b, c, d, e, f) {
+      calls.push(["setTransform", a, b, c, d, e, f]);
+    },
     clearRect(x, y, w, h) {
       calls.push(["clearRect", x, y, w, h]);
     },
@@ -108,3 +111,13 @@ test("DiffOverlayRenderer renders per-cell highlights for all diff buckets", () 
   assert.equal(strikethroughStrokes.length, 2);
 });
 
+test("DiffOverlayRenderer.clear resets transforms so DPR scaling doesn't interfere", () => {
+  const renderer = new DiffOverlayRenderer();
+  const { ctx, calls } = makeFakeCtx();
+  renderer.clear(ctx);
+
+  assert.deepEqual(
+    calls.map((c) => c[0]),
+    ["save", "setTransform", "clearRect", "restore"],
+  );
+});
