@@ -4362,6 +4362,10 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
 /// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
 ///   or exported to `.xlsx` depending on the output extension.
 /// - [`Workbook::Model`] is exported as `.xlsx` via [`formula_xlsx::write_workbook`].
+///
+/// To write a **password-protected** workbook (Office-encrypted OOXML OLE/CFB wrapper containing
+/// `EncryptionInfo` + `EncryptedPackage`), use [`save_workbook_with_options`] with
+/// [`SaveOptions::password`].
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     save_workbook_with_options(workbook, path, SaveOptions::default())
 }
