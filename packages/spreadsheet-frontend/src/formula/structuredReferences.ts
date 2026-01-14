@@ -70,6 +70,20 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
     const selector = unescapeStructuredRefItem(qualifiedMatch[1]!.trim());
     if (!selector.startsWith("#")) return null;
     const columnName = unescapeStructuredRefItem(qualifiedMatch[2]!.trim());
+    // Ambiguous: `Table1[[#All],[#Totals]]` (and friends) represent *multiple* structured
+    // reference items with no explicit column selection (all columns). These should be handled
+    // by a nested structured-ref parser rather than being misinterpreted as a selector-qualified
+    // single-item reference where the "column name" is itself a selector.
+    const normalizedColumnItem = columnName.trim().replace(/\s+/g, " ").toLowerCase();
+    if (
+      normalizedColumnItem === "#all" ||
+      normalizedColumnItem === "#headers" ||
+      normalizedColumnItem === "#data" ||
+      normalizedColumnItem === "#totals" ||
+      normalizedColumnItem === "#this row"
+    ) {
+      return null;
+    }
     return { tableName, selector, columnName };
   }
 

@@ -52,12 +52,9 @@ function parseStructuredRef(input) {
   const suffix = s.slice(firstBracket);
   if (!suffix) return null;
 
-  // Match the subset supported by the formula tokenizer / reference extractor:
-  // - TableName[ColumnName]
-  // - TableName[#All] / [#Headers] / [#Data] / [#Totals]
-  // - TableName[[#All],[ColumnName]] (and other selectors like #Data/#Headers/#Totals)
-  // - TableName[[#All],[Col1],[Col2]] (multi-column; contiguous columns only)
-  // - TableName[[#All],[Col1]:[Col3]] (column-range)
+  const KNOWN_SELECTOR_ITEMS = new Set(["#ALL", "#HEADERS", "#DATA", "#TOTALS", "#THIS ROW"]);
+  const normalizeSelector = (value) => String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  const isSelectorItem = (value) => KNOWN_SELECTOR_ITEMS.has(normalizeSelector(value));
 
   function findMatchingStructuredRefBracketEnd(src, start) {
     // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
@@ -120,7 +117,7 @@ function parseStructuredRef(input) {
     }
   }
 
-  function parseNestedItems(nested) {
+  function parseNested(nested) {
     if (!nested.startsWith("[[")) return null;
     const items = [];
     const seps = [];
@@ -131,7 +128,7 @@ function parseStructuredRef(input) {
       if (!end) return null;
       const raw = nested.slice(pos + 1, end - 1);
       // Excel escapes `]` inside structured reference items by doubling it: `]]`.
-      items.push(raw.replaceAll("]]", "]"));
+      items.push(raw.replaceAll("]]", "]").trim());
       pos = end;
       while (pos < nested.length && /\s/.test(nested[pos])) pos += 1;
       const ch = nested[pos];
@@ -152,55 +149,42 @@ function parseStructuredRef(input) {
 
     if (items.length === 0) return null;
 
-    let selector = null;
-    let columnItems = items;
-    let columnSeps = seps;
-
-    const first = String(items[0] ?? "").trim();
-    if (first.startsWith("#")) {
-      if (items.length < 2) return null;
-      if (seps[0] !== ",") return null;
-      selector = first;
-      columnItems = items.slice(1);
-      columnSeps = seps.slice(1);
+    let selectorCount = 0;
+    while (selectorCount < items.length && isSelectorItem(items[selectorCount])) {
+      if (selectorCount < seps.length && seps[selectorCount] === ":") return null;
+      selectorCount += 1;
     }
 
-    if (columnItems.length === 1) {
-      return { selector, columnName: String(columnItems[0] ?? "").trim(), columns: null, columnMode: null };
+    if (selectorCount > 0 && selectorCount < items.length) {
+      if (seps[selectorCount - 1] !== ",") return null;
     }
 
-    const hasColon = columnSeps.includes(":");
-    if (hasColon) {
-      if (columnItems.length !== 2) return null;
-      if (columnSeps.length !== 1 || columnSeps[0] !== ":") return null;
-      return { selector, columnName: null, columns: columnItems.map((c) => String(c ?? "").trim()), columnMode: "range" };
-    }
-
-    if (!columnSeps.every((sep) => sep === ",")) return null;
-    return { selector, columnName: null, columns: columnItems.map((c) => String(c ?? "").trim()), columnMode: "list" };
-  }
-
-  const nested = parseNestedItems(suffix);
-  if (nested) {
     return {
-      tableName,
-      selector: nested.selector,
-      columnName: nested.columnName,
-      columns: nested.columns,
-      columnMode: nested.columnMode,
+      selectors: items.slice(0, selectorCount),
+      columnItems: items.slice(selectorCount),
+      columnSeparators: seps.slice(selectorCount),
     };
   }
 
-  // Avoid mis-parsing nested bracket groups like `[[#All],[Amount]]` as a single item.
-  // If the nested parser fails, treat the reference as invalid rather than falling back to
-  // a simple `[Column]` match.
+  const nested = parseNested(suffix);
+  if (nested) {
+    return {
+      tableName,
+      selectors: nested.selectors,
+      columnItems: nested.columnItems,
+      columnSeparators: nested.columnSeparators,
+    };
+  }
+
   if (suffix.startsWith("[[")) return null;
 
   const simpleMatch = suffix.match(/^\[\s*((?:[^\]]|]])+)\s*\]$/);
   if (simpleMatch) {
-    // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
-    const columnName = simpleMatch[1].replaceAll("]]", "]").trim();
-    return { tableName, selector: null, columnName, columns: null, columnMode: null };
+    const item = simpleMatch[1].replaceAll("]]", "]").trim();
+    if (isSelectorItem(item)) {
+      return { tableName, selectors: [item], columnItems: [], columnSeparators: [] };
+    }
+    return { tableName, selectors: [], columnItems: [item], columnSeparators: [] };
   }
 
   return null;
@@ -229,6 +213,8 @@ function resolveSheetName(name, workbook) {
  *   - `Table1[Column]`
  *   - `Table1[#All]` / `Table1[#Headers]` / `Table1[#Data]` / `Table1[#Totals]`
  *   - `Table1[[#All],[Column]]` (and other selectors like `#Data`/`#Headers`/`#Totals`)
+ *   - `Table1[[#Headers],[#Data],[Column]]` (multi-item selector unions; only when the resulting range is rectangular)
+ *   - `Table1[[#All],[#Totals]]` (multi-item selector unions without an explicit column list; rectangular only)
  *   - `Table1[[#All],[Col1],[Col2]]` (multi-column; contiguous columns only)
  *   - `Table1[[#All],[Col1]:[Col3]]` (column-range)
  */
@@ -249,131 +235,97 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     if (!table) throw new Error(`Unknown table: ${structured.tableName}`);
     const tableSheetName = resolveSheetName(table.sheetName, workbook);
 
-    const selectorNorm = structured.selector ? normalizeName(structured.selector) : null;
-    if (selectorNorm && selectorNorm !== "#ALL" && selectorNorm !== "#HEADERS" && selectorNorm !== "#DATA" && selectorNorm !== "#TOTALS") {
+    const normalizeSelector = (value) => String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+    const selectors =
+      Array.isArray(structured.selectors) && structured.selectors.length > 0 ? structured.selectors.map(normalizeSelector) : ["#ALL"];
+
+    const unsupportedSelector = selectors.find((s) => s !== "#ALL" && s !== "#HEADERS" && s !== "#DATA" && s !== "#TOTALS");
+    if (unsupportedSelector) {
       // Selectors like `#This Row` are relative to an active row context, which `parseGoTo` does not have.
       // Reject them explicitly rather than returning a misleading full-table range.
-      throw new Error(`Unsupported structured reference selector: ${structured.selector}`);
+      throw new Error(`Unsupported structured reference selector: ${unsupportedSelector}`);
     }
 
-    const normalizeColumns = (names) =>
-      Array.isArray(names)
-        ? names.map((c) => normalizeName(c)).filter((c) => typeof c === "string" && c.length > 0)
-        : [];
+    // Resolve row union. `parseGoTo` only returns a single rectangle; reject discontiguous unions.
+    const rowIntervals = selectors.map((s) => {
+      if (s === "#HEADERS") return { startRow: table.startRow, endRow: table.startRow };
+      if (s === "#TOTALS") return { startRow: table.endRow, endRow: table.endRow };
+      if (s === "#DATA") {
+        const startRow = table.endRow > table.startRow ? table.startRow + 1 : table.startRow;
+        return { startRow, endRow: table.endRow };
+      }
+      // #ALL
+      return { startRow: table.startRow, endRow: table.endRow };
+    });
+
+    rowIntervals.sort((a, b) => a.startRow - b.startRow);
+    const mergedRows = [];
+    for (const interval of rowIntervals) {
+      const last = mergedRows[mergedRows.length - 1];
+      if (!last) {
+        mergedRows.push({ ...interval });
+        continue;
+      }
+      if (interval.startRow <= last.endRow + 1) {
+        last.endRow = Math.max(last.endRow, interval.endRow);
+      } else {
+        mergedRows.push({ ...interval });
+      }
+    }
+    if (mergedRows.length !== 1) {
+      throw new Error(`Discontiguous structured reference selectors are not supported: ${structured.tableName}`);
+    }
+    const { startRow, endRow } = mergedRows[0];
 
     const columns = table.columns ?? [];
     const findColumnIndex = (name) => columns.findIndex((c) => normalizeName(c) === normalizeName(name));
 
-    if (structured.columns && structured.columnMode) {
-      const requested = normalizeColumns(structured.columns);
-      if (requested.length === 0) throw new Error(`Invalid structured reference: ${input}`);
+    let startCol = table.startCol;
+    let endCol = table.endCol;
 
-      let indices = [];
-      if (structured.columnMode === "range") {
-        if (requested.length !== 2) throw new Error(`Invalid structured reference: ${input}`);
-        const a = findColumnIndex(structured.columns[0]);
-        const b = findColumnIndex(structured.columns[1]);
-        if (a === -1 || b === -1) throw new Error(`Unknown table column: ${structured.tableName}[[${structured.columns.join("]:[")}]]`);
-        indices = [a, b];
-      } else {
-        indices = structured.columns.map((name) => findColumnIndex(name));
-        if (indices.some((idx) => idx === -1)) {
-          throw new Error(`Unknown table column in structured reference: ${structured.tableName}`);
+    const columnItems = Array.isArray(structured.columnItems) ? structured.columnItems : [];
+    const columnSeps = Array.isArray(structured.columnSeparators) ? structured.columnSeparators : [];
+    if (columnItems.length > 0) {
+      const indices = new Set();
+      let i = 0;
+      while (i < columnItems.length) {
+        const sep = i < columnSeps.length ? columnSeps[i] : null;
+        if (sep === ":") {
+          if (i + 1 >= columnItems.length) throw new Error(`Invalid structured reference: ${input}`);
+          const a = findColumnIndex(columnItems[i]);
+          const b = findColumnIndex(columnItems[i + 1]);
+          if (a === -1 || b === -1) throw new Error(`Unknown table column: ${structured.tableName}`);
+          const lo = Math.min(a, b);
+          const hi = Math.max(a, b);
+          for (let idx = lo; idx <= hi; idx += 1) indices.add(idx);
+          i += 2;
+          if (i < columnItems.length && columnSeps[i - 1] !== ",") throw new Error(`Invalid structured reference: ${input}`);
+          continue;
         }
+
+        const idx = findColumnIndex(columnItems[i]);
+        if (idx === -1) throw new Error(`Unknown table column: ${structured.tableName}`);
+        indices.add(idx);
+        i += 1;
+        if (i < columnItems.length && columnSeps[i - 1] !== ",") throw new Error(`Invalid structured reference: ${input}`);
       }
 
-      const uniq = Array.from(new Set(indices)).sort((a, b) => a - b);
+      const uniq = Array.from(indices).sort((a, b) => a - b);
+      if (uniq.length === 0) throw new Error(`Invalid structured reference: ${input}`);
       const minIdx = uniq[0];
       const maxIdx = uniq[uniq.length - 1];
 
-      // Comma-separated multi-column refs represent a union. `parseGoTo` only returns a single range,
-      // so only support contiguous columns to avoid selecting a misleading bounding rectangle.
-      if (structured.columnMode === "list" && maxIdx - minIdx + 1 !== uniq.length) {
+      // Multi-column structured refs can represent unions. Only resolve contiguous columns to avoid
+      // selecting a misleading bounding rectangle.
+      if (maxIdx - minIdx + 1 !== uniq.length) {
         throw new Error(`Non-contiguous structured reference columns are not supported: ${structured.tableName}`);
       }
 
-      const startCol = table.startCol + minIdx;
-      const endCol = table.startCol + maxIdx;
-
-      let startRow = table.startRow;
-      let endRow = table.endRow;
-
-      if (selectorNorm === "#HEADERS") {
-        endRow = startRow;
-      } else if (selectorNorm === "#TOTALS") {
-        startRow = endRow;
-      } else if (selectorNorm === "#DATA") {
-        if (endRow > startRow) startRow = startRow + 1;
-      } else if (selectorNorm === "#ALL") {
-        // keep full range
-      }
-
-      return { type: "range", source: "table", sheetName: tableSheetName, range: { startRow, endRow, startCol, endCol } };
+      startCol = table.startCol + minIdx;
+      endCol = table.startCol + maxIdx;
     }
 
-    const columnNorm = normalizeName(structured.columnName);
-
-    // Whole-table specifiers: `Table1[#All]`, `Table1[#Headers]`, `Table1[#Data]`, `Table1[#Totals]`.
-    if (columnNorm.startsWith("#") && !structured.columns) {
-      if (columnNorm === "#ALL") {
-        return {
-          type: "range",
-          source: "table",
-          sheetName: tableSheetName,
-          range: { startRow: table.startRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
-        };
-      }
-      if (columnNorm === "#HEADERS") {
-        return {
-          type: "range",
-          source: "table",
-          sheetName: tableSheetName,
-          range: { startRow: table.startRow, endRow: table.startRow, startCol: table.startCol, endCol: table.endCol },
-        };
-      }
-      if (columnNorm === "#DATA") {
-        const startRow = table.endRow > table.startRow ? table.startRow + 1 : table.startRow;
-        return {
-          type: "range",
-          source: "table",
-          sheetName: tableSheetName,
-          range: { startRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
-        };
-      }
-      if (columnNorm === "#TOTALS") {
-        return {
-          type: "range",
-          source: "table",
-          sheetName: tableSheetName,
-          range: { startRow: table.endRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
-        };
-      }
-    }
-
-    // Column references: `Table1[Col2]` or selector-qualified `Table1[[#Headers],[Col2]]`.
-    const idx = columns.findIndex((c) => normalizeName(c) === columnNorm);
-    if (idx === -1) {
-      const suffix = selectorNorm ? `[[${structured.selector}],[${structured.columnName}]]` : `[${structured.columnName}]`;
-      throw new Error(`Unknown table column: ${structured.tableName}${suffix}`);
-    }
-
-    const col = table.startCol + idx;
-    let startRow = table.startRow;
-    let endRow = table.endRow;
-
-    // For selector-qualified column refs, adjust the row span. Unqualified `Table1[Col]`
-    // intentionally selects the full column including headers (legacy behavior).
-    if (selectorNorm === "#HEADERS") {
-      endRow = startRow;
-    } else if (selectorNorm === "#TOTALS") {
-      startRow = endRow;
-    } else if (selectorNorm === "#DATA") {
-      if (endRow > startRow) startRow = startRow + 1;
-    } else if (selectorNorm === "#ALL") {
-      // keep full range (including headers)
-    }
-
-    return { type: "range", source: "table", sheetName: tableSheetName, range: { startRow, endRow, startCol: col, endCol: col } };
+    return { type: "range", source: "table", sheetName: tableSheetName, range: { startRow, endRow, startCol, endCol } };
   }
 
   // A1 reference

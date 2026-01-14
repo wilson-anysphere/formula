@@ -434,6 +434,101 @@ describe("extractFormulaReferences", () => {
     expect(totalsRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 3, startCol: 1, endRow: 3, endCol: 1 });
   });
 
+  it("extracts multi-item structured refs when the selector union is a contiguous rectangle", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"],
+        },
+      ],
+    ]);
+
+    const input = "=SUM(Table1[[#Headers],[#Data],[Amount]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    // #Headers + #Data is equivalent to #All in rectangular form.
+    expect(references[0]?.range).toEqual({ sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 1 });
+  });
+
+  it("extracts multi-item structured refs without columns when the selector union is rectangular", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"],
+        },
+      ],
+    ]);
+
+    const input = "=COUNTA(Table1[[#All],[#Totals]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    // #All already includes the totals row; the union should still resolve to the full table range.
+    expect(references[0]?.range).toEqual({ sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 3, endCol: 1 });
+  });
+
+  it("does not resolve discontiguous multi-item selector unions into a misleading rectangle", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"],
+        },
+      ],
+    ]);
+
+    const input = "=SUM(Table1[[#Headers],[#Totals],[Amount]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    // Header + totals is a discontiguous row union; avoid highlighting a bounding rectangle.
+    expect(references).toEqual([]);
+  });
+
+  it("extracts contiguous multi-column unions that combine ranges and single columns", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:D4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 3,
+          columns: ["Item", "Amount", "Tax", "Total"],
+        },
+      ],
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount]:[Total],[Tax]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    // Amount:Total already includes Tax; the union is still a contiguous rectangle (B1:D4).
+    expect(references[0]?.range).toEqual({ sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 3 });
+  });
+
   it("extracts structured table references with escaped closing brackets in column names", () => {
     const tables = new Map([
       [

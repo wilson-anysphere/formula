@@ -364,19 +364,37 @@ function findMatchingStructuredRefBracketEnd(src: string, start: number): number
   }
 }
 
-type ParsedMultiColumnStructuredReference = {
+type ParsedNestedStructuredReference = {
   tableName: string;
-  selector: string | null;
   /**
-   * Column names referenced by the structured reference.
+   * Structured reference selector items (e.g. `#All`, `#Headers`, `#Data`).
    *
-   * For `columnMode: "range"`, this is `[start, end]` (inclusive range by table column order).
+   * Excel permits multiple selector items in a single structured reference, for example:
+   *   Table1[[#Headers],[#Data],[Col1]]
+   *   Table1[[#All],[#Totals]]
+   *
+   * These represent a union of table areas. We only resolve them when the resulting
+   * range is a single contiguous rectangle (otherwise we'd highlight a misleading
+   * bounding box).
    */
-  columnNames: string[];
-  columnMode: "list" | "range";
+  selectors: string[];
+  /**
+   * Column tokens referenced by the structured reference.
+   *
+   * When empty, the structured reference selects all table columns.
+   */
+  columnItems: string[];
+  /** Separators between `columnItems` (length = `columnItems.length - 1`). */
+  columnSeparators: Array<"," | ":">;
 };
 
-function parseMultiColumnStructuredReference(refText: string): ParsedMultiColumnStructuredReference | null {
+const KNOWN_SELECTOR_ITEMS = new Set(["#all", "#headers", "#data", "#totals", "#this row"]);
+
+function normalizeStructuredRefItem(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function parseNestedStructuredReference(refText: string): ParsedNestedStructuredReference | null {
   const firstBracket = refText.indexOf("[");
   if (firstBracket < 0) return null;
   const tableName = refText.slice(0, firstBracket);
@@ -420,31 +438,27 @@ function parseMultiColumnStructuredReference(refText: string): ParsedMultiColumn
 
   const items = rawItems.map((item) => unescapeStructuredRefItem(item).trim());
 
-  let selector: string | null = null;
-  let columnItems = items;
-  let columnSeps = separators;
-
-  // Heuristic: if the first item starts with `#`, treat it as a selector (e.g. `#All`).
-  // This matches Excel's structured reference grammar.
-  if (items[0]?.startsWith("#")) {
-    if (items.length < 2) return null;
-    if (separators[0] !== ",") return null;
-    selector = items[0] ?? null;
-    columnItems = items.slice(1);
-    columnSeps = separators.slice(1);
+  // Parse leading selector items (`#All`, `#Data`, …). These must be comma-separated.
+  let selectorCount = 0;
+  while (selectorCount < items.length) {
+    const item = items[selectorCount] ?? "";
+    const normalized = normalizeStructuredRefItem(item);
+    if (!KNOWN_SELECTOR_ITEMS.has(normalized)) break;
+    // Selector items cannot be joined via ":".
+    if (selectorCount < separators.length && separators[selectorCount] === ":") return null;
+    selectorCount += 1;
   }
 
-  if (columnItems.length === 0) return null;
-
-  const hasColon = columnSeps.includes(":");
-  if (hasColon) {
-    if (columnItems.length !== 2) return null;
-    if (columnSeps.length !== 1 || columnSeps[0] !== ":") return null;
-    return { tableName, selector, columnNames: columnItems, columnMode: "range" };
+  if (selectorCount > 0 && selectorCount < items.length) {
+    // The boundary between the last selector and the first column token must be a comma.
+    if (separators[selectorCount - 1] !== ",") return null;
   }
 
-  if (!columnSeps.every((sep) => sep === ",")) return null;
-  return { tableName, selector, columnNames: columnItems, columnMode: "list" };
+  const selectors = items.slice(0, selectorCount);
+  const columnItems = items.slice(selectorCount);
+  const columnSeparators = separators.slice(selectorCount);
+
+  return { tableName, selectors, columnItems, columnSeparators };
 }
 
 function resolveStructuredReference(refText: string, opts: ExtractFormulaReferencesOptions | undefined): FormulaReferenceRange | null {
@@ -458,10 +472,10 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const tables = opts.tables;
   if (!tables) return null;
   const parsed = parseStructuredReferenceText(refText);
-  const multi = parsed ? null : parseMultiColumnStructuredReference(refText);
-  if (!parsed && !multi) return null;
+  const nested = parsed ? null : parseNestedStructuredReference(refText);
+  if (!parsed && !nested) return null;
 
-  const table = findTableInfo(tables, parsed ? parsed.tableName : multi!.tableName);
+  const table = findTableInfo(tables, parsed ? parsed.tableName : nested!.tableName);
   if (!table) return null;
 
   const startRow = table.startRow;
@@ -476,67 +490,116 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const baseStartRow = Math.min(startRow!, endRow!);
   const baseEndRow = Math.max(startRow!, endRow!);
 
-  if (multi) {
-    const selector = multi.selector?.toLowerCase() ?? null;
-    if (!(selector === null || selector === "#data" || selector === "#headers" || selector === "#totals" || selector === "#all")) {
-      // Unsupported selector (e.g. `#This Row`) - we can't resolve it to a stable rectangular range
-      // without additional context.
-      return null;
+  if (nested) {
+    const normalizedSelectors =
+      nested.selectors.length === 0 ? ["" /* default -> #Data */] : nested.selectors.map((s) => normalizeStructuredRefItem(s));
+
+    type RowInterval = { startRow: number; endRow: number };
+    const intervals: RowInterval[] = [];
+
+    for (const selector of normalizedSelectors) {
+      if (selector === "#this row") {
+        // `#This Row` depends on the edited row context and is handled by UI-specific resolvers.
+        return null;
+      }
+      if (selector !== "" && selector !== "#data" && selector !== "#headers" && selector !== "#totals" && selector !== "#all") {
+        return null;
+      }
+
+      let start = baseStartRow;
+      let end = baseEndRow;
+
+      if (selector === "#headers") {
+        end = start;
+      } else if (selector === "#totals") {
+        start = baseEndRow;
+        end = baseEndRow;
+      } else if (selector === "#all") {
+        // Keep full range.
+      } else {
+        // Default / #Data: exclude header row when the table has at least one data row.
+        if (end > start) start = start + 1;
+      }
+
+      intervals.push({ startRow: Math.min(start, end), endRow: Math.max(start, end) });
     }
+
+    // Merge intervals; only resolve when the union is a single contiguous interval.
+    intervals.sort((a, b) => a.startRow - b.startRow);
+    const merged: RowInterval[] = [];
+    for (const interval of intervals) {
+      const last = merged[merged.length - 1];
+      if (!last) {
+        merged.push({ ...interval });
+        continue;
+      }
+      if (interval.startRow <= last.endRow + 1) {
+        last.endRow = Math.max(last.endRow, interval.endRow);
+        continue;
+      }
+      merged.push({ ...interval });
+    }
+    if (merged.length !== 1) return null;
+    const rowSpan = merged[0]!;
 
     const tableColumns = Array.isArray(table.columns) ? table.columns : [];
-    const indices: number[] = [];
 
-    if (multi.columnMode === "range") {
-      const startName = multi.columnNames[0] ?? "";
-      const endName = multi.columnNames[1] ?? "";
-      const startIdx = tableColumns.findIndex((c) => String(c).toLowerCase() === startName.toLowerCase());
-      const endIdx = tableColumns.findIndex((c) => String(c).toLowerCase() === endName.toLowerCase());
-      if (startIdx < 0 || endIdx < 0) return null;
-      indices.push(startIdx, endIdx);
-    } else {
-      for (const name of multi.columnNames) {
-        const idx = tableColumns.findIndex((c) => String(c).toLowerCase() === String(name).toLowerCase());
+    const findColumnIndex = (name: string): number => {
+      const target = String(name ?? "").toLowerCase();
+      return tableColumns.findIndex((c) => String(c).toLowerCase() === target);
+    };
+
+    let startColRef = baseStartCol;
+    let endColRef = baseEndCol;
+
+    if (nested.columnItems.length > 0) {
+      const indices = new Set<number>();
+      const cols = nested.columnItems;
+      const seps = nested.columnSeparators;
+
+      let i = 0;
+      while (i < cols.length) {
+        const sep = i < seps.length ? seps[i] : null;
+        if (sep === ":") {
+          if (i + 1 >= cols.length) return null;
+          const startName = cols[i] ?? "";
+          const endName = cols[i + 1] ?? "";
+          const startIdx = findColumnIndex(startName);
+          const endIdx = findColumnIndex(endName);
+          if (startIdx < 0 || endIdx < 0) return null;
+          const lo = Math.min(startIdx, endIdx);
+          const hi = Math.max(startIdx, endIdx);
+          for (let idx = lo; idx <= hi; idx += 1) indices.add(idx);
+          i += 2;
+          if (i < cols.length && seps[i - 1] !== ",") return null;
+          continue;
+        }
+
+        const idx = findColumnIndex(cols[i] ?? "");
         if (idx < 0) return null;
-        indices.push(idx);
+        indices.add(idx);
+        i += 1;
+        if (i < cols.length && seps[i - 1] !== ",") return null;
       }
-    }
 
-    const uniqSorted = Array.from(new Set(indices)).sort((a, b) => a - b);
-    if (uniqSorted.length === 0) return null;
+      const uniqSorted = Array.from(indices).sort((a, b) => a - b);
+      if (uniqSorted.length === 0) return null;
+      const minIdx = uniqSorted[0]!;
+      const maxIdx = uniqSorted[uniqSorted.length - 1]!;
 
-    const minIdx = uniqSorted[0]!;
-    const maxIdx = uniqSorted[uniqSorted.length - 1]!;
+      // Multi-column refs can represent unions. Only resolve when contiguous so we don't
+      // highlight a misleading bounding rectangle.
+      if (maxIdx - minIdx + 1 !== uniqSorted.length) return null;
 
-    // For comma-separated lists (`Table1[[Col1],[Col3]]`), Excel returns a union. We only resolve
-    // the range when the selected columns are contiguous, otherwise we'd highlight a misleading
-    // rectangular range that includes columns the reference doesn't actually cover.
-    if (multi.columnMode === "list" && maxIdx - minIdx + 1 !== uniqSorted.length) return null;
-
-    const startColRef = baseStartCol + minIdx;
-    const endColRef = baseStartCol + maxIdx;
-    if (startColRef < baseStartCol || endColRef > baseEndCol) return null;
-
-    let refStartRow = baseStartRow;
-    let refEndRow = baseEndRow;
-
-    if (selector === "#headers") {
-      refEndRow = refStartRow;
-    } else if (selector === "#totals") {
-      refStartRow = baseEndRow;
-      refEndRow = baseEndRow;
-    } else if (selector === "#all") {
-      // Keep the full range, including headers.
-    } else if (selector === null || selector === "#data") {
-      if (refEndRow > refStartRow) {
-        refStartRow = refStartRow + 1;
-      }
+      startColRef = baseStartCol + minIdx;
+      endColRef = baseStartCol + maxIdx;
+      if (startColRef < baseStartCol || endColRef > baseEndCol) return null;
     }
 
     return {
       sheet: table.sheet ?? table.sheetName,
-      startRow: Math.min(refStartRow, refEndRow),
-      endRow: Math.max(refStartRow, refEndRow),
+      startRow: rowSpan.startRow,
+      endRow: rowSpan.endRow,
       startCol: startColRef,
       endCol: endColRef,
     };

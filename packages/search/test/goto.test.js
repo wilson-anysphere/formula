@@ -180,6 +180,50 @@ test("parseGoTo supports selector-qualified structured table column references",
   assert.deepEqual(all.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
 });
 
+test("parseGoTo supports multi-item selector unions when they resolve to a single rectangle", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  const parsed = parseGoTo("Table1[[#Headers],[#Data]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  // #Headers + #Data is equivalent to the full table range (#All) in rectangular form.
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 1 });
+
+  const allAndTotals = parseGoTo("Table1[[#All],[#Totals]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(allAndTotals.source, "table");
+  assert.deepEqual(allAndTotals.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 1 });
+});
+
+test("parseGoTo throws for discontiguous multi-item selector unions", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  assert.throws(
+    () => parseGoTo("Table1[[#Headers],[#Totals]]", { workbook: wb, currentSheetName: "Sheet1" }),
+    /discontiguous/i,
+  );
+});
+
 test("parseGoTo supports multi-column structured table references when columns are contiguous", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");
