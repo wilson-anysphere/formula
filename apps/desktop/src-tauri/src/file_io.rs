@@ -23,10 +23,9 @@ use formula_xlsb::{
     XlsbWorkbook,
 };
 use formula_xlsx::drawingml::PreservedDrawingParts;
-use formula_xlsx::print::{
-    read_workbook_print_settings, read_workbook_print_settings_from_reader,
-    write_workbook_print_settings, WorkbookPrintSettings,
-};
+use formula_xlsx::print::{write_workbook_print_settings, WorkbookPrintSettings};
+#[cfg(test)]
+use formula_xlsx::print::read_workbook_print_settings;
 use formula_xlsx::{
     parse_sheet_tab_color, parse_workbook_sheets, patch_xlsx_streaming_workbook_cell_patches,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
@@ -751,12 +750,17 @@ where
     let workbook_model = formula_xlsx::read_workbook_from_reader(open_reader()?)
         .with_context(|| format!("parse xlsx {:?}", path))?;
 
-    let print_settings = match origin_xlsx_bytes.as_deref() {
-        Some(bytes) => read_workbook_print_settings(bytes).ok().unwrap_or_default(),
-        None => open_reader()
-            .ok()
-            .and_then(|r| read_workbook_print_settings_from_reader(r).ok())
-            .unwrap_or_default(),
+    // Print settings are already parsed into the `formula-model` workbook as part of the main XLSX
+    // import. Avoid re-reading and inflating worksheet XML a second time.
+    let print_settings = WorkbookPrintSettings {
+        sheets: workbook_model
+            .sheets
+            .iter()
+            .map(|sheet| {
+                let model = workbook_model.sheet_print_settings(sheet.id);
+                formula_xlsx::print::SheetPrintSettings::from(&model)
+            })
+            .collect(),
     };
 
     let mut out = Workbook {
@@ -4661,6 +4665,55 @@ mod tests {
             workbook.preserved_pivot_parts.is_none(),
             "expected oversized pivot parts to be dropped during open"
         );
+    }
+
+    #[test]
+    fn read_xlsx_print_settings_fall_back_to_model_when_print_extractor_fails() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/print-settings.xlsx"
+        ));
+        let bytes = std::fs::read(fixture_path).expect("read print settings fixture");
+
+        // Corrupt the Print_Area defined name so `read_workbook_print_settings` fails (it requires
+        // all print-related defined names to parse), while the main XLSX reader can still open the
+        // workbook and salvage the remaining print settings best-effort.
+        let workbook_xml = formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(bytes.as_slice()),
+            "xl/workbook.xml",
+            XLSX_WORKBOOK_XML_MAX_BYTES,
+        )
+        .expect("read xl/workbook.xml")
+        .expect("expected xl/workbook.xml to exist");
+        let mut workbook_xml =
+            String::from_utf8(workbook_xml).expect("workbook.xml should be valid utf-8");
+        workbook_xml = workbook_xml.replace(
+            "Sheet1!$A$1:$D$10",
+            "NotARef",
+        );
+        let rewritten = upsert_zip_entry(&bytes, "xl/workbook.xml", workbook_xml.as_bytes());
+        assert!(
+            read_workbook_print_settings(&rewritten).is_err(),
+            "expected print-settings extractor to fail when a print-related defined name is invalid"
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("invalid-print-area.xlsx");
+        std::fs::write(&path, &rewritten).expect("write patched workbook");
+
+        let workbook = read_xlsx_blocking(&path).expect("open workbook with invalid print area");
+        assert_eq!(workbook.print_settings.sheets.len(), 1);
+        let sheet = &workbook.print_settings.sheets[0];
+        assert_eq!(sheet.sheet_name, "Sheet1");
+        assert!(sheet.print_area.is_none(), "expected invalid print area to be dropped");
+        assert_eq!(
+            sheet.print_titles,
+            Some(formula_xlsx::print::PrintTitles {
+                repeat_rows: Some(formula_xlsx::print::RowRange { start: 1, end: 1 }),
+                repeat_cols: Some(formula_xlsx::print::ColRange { start: 1, end: 2 }),
+            })
+        );
+        assert_eq!(sheet.page_setup.orientation, formula_xlsx::print::Orientation::Landscape);
     }
 
     #[test]
