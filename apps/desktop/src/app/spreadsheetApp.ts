@@ -2837,12 +2837,12 @@ export class SpreadsheetApp {
         if (source === "applyState") {
           this.drawingOverlay.clearImageCache();
         }
-        const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
+          const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
           ? payload.imageDeltas
           : Array.isArray(payload?.imagesDeltas)
             ? payload.imagesDeltas
             : [];
-        const activeDesiredBackgroundId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId);
         let activeBackgroundNeedsReload = false;
 
         for (const delta of imageDeltas) {
@@ -6383,12 +6383,13 @@ export class SpreadsheetApp {
    * Best-effort selected drawing id (used to render selection handles in the drawings overlay).
    *
    * Prefers the explicit drawing selection state, but falls back to chart selection
-   * when available (so chart selection continues to show handles).
+   * in canvas-charts mode (so chart selection continues to show handles in split view).
    */
   getSelectedDrawingId(): number | null {
     if (this.selectedDrawingId != null) return this.selectedDrawingId;
+    if (!this.useCanvasCharts) return null;
     if (!this.selectedChartId) return null;
-    return this.useCanvasCharts ? chartStoreIdToDrawingId(this.selectedChartId) : this.chartIdToDrawingId(this.selectedChartId);
+    return chartStoreIdToDrawingId(this.selectedChartId);
   }
 
   getGridLimits(): GridLimits {
