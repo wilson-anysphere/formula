@@ -176,4 +176,26 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
       app.destroy();
     }
   });
+
+  it("clears outline->engine hidden column sync caches on restoreDocumentState", async () => {
+    const app = new SpreadsheetApp(createRoot(), createStatus());
+    try {
+      // Seed non-null cache values to ensure restore clears them even when sheet ids collide.
+      (app as any).lastSyncedHiddenColsEngine = { terminate: () => {} };
+      (app as any).lastSyncedHiddenColsKey = "Sheet1:0";
+      (app as any).lastSyncedHiddenCols = [0];
+
+      const snapshotDoc = new DocumentController();
+      snapshotDoc.setCellValue("Sheet1", { row: 0, col: 0 }, "A");
+      const snapshot = snapshotDoc.encodeState();
+
+      await app.restoreDocumentState(snapshot);
+
+      expect((app as any).lastSyncedHiddenColsEngine).toBeNull();
+      expect((app as any).lastSyncedHiddenColsKey).toBeNull();
+      expect((app as any).lastSyncedHiddenCols).toBeNull();
+    } finally {
+      app.destroy();
+    }
+  });
 });

@@ -7902,6 +7902,16 @@ export class SpreadsheetApp {
    */
   async restoreDocumentState(snapshot: Uint8Array): Promise<void> {
     this.wasmSyncSuspended = true;
+    // `restoreDocumentState` replaces the workbook state inside the WASM engine via
+    // `loadWorkbookFromJson`. Any previously-cached outline->engine hidden column sync state is
+    // now stale, even if the engine instance and active sheet id remain unchanged (common when
+    // switching between workbooks that both contain `Sheet1`).
+    //
+    // Clear the cache so the next outline update can re-sync hidden flags without being skipped
+    // due to an identical `${sheetId}:${hiddenCols}` key from the prior workbook.
+    this.lastSyncedHiddenColsEngine = null;
+    this.lastSyncedHiddenColsKey = null;
+    this.lastSyncedHiddenCols = null;
     try {
       // Restoring can happen while a legacy chart/drawing drag gesture is still active. Cancel any
       // in-progress gestures first so the eventual pointerup cannot commit/cancel against a workbook
