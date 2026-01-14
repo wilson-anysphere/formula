@@ -88,7 +88,7 @@ import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
 import {
   createEngineClient,
-  engineApplyDeltas,
+  engineApplyDocumentChange,
   engineHydrateFromDocument,
   type EditOp,
   type EditResult,
@@ -5253,40 +5253,51 @@ export class SpreadsheetApp {
           }
 
            this.wasmEngine = engine;
-           this.wasmUnsubscribe = this.document.on(
-             "change",
-             ({ deltas, source, recalc }: { deltas: any[]; source?: string; recalc?: boolean }) => {
-              if (!this.wasmEngine || this.wasmSyncSuspended) return;
+           this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
+             if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
-              if (source === "applyState") {
-                this.clearComputedValuesByCoord();
-                void this.enqueueWasmSync(async (worker) => {
-                  const changes = await engineHydrateFromDocument(worker, this.document);
-                  this.applyComputedChanges(changes);
-                });
-                return;
-              }
+             const source = typeof payload?.source === "string" ? payload.source : "";
 
-              if (!Array.isArray(deltas) || deltas.length === 0) {
-                if (recalc) {
-                  void this.enqueueWasmSync(async (worker) => {
-                    const changes = await worker.recalculate();
-                    this.applyComputedChanges(changes);
-                  });
-                }
-                return;
-              }
-
+             if (source === "applyState") {
+               this.clearComputedValuesByCoord();
                void this.enqueueWasmSync(async (worker) => {
-                 const changes = await engineApplyDeltas(worker, deltas, { recalculate: recalc !== false });
+                 const changes = await engineHydrateFromDocument(worker, this.document);
                  this.applyComputedChanges(changes);
                });
+               return;
              }
-           );
 
-           // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
-           // interactions) before the `document.on("change")` listener is installed. If the
-           // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
+             const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+             const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
+             const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
+             const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
+             const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+
+             const recalc = payload?.recalc;
+             const wantsRecalc = recalc === true;
+
+             if (deltas.length === 0 && !hasStyles) {
+               if (wantsRecalc) {
+                 void this.enqueueWasmSync(async (worker) => {
+                   const changes = await worker.recalculate();
+                   this.applyComputedChanges(changes);
+                 });
+               }
+               return;
+             }
+
+             void this.enqueueWasmSync(async (worker) => {
+               const changes = await engineApplyDocumentChange(worker, payload, {
+                 recalculate: recalc !== false,
+                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
+               });
+               this.applyComputedChanges(changes);
+             });
+           });
+
+            // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
+            // interactions) before the `document.on("change")` listener is installed. If the
+            // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
            // deltas could be missed, leaving the worker with an incomplete view of inputs.
            //
            // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the

@@ -64,12 +64,14 @@ export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from ".
 
 export {
   engineApplyDeltas,
+  engineApplyDocumentChange,
   engineHydrateFromDocument,
   exportDocumentToEngineWorkbookJson,
 } from "./documentControllerSync.ts";
 export type {
   DocumentCellDelta,
   DocumentCellState,
+  EngineApplyDocumentChangeOptions,
   EngineCellScalar,
   EngineSyncTarget,
   EngineWorkbookJson,

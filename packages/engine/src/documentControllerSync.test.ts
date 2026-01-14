@@ -6,6 +6,7 @@ import { DocumentController } from "../../../apps/desktop/src/document/documentC
 import type { CellChange } from "./protocol.ts";
 import {
   engineApplyDeltas,
+  engineApplyDocumentChange,
   engineHydrateFromDocument,
   exportDocumentToEngineWorkbookJson,
   type EngineSyncTarget,
@@ -292,5 +293,47 @@ describe("engine sync helpers", () => {
     ]);
 
     expect(engine.setCalls).toEqual([{ address: "B1", value: "=A1*2", sheet: "Sheet1" }]);
+  });
+
+  it("engineApplyDocumentChange propagates row/col/sheet style deltas via the optional formatting API", async () => {
+    const doc = new DocumentController();
+
+    const internStyle = vi.fn((_: unknown) => 100);
+    const setRowStyleId = vi.fn();
+    const setColStyleId = vi.fn();
+    const setSheetDefaultStyleId = vi.fn();
+
+    const engine: EngineSyncTarget = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+      internStyle,
+      setRowStyleId,
+      setColStyleId,
+      setSheetDefaultStyleId,
+    };
+
+    const pending: Promise<unknown>[] = [];
+    doc.on("change", (payload: any) => {
+      pending.push(
+        engineApplyDocumentChange(engine, payload, {
+          recalculate: false,
+          getStyleById: (styleId) => doc.styleTable.get(styleId),
+        }),
+      );
+    });
+
+    // Apply the same patch three times; DocumentController should reuse the same styleId, and the
+    // sync helper should intern it into the engine once and then reuse the cached mapping.
+    doc.setRowFormat("Sheet1", 0, { font: { bold: true } });
+    doc.setColFormat("Sheet1", 0, { font: { bold: true } });
+    doc.setSheetFormat("Sheet1", { font: { bold: true } });
+
+    await Promise.all(pending);
+
+    expect(internStyle).toHaveBeenCalledTimes(1);
+    expect(setRowStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
+    expect(setColStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
   });
 });

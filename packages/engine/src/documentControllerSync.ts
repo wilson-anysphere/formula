@@ -59,6 +59,45 @@ export interface EngineSyncTarget {
    */
   setCellStyleId?: (address: string, styleId: number, sheet?: string) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
+  /**
+   * Optional formatting metadata interning + application methods.
+   *
+   * These are additive and may not be implemented by all engine targets.
+   * Sync helpers must treat them as best-effort.
+   */
+  internStyle?: (styleObj: unknown) => Promise<number> | number;
+  setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
+  setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
+  setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
+}
+
+export type EngineApplyDocumentChangeOptions = {
+  /**
+   * Whether to call `engine.recalculate()` after applying the change payload.
+   *
+   * Defaults to the DocumentController-provided `payload.recalc` flag when available
+   * (`true`/`false`), with a backwards-compatible fallback of `true` when omitted.
+   */
+  recalculate?: boolean;
+  /**
+   * Resolve a DocumentController `styleId` into a style object suitable for `internStyle`.
+   *
+   * If not provided, style deltas are ignored (backwards compatible).
+   */
+  getStyleById?: (styleId: number) => unknown;
+};
+
+type StyleIdCache = Map<number, Promise<number>>;
+
+// Per-engine cache mapping DocumentController style ids → engine style ids.
+//
+// We use a WeakMap so engine clients can be GC'd without explicit disposal.
+const styleIdCacheByEngine = new WeakMap<object, StyleIdCache>();
+
+function resetEngineStyleCache(engine: EngineSyncTarget): void {
+  // Clear any cached document→engine style ids when the engine is re-hydrated.
+  // Workbook loads typically reset internal style tables, so stale ids would be unsafe.
+  styleIdCacheByEngine.delete(engine as object);
 }
 
 type StyleTableLike = { get(styleId: number): unknown };
@@ -149,6 +188,7 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
 
 export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<CellChange[]> {
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
+  resetEngineStyleCache(engine);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
 
   const styleTable = doc?.styleTable as StyleTableLike | null;
@@ -264,6 +304,126 @@ export async function engineApplyDeltas(
   }
 
   if (!didApply) return [];
+  if (!shouldRecalculate) return [];
+  return await engine.recalculate();
+}
+
+export async function engineApplyDocumentChange(
+  engine: EngineSyncTarget,
+  changePayload: unknown,
+  options: EngineApplyDocumentChangeOptions = {},
+): Promise<CellChange[]> {
+  // `DocumentController` emits a JSON-ish payload; keep parsing tolerant since callers may
+  // pass through other event sources in tests.
+  const payload = changePayload as any;
+
+  // Handle "reset boundary" payloads by forcing callers to re-hydrate. We intentionally
+  // don't attempt to mirror sheet structure changes incrementally here.
+  if (payload?.source === "applyState") {
+    return [];
+  }
+
+  const deltas: readonly DocumentCellDelta[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
+  const rowStyleDeltas: Array<{ sheetId: string; row: number; afterStyleId: number }> = Array.isArray(payload?.rowStyleDeltas)
+    ? payload.rowStyleDeltas
+    : [];
+  const colStyleDeltas: Array<{ sheetId: string; col: number; afterStyleId: number }> = Array.isArray(payload?.colStyleDeltas)
+    ? payload.colStyleDeltas
+    : [];
+  const sheetStyleDeltas: Array<{ sheetId: string; afterStyleId: number }> = Array.isArray(payload?.sheetStyleDeltas)
+    ? payload.sheetStyleDeltas
+    : [];
+
+  const hasRowStyleDeltas = rowStyleDeltas.length > 0;
+  const hasColStyleDeltas = colStyleDeltas.length > 0;
+  const hasSheetStyleDeltas = sheetStyleDeltas.length > 0;
+
+  // Apply cell content deltas (same logic as `engineApplyDeltas`, but we delay recalc until
+  // after formatting metadata is applied so we only recalc once per DocumentController event).
+  const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
+
+  for (const delta of deltas) {
+    const beforeInput = cellStateToEngineInput(delta.before);
+    const afterInput = cellStateToEngineInput(delta.after);
+
+    // Ignore formatting-only edits and rich-text run edits that don't change the plain input.
+    if (beforeInput === afterInput) continue;
+
+    const address = toA1(delta.row, delta.col);
+    updates.push({ address, value: afterInput, sheet: delta.sheetId });
+  }
+
+  const didApplyCellInputs = updates.length > 0;
+  if (didApplyCellInputs) {
+    if (engine.setCells) {
+      await engine.setCells(updates);
+    } else {
+      await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
+    }
+  }
+
+  // Apply row/col/sheet style deltas (best-effort).
+  const getStyleById = options.getStyleById;
+  const internStyle = engine.internStyle;
+
+  const didAttemptStyleSync =
+    Boolean(getStyleById) && typeof internStyle === "function" && (hasRowStyleDeltas || hasColStyleDeltas || hasSheetStyleDeltas);
+
+  let didApplyAnyStyles = false;
+
+  if (didAttemptStyleSync) {
+    let cache = styleIdCacheByEngine.get(engine as object);
+    if (!cache) {
+      cache = new Map();
+      // Seed the default style: document `0` always maps to engine `0`.
+      cache.set(0, Promise.resolve(0));
+      styleIdCacheByEngine.set(engine as object, cache);
+    }
+
+    const resolveEngineStyleId = async (docStyleId: unknown): Promise<number> => {
+      const id = typeof docStyleId === "number" ? docStyleId : 0;
+      if (!Number.isInteger(id) || id <= 0) return 0;
+
+      const existing = cache.get(id);
+      if (existing) return await existing;
+
+      const styleObj = getStyleById!(id);
+      const promise = Promise.resolve(internStyle!(styleObj));
+      cache.set(id, promise);
+      return await promise;
+    };
+
+    if (hasRowStyleDeltas && typeof engine.setRowStyleId === "function") {
+      for (const d of rowStyleDeltas) {
+        const styleId = await resolveEngineStyleId(d.afterStyleId);
+        await engine.setRowStyleId(d.row, styleId, d.sheetId);
+        didApplyAnyStyles = true;
+      }
+    }
+
+    if (hasColStyleDeltas && typeof engine.setColStyleId === "function") {
+      for (const d of colStyleDeltas) {
+        const styleId = await resolveEngineStyleId(d.afterStyleId);
+        await engine.setColStyleId(d.col, styleId, d.sheetId);
+        didApplyAnyStyles = true;
+      }
+    }
+
+    if (hasSheetStyleDeltas && typeof engine.setSheetDefaultStyleId === "function") {
+      for (const d of sheetStyleDeltas) {
+        const styleId = await resolveEngineStyleId(d.afterStyleId);
+        await engine.setSheetDefaultStyleId(styleId, d.sheetId);
+        didApplyAnyStyles = true;
+      }
+    }
+  }
+
+  const didApplyAnyUpdates = didApplyCellInputs || didApplyAnyStyles;
+
+  const recalcFlag = typeof payload?.recalc === "boolean" ? (payload.recalc as boolean) : undefined;
+  const shouldRecalculate =
+    typeof options.recalculate === "boolean" ? options.recalculate : didApplyAnyUpdates ? recalcFlag !== false : recalcFlag === true;
+
   if (!shouldRecalculate) return [];
   return await engine.recalculate();
 }
