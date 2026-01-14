@@ -3,6 +3,7 @@ import test from "node:test";
 
 import * as Y from "yjs";
 import { requireYjsCjs } from "../../../collab/yjs-utils/test/require-yjs-cjs.js";
+import { patchForeignAbstractTypeConstructor } from "../../../collab/yjs-utils/src/index.ts";
 
 import { YjsVersionStore } from "./yjsVersionStore.js";
 
@@ -73,19 +74,7 @@ test("YjsVersionStore normalizes foreign AbstractType placeholder roots even whe
 
   // Patch prototype chain so the foreign placeholder passes `instanceof Y.AbstractType`
   // checks (mirrors collab undo's prototype patching behavior).
-  try {
-    const ctor = placeholder.constructor;
-    if (typeof ctor === "function" && ctor !== Y.AbstractType) {
-      const baseProto = Object.getPrototypeOf(ctor.prototype);
-      if (baseProto && baseProto !== Object.prototype) {
-        Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
-      } else {
-        Object.setPrototypeOf(ctor.prototype, Y.AbstractType.prototype);
-      }
-    }
-  } catch {
-    // ignore (best-effort)
-  }
+  patchForeignAbstractTypeConstructor(placeholder);
   assert.equal(placeholder instanceof Y.AbstractType, true);
 
   const store = new YjsVersionStore({
