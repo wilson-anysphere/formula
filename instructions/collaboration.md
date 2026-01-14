@@ -198,8 +198,8 @@ docker build -f services/sync-server/Dockerfile -t formula-sync-server .
 
 - **Auth context:** `docId`, `sub`/`userId` (user id), `role` (owner/admin/editor/commenter/viewer), optional `rangeRestrictions` (from JWT claims or token introspection responses)
 - **Desktop JWT-derived permissions (best-effort):** in desktop collab mode, the client **decodes the JWT payload without verifying it** to drive UX + attribution:
-  - `sub` is used as the local presence id (so it matches what the sync-server enforces) and is forwarded to `CollabSession.setPermissions({ userId })`.
-  - `role` + `rangeRestrictions` are forwarded to `CollabSession.setPermissions({ role, rangeRestrictions })`.
+  - `sub` (when present) is used as the local presence id (so it matches what the sync-server enforces) and is forwarded to `CollabSession.setPermissions({ userId })`.
+  - `role` + `rangeRestrictions` are forwarded to `CollabSession.setPermissions({ role, rangeRestrictions })` (with best-effort defaults when missing/invalid).
   - `CollabSession.setPermissions` validates `rangeRestrictions` and can throw on malformed payloads; desktop should treat these claims as untrusted and fall back (e.g. drop invalid restrictions) rather than crashing.
   - If the token is opaque / not JWT-decodable, desktop falls back to permissive client-side permissions (`{ role: "editor", rangeRestrictions: [] }`); server-side enforcement remains the source of truth.
 - **Read-only enforcement:** viewer role enforced at the sync-server (drops writes); commenter role is comment-only (comments allowed, workbook edits rejected). Desktop mirrors this in the UX:
