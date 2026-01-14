@@ -68,6 +68,48 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("passes when run script only mentions cargo in a comment", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Script mentions cargo in a comment only
+        run: |
+          # cargo test --locked
+          echo ok
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
+test("passes when a github-script block mentions cargo in a string", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            console.log("cargo test --locked");
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("fails when workflow toolchain differs from rust-toolchain.toml", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `

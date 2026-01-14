@@ -136,6 +136,7 @@ for workflow in "${workflow_files[@]}"; do
       fail = 0
       in_block = 0
       block_indent = 0
+      block_is_run = 0
       in_steps = 0
       steps_indent = 0
       step_item_indent = 0
@@ -161,14 +162,26 @@ for workflow in "${workflow_files[@]}"; do
       if (in_block) {
         if (trimmed != "" && indent <= block_indent) {
           in_block = 0
+          block_is_run = 0
         } else {
-          if (in_steps && line_looks_like_rust_tooling(trimmed)) {
-            note_rust_use(trimmed)
+          # Only treat `run: |` blocks as executable shell scripts; other block scalars like
+          # `with: script: |` (github-script) and `with: restore-keys: |` contain structured data
+          # and may mention cargo/rustup in strings without actually invoking Rust.
+          if (in_steps && block_is_run) {
+            # Ignore comment-only lines in scripts (they are not executed).
+            if (trimmed ~ /^#/) next
+            if (line_looks_like_rust_tooling(trimmed)) {
+              note_rust_use(trimmed)
+            }
           }
           next
         }
       }
-      if (!in_block && trimmed ~ /^[^#].*:[[:space:]]*[|>][+-]?[[:space:]]*($|#)/) {
+      if (!in_block && trimmed ~ /^[^#].*:[[:space:]]*[|>][0-9+-]*[[:space:]]*($|#)/) {
+        code = trimmed
+        # Best-effort strip trailing YAML comments.
+        sub(/[[:space:]]+#.*/, "", code)
+        block_is_run = (code ~ /^run:[[:space:]]*[|>]/ || code ~ /^-[[:space:]]*run:[[:space:]]*[|>]/)
         in_block = 1
         block_indent = indent
         next
