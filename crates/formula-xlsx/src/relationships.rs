@@ -216,6 +216,10 @@ mod tests {
             "expected rId1 to be preserved, got:\n{serialized}"
         );
         assert!(
+            !serialized.contains(r#"Type="""#),
+            "expected missing Type to remain omitted (not `Type=\"\"`), got:\n{serialized}"
+        );
+        assert!(
             serialized.contains(r#"TargetMode="External""#),
             "expected TargetMode to be preserved, got:\n{serialized}"
         );
