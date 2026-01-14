@@ -50,9 +50,6 @@ type WasmWorkbookInstance = {
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
   setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
-  setRowStyleId?: (sheet: string, row: number, styleId: number | null) => void;
-  setColStyleId?: (sheet: string, col: number, styleId: number | null) => void;
-  setSheetDefaultStyleId?: (sheet: string, styleId: number | null) => void;
   toJson(): string;
 };
 
@@ -580,27 +577,6 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               (wb as any).setColWidthChars(params.sheet, params.col, params.widthChars);
               result = null;
               break;
-            case "setRowStyleId":
-              if (typeof (wb as any).setRowStyleId !== "function") {
-                throw new Error("setRowStyleId: not available in this WASM build");
-              }
-              (wb as any).setRowStyleId(params.sheet, params.row, params.styleId === null ? undefined : params.styleId);
-              result = null;
-              break;
-            case "setColStyleId":
-              if (typeof (wb as any).setColStyleId !== "function") {
-                throw new Error("setColStyleId: not available in this WASM build");
-              }
-              (wb as any).setColStyleId(params.sheet, params.col, params.styleId === null ? undefined : params.styleId);
-              result = null;
-              break;
-            case "setSheetDefaultStyleId":
-              if (typeof (wb as any).setSheetDefaultStyleId !== "function") {
-                throw new Error("setSheetDefaultStyleId: not available in this WASM build");
-              }
-              (wb as any).setSheetDefaultStyleId(params.sheet, params.styleId === null ? undefined : params.styleId);
-              result = null;
-              break;
             case "setCells":
               if (typeof (wb as any).setCells === "function") {
                 (wb as any).setCells(params.updates);
@@ -685,14 +661,16 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setRowStyleId !== "function") {
                 throw new Error("setRowStyleId: WasmWorkbook.setRowStyleId is not available in this WASM build");
               }
-              (wb as any).setRowStyleId(params.sheet ?? "Sheet1", params.row, params.styleId);
+              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
+              (wb as any).setRowStyleId(params.sheet ?? "Sheet1", params.row, params.styleId ?? 0);
               result = null;
               break;
             case "setColStyleId":
               if (typeof (wb as any).setColStyleId !== "function") {
                 throw new Error("setColStyleId: WasmWorkbook.setColStyleId is not available in this WASM build");
               }
-              (wb as any).setColStyleId(params.sheet ?? "Sheet1", params.col, params.styleId);
+              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
+              (wb as any).setColStyleId(params.sheet ?? "Sheet1", params.col, params.styleId ?? 0);
               result = null;
               break;
             case "setSheetDefaultStyleId":
@@ -701,7 +679,8 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "setSheetDefaultStyleId: WasmWorkbook.setSheetDefaultStyleId is not available in this WASM build"
                 );
               }
-              (wb as any).setSheetDefaultStyleId(params.sheet ?? "Sheet1", params.styleId);
+              // `0` is the default style id; treat `null`/`undefined` as a request to clear.
+              (wb as any).setSheetDefaultStyleId(params.sheet ?? "Sheet1", params.styleId ?? 0);
               result = null;
               break;
             case "setColWidth":

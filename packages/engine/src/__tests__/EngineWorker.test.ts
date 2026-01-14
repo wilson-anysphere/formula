@@ -377,15 +377,15 @@ describe("EngineWorker RPC", () => {
       channelFactory: createMockChannel
     });
 
-    await engine.setRowStyleId("Sheet1", 5, 123);
-    await engine.setColStyleId("Sheet1", 2, null);
-    await engine.setSheetDefaultStyleId("Sheet1", 42);
+    await engine.setRowStyleId(5, 123, "Sheet1");
+    await engine.setColStyleId(2, 0, "Sheet1");
+    await engine.setSheetDefaultStyleId(42, "Sheet1");
 
     const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
     const methods = requests.map((r) => r.method);
     expect(methods).toEqual(["setRowStyleId", "setColStyleId", "setSheetDefaultStyleId"]);
     expect(requests[0].params).toEqual({ sheet: "Sheet1", row: 5, styleId: 123 });
-    expect(requests[1].params).toEqual({ sheet: "Sheet1", col: 2, styleId: null });
+    expect(requests[1].params).toEqual({ sheet: "Sheet1", col: 2, styleId: 0 });
     expect(requests[2].params).toEqual({ sheet: "Sheet1", styleId: 42 });
   });
 
