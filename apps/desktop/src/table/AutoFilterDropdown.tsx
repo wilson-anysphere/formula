@@ -27,6 +27,8 @@ export function AutoFilterDropdown({
     () => new Set(initialSelected == null ? values : initialSelected),
   );
 
+  const valueLabel = (value: string): string => (value === "" ? "(Blanks)" : value);
+
   const toggle = (v: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -47,7 +49,7 @@ export function AutoFilterDropdown({
               checked={selected.has(v)}
               onChange={() => toggle(v)}
             />
-            <span>{v}</span>
+            <span>{valueLabel(v)}</span>
           </label>
         ))}
       </div>
