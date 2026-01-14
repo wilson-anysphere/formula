@@ -152,7 +152,7 @@ test("semanticDiff: encrypted cell format-only changes are detected", () => {
   assert.equal(diff.modified.length, 0);
 });
 
-test("semanticDiff: enc=null is treated as unencrypted (backwards compatible)", () => {
+test("semanticDiff: enc=null is treated as encrypted (fail closed)", () => {
   const before = sheetFromObject({
     [cellKey(0, 0)]: { enc: null, value: 1 },
   });
@@ -162,10 +162,14 @@ test("semanticDiff: enc=null is treated as unencrypted (backwards compatible)", 
   const diff = semanticDiff(before, after);
   assert.equal(diff.modified.length, 1);
   assert.deepEqual(diff.modified[0].cell, { row: 0, col: 0 });
-  assert.equal(diff.modified[0].oldValue, 1);
+  // When an `enc` marker is present, semanticDiff should not fall back to plaintext
+  // fields, even if they exist in the payload.
+  assert.equal(diff.modified[0].oldValue, null);
   assert.equal(diff.modified[0].newValue, 2);
-  assert.equal("oldEncrypted" in diff.modified[0], false);
-  assert.equal("newEncrypted" in diff.modified[0], false);
+  assert.equal(diff.modified[0].oldEncrypted, true);
+  assert.equal(diff.modified[0].newEncrypted, false);
+  assert.equal(diff.modified[0].oldKeyId, null);
+  assert.equal(diff.modified[0].newKeyId, null);
  });
 
 test("semanticDiff: encrypted cells do not leak value/formula fields even if provided", () => {

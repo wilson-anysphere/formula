@@ -1230,6 +1230,12 @@ function extractTransactionChanges(events, cells) {
     } else if (entry.mapChange?.action === "delete" || entry.mapChange?.action === "update") {
       before = normalizeCell(entry.mapChange.oldValue);
     } else if (entry.propChanges.size > 0) {
+      // Reconstruct the "before" cell state by starting from the post-transaction view and then
+      // patching in any `oldValue`s reported by Yjs for the keys that changed.
+      //
+      // Important: `enc` uses `undefined` (absent key) vs `null` (explicit marker) to distinguish
+      // plaintext cells from encrypted/tainted ones. Do not default `enc` to `null`, otherwise
+      // plaintext edits can look like encryption marker transitions and break move-vs-edit auto-merges.
       const seed = after
         ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc, format: after.format ?? null }
         : { value: null, formula: null, enc: undefined, format: null };
