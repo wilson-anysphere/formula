@@ -137,3 +137,42 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
         "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
 }
+
+#[test]
+fn bytecode_sum_over_external_range_compiles_and_uses_reference_semantics() {
+    // Excel quirk: SUM over references ignores logicals/text stored in cells.
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            if sheet != "[Book.xlsx]Sheet1" || addr.col != 0 {
+                return None;
+            }
+            match addr.row {
+                0 => Some(Value::Number(1.0)),
+                1 => Some(Value::Text("2".to_string())),
+                2 => Some(Value::Bool(true)),
+                _ => None,
+            }
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!A1:A3)")
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected external workbook range refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+}
