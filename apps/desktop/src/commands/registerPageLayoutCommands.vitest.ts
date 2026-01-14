@@ -33,6 +33,13 @@ describe("registerPageLayoutCommands", () => {
       expect(commandRegistry.getCommand(id), `Expected command to be registered: ${id}`).toBeTruthy();
     }
 
+    // The Page Setup dropdown uses ribbon-scoped print-area ids that duplicate the primary Print Area group
+    // commands. Keep them registered for schema coverage, but hide them from the command palette.
+    expect(commandRegistry.getCommand(PAGE_LAYOUT_COMMANDS.printArea.set)?.when).toBe("false");
+    expect(commandRegistry.getCommand(PAGE_LAYOUT_COMMANDS.printArea.clear)?.when).toBe("false");
+    expect(commandRegistry.getCommand(PAGE_LAYOUT_COMMANDS.printArea.setPrintArea)?.when).toBeNull();
+    expect(commandRegistry.getCommand(PAGE_LAYOUT_COMMANDS.printArea.clearPrintArea)?.when).toBeNull();
+
     await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
     expect(handlers.openPageSetupDialog).toHaveBeenCalledTimes(1);
 
@@ -127,4 +134,3 @@ describe("registerPageLayoutCommands", () => {
     expect(handlers.exportPdf).toHaveBeenCalledTimes(1);
   });
 });
-

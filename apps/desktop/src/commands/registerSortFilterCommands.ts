@@ -54,7 +54,7 @@ export function registerSortFilterCommands(params: {
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ, "Sort A to Z", "ascending");
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA, "Sort Z to A", "descending");
 
-  const registerCustomSortCommand = (commandId: string): void => {
+  const registerCustomSortCommand = (commandId: string, options: { when?: string | null } = {}): void => {
     commandRegistry.registerBuiltinCommand(
       commandId,
       "Custom Sort…",
@@ -69,11 +69,12 @@ export function registerSortFilterCommands(params: {
           focusGrid: () => app.focus(),
         });
       },
-      { category, icon: null, keywords: ["sort", "custom sort"] },
+      { category, icon: null, keywords: ["sort", "custom sort"], when: options.when ?? null },
     );
   };
 
-  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
+  // Home uses a ribbon-scoped id for UI parity; hide it from the command palette to avoid
+  // duplicate "Custom Sort…" entries (Data tab id is treated as canonical).
+  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort, { when: "false" });
   registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort);
 }
-

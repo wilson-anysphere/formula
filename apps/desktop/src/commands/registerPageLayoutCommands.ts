@@ -172,6 +172,9 @@ export function registerPageLayoutCommands(params: { commandRegistry: CommandReg
     icon: null,
     description: "Set the print area to the current selection",
     keywords: ["print area", "page setup", "print"],
+    // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
+    // duplicate "Set Print Area" entries (`pageLayout.printArea.setPrintArea` is the canonical command).
+    when: "false",
   });
 
   commandRegistry.registerBuiltinCommand(
@@ -192,6 +195,9 @@ export function registerPageLayoutCommands(params: { commandRegistry: CommandReg
     icon: null,
     description: "Clear the sheet print area",
     keywords: ["print area", "clear", "page setup", "print"],
+    // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
+    // duplicate "Clear Print Area" entries (`pageLayout.printArea.clearPrintArea` is the canonical command).
+    when: "false",
   });
 
   commandRegistry.registerBuiltinCommand(PAGE_LAYOUT_COMMANDS.printArea.addTo, "Add to Print Area", () => handlers.addToPrintArea(), {
@@ -208,4 +214,3 @@ export function registerPageLayoutCommands(params: { commandRegistry: CommandReg
     keywords: ["export", "pdf", "print"],
   });
 }
-

@@ -71,6 +71,11 @@ describe("registerSortFilterCommands", () => {
     const isEditing = vi.fn(() => false);
     registerSortFilterCommands({ commandRegistry, app, isEditing });
 
+    // Home ribbon id is an alias; keep it registered but hidden from the command palette.
+    expect(commandRegistry.getCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort)?.when).toBe("false");
+    // Data tab id is treated as canonical and should remain visible.
+    expect(commandRegistry.getCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort)?.when).toBeNull();
+
     await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
 
     expect(openCustomSortDialog).toHaveBeenCalledTimes(1);
@@ -82,4 +87,3 @@ describe("registerSortFilterCommands", () => {
     expect(isEditing).toHaveBeenCalledTimes(2);
   });
 });
-

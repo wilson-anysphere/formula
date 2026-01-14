@@ -72,6 +72,12 @@ test("CommandRegistry registers Page Layout ribbon ids as builtin commands", () 
   for (const id of ids) {
     assert.match(source, new RegExp(`["']${escapeRegExp(id)}["']`), `Expected Page Layout command registration to include ${id}`);
   }
+
+  // The Page Setup dropdown uses schema-scoped Print Area ids that are aliases of the primary
+  // Print Area group commands. Keep them registered for ribbon coverage, but hide them from
+  // the command palette to avoid duplicate entries.
+  assert.match(source, /\bPAGE_LAYOUT_COMMANDS\.printArea\.set\b[\s\S]*?\bwhen:\s*["']false["']/);
+  assert.match(source, /\bPAGE_LAYOUT_COMMANDS\.printArea\.clear\b[\s\S]*?\bwhen:\s*["']false["']/);
 });
 
 test("Desktop main.ts does not special-case Page Layout ribbon actions in the ribbon switch", () => {
