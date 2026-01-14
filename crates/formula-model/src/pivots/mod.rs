@@ -105,7 +105,6 @@ pub enum SortOrder {
     Descending,
     Manual,
 }
-
 /// Excel-style layout mode for pivot output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,7 +152,6 @@ impl Default for GrandTotals {
         }
     }
 }
-
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
