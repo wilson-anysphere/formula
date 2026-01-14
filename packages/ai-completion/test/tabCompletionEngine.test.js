@@ -2091,6 +2091,44 @@ test("Numeric argument suggestions work with a unary '-' prefix", async () => {
   );
 });
 
+test("Value argument left-cell reference preserves the typed prefix (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ABS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're in column B so the cell to the left is A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ABS(A1"),
+    `Expected ABS to suggest the left cell ref as a pure insertion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Value argument left-cell reference is not suggested when it would delete typed text (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ABS(C";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're in column B so the cell to the left is A1. Since the user typed "C",
+    // suggesting "A1" would require deleting the "C".
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(
+    suggestions.length,
+    0,
+    `Expected no suggestions (pure insertion), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
   const engine = new TabCompletionEngine();
 

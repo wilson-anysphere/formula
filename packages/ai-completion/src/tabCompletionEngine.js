@@ -1186,12 +1186,18 @@ export class TabCompletionEngine {
       // Common heuristic: reference the cell to the left.
       if (cellRef.col > 0) {
         const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
-        suggestions.push({
-          text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${leftA1}`),
-          displayText: leftA1,
-          type: "function_arg",
-          confidence: 0.35,
-        });
+        // Only suggest this when it can be represented as a pure insertion. If the user
+        // already started typing something that doesn't match the left-cell ref, replacing
+        // it would require deleting characters (not supported by the formula-bar completion UX).
+        if (!typedPrefix || (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length)) {
+          const completed = completeIdentifier(leftA1, typedPrefix);
+          suggestions.push({
+            text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+            displayText: completed,
+            type: "function_arg",
+            confidence: 0.35,
+          });
+        }
       }
       return suggestions;
     }
