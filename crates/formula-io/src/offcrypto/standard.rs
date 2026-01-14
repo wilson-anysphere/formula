@@ -661,9 +661,11 @@ pub(crate) fn derive_file_key_standard(
 }
 
 fn derive_standard_aes_iv(info: &StandardEncryptionInfo) -> Result<[u8; AES_BLOCK_SIZE], OffcryptoError> {
-    // MS-OFFCRYPTO Standard AES IV derivation for verifier checks:
-    ////
-    //   iv = Hash(salt || LE32(0))[..16]
+    // Compatibility fallback IV derivation for non-standard Standard/CryptoAPI AES producers that
+    // encrypt verifier fields with AES-CBC (baseline MS-OFFCRYPTO/ECMA-376 Standard AES uses
+    // AES-ECB and has no IV).
+    //
+    // iv = Hash(salt || LE32(0))[0..16]
     let block = 0u32.to_le_bytes();
     let iv_full = hash(info.header.alg_id_hash, &[&info.verifier.salt, &block])?;
     if iv_full.len() < AES_BLOCK_SIZE {
@@ -995,7 +997,10 @@ mod tests {
 
     #[test]
     fn verify_password_standard_aes_sha1() {
-        // Test vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2).
+        // Key derivation vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2).
+        //
+        // This test uses an AES-CBC-encrypted verifier blob to exercise the compatibility fallback
+        // path; baseline MS-OFFCRYPTO Standard AES verifier fields are AES-ECB (no IV).
         let password = "Password1234_";
         let wrong_password = "Password1234!";
         let salt: [u8; 16] = [
@@ -1003,7 +1008,9 @@ mod tests {
             0xF8, 0x30, 0xEF,
         ];
 
-        // Expected values computed from the MS-OFFCRYPTO Standard key/IV derivation.
+        // Expected key from Standard/CryptoAPI key derivation (docs §8.2), and IV for the AES-CBC
+        // compatibility fallback path:
+        //   iv = Hash(salt || LE32(0))[0..16]
         let expected_key: [u8; 16] = [
             0x40, 0xB1, 0x3A, 0x71, 0xF9, 0x0B, 0x96, 0x6E, 0x37, 0x54, 0x08, 0xF2, 0xD1,
             0x81, 0xA1, 0xAA,
@@ -1034,7 +1041,8 @@ mod tests {
         let verifier_hash = hash(CALG_SHA1, &[&verifier]).expect("sha1 hash");
         assert_eq!(verifier_hash.len(), 20);
 
-        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding.
+        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding, to
+        // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
         plaintext.extend_from_slice(&verifier_hash);
@@ -1364,7 +1372,8 @@ mod tests {
         let verifier_hash = hash(CALG_SHA1, &[&verifier]).expect("sha1 hash");
         assert_eq!(verifier_hash.len(), 20);
 
-        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding.
+        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding, to
+        // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
         plaintext.extend_from_slice(&verifier_hash);
@@ -1441,7 +1450,8 @@ mod tests {
         let verifier_hash = hash(CALG_MD5, &[&verifier]).expect("md5 hash");
         assert_eq!(verifier_hash.len(), 16);
 
-        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding.
+        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding, to
+        // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
         plaintext.extend_from_slice(&verifier_hash);
