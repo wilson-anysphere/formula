@@ -673,10 +673,12 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     }
     if let Some(width) = sheet.default_col_width {
         // Format f32s directly to avoid casting noise like `0.100000001490116`.
+        let width = if width == 0.0 { 0.0 } else { width };
         out.push_str(&format!(r#" defaultColWidth="{width}""#));
     }
     if let Some(height) = sheet.default_row_height {
         // Format f32s directly to avoid casting noise like `0.100000001490116`.
+        let height = if height == 0.0 { 0.0 } else { height };
         out.push_str(&format!(r#" defaultRowHeight="{height}""#));
     }
     if outline_level_row > 0 {
@@ -727,6 +729,19 @@ mod sheet_format_pr_tests {
         let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
         let node = doc.root_element();
         assert_eq!(node.attribute("defaultColWidth"), Some("8.43"));
+    }
+
+    #[test]
+    fn renders_negative_zero_defaults_as_zero() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.default_col_width = Some(-0.0);
+        sheet.default_row_height = Some(-0.0);
+
+        let xml = sheet_format_pr_xml(&sheet);
+        let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
+        let node = doc.root_element();
+        assert_eq!(node.attribute("defaultColWidth"), Some("0"));
+        assert_eq!(node.attribute("defaultRowHeight"), Some("0"));
     }
 }
 
