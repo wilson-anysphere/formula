@@ -98,6 +98,17 @@ test("parsePartialFormula ignores ';' inside structured references", () => {
   assert.equal(parsed.currentArg?.text, "A");
 });
 
+test("parsePartialFormula ignores ';' after escaped brackets inside structured references", () => {
+  const registry = new FunctionRegistry();
+  // Column name is literally `A]B;USD`, encoded as `A]]B;USD`.
+  // The `;` inside the structured ref must not be treated as a function arg separator.
+  const input = "=SUM(Table1[[#Headers],[A]]B;USD]]; A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
+
 test("parsePartialFormula ignores ';' inside nested function calls (depth > baseDepth)", () => {
   const registry = new FunctionRegistry();
   const input = "=SUM(IF(A1>0;A1;0); A";

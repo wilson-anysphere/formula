@@ -41,6 +41,12 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   const openParens = [];
   let inString = false;
   let inSheetQuote = false;
+  // Track whether the cursor is currently inside a `[...]` segment.
+  //
+  // Note: In Excel formulas, `]` inside structured references and external workbook prefixes
+  // is escaped as `]]`, which is ambiguous with nested bracket closure (e.g. `[[Col]]`).
+  // Use `findMatchingBracketEnd` to skip complete bracket segments and avoid naive depth
+  // counting errors that would treat `]]` as two closings.
   let bracketDepth = 0;
   let braceDepth = 0;
   // Track the most recent identifier token so we can cheaply associate it with a following '('
@@ -87,12 +93,15 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       continue;
     }
     if (ch === "[") {
-      bracketDepth += 1;
       pendingIdent = null;
-      continue;
-    }
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
+      // Skip a full bracket segment when it closes before the cursor. If it does not close
+      // within the prefix, we know the cursor is inside a structured reference / external ref.
+      const end = findMatchingBracketEnd(prefix, i, prefix.length);
+      if (end == null) {
+        bracketDepth = 1;
+        break;
+      }
+      i = end - 1;
       pendingIdent = null;
       continue;
     }
@@ -279,7 +288,6 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   let lastSemicolonIndex = -1;
   let inString = false;
   let inSheetQuote = false;
-  let bracketDepth = 0;
   let braceDepth = 0;
 
   for (let i = openParenIndex + 1; i < cursorPosition; i++) {
@@ -308,16 +316,16 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       inString = true;
       continue;
     }
-    if (ch === "'" && bracketDepth === 0) {
+    if (ch === "'") {
       inSheetQuote = true;
       continue;
     }
     if (ch === "[") {
-      bracketDepth += 1;
-      continue;
-    }
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
+      // Skip bracket segments so we don't treat commas/semicolons inside structured refs
+      // as function argument separators.
+      const end = findMatchingBracketEnd(input, i, cursorPosition);
+      if (end == null) break;
+      i = end - 1;
       continue;
     }
     if (ch === "{") {
@@ -328,9 +336,9 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       braceDepth = Math.max(0, braceDepth - 1);
       continue;
     }
-    if (ch === "(" && bracketDepth === 0) depth++;
-    else if (ch === ")" && bracketDepth === 0) depth = Math.max(baseDepth, depth - 1);
-    else if (depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(baseDepth, depth - 1);
+    else if (depth === baseDepth && braceDepth === 0) {
       if (ch === ",") {
         commaArgIndex++;
         lastCommaIndex = i;
@@ -355,6 +363,76 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   };
 
   return { argIndex, currentArg };
+}
+
+/**
+ * Find the end position (exclusive) for a bracketed segment starting at `startIndex`.
+ *
+ * Excel uses `]]` to encode a literal `]` inside structured references and external workbook
+ * prefixes, which is ambiguous with nested closure (e.g. `[[Col]]`).
+ *
+ * This matcher prefers treating `]]` as an escaped `]` but will backtrack if that interpretation
+ * makes it impossible to close all brackets before `limit`.
+ *
+ * @param {string} src
+ * @param {number} startIndex
+ * @param {number} limit exclusive upper bound for scanning
+ * @returns {number | null}
+ */
+function findMatchingBracketEnd(src, startIndex, limit) {
+  if (typeof src !== "string") return null;
+  const max = typeof limit === "number" && Number.isFinite(limit) ? Math.max(0, Math.min(src.length, limit)) : src.length;
+  if (startIndex < 0 || startIndex >= max) return null;
+  if (src[startIndex] !== "[") return null;
+
+  let i = startIndex;
+  let depth = 0;
+  /** @type {Array<{ i: number, depth: number }>} */
+  const escapeChoices = [];
+
+  const backtrack = () => {
+    const choice = escapeChoices.pop();
+    if (!choice) return false;
+    i = choice.i;
+    depth = choice.depth;
+    // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+    depth -= 1;
+    i += 1;
+    return true;
+  };
+
+  while (true) {
+    if (i >= max) {
+      if (!backtrack()) return null;
+      continue;
+    }
+
+    const ch = src[i];
+    if (ch === "[") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === "]") {
+      if (src[i + 1] === "]" && depth > 0 && i + 1 < max) {
+        // Prefer treating `]]` as an escaped literal `]`. Record a choice point so we can
+        // reinterpret it as a real closing bracket if we later fail to close everything.
+        escapeChoices.push({ i, depth });
+        i += 2;
+        continue;
+      }
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return i;
+      if (depth < 0) {
+        // Too many closing brackets; try reinterpreting an earlier escape.
+        if (!backtrack()) return null;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
 }
 
 /**
