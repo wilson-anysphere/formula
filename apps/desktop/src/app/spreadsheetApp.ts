@@ -9021,8 +9021,6 @@ export class SpreadsheetApp {
     const state = this.chartDragState;
     if (!state) return;
     if (e.pointerId !== state.pointerId) return;
-    const geom = this.chartOverlayGeom;
-    if (!geom) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -9030,18 +9028,23 @@ export class SpreadsheetApp {
     const dx = e.clientX - state.startClientX;
     const dy = e.clientY - state.startClientY;
 
-    const startDrawingAnchor = chartAnchorToDrawingAnchor(state.startAnchor as any);
-    const startRect = anchorToRectPx(startDrawingAnchor, geom);
+    const startRect = this.chartAnchorToViewportRect(state.startAnchor);
+    if (!startRect) return;
 
     const minSize = 20;
     const nextRect = (() => {
       if (state.mode === "move") {
-        return { x: startRect.x + dx, y: startRect.y + dy, width: startRect.width, height: startRect.height };
+        return {
+          x: startRect.left + dx,
+          y: startRect.top + dy,
+          width: startRect.width,
+          height: startRect.height
+        };
       }
 
       const handle = state.resizeHandle ?? "se";
-      let x = startRect.x;
-      let y = startRect.y;
+      let x = startRect.left;
+      let y = startRect.top;
       let width = startRect.width;
       let height = startRect.height;
 
@@ -9084,7 +9087,21 @@ export class SpreadsheetApp {
       return { x, y, width, height };
     })();
 
-    const nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, nextRect);
+    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    const frozenWidth = layout.paneRects.topLeft.width;
+    const frozenHeight = layout.paneRects.topLeft.height;
+
+    // Convert from screen-space (viewport/cell-area) back to sheet-space coordinates for anchor updates.
+    // Frozen quadrants do not scroll; scrollable quadrants do.
+    const scrollBaseX = state.startAnchor.kind === "absolute" ? this.scrollX : nextRect.x < frozenWidth ? 0 : this.scrollX;
+    const scrollBaseY = state.startAnchor.kind === "absolute" ? this.scrollY : nextRect.y < frozenHeight ? 0 : this.scrollY;
+
+    const nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, {
+      x: nextRect.x + scrollBaseX,
+      y: nextRect.y + scrollBaseY,
+      width: nextRect.width,
+      height: nextRect.height,
+    });
     this.chartStore.updateChartAnchor(state.chartId, nextAnchor);
   }
 

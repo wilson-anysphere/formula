@@ -301,6 +301,60 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("dragging a frozen chart into the scrollable pane accounts for scroll offsets", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    doc.setFrozen(app.getCurrentSheetId(), 0, 1, { label: "Freeze Col" });
+    app.setScroll(200, 0);
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Frozen Drag",
+      position: "A1",
+    });
+
+    const before = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(before).toBeTruthy();
+    expect(before!.anchor.kind).toBe("twoCell");
+
+    const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    // Drag chart so its top-left ends up at x=150px in the cell-area (past the frozen boundary).
+    const startX = originX + rect.left + 10;
+    const startY = originY + rect.top + 10;
+    const endX = startX + (150 - rect.left);
+    const endY = startY;
+
+    dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 55 });
+    dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 55 });
+    dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 55 });
+
+    const after = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(after).toBeTruthy();
+    expect(after!.anchor.kind).toBe("twoCell");
+    const afterAnchor = after!.anchor as any;
+
+    // With scrollX=200, landing at x=150 should map to sheet-space x=350 => col 3.
+    expect(afterAnchor.fromCol).toBe(3);
+    expect(afterAnchor.toCol).toBe(8);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("resizing a selected chart updates its twoCell anchor", () => {
     const root = createRoot();
     const status = {
