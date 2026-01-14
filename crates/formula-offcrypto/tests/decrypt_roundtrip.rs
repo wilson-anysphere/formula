@@ -129,6 +129,66 @@ fn decrypt_agile_tampered_ciphertext_fails_integrity() {
     assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
 }
 
+#[test]
+fn decrypt_agile_tampered_size_header_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password_agile(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let mut encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Tamper the 8-byte plaintext size prefix. Integrity verification should cover these bytes as
+    // part of the full `EncryptedPackage` stream.
+    let original_size = u64::from_le_bytes(
+        encrypted_package[..8]
+            .try_into()
+            .expect("EncryptedPackage header is 8 bytes"),
+    );
+    assert!(original_size > 0, "unexpected empty EncryptedPackage payload");
+    let tampered_size = original_size - 1;
+    encrypted_package[..8].copy_from_slice(&tampered_size.to_le_bytes());
+
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+        options,
+    )
+    .expect_err("tampered EncryptedPackage header should fail integrity");
+    assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
+}
+
+#[test]
+fn decrypt_agile_appended_ciphertext_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password_agile(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let mut encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Append an extra AES block to simulate trailing bytes stored in the stream (e.g. sector slack
+    // or producer quirks). MS-OFFCRYPTO defines `dataIntegrity` as an HMAC over the *entire*
+    // `EncryptedPackage` stream bytes, so this should fail integrity verification.
+    encrypted_package.extend_from_slice(&[0xA5u8; 16]);
+
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+        options,
+    )
+    .expect_err("tampered EncryptedPackage should fail integrity");
+    assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
+}
+
 fn aes128_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     assert_eq!(key.len(), 16, "expected AES-128 key");
     assert_eq!(buf.len() % 16, 0, "ECB input must be block-aligned");
