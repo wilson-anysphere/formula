@@ -133,14 +133,15 @@ export async function installStartupTimingsListeners(): Promise<void> {
 }
 
 /**
- * Notify the Rust host that the webview has started executing JS and (when
- * called after `installStartupTimingsListeners()`) that the frontend is ready
- * to receive startup timing events.
+ * Notify the Rust host that the frontend has installed its startup timing
+ * listeners and is ready to receive startup timing events.
  *
- * This function is safe to call multiple times. The typical pattern is:
- * 1) call once as early as possible (minimizes measurement skew)
- * 2) install listeners in parallel
- * 3) call again to re-emit cached `startup:*` events for late listeners
+ * Tauri does not guarantee that early events are queued before JS listeners are
+ * registered, so calling this after `installStartupTimingsListeners()` prompts
+ * the host to (re-)emit cached `startup:*` events.
+ *
+ * Safe to call multiple times; the host will not overwrite the authoritative
+ * `webviewLoadedMs` value recorded via a native page-load callback.
  *
  * Note: `webviewLoadedMs` is recorded in Rust via a native page-load callback.
  * Calling this is safe and will not overwrite earlier host-recorded timings; it
