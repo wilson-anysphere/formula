@@ -1164,6 +1164,7 @@ Manual inspection (useful when debugging bundling issues):
 ```bash
 appimage="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/appimage/*.AppImage' 2>/dev/null | head -n 1 || true)"
 test -n "$appimage" || { echo "No AppImage found under target/**/release/bundle/appimage/*.AppImage" >&2; exit 1; }
+appimage="$(realpath "$appimage")"
 chmod +x "$appimage"
 
 tmpdir="$(mktemp -d)"
