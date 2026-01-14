@@ -31,10 +31,10 @@ export type DrawingInteractionCommit = {
   /** Final drawing state at gesture commit time (after any DrawingML patching). */
   after: DrawingObject;
   /**
-   * Optional full object list after the commit.
+   * Optional full object list at commit time (after any commit-time patching).
    *
-   * When `DrawingInteractionController` calls this callback during a gesture, it
-   * will include the full post-commit object list so integrations can persist
+   * When `DrawingInteractionController` invokes `onInteractionCommit`, it
+   * includes the full post-commit object list so integrations can persist
    * without re-reading `getObjects()`.
    */
   objects?: DrawingObject[];
@@ -48,8 +48,9 @@ export interface DrawingInteractionCallbacks {
    * Commit a single drawing interaction gesture (move/resize/rotate).
    *
    * This is called once per gesture (pointerup) and includes the before/after
-   * values for the edited object, so integrations can persist changes without
-   * diffing entire object lists.
+   * values for the edited object. The commit payload may also include the full
+   * objects list at commit time (`commit.objects`) after any DrawingML patching
+   * has been applied.
    */
   onInteractionCommit?(commit: DrawingInteractionCommit): void;
   /**
