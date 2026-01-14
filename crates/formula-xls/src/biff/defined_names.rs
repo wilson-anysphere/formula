@@ -683,11 +683,46 @@ fn read_biff8_array_constant_from_record(
             0x02 => {
                 let cch = cursor.read_u16_le()?;
                 out.extend_from_slice(&cch.to_le_bytes());
-                let byte_len = (cch as usize)
-                    .checked_mul(2)
-                    .ok_or_else(|| "array string length overflow".to_string())?;
-                let bytes = cursor.read_bytes(byte_len)?;
-                out.extend_from_slice(&bytes);
+
+                // Array constant strings are stored as a sequence of UTF-16LE (or compressed 8-bit)
+                // chars. When they span a CONTINUE boundary, the continued fragment begins with a
+                // 1-byte option flags prefix (fHighByte) indicating the encoding for that segment.
+                //
+                // Emit canonical UTF-16LE bytes regardless of the segment encoding so downstream
+                // `rgcb` decoders can treat the stream uniformly.
+                let mut remaining_chars = cch as usize;
+                let mut is_unicode = true;
+                while remaining_chars > 0 {
+                    if cursor.remaining_in_fragment() == 0 {
+                        cursor.advance_fragment_in_biff8_string(&mut is_unicode)?;
+                        continue;
+                    }
+
+                    let bytes_per_char = if is_unicode { 2 } else { 1 };
+                    let available_bytes = cursor.remaining_in_fragment();
+                    let available_chars = available_bytes / bytes_per_char;
+                    if available_chars == 0 {
+                        return Err(
+                            "array constant string continuation split mid-character".to_string(),
+                        );
+                    }
+
+                    let take_chars = remaining_chars.min(available_chars);
+                    let take_bytes = take_chars * bytes_per_char;
+                    let bytes = cursor.read_exact_from_current(take_bytes)?;
+
+                    if is_unicode {
+                        out.extend_from_slice(bytes);
+                    } else {
+                        // Expand compressed bytes into canonical UTF-16LE (high byte 0).
+                        for &b in bytes {
+                            out.push(b);
+                            out.push(0);
+                        }
+                    }
+
+                    remaining_chars -= take_chars;
+                }
             }
             0x04 | 0x10 => {
                 out.push(cursor.read_u8()?);
@@ -2677,6 +2712,143 @@ mod tests {
         assert_eq!(parsed.names.len(), 1);
         assert_eq!(parsed.names[0].name, name);
         assert_eq!(parsed.names[0].refers_to, "{1,2;3,4}");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn imports_defined_name_array_constant_string_split_across_continue() {
+        // NAME formula `={"ABCDE"}` encoded with PtgArray + trailing rgcb bytes, where the string's
+        // UTF-16 bytes are split across a CONTINUE boundary and the continued fragment begins with
+        // the required 1-byte option flags prefix (`fHighByte=1`).
+        let name = "ArrStr";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // 1x1 array constant: {"ABCDE"}
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 col
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+        rgcb.push(0x02); // string
+        rgcb.extend_from_slice(&5u16.to_le_bytes()); // cch
+        for unit in "ABCDE".encode_utf16() {
+            rgcb.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let start_utf16 = 4 + 1 + 2;
+        let split_at = start_utf16 + 4; // two UTF-16 code units ("AB")
+        let (rgcb_part1, rgcb_rest) = rgcb.split_at(split_at);
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let mut first = Vec::new();
+        first.extend_from_slice(&header);
+        first.extend_from_slice(&name_str);
+        first.extend_from_slice(&rgce);
+        first.extend_from_slice(rgcb_part1);
+
+        let mut second = Vec::new();
+        second.push(1); // continued segment option flags (fHighByte=1 => unicode)
+        second.extend_from_slice(rgcb_rest);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &first),
+            record(records::RECORD_CONTINUE, &second),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, r#"{"ABCDE"}"#);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn imports_defined_name_array_constant_string_split_across_continue_compressed() {
+        // Like `imports_defined_name_array_constant_string_split_across_continue`, but the
+        // continued fragment is stored in the compressed form (`fHighByte=0`).
+        let name = "ArrStrCompressed";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // 1x1 array constant: {"ABCDE"}
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 col
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+        rgcb.push(0x02); // string
+        rgcb.extend_from_slice(&5u16.to_le_bytes()); // cch
+        for unit in "ABCDE".encode_utf16() {
+            rgcb.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let start_utf16 = 4 + 1 + 2;
+        let split_at = start_utf16 + 4; // two UTF-16 code units ("AB")
+        let (rgcb_part1, rgcb_rest_utf16) = rgcb.split_at(split_at);
+
+        // Convert the remaining UTF-16LE bytes into compressed single-byte chars for the continued
+        // segment. This only works because the literal is ASCII.
+        assert!(
+            rgcb_rest_utf16.len() % 2 == 0,
+            "expected UTF-16LE payload to have even length"
+        );
+        let mut rgcb_rest_compressed = Vec::with_capacity(rgcb_rest_utf16.len() / 2);
+        for chunk in rgcb_rest_utf16.chunks_exact(2) {
+            assert_eq!(chunk[1], 0, "expected ASCII string for compressed segment");
+            rgcb_rest_compressed.push(chunk[0]);
+        }
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let mut first = Vec::new();
+        first.extend_from_slice(&header);
+        first.extend_from_slice(&name_str);
+        first.extend_from_slice(&rgce);
+        first.extend_from_slice(rgcb_part1);
+
+        let mut second = Vec::new();
+        second.push(0); // continued segment option flags (fHighByte=0 => compressed)
+        second.extend_from_slice(&rgcb_rest_compressed);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &first),
+            record(records::RECORD_CONTINUE, &second),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, r#"{"ABCDE"}"#);
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
