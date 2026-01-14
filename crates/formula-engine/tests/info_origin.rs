@@ -48,3 +48,29 @@ fn info_origin_is_scoped_per_sheet() {
     );
 }
 
+#[test]
+fn info_origin_dynamic_key_marks_dependents_dirty() {
+    let mut engine = Engine::new();
+
+    // Use a runtime-resolved key (cell reference) so dependency analysis must be conservative.
+    engine.set_cell_value("Sheet1", "A1", "origin").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=INFO(A1)"#)
+        .unwrap();
+
+    engine.recalculate();
+    assert!(!engine.has_dirty_cells());
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("$A$1".to_string())
+    );
+
+    engine.set_sheet_origin("Sheet1", Some("C5")).unwrap();
+    assert!(engine.has_dirty_cells());
+
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("$C$5".to_string())
+    );
+}
