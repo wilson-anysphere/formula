@@ -4,6 +4,8 @@ import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "./selectionSizeGuard.js";
 
 export type FormatAsTablePresetId = "light" | "medium" | "dark";
 
+export const FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS = 5_000;
+
 export type FormatAsTablePreset = {
   header: {
     fill: string;
@@ -49,6 +51,17 @@ const PRESETS: Record<FormatAsTablePresetId, FormatAsTablePreset> = {
 
 export function getFormatAsTablePreset(preset: FormatAsTablePresetId): FormatAsTablePreset {
   return PRESETS[preset];
+}
+
+export function estimateFormatAsTableBandedRowOps(rowCount: number): number {
+  // Banded rows are applied to every other *body* row (selection rows - 1 header row).
+  // For example:
+  // - 1 row total => 0 banded row ops
+  // - 2 rows total => 0 banded row ops
+  // - 3 rows total => 1 banded row op (the 2nd body row)
+  const rows = Number(rowCount);
+  if (!Number.isFinite(rows) || rows <= 0) return 0;
+  return Math.floor(Math.max(0, rows - 1) / 2);
 }
 
 function normalizeRange(range: CellRange): CellRange {
@@ -99,9 +112,8 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
   const rowCount = table.end.row - table.start.row + 1;
   const colCount = table.end.col - table.start.col + 1;
   const cellCount = rowCount * colCount;
-  const maxBandedRowOps = 5_000;
-  const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
-  if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
+  const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
+  if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
     return false;
   }
 

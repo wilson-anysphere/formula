@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DocumentController } from "../../document/documentController.js";
-import { applyFormatAsTablePreset, getFormatAsTablePreset } from "../formatAsTablePresets.js";
+import { applyFormatAsTablePreset, FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS, getFormatAsTablePreset } from "../formatAsTablePresets.js";
 
 test("applyFormatAsTablePreset applies header formatting, banded rows, and outline borders", () => {
   const doc = new DocumentController();
@@ -57,8 +57,14 @@ test("applyFormatAsTablePreset refuses overly large ranges (banding cap)", () =>
   doc.setCellValue("Sheet1", "A1", "x");
 
   const before = doc.history.length;
-  // 10,003 rows => floor((rows - 1) / 2) = 5,001 banded-row ops (exceeds the cap).
-  const ok = applyFormatAsTablePreset(doc, "Sheet1", { start: { row: 0, col: 0 }, end: { row: 10_002, col: 0 } }, "light");
+  // rowCount = 2*max + 3 => floor((rows - 1) / 2) = max + 1 banded-row ops (exceeds the cap).
+  const rowCount = FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS * 2 + 3;
+  const ok = applyFormatAsTablePreset(
+    doc,
+    "Sheet1",
+    { start: { row: 0, col: 0 }, end: { row: rowCount - 1, col: 0 } },
+    "light",
+  );
   assert.equal(ok, false);
   assert.equal(doc.history.length, before);
 });

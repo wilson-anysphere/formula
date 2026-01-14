@@ -193,7 +193,11 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
-import { applyFormatAsTablePreset } from "./formatting/formatAsTablePresets.js";
+import {
+  applyFormatAsTablePreset,
+  FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS,
+  estimateFormatAsTableBandedRowOps,
+} from "./formatting/formatAsTablePresets.js";
 import { computeFilterHiddenRows, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
@@ -8698,9 +8702,8 @@ function handleRibbonCommand(commandId: string): void {
           const rowCount = range.end.row - range.start.row + 1;
           const colCount = range.end.col - range.start.col + 1;
           const cellCount = rowCount * colCount;
-          const maxBandedRowOps = 5_000;
-          const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
-          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
+          const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
+          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
             try {
               showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
             } catch {
@@ -8730,9 +8733,8 @@ function handleRibbonCommand(commandId: string): void {
         const rowCount = range.end.row - range.start.row + 1;
         const colCount = range.end.col - range.start.col + 1;
         const cellCount = rowCount * colCount;
-        const maxBandedRowOps = 5_000;
-        const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
-        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
+        const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
+        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
           showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
           app.focus();
           return;
