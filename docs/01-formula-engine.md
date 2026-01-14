@@ -134,7 +134,7 @@ arg_list    = expression ("," expression)* ;
   //   Sheet1!A1
   //   Sheet1:Sheet3!A1                // 3D sheet span (workbook sheet order)
   //   [Book.xlsx]Sheet1!A1             // external workbook
-  //   [Book.xlsx]Sheet1:Sheet3!A1      // external workbook 3D sheet span (requires ExternalValueProvider::sheet_order)
+  //   [Book.xlsx]Sheet1:Sheet3!A1      // external workbook 3D sheet span (requires external workbook sheet order)
   sheet_prefix =
     (sheet_name
      | sheet_name ":" sheet_name
@@ -189,7 +189,8 @@ sheet prefix. The engine unescapes this and passes the literal quote through in 
 
 Implementation notes:
 
-* `get(...)` and `sheet_order(...)` may be called frequently (especially when evaluating ranges).
+* `get(...)` and workbook sheet-order lookups (`workbook_sheet_names(...)` / `sheet_order(...)`) may be
+  called frequently (especially when evaluating ranges).
 * When the engine is configured for multi-threaded recalculation, these methods may be called
   concurrently from multiple threads; implementations should be thread-safe and keep lookups fast
   (e.g. internal caching, lock-free reads, etc.).
@@ -224,7 +225,9 @@ single **span key**:
 This key is **not** looked up directly via `ExternalValueProvider::get`. Instead, during evaluation the
 engine expands the span into per-sheet keys using workbook sheet order returned by:
 
-* `ExternalValueProvider::sheet_order(workbook) -> Option<Vec<String>>`
+* `ExternalValueProvider::workbook_sheet_names(workbook) -> Option<Arc<[String]>>` (preferred)
+  * The default implementation forwards to `sheet_order(...)`.
+* `ExternalValueProvider::sheet_order(workbook) -> Option<Vec<String>>` (legacy)
 
 Expansion rules:
 
@@ -248,10 +251,10 @@ Expansion rules:
   for `get` calls.
 * Spans are resolved by workbook sheet order regardless of whether the user writes them “forward”
   or “reversed” in the formula (e.g. `Sheet3:Sheet1` expands the same as `Sheet1:Sheet3`).
-* If `sheet_order(...)` returns `None` **or** either endpoint is missing from the returned order, the
-  3D span evaluates to `#REF!`.
+* If sheet order is unavailable (or either endpoint is missing from the returned order), the 3D span
+  evaluates to `#REF!`.
 * Degenerate spans where start and end are the same sheet (case-insensitive) are canonicalized to a
-  single-sheet key (e.g. `"[Book.xlsx]Sheet1"`), so `sheet_order` is not required.
+  single-sheet key (e.g. `"[Book.xlsx]Sheet1"`), so external sheet order is not required.
 
 Example:
 
@@ -327,7 +330,8 @@ restrictions (notably: no `]`), so this split is unambiguous.
     key (e.g. `[Book.xlsx]Sheet1!A1`, plus path-qualified variants).
   * External workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are not currently compiled to
     bytecode (they fall back to the AST evaluator), since span expansion requires
-    `ExternalValueProvider::sheet_order`.
+    external workbook sheet order (via `ExternalValueProvider::workbook_sheet_names` /
+    `ExternalValueProvider::sheet_order`).
   * The bytecode backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a
     multi-area reference) when all referenced sheets exist.
 * **External structured references:** external workbook table refs like
@@ -340,10 +344,11 @@ restrictions (notably: no `]`), so this split is unambiguous.
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
 * **External workbook metadata functions:**
-  * `SHEET(...)` supports external refs when `ExternalValueProvider::sheet_order(workbook)` is
-    available (returns `#N/A` when the external workbook’s sheet order is unavailable, matching
-    Excel).
-  * `SHEETS(...)` can count sheets in an external 3D span when `sheet_order` is available.
+  * `SHEET(...)` supports external refs when external workbook sheet order is available via
+    `ExternalValueProvider::workbook_sheet_names(workbook)` (or `sheet_order(workbook)`), and returns
+    `#N/A` when the external workbook’s sheet order is unavailable (matching Excel).
+  * `SHEETS(...)` can count sheets in an external 3D span when external workbook sheet order is
+    available.
   * Other workbook/sheet metadata functions such as `CELL(...)` and `INFO(...)` currently operate on
     the *current workbook* and do not introspect external workbooks referenced via `[Book.xlsx]...`.
 * **Volatility / invalidation:** external workbook references are treated as **volatile** by default
@@ -371,7 +376,7 @@ restrictions (notably: no `]`), so this split is unambiguous.
     external precedent for the raw span key).
 * **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
-  to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
+  to `#VALUE!` when the span can be expanded (or `#REF!` when external sheet order is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
 * **INDIRECT + external workbook refs:** `INDIRECT` supports external *single-sheet* workbook
   references like `INDIRECT("[Book.xlsx]Sheet1!A1")` via the configured external provider.
@@ -500,7 +505,7 @@ Excel formulas can reference cells/ranges in **other workbooks**:
 
 - `[Book.xlsx]Sheet1!A1`
 - `'C:\path\[Book.xlsx]Sheet1'!A1` (path-qualified workbook)
-- `[Book.xlsx]Sheet1:Sheet3!A1` (external **3D** span; requires `sheet_order`)
+- `[Book.xlsx]Sheet1:Sheet3!A1` (external **3D** span; requires external workbook sheet order)
 - `[Book.xlsx]Sheet1!Table1[Col]` (external **structured reference** / table ref; requires `workbook_table` metadata)
 
 The engine **does not load external workbooks itself**. Instead, evaluation delegates lookups to an
@@ -553,12 +558,14 @@ workbook’s sheet order*. Because the engine cannot know the sheet ordering for
 host must supply it:
 
 1. `workbook_sheet_names("Book.xlsx")` returns sheet names in workbook order (case-insensitive semantics).
-    - In the Rust `ExternalValueProvider` trait, this is exposed as
-      `ExternalValueProvider::sheet_order(workbook)`.
+    - In the Rust `ExternalValueProvider` trait, implement
+      `ExternalValueProvider::workbook_sheet_names(workbook)` (preferred; defaults to
+      `sheet_order(workbook)`) or `ExternalValueProvider::sheet_order(workbook)`.
     - Conceptually (in other host bindings), this can be thought of as
       `workbook_sheet_names(workbook)`.
-    - When embedding the evaluator directly via `ValueResolver`, this is exposed as
-      `ValueResolver::external_sheet_order(workbook)`.
+    - When embedding the evaluator directly via `ValueResolver`, implement
+      `ValueResolver::workbook_sheet_names(workbook)` (preferred; defaults to
+      `external_sheet_order(workbook)`) or `ValueResolver::external_sheet_order(workbook)`.
 2. The engine finds `start` and `end` within that list and selects the inclusive slice between them (order
    independent, like Excel).
 3. Each sheet name `S` in that slice is queried as `sheet_key = "[Book.xlsx]S"`.
@@ -602,9 +609,11 @@ integrators must implement:
 - `ValueResolver::get_external_value(sheet_key, addr)` — evaluator-facing hook (used when embedding the
   evaluator directly).
 - `ExternalValueProvider::get(sheet_key, addr)` — return a scalar value for an external cell.
-- `ExternalValueProvider::sheet_order(workbook)` (aka `workbook_sheet_names`) — return sheet names for
-  `workbook` in workbook order (required for external 3D spans).
+- External workbook sheet order — required for external 3D spans:
+  - `ExternalValueProvider::workbook_sheet_names(workbook)` (preferred) or
+    `ExternalValueProvider::sheet_order(workbook)`
   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
+    `ValueResolver::workbook_sheet_names(workbook)` (preferred) or
     `ValueResolver::external_sheet_order(workbook)`.
 - `ExternalValueProvider::workbook_table(workbook, table_name)` — return external workbook table metadata
   (required for external structured refs like `[Book.xlsx]Sheet1!Table1[Col]`).
