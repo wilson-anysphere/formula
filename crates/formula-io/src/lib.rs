@@ -1595,8 +1595,12 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
         });
     }
 
-    // We currently don't implement OOXML decryption in `formula-io`, but we still want callers to
-    // be able to surface a dedicated "wrong password" error when the user *did* provide one.
+    // We don't attempt to decrypt in this helper; it exists to provide UX-friendly error
+    // classification for encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage` streams).
+    //
+    // When the `encrypted-workbooks` feature is enabled, the password-aware open paths attempt
+    // in-memory decryption earlier and only fall back to this classification logic when decryption
+    // is not in play.
     Some(Error::InvalidPassword {
         path: path.to_path_buf(),
     })
