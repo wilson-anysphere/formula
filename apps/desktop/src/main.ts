@@ -58,7 +58,6 @@ import {
   handleRibbonToggle as handleRibbonFormattingToggle,
 } from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
-import { resolveHomeEditingClearCommandTarget } from "./ribbon/homeEditingClearCommandRouting.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -8730,20 +8729,6 @@ function handleRibbonCommand(commandId: string): void {
         showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     };
-    // Home → Editing → Clear dropdown menu items are ribbon-only ids. Route the implemented
-    // variants to the existing `format.clear*` commands so they share logic with other
-    // surfaces (command palette / keybindings / Home → Font → Clear).
-    if (
-      commandId === "home.editing.clear.clearAll" ||
-      commandId === "home.editing.clear.clearFormats" ||
-      commandId === "home.editing.clear.clearContents"
-    ) {
-      const editingClearTarget = resolveHomeEditingClearCommandTarget(commandId);
-      if (editingClearTarget) {
-        executeBuiltinCommand(editingClearTarget);
-      }
-      return;
-    }
 
     // Merge commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
     // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
