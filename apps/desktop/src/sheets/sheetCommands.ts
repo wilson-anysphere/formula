@@ -189,13 +189,17 @@ export function createDeleteActiveSheetCommand(params: {
         showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
       }
 
-      // If the app is still pointing at the deleted sheet, switch to a remaining visible sheet.
-      if (app.getCurrentSheetId() === activeId) {
-        const fallback = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
-        const next = nextActiveId ?? fallback;
-        if (next && next !== activeId) {
-          app.activateSheet(next);
-        }
+      // Switch away from the deleted sheet.
+      //
+      // Note: other parts of the desktop UI (e.g. `main.ts` sheet-store subscription) may
+      // proactively activate a fallback sheet before the deletion is fully processed to avoid
+      // DocumentController listeners re-creating the deleted sheet. We still apply the Excel-like
+      // "next visible sheet to the right, otherwise left" policy here to ensure the final active
+      // sheet selection is deterministic across all delete entrypoints (ribbon, tabs, dialogs).
+      const fallback = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+      const next = nextActiveId ?? fallback;
+      if (next && next !== activeId && app.getCurrentSheetId() !== next) {
+        app.activateSheet(next);
       }
     } finally {
       restoreFocusAfterSheetNavigation();
