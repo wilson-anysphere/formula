@@ -102,7 +102,7 @@ for wf in "${workflows[@]}"; do
           has_benchmark = 1;
         }
 
-        if (line ~ /^[[:space:]]*group:[[:space:]]*benchmark-gh-pages-publish[[:space:]]*$/) {
+        if (line ~ /^[[:space:]]*group:[[:space:]]*["\x27]?benchmark-gh-pages-publish["\x27]?[[:space:]]*$/) {
           has_concurrency = 1;
         }
 
@@ -154,4 +154,3 @@ if [ "${#bad[@]}" -gt 0 ]; then
 fi
 
 echo "benchmark-action gh-pages concurrency: OK"
-
