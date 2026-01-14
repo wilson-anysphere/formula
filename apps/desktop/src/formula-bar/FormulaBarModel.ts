@@ -716,13 +716,32 @@ export class FormulaBarModel {
     const argSeparator = argSeparatorText.startsWith(";") ? ";" : ",";
 
     const c1 = this.#activeArgumentSpanCache;
-    if (c1 && c1.draft === draft && c1.cursor === cursor && c1.argSeparator === argSeparator) return c1.result;
+    if (c1 && c1.draft === draft && c1.argSeparator === argSeparator) {
+      if (c1.cursor === cursor) return c1.result;
+      // Cursor moves within the same argument span are extremely common while editing.
+      // `getActiveArgumentSpan` is O(cursor) in the worst case, so reuse the prior result
+      // when the cursor is still within that span.
+      const cached = c1.result;
+      if (cached && cursor >= cached.span.start && cursor <= cached.span.end) {
+        c1.cursor = cursor;
+        return cached;
+      }
+    }
     const c2 = this.#activeArgumentSpanCache2;
-    if (c2 && c2.draft === draft && c2.cursor === cursor && c2.argSeparator === argSeparator) {
-      // Promote to the front of the small LRU.
-      this.#activeArgumentSpanCache2 = c1;
-      this.#activeArgumentSpanCache = c2;
-      return c2.result;
+    if (c2 && c2.draft === draft && c2.argSeparator === argSeparator) {
+      if (c2.cursor === cursor) {
+        // Promote to the front of the small LRU.
+        this.#activeArgumentSpanCache2 = c1;
+        this.#activeArgumentSpanCache = c2;
+        return c2.result;
+      }
+      const cached = c2.result;
+      if (cached && cursor >= cached.span.start && cursor <= cached.span.end) {
+        c2.cursor = cursor;
+        this.#activeArgumentSpanCache2 = c1;
+        this.#activeArgumentSpanCache = c2;
+        return cached;
+      }
     }
 
     const result = getActiveArgumentSpan(draft, cursor, { argSeparators: argSeparator });
