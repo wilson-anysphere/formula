@@ -206,6 +206,29 @@ describe("DrawingOverlay destroy()", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects preloadImage after destroy without starting a decode", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn(() => Promise.resolve(bitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const imageEntry: ImageEntry = { id: "img_destroyed_preload", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+    const images: ImageStore = {
+      get: () => imageEntry,
+      set: () => {},
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    overlay.destroy();
+
+    await expect(overlay.preloadImage(imageEntry)).rejects.toMatchObject({ name: "AbortError" });
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
   it("does not cache hydrated image bytes after destroy()", async () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);

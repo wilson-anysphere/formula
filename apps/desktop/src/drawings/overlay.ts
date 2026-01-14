@@ -1021,6 +1021,10 @@ export class DrawingOverlay {
    * can reuse an already-decoding promise.
    */
   preloadImage(entry: ImageEntry): Promise<ImageBitmap> {
+    if (this.destroyed) {
+      // Treat preloads as best-effort and allow callers to treat teardown as an abort.
+      return Promise.reject(createAbortError());
+    }
     // Preloads are optional / best-effort and can be invalidated by:
     // - overlay destruction (switching workbooks, hot reload, tests)
     // - cache clears/invalidation (applyState/image updates)
@@ -1062,6 +1066,7 @@ export class DrawingOverlay {
    * Useful after loading a new workbook snapshot where all image ids/bytes may change.
    */
   clearImageCache(): void {
+    if (this.destroyed) return;
     // When callers clear the cache (e.g. applying a new document snapshot), ensure any in-flight
     // decodes from older renders/preloads don't leak their ImageBitmaps after the cache entry is
     // dropped.
@@ -1115,6 +1120,12 @@ export class DrawingOverlay {
 
 function isAbortError(err: unknown): boolean {
   return typeof (err as { name?: unknown } | null)?.name === "string" && (err as any).name === "AbortError";
+}
+
+function createAbortError(): Error {
+  const err = new Error("The operation was aborted.");
+  err.name = "AbortError";
+  return err;
 }
 
 function intersects(a: Rect, b: Rect): boolean {
