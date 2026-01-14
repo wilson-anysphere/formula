@@ -6,9 +6,11 @@ import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const validatorScriptPath = join(repoRoot, "scripts", "validate-linux-rpm.sh");
-const validatorScriptContents = readFileSync(validatorScriptPath, "utf8");
+const validatorScriptContents = stripHashComments(readFileSync(validatorScriptPath, "utf8"));
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
@@ -58,11 +60,13 @@ const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-ha
 
 test("validate-linux-rpm.sh bounds fallback desktop file scans (perf guardrail)", () => {
   const lines = validatorScriptContents.split(/\r?\n/);
+  let found = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const trimmed = raw.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!trimmed) continue;
     if (!raw.includes('find "$tmpdir"')) continue;
+    found = true;
 
     const snippet = lines.slice(i, i + 12).join("\n");
     assert.match(
@@ -71,6 +75,7 @@ test("validate-linux-rpm.sh bounds fallback desktop file scans (perf guardrail)"
       `Expected find \"$tmpdir\" fallback scan to be bounded with -maxdepth.\nSaw snippet:\n${snippet}`,
     );
   }
+  assert.ok(found, 'Expected validate-linux-rpm.sh to include a find "$tmpdir" fallback scan for desktop entries.');
 });
 
 test("validate-linux-rpm.sh bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {

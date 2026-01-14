@@ -6,6 +6,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
@@ -110,7 +112,7 @@ test("validate-linux-deb --help prints usage and mentions key env vars", { skip:
 });
 
 test("validate-linux-deb bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {
-  const script = readFileSync(join(repoRoot, "scripts", "validate-linux-deb.sh"), "utf8");
+  const script = stripHashComments(readFileSync(join(repoRoot, "scripts", "validate-linux-deb.sh"), "utf8"));
   const idx = script.indexOf('find "$applications_dir"');
   assert.ok(idx >= 0, "Expected validate-linux-deb.sh to use find \"$applications_dir\" when validating extracted desktop entries.");
   const snippet = script.slice(idx, idx + 200);

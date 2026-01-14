@@ -6,6 +6,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfig = JSON.parse(
   readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"),
@@ -257,7 +259,7 @@ test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash
 });
 
 test("validate-linux-appimage bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {
-  const script = readFileSync(join(repoRoot, "scripts", "validate-linux-appimage.sh"), "utf8");
+  const script = stripHashComments(readFileSync(join(repoRoot, "scripts", "validate-linux-appimage.sh"), "utf8"));
   const idx = script.indexOf('find "$applications_dir"');
   assert.ok(
     idx >= 0,
