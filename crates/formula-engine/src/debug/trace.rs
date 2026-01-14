@@ -481,16 +481,15 @@ impl<'a> Lexer<'a> {
         }
 
         // Find the workbook closing bracket.
-        let mut close = bracket_start + 1;
-        while close < bytes.len() && bytes[close] != b']' {
-            close += 1;
-        }
-        if close >= bytes.len() {
+        //
+        // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
+        // Treat those escapes as part of the workbook segment (not as the terminator).
+        let Some(close) = find_workbook_prefix_end(self.input, bracket_start) else {
             return false;
-        }
+        };
 
         // Parse sheet name + optional sheet span + '!' after the workbook prefix.
-        let mut pos = close + 1;
+        let mut pos = close;
         while let Some(ch) = self.input[pos..].chars().next() {
             if ch.is_whitespace() {
                 pos += ch.len_utf8();
@@ -584,12 +583,11 @@ impl<'a> Lexer<'a> {
         // everything up to the closing `]` before switching back to strict identifier rules for
         // the sheet name portion.
         if self.peek_char() == Some('[') {
-            self.pos += 1; // '['
-            while let Some(ch) = self.peek_char() {
-                self.pos += ch.len_utf8();
-                if ch == ']' {
-                    break;
-                }
+            if let Some(end) = find_workbook_prefix_end(self.input, self.pos) {
+                self.pos = end;
+            } else {
+                // No closing bracket; treat the rest of the input as part of this identifier.
+                self.pos = self.input.len();
             }
         }
 
@@ -4668,6 +4666,48 @@ mod tests {
                     cell.sheet,
                     SheetReference::External(r"[C:\path\Book[Name]].xlsx]Sheet1".to_string())
                 );
+                assert_eq!(
+                    cell.addr,
+                    crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_external_refs_with_escaped_rbracket_in_workbook_name() {
+        let expr =
+            parse_spanned_formula("=[Book]]Name.xlsx]Sheet1!A1").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                let key = match &cell.sheet {
+                    SheetReference::Sheet(s) | SheetReference::External(s) => s,
+                    other => panic!("expected sheet or external ref, got {other:?}"),
+                };
+                assert_eq!(key, "[Book]]Name.xlsx]Sheet1");
+                assert_eq!(
+                    cell.addr,
+                    crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_external_refs_with_literal_brackets_in_workbook_name() {
+        // Workbook name: `[Book]` -> workbook id: `[Book]]` (escaped `]`)
+        let expr = parse_spanned_formula("=[[Book]]]Sheet1!A1").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                let key = match &cell.sheet {
+                    SheetReference::Sheet(s) | SheetReference::External(s) => s,
+                    other => panic!("expected sheet or external ref, got {other:?}"),
+                };
+                assert_eq!(key, "[[Book]]]Sheet1");
                 assert_eq!(
                     cell.addr,
                     crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
