@@ -279,7 +279,9 @@ describe("createDefaultAIAuditStore", () => {
       open() {
         const request: any = { error: new Error("indexedDB.open failed") };
         // Trigger the `onerror` callback after the store has attached handlers.
-        Promise.resolve().then(() => request.onerror?.());
+        Promise.resolve()
+          .then(() => request.onerror?.())
+          .catch(() => {});
         return request;
       }
     };
@@ -295,7 +297,9 @@ describe("createDefaultAIAuditStore", () => {
       open() {
         const request: any = {};
         // Trigger the `onblocked` callback after the store has attached handlers.
-        Promise.resolve().then(() => request.onblocked?.());
+        Promise.resolve()
+          .then(() => request.onblocked?.())
+          .catch(() => {});
         return request;
       }
     };

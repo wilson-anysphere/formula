@@ -721,14 +721,14 @@ export function createSyncServer(
               void enqueue(retentionDocName, async () => {
                 await hashedLdb.storeUpdate(docName, update);
               });
-              void retentionManager?.markSeen(retentionDocName);
+              void retentionManager?.markSeen(retentionDocName)?.catch(() => {});
             });
             ydoc.on("destroy", () => {
               disabledDocs.delete(docName);
             });
- 
+  
             if (shouldPersist(docName)) {
-              void retentionManager?.markSeen(retentionDocName, { force: true });
+              void retentionManager?.markSeen(retentionDocName, { force: true })?.catch(() => {});
 
               const persistedYdoc = await hashedLdb.getYDoc(docName);
               Y.applyUpdate(
@@ -796,12 +796,12 @@ export function createSyncServer(
             await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
             await enqueue(retentionDocName, () => ldb.clearDocument(docName));
             docsNeedingMigration.delete(docName);
-            void retentionManager?.markFlushed(retentionDocName);
+            void retentionManager?.markFlushed(retentionDocName)?.catch(() => {});
             return;
           }
 
           await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
-          void retentionManager?.markFlushed(retentionDocName);
+          void retentionManager?.markFlushed(retentionDocName)?.catch(() => {});
         },
       });
       waitForDocLoaded = (docName: string) => docLoadPromises.get(docName) ?? Promise.resolve();
@@ -1030,14 +1030,14 @@ export function createSyncServer(
                 void enqueue(retentionDocName, async () => {
                   await hashedLdb.storeUpdate(docName, update);
                 });
-                void retentionManager?.markSeen(retentionDocName);
+                void retentionManager?.markSeen(retentionDocName)?.catch(() => {});
               });
               ydoc.on("destroy", () => {
                 disabledDocs.delete(docName);
               });
 
               if (shouldPersist(docName)) {
-                void retentionManager?.markSeen(retentionDocName, { force: true });
+                void retentionManager?.markSeen(retentionDocName, { force: true })?.catch(() => {});
                 const persistedYdoc = await hashedLdb.getYDoc(docName);
                 Y.applyUpdate(
                   ydoc,
@@ -1105,12 +1105,12 @@ export function createSyncServer(
               await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
               await enqueue(retentionDocName, () => ldb.clearDocument(docName));
               docsNeedingMigration.delete(docName);
-              void retentionManager?.markFlushed(retentionDocName);
+              void retentionManager?.markFlushed(retentionDocName)?.catch(() => {});
               return;
             }
 
             await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
-            void retentionManager?.markFlushed(retentionDocName);
+            void retentionManager?.markFlushed(retentionDocName)?.catch(() => {});
           },
         });
         waitForDocLoaded = (docName: string) => docLoadPromises.get(docName) ?? Promise.resolve();
@@ -1620,7 +1620,7 @@ export function createSyncServer(
     // even for read-only sessions with no Yjs updates.
     ws.on("pong", () => {
       if (!shouldPersist(docName)) return;
-      void retentionManager?.markSeen(persistedName);
+      void retentionManager?.markSeen(persistedName)?.catch(() => {});
     });
 
     ws.on("close", (code) => {
@@ -1725,7 +1725,7 @@ export function createSyncServer(
     }
 
     if (shouldPersist(docName)) {
-      void retentionManager?.markSeen(persistedName);
+      void retentionManager?.markSeen(persistedName)?.catch(() => {});
     }
 
     const ydoc = getYDoc(docName, config.gc);
@@ -2013,15 +2013,24 @@ export function createSyncServer(
           }
           throw err;
         }
-      } catch (err) {
-        logger.error({ err }, "upgrade_failed");
-        try {
-          sendUpgradeRejection(socket, 500, "Internal Server Error");
-        } catch {
-          // ignore
+        } catch (err) {
+          logger.error({ err }, "upgrade_failed");
+          try {
+            sendUpgradeRejection(socket, 500, "Internal Server Error");
+          } catch {
+            // ignore
+          }
         }
+    })().catch((err) => {
+      // Best-effort: the upgrade handler has its own try/catch, but attach a terminal handler so
+      // unexpected failures (including in the error path) can't surface as an unhandled rejection.
+      logger.error({ err }, "upgrade_failed_unhandled");
+      try {
+        sendUpgradeRejection(socket, 500, "Internal Server Error");
+      } catch {
+        // ignore
       }
-    })();
+    });
   });
 
   const handle: SyncServerHandle = {

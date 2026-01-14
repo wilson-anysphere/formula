@@ -11470,9 +11470,17 @@ try {
   const { listen, emit } = getTauriEventApiOrThrow();
   const listenBestEffort = (...args: Parameters<typeof listen>): void => {
     try {
-      void listen(...args).catch((err) => {
-        console.error(`Failed to register Tauri listener '${String(args[0])}':`, err);
-      });
+      void listen(...args)
+        .catch((err) => {
+          try {
+            console.error(`Failed to register Tauri listener '${String(args[0])}':`, err);
+          } catch {
+            // ignore
+          }
+        })
+        .catch(() => {
+          // Best-effort: avoid unhandled rejections if the error handler throws.
+        });
     } catch (err) {
       console.error(`Failed to register Tauri listener '${String(args[0])}':`, err);
     }
