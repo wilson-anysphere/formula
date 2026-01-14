@@ -272,10 +272,16 @@
   border-bottom: 1px solid var(--border);
 }
 
-.what-if-table th {
+.what-if-table thead th {
   font-weight: 700;
   color: var(--text-secondary);
   background: var(--bg-secondary);
+}
+
+.what-if-table tbody th {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: transparent;
 }
 
 .what-if-table tr:last-child td {
