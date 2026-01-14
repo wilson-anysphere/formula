@@ -132,7 +132,7 @@ const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
   the returned context/error as hints for completion, not as a hard validation pass.
 - **How it composes with `packages/ai-completion`:** the rule-based tab completion engine in `packages/ai-completion`
   remains responsible for generating/ranking suggestions; its `TabCompletionEngine` supports injecting a
-  `parsePartialFormula` implementation. The UI can provide an adapter that delegates to
+  `parsePartialFormula` implementation (sync or async). The UI can provide an adapter that delegates to
   `engine.parseFormulaPartial(formula, cursor, { localeId })` (with a fallback to the existing lightweight JS parser when
   WASM is unavailable) so completion logic stays consistent with the engine and the current locale.
 
