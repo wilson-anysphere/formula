@@ -108,6 +108,14 @@ jobs:
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
+        shell: bash
+        run: bash scripts/ci/check-cargo-lock-reproducible.sh
+
+      - name: Fail if preflight modified tracked files
+        shell: bash
+        run: git diff --exit-code
+
       - name: Install Rust targets (wasm32 + Windows ARM64)
         run: rustup target add wasm32-unknown-unknown aarch64-pc-windows-msvc
 
