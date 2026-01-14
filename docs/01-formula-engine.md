@@ -162,6 +162,13 @@ Example (quoted external sheet name):
 '[Book.xlsx]Sheet 1'!A1  =>  sheet key "[Book.xlsx]Sheet 1"
 ```
 
+If a sheet name contains a literal single quote (`'`), Excel escapes it by doubling inside the quoted
+sheet prefix. The engine unescapes this and passes the literal quote through in the key:
+
+```txt
+'[Book.xlsx]Bob''s Sheet'!A1  =>  sheet key "[Book.xlsx]Bob's Sheet"
+```
+
 `ExternalValueProvider::get` return semantics:
 
 * For **local sheet names** (e.g. `"Sheet1"`), returning `None` is treated as a blank cell (`Value::Blank`).

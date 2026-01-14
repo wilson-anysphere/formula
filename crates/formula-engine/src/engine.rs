@@ -8667,6 +8667,7 @@ fn rewrite_defined_name_constants_for_bytecode(
 ///   - In Rust string literals you will typically escape backslashes:
 ///     `'C:\\path\\[Book.xlsx]Sheet1'!A1` → `sheet = "[C:\\path\\Book.xlsx]Sheet1"`
 /// - `'[Book.xlsx]Sheet 1'!A1` → `sheet = "[Book.xlsx]Sheet 1"`
+/// - `'[Book.xlsx]Bob''s Sheet'!A1` → `sheet = "[Book.xlsx]Bob's Sheet"`
 ///
 /// # Return value semantics
 ///
