@@ -7024,7 +7024,15 @@ export class DocumentController {
     const filtered = [];
     for (const delta of deltas) {
       if (!delta) continue;
-      const sheetId = String(delta.sheetId ?? "").trim();
+      const rawSheetId = unwrapSingletonId(delta.sheetId);
+      const sheetId =
+        typeof rawSheetId === "string"
+          ? rawSheetId.trim()
+          : typeof rawSheetId === "number" && Number.isFinite(rawSheetId)
+            ? String(rawSheetId)
+            : typeof rawSheetId === "bigint"
+              ? String(rawSheetId)
+              : "";
       if (!sheetId) continue;
 
       const before = this.model.getSheetView(sheetId);
@@ -7067,7 +7075,15 @@ export class DocumentController {
     const sheetViewDeltas = [];
     for (const delta of deltas) {
       if (!delta) continue;
-      const sheetId = String(delta.sheetId ?? "").trim();
+      const rawSheetId = unwrapSingletonId(delta.sheetId);
+      const sheetId =
+        typeof rawSheetId === "string"
+          ? rawSheetId.trim()
+          : typeof rawSheetId === "number" && Number.isFinite(rawSheetId)
+            ? String(rawSheetId)
+            : typeof rawSheetId === "bigint"
+              ? String(rawSheetId)
+              : "";
       if (!sheetId) continue;
 
       const before = this.model.getSheetView(sheetId);
@@ -7142,7 +7158,15 @@ export class DocumentController {
     const filtered = [];
     for (const delta of deltas) {
       if (!delta) continue;
-      const imageId = String(delta.imageId ?? "").trim();
+      const rawImageId = unwrapSingletonId(delta.imageId);
+      const imageId =
+        typeof rawImageId === "string"
+          ? rawImageId.trim()
+          : typeof rawImageId === "number" && Number.isFinite(rawImageId)
+            ? String(rawImageId)
+            : typeof rawImageId === "bigint"
+              ? String(rawImageId)
+              : "";
       if (!imageId) continue;
       const afterNormalized = normalizeImageEntryInput(delta.after);
       // If the `after` payload is present but invalid (e.g. non-bytes or oversized), ignore the delta.
@@ -7212,7 +7236,15 @@ export class DocumentController {
     const filtered = [];
     for (const delta of deltas) {
       if (!delta) continue;
-      const imageId = String(delta.imageId ?? "").trim();
+      const rawImageId = unwrapSingletonId(delta.imageId);
+      const imageId =
+        typeof rawImageId === "string"
+          ? rawImageId.trim()
+          : typeof rawImageId === "number" && Number.isFinite(rawImageId)
+            ? String(rawImageId)
+            : typeof rawImageId === "bigint"
+              ? String(rawImageId)
+              : "";
       if (!imageId) continue;
       const beforeNormalized = normalizeImageEntryInput(delta.before);
       const afterNormalized = normalizeImageEntryInput(delta.after);

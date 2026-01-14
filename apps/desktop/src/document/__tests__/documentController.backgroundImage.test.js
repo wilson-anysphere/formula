@@ -65,3 +65,18 @@ test("applyExternalSheetViewDeltas trims backgroundImageId (defensive)", () => {
   assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
   assert.equal(doc.getSheetView("Sheet1").backgroundImageId, "bg.png");
 });
+
+test("applyExternalSheetViewDeltas accepts singleton-wrapped sheet ids (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalSheetViewDeltas([
+    {
+      sheetId: { 0: "Sheet1" },
+      before: { frozenRows: 0, frozenCols: 0 },
+      after: { frozenRows: 0, frozenCols: 0, backgroundImageId: " bg.png " },
+    },
+  ]);
+
+  assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
+  assert.equal(doc.getSheetView("Sheet1").backgroundImageId, "bg.png");
+});

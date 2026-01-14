@@ -502,6 +502,20 @@ test("applyExternalDrawingDeltas updates sheet drawings without creating undo hi
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), []);
 });
 
+test("applyExternalDrawingDeltas accepts singleton-wrapped sheet ids (interop)", () => {
+  const doc = new DocumentController();
+
+  const drawing = {
+    id: "d_external",
+    zOrder: 0,
+    kind: { type: "image", imageId: "img_external.png" },
+    anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+  };
+
+  doc.applyExternalDrawingDeltas([{ sheetId: { 0: "Sheet1" }, before: [], after: [drawing] }], { source: "collab" });
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+});
+
 test("applyExternalImageDeltas updates image store without creating undo history", () => {
   const doc = new DocumentController();
   let lastChange = null;
@@ -536,4 +550,15 @@ test("applyExternalImageDeltas updates image store without creating undo history
   assert.deepEqual(lastChange.imageDeltas, [
     { imageId: "img_external", before: null, after: { mimeType: "image/png", byteLength: 3 } },
   ]);
+});
+
+test("applyExternalImageDeltas accepts singleton-wrapped image ids (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageDeltas([{ imageId: { 0: "img_external" }, before: null, after: { bytes: new Uint8Array([7, 8, 9]), mimeType: "image/png" } }]);
+
+  const image = doc.getImage("img_external");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [7, 8, 9]);
 });

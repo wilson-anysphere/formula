@@ -42,6 +42,26 @@ test("applyExternalImageCacheDeltas updates cache, emits change.imageDeltas, and
   assert.equal(snapshot.images, undefined, "cached images should not be serialized into snapshots");
 });
 
+test("applyExternalImageCacheDeltas accepts singleton-wrapped image ids (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: { 0: "img1" },
+        before: null,
+        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
 test("applyExternalImageCacheDeltas respects markDirty=true", () => {
   const doc = new DocumentController();
   doc.markSaved();
