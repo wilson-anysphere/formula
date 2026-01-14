@@ -302,6 +302,17 @@ fn warn(warnings: &mut Vec<crate::ImportWarning>, msg: impl Into<String>) {
     }
 }
 
+fn warn_string(warnings: &mut Vec<String>, msg: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(msg.into());
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET {
+        warnings.push(WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    }
+}
+
 fn parse_cell_ref_u16(row: u16, col: u16) -> Option<CellRef> {
     let row = row as u32;
     let col = col as u32;
@@ -1362,8 +1373,10 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                out.warnings
-                    .push(format!("malformed BIFF record in worksheet stream: {err}"));
+                warn_string(
+                    &mut out.warnings,
+                    format!("malformed BIFF record in worksheet stream: {err}"),
+                );
                 break;
             }
         };
@@ -1378,11 +1391,14 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         match record.record_id {
             RECORD_SHRFMLA => {
                 let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    out.warnings.push(format!(
-                        "failed to parse SHRFMLA range at offset {} (len={})",
-                        record.offset,
-                        record.data.len()
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse SHRFMLA range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
                     continue;
                 };
                 let anchor = range.0;
@@ -1397,19 +1413,25 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             },
                         );
                     }
-                    Err(err) => out.warnings.push(format!(
-                        "failed to parse SHRFMLA record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse SHRFMLA record at offset {}: {err}",
+                            record.offset
+                        ),
+                    ),
                 }
             }
             RECORD_ARRAY => {
                 let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    out.warnings.push(format!(
-                        "failed to parse ARRAY range at offset {} (len={})",
-                        record.offset,
-                        record.data.len()
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse ARRAY range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
                     continue;
                 };
                 let anchor = range.0;
@@ -1424,19 +1446,22 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             },
                         );
                     }
-                    Err(err) => out.warnings.push(format!(
-                        "failed to parse ARRAY record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => warn_string(
+                        &mut out.warnings,
+                        format!("failed to parse ARRAY record at offset {}: {err}", record.offset),
+                    ),
                 }
             }
             RECORD_TABLE => {
                 let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    out.warnings.push(format!(
-                        "failed to parse TABLE range at offset {} (len={})",
-                        record.offset,
-                        record.data.len()
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse TABLE range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
                     continue;
                 };
                 let anchor = range.0;
@@ -1451,7 +1476,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
             RECORD_FORMULA => match parse_formula_record_for_wide_ptgexp(&record) {
                 Ok(Some(p)) => pending.push(p),
                 Ok(None) => {}
-                Err(err) => out.warnings.push(err),
+                Err(err) => warn_string(&mut out.warnings, err),
             },
             _ => {}
         }
@@ -1464,12 +1489,15 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
     for exp in pending {
         let candidates = ptgexp_candidates(&exp.payload);
         if candidates.is_empty() {
-            out.warnings.push(format!(
-                "cell {}: {:?} token has no in-bounds coordinate candidates (payload_len={})",
-                exp.cell.to_a1(),
-                exp.kind,
-                exp.payload.len()
-            ));
+            warn_string(
+                &mut out.warnings,
+                format!(
+                    "cell {}: {:?} token has no in-bounds coordinate candidates (payload_len={})",
+                    exp.cell.to_a1(),
+                    exp.kind,
+                    exp.payload.len()
+                ),
+            );
             continue;
         }
 
@@ -1508,20 +1536,26 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         }
 
         let Some(&(base_row, base_col)) = matches.first() else {
-            out.warnings.push(format!(
-                "cell {}: {:?} token base cell could not be resolved: candidates={candidates:?}",
-                exp.cell.to_a1(),
-                exp.kind
-            ));
+            warn_string(
+                &mut out.warnings,
+                format!(
+                    "cell {}: {:?} token base cell could not be resolved: candidates={candidates:?}",
+                    exp.cell.to_a1(),
+                    exp.kind
+                ),
+            );
             continue;
         };
 
         if matches.len() > 1 {
-            out.warnings.push(format!(
-                "cell {}: {:?} token has multiple base-cell candidates that match definitions: {matches:?}; choosing ({base_row},{base_col})",
-                exp.cell.to_a1(),
-                exp.kind
-            ));
+            warn_string(
+                &mut out.warnings,
+                format!(
+                    "cell {}: {:?} token has multiple base-cell candidates that match definitions: {matches:?}; choosing ({base_row},{base_col})",
+                    exp.cell.to_a1(),
+                    exp.kind
+                ),
+            );
         }
 
         let base_cell = CellRef::new(base_row, base_col);
@@ -1551,18 +1585,24 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .is_some_and(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    out.warnings.push(format!(
-                        "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
-                        exp.cell.to_a1()
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
+                            exp.cell.to_a1()
+                        ),
+                    );
                     out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
                     continue;
                 } else {
-                    out.warnings.push(format!(
-                        "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
-                        exp.cell.to_a1(),
-                        exp.kind
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
+                            exp.cell.to_a1(),
+                            exp.kind
+                        ),
+                    );
                     continue;
                 }
             }
@@ -1571,10 +1611,13 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .is_some_and(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    out.warnings.push(format!(
-                        "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
-                        exp.cell.to_a1()
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
+                            exp.cell.to_a1()
+                        ),
+                    );
                     out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
                     continue;
                 } else if let Some(def) = shrfmla
@@ -1598,18 +1641,21 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                         Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
                     )
                 } else {
-                    out.warnings.push(format!(
-                        "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
-                        exp.cell.to_a1(),
-                        exp.kind
-                    ));
+                    warn_string(
+                        &mut out.warnings,
+                        format!(
+                            "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
+                            exp.cell.to_a1(),
+                            exp.kind
+                        ),
+                    );
                     continue;
                 }
             }
         };
 
         for w in decoded.warnings {
-            out.warnings.push(format!("cell {}: {w}", exp.cell.to_a1()));
+            warn_string(&mut out.warnings, format!("cell {}: {w}", exp.cell.to_a1()));
         }
         out.formulas.insert(exp.cell, decoded.text);
     }
@@ -2516,6 +2562,42 @@ mod tests {
         assert!(
             warning_text.contains("no TABLE record was found for base A1"),
             "expected missing-TABLE warning, got:\n{warning_text}"
+        );
+    }
+
+    #[test]
+    fn ptgexp_wide_payload_warnings_are_bounded() {
+        // Emit many non-canonical PtgExp tokens whose payload is too short to contain any
+        // in-bounds coordinate candidates, and ensure warnings are capped.
+        let mut stream = Vec::new();
+        for idx in 0..(MAX_WARNINGS_PER_SHEET + 25) {
+            // PtgExp with a 1-byte payload (non-canonical; canonical BIFF8 is 4 bytes).
+            let rgce = [0x01u8, 0x00u8];
+            stream.extend_from_slice(&record(
+                RECORD_FORMULA,
+                &formula_payload(idx as u16, 0, 0, &rgce),
+            ));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let ctx = rgce::RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &[],
+            externsheet: &[],
+            supbooks: &[],
+            defined_names: &[],
+        };
+
+        let parsed = parse_biff8_worksheet_ptgexp_formulas(&stream, 0, &ctx).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET + 1,
+            "warnings={:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(|w| w.as_str()),
+            Some(WARNINGS_SUPPRESSED_MESSAGE)
         );
     }
 }
