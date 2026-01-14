@@ -92,6 +92,8 @@ import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import {
   getTauriDialogOrThrow,
   getTauriEventApiOrThrow,
+  getTauriAppGetNameOrNull,
+  getTauriAppGetVersionOrNull,
   getTauriInvokeOrNull,
   getTauriWindowHandleOrThrow,
   hasTauri,
@@ -11438,15 +11440,8 @@ try {
 
   void listen("menu-about", () => {
     void (async () => {
-      let tauri: any = null;
-      try {
-        tauri = (globalThis as any).__TAURI__ ?? null;
-      } catch {
-        tauri = null;
-      }
-      const appApi = tauri?.app;
-      const getName = appApi?.getName as (() => Promise<unknown>) | undefined;
-      const getVersion = appApi?.getVersion as (() => Promise<unknown>) | undefined;
+      const getName = getTauriAppGetNameOrNull();
+      const getVersion = getTauriAppGetVersionOrNull();
 
       let name = "Formula";
       let version: string | null = null;

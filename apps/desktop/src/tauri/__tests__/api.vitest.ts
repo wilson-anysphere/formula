@@ -9,6 +9,8 @@ import {
   getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
   getTauriEventApiOrThrow,
+  getTauriAppGetNameOrNull,
+  getTauriAppGetVersionOrNull,
   getTauriInvokeOrNull,
   getTauriInvokeOrThrow,
   hasTauri,
@@ -256,6 +258,61 @@ describe("tauri/api dynamic accessors", () => {
       expect(getTauriInvokeOrNull()).toBeNull();
       expect(hasTauriInvoke()).toBe(false);
       expect(() => getTauriInvokeOrThrow()).toThrowError("Tauri invoke API not available");
+    });
+  });
+
+  describe("getTauriAppGetName/Version*", () => {
+    it("returns null when the app API is missing", () => {
+      expect(getTauriAppGetNameOrNull()).toBeNull();
+      expect(getTauriAppGetVersionOrNull()).toBeNull();
+    });
+
+    it("detects __TAURI__.app.getName/getVersion when available and preserves method binding", async () => {
+      const appApi: any = {};
+      const getName = vi.fn(function () {
+        return Promise.resolve(this === appApi ? "Formula" : "bad");
+      });
+      const getVersion = vi.fn(function () {
+        return Promise.resolve(this === appApi ? "1.2.3" : "bad");
+      });
+      appApi.getName = getName;
+      appApi.getVersion = getVersion;
+      (globalThis as any).__TAURI__ = { app: appApi };
+
+      const nameFn = getTauriAppGetNameOrNull();
+      const versionFn = getTauriAppGetVersionOrNull();
+      expect(nameFn).not.toBeNull();
+      expect(versionFn).not.toBeNull();
+
+      await expect(nameFn!()).resolves.toBe("Formula");
+      await expect(versionFn!()).resolves.toBe("1.2.3");
+      expect(getName).toHaveBeenCalledTimes(1);
+      expect(getVersion).toHaveBeenCalledTimes(1);
+    });
+
+    it("supports the __TAURI__.plugin.app API shape", async () => {
+      const appApi: any = {};
+      const getName = vi.fn(async () => "Formula");
+      appApi.getName = getName;
+      (globalThis as any).__TAURI__ = { plugin: { app: appApi } };
+
+      const nameFn = getTauriAppGetNameOrNull();
+      expect(nameFn).not.toBeNull();
+      await expect(nameFn!()).resolves.toBe("Formula");
+    });
+
+    it("treats throwing nested properties (e.g. app getter) as unavailable", () => {
+      const tauri: any = {};
+      Object.defineProperty(tauri, "app", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked app access");
+        },
+      });
+      (globalThis as any).__TAURI__ = tauri;
+
+      expect(getTauriAppGetNameOrNull()).toBeNull();
+      expect(getTauriAppGetVersionOrNull()).toBeNull();
     });
   });
 

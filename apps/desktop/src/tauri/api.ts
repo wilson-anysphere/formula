@@ -11,6 +11,9 @@ export type TauriDialogMessage = (message: string, options?: Record<string, unkn
 
 export type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
+export type TauriAppGetName = () => Promise<string>;
+export type TauriAppGetVersion = () => Promise<string>;
+
 export type TauriDialogApi = {
   open: TauriDialogOpen;
   save: TauriDialogSave;
@@ -57,6 +60,27 @@ export function getTauriInvokeOrThrow(): TauriInvoke {
 
 export function hasTauriInvoke(): boolean {
   return hasTauriInvokeRuntime();
+}
+
+function getTauriAppNamespaceOrNull(): any | null {
+  const tauri = getTauriGlobalOrNull();
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  return safeGetProp(tauri, "app") ?? safeGetProp(plugin, "app") ?? safeGetProp(plugins, "app") ?? null;
+}
+
+export function getTauriAppGetNameOrNull(): TauriAppGetName | null {
+  const app = getTauriAppNamespaceOrNull();
+  const getName = safeGetProp(app, "getName") as (() => Promise<unknown>) | undefined;
+  if (typeof getName !== "function") return null;
+  return async () => String(await getName.call(app));
+}
+
+export function getTauriAppGetVersionOrNull(): TauriAppGetVersion | null {
+  const app = getTauriAppNamespaceOrNull();
+  const getVersion = safeGetProp(app, "getVersion") as (() => Promise<unknown>) | undefined;
+  if (typeof getVersion !== "function") return null;
+  return async () => String(await getVersion.call(app));
 }
 
 function getTauriDialogNamespaceOrNull(): any | null {
