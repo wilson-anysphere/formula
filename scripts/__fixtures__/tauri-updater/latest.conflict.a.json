@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "notes": "Conflict manifest A",
+  "pub_date": "2026-01-01T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64_en-US.msi",
+      "signature": "ZmFrZS1zaWctd2luZG93cy14ODZfNjQ="
+    }
+  }
+}

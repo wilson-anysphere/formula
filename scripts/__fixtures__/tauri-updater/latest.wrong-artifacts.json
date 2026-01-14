@@ -1,0 +1,35 @@
+{
+  "version": "0.1.0",
+  "notes": "Wrong artifact type fixture (DMG/DEB)",
+  "pub_date": "2026-01-01T00:00:00Z",
+  "platforms": {
+    "darwin-universal": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_macos_universal.dmg",
+      "signature": "ZmFrZS1zaWctZGFyd2luLXVuaXZlcnNhbA=="
+    },
+    "darwin-x86_64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_macos_universal.dmg",
+      "signature": "ZmFrZS1zaWctZGFyd2luLXg4Nl82NA=="
+    },
+    "darwin-aarch64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_macos_universal.dmg",
+      "signature": "ZmFrZS1zaWctZGFyd2luLWFhcmNoNjQ="
+    },
+    "windows-x86_64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64_en-US.msi",
+      "signature": "ZmFrZS1zaWctd2luZG93cy14ODZfNjQ="
+    },
+    "windows-aarch64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_arm64_en-US.msi",
+      "signature": "ZmFrZS1zaWctd2luZG93cy1hYXJjaDY0"
+    },
+    "linux-x86_64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_amd64.deb",
+      "signature": "ZmFrZS1zaWctbGludXgteDg2XzY0"
+    },
+    "linux-aarch64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_aarch64.deb",
+      "signature": "ZmFrZS1zaWctbGludXgtYWFyY2g2NA=="
+    }
+  }
+}

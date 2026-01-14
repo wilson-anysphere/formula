@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "notes": "Missing platform keys fixture",
+  "pub_date": "2026-01-01T00:00:00Z",
+  "platforms": {
+    "darwin-universal": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_macos_universal.app.tar.gz",
+      "signature": "ZmFrZS1zaWctZGFyd2luLXVuaXZlcnNhbA=="
+    },
+    "windows-x86_64": {
+      "url": "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64_en-US.msi",
+      "signature": "ZmFrZS1zaWctd2luZG93cy14ODZfNjQ="
+    }
+  }
+}

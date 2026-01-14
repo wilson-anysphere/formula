@@ -36,6 +36,19 @@ jobs:
       - name: "Guard: desktop installer artifact size reporter JSON output"
         run: python3 -m unittest scripts/test_desktop_bundle_size_report_json.py
 
+  release-manifest-tests:
+    name: Desktop release manifest scripts (node:test)
+    needs: conflict-marker-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run manifest unit tests (fast, dependency-free)
+        run: node --test scripts/__tests__/release-manifest.test.mjs
+
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
     needs: conflict-marker-guard
