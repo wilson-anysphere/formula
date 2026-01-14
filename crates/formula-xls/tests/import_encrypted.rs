@@ -1,7 +1,12 @@
 use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{io::Read, ops::Range as ByteRange};
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(rel)
+}
 
 fn read_workbook_stream(path: &Path) -> Vec<u8> {
     let bytes = std::fs::read(path).expect("read xls fixture");
@@ -151,3 +156,31 @@ fn import_with_password_surfaces_decrypt_error_for_malformed_filepass() {
         "decrypt failures should not be surfaced as ImportError::Xls: {err:?}"
     );
 }
+
+#[test]
+fn opens_encrypted_rc4_cryptoapi_xls_fixture_with_password() {
+    let path = fixture_path("encryption/encrypted_rc4_cryptoapi.xls");
+
+    let err = formula_xls::import_xls_path(&path).expect_err("expected encrypted workbook");
+    assert!(matches!(err, formula_xls::ImportError::EncryptedWorkbook));
+
+    let result = formula_xls::import_xls_path_with_password(&path, Some("password"))
+        .expect("decrypt+import");
+    assert!(
+        !result.workbook.sheets.is_empty(),
+        "expected decrypted workbook to contain at least one sheet"
+    );
+}
+
+#[test]
+fn opens_encrypted_rc4_cryptoapi_xls_fixture_with_unicode_password() {
+    let path = fixture_path("encryption/encrypted_rc4_cryptoapi_unicode.xls");
+
+    let result = formula_xls::import_xls_path_with_password(&path, Some("pässwörd"))
+        .expect("decrypt+import");
+    assert!(
+        !result.workbook.sheets.is_empty(),
+        "expected decrypted workbook to contain at least one sheet"
+    );
+}
+

@@ -304,3 +304,43 @@ fn encrypted_ooxml_plaintext_xlsb_payload_opens() {
         CellValue::String("Hello".to_string())
     );
 }
+
+#[test]
+fn opens_real_encrypted_ooxml_fixtures_with_password() {
+    let fixtures = [
+        ("encryption/encrypted_agile.xlsx", "password"),
+        ("encryption/encrypted_standard.xlsx", "password"),
+        ("encryption/encrypted_agile_unicode.xlsx", "pässwörd"),
+        ("encryption/encrypted_agile.xlsm", "password"),
+    ];
+
+    for (rel, password) in fixtures {
+        let path = fixture_path(rel);
+
+        let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
+        if cfg!(feature = "encrypted-workbooks") {
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+        }
+
+        if cfg!(feature = "encrypted-workbooks") {
+            let wb =
+                open_workbook_with_password(&path, Some(password)).expect("open encrypted workbook");
+            // For OOXML workbooks, `formula-io` opens both `.xlsx` and `.xlsm` as an `Xlsx` package.
+            assert!(
+                matches!(wb, Workbook::Xlsx(_)),
+                "expected Workbook::Xlsx(..), got {wb:?}"
+            );
+
+            let model = open_workbook_model_with_password(&path, Some(password))
+                .expect("open encrypted workbook model");
+            assert!(
+                !model.sheets.is_empty(),
+                "expected decrypted model workbook to contain at least one sheet"
+            );
+        }
+    }
+}
+

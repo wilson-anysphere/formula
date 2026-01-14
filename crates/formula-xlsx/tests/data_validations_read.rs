@@ -43,7 +43,7 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
- fn build_data_validation_xlsx() -> Vec<u8> {
+fn build_data_validation_xlsx() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -57,7 +57,7 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 </Relationships>"#;
 
-     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
    <sheetData/>
    <dataValidations count="3">
@@ -92,8 +92,8 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
- fn reads_synthetic_data_validations_ranges_operator_and_messages(
- ) -> Result<(), Box<dyn std::error::Error>> {
+fn reads_synthetic_data_validations_ranges_operator_and_messages(
+) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_data_validation_xlsx();
 
     // Use the fast reader path here so this test exercises the streaming worksheet parser.
@@ -104,7 +104,7 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
         .find(|s| s.name == "Sheet1")
         .expect("Sheet1 should exist");
 
-     assert_eq!(sheet.data_validations.len(), 3);
+    assert_eq!(sheet.data_validations.len(), 3);
 
     let first = &sheet.data_validations[0];
     assert_eq!(first.id, 1);
@@ -159,29 +159,31 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
         Some("Out of range")
     );
 
-     let second = &sheet.data_validations[1];
+    let second = &sheet.data_validations[1];
     assert_eq!(second.id, 2);
     assert_eq!(second.ranges, vec![Range::from_a1("D4")?]);
     assert_eq!(second.validation.kind, DataValidationKind::Custom);
     assert_eq!(second.validation.allow_blank, true);
-     assert_eq!(
-         second.validation.formula1, "SEQUENCE(1)",
-         "import should strip a single leading '=' and any `_xlfn.` prefixes"
-     );
+    assert_eq!(
+        second.validation.formula1,
+        "SEQUENCE(1)",
+        "import should strip a single leading '=' and any `_xlfn.` prefixes"
+    );
 
-     let third = &sheet.data_validations[2];
-     assert_eq!(third.id, 3);
-     assert_eq!(third.ranges, vec![Range::from_a1("E5")?]);
-     assert_eq!(third.validation.kind, DataValidationKind::List);
-     assert_eq!(
-         third.validation.formula1,
-         r#""Yes,No""#,
-         "list validations should preserve literal lists"
-     );
-     assert_eq!(
-         third.validation.show_drop_down, false,
-         "showDropDown=\"1\" should suppress the in-cell dropdown arrow"
-     );
+    let third = &sheet.data_validations[2];
+    assert_eq!(third.id, 3);
+    assert_eq!(third.ranges, vec![Range::from_a1("E5")?]);
+    assert_eq!(third.validation.kind, DataValidationKind::List);
+    assert_eq!(
+        third.validation.formula1,
+        r#""Yes,No""#,
+        "list validations should preserve literal lists"
+    );
+    assert_eq!(
+        third.validation.show_drop_down,
+        false,
+        "showDropDown=\"1\" should suppress the in-cell dropdown arrow"
+    );
 
-     Ok(())
- }
+    Ok(())
+}

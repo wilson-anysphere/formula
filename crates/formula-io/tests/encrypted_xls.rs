@@ -1,14 +1,21 @@
 use std::io::{Cursor, Read, Write};
+use std::path::PathBuf;
 
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model, Error,
-    open_workbook_model_with_options, open_workbook_with_options, OpenOptions, Workbook,
-    WorkbookEncryption,
+    open_workbook_model_with_options, open_workbook_with_options, open_workbook_with_password,
+    OpenOptions, Workbook, WorkbookEncryption,
 };
 
 use formula_model::{CellRef, CellValue};
 
 const PASSWORD: &str = "correct horse battery staple";
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(rel)
+}
 
 fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(4 + payload.len());
@@ -316,3 +323,40 @@ fn errors_on_unsupported_encryption_for_encrypted_xls() {
         "unsupported-encryption error message should not imply the password is wrong, got: {msg}"
     );
 }
+
+#[test]
+fn opens_real_encrypted_xls_fixtures_with_password() {
+    let fixtures = [
+        ("encryption/encrypted_rc4_cryptoapi.xls", "password"),
+        ("encryption/encrypted_rc4_cryptoapi_unicode.xls", "pässwörd"),
+    ];
+
+    for (rel, password) in fixtures {
+        let path = fixture_path(rel);
+
+        // The non-password open API should return a generic encrypted-workbook error.
+        let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
+        assert!(
+            matches!(err, Error::EncryptedWorkbook { .. }),
+            "expected Error::EncryptedWorkbook, got {err:?}"
+        );
+
+        // The password-aware API should surface a password-required error when no password is
+        // provided.
+        let err =
+            open_workbook_with_password(&path, None).expect_err("expected password required error");
+        assert!(
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
+        );
+
+        // With the correct password, the workbook should open.
+        let wb = open_workbook_with_password(&path, Some(password))
+            .expect("open encrypted xls with password");
+        assert!(
+            matches!(wb, Workbook::Xls(_)),
+            "expected Workbook::Xls(..), got {wb:?}"
+        );
+    }
+}
+

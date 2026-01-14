@@ -182,3 +182,21 @@ fn detects_encrypted_ooxml_container() {
         }
     }
 }
+
+#[test]
+fn detects_real_encrypted_ooxml_fixture() {
+    let path = fixture_path("encryption/encrypted_agile.xlsx");
+    let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
+    if cfg!(feature = "encrypted-workbooks") {
+        assert!(
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
+        );
+    } else {
+        assert!(
+            matches!(err, Error::UnsupportedEncryption { .. }),
+            "expected Error::UnsupportedEncryption, got {err:?}"
+        );
+    }
+}
+

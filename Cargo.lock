@@ -2329,6 +2329,7 @@ dependencies = [
  "formula-engine",
  "formula-format",
  "formula-model",
+ "formula-office-crypto",
  "log",
  "md-5",
  "proptest",
