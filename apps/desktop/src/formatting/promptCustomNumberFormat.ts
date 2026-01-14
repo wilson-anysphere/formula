@@ -35,7 +35,10 @@ export async function promptAndApplyCustomNumberFormat(options: {
   // Preserve the exact user-entered format code. (Excel number formats can contain spaces,
   // so avoid trimming beyond what we need for "empty"/"General" detection.)
   const trimmed = input.trim();
-  const desired = !trimmed || trimmed.toLowerCase() === "general" ? null : input;
+  const normalized = trimmed.toLowerCase();
+  const localizedGeneral = t("command.format.numberFormat.general").trim().toLowerCase();
+  const desired =
+    !trimmed || normalized === "general" || (localizedGeneral && normalized === localizedGeneral) ? null : input;
 
   options.applyFormattingToSelection(t("quickPick.numberFormat.placeholder"), (doc, sheetId, ranges) => {
     let applied = true;

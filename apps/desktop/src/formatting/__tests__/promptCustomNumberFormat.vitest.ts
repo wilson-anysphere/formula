@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
+import { setLocale } from "../../i18n/index.js";
 import { promptAndApplyCustomNumberFormat } from "../promptCustomNumberFormat.js";
 
 describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
@@ -93,5 +94,31 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     });
 
     expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("0.00 ");
+  });
+
+  it("treats the localized General label as a clear-format sentinel", async () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });
+
+    // German locale uses "Allgemein" for the General number format category. Users may type that
+    // into the custom format prompt; treat it as a request to clear the custom format.
+    setLocale("de-DE");
+    try {
+      const showInputBox = vi.fn().mockResolvedValue("Allgemein");
+      const applyFormattingToSelection = vi.fn((_, fn) => {
+        fn(doc, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
+      });
+
+      await promptAndApplyCustomNumberFormat({
+        isEditing: () => false,
+        showInputBox,
+        getActiveCellNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
+        applyFormattingToSelection,
+      });
+
+      expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBeNull();
+    } finally {
+      setLocale("en-US");
+    }
   });
 });
