@@ -8,6 +8,5 @@ xlsx-diff = { path = "../xlsx-diff" }
 
 [dev-dependencies]
 anyhow = "1.0"
-ms-offcrypto-writer = "1"
-rand = "0.9"
+formula-office-crypto = { path = "../formula-office-crypto" }
 tempfile = "3.10"

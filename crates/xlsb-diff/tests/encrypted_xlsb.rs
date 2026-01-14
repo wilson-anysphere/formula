@@ -1,39 +1,56 @@
-use std::io::{Cursor, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use ms_offcrypto_writer::Ecma376AgileWriter;
-use rand::{rngs::StdRng, SeedableRng as _};
+use formula_office_crypto::EncryptOptions;
 
 const PASSWORD: &str = "correct-horse-battery-staple";
+const FAST_TEST_SPIN_COUNT: u32 = 1_000;
+
+fn fixture_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let fixture_path = Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../formula-xlsb/tests/fixtures/simple.xlsb"
+            ));
+            std::fs::read(fixture_path).expect("read base xlsb fixture")
+        })
+        .as_slice()
+}
+
+fn encrypted_fixture_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| encrypt_ooxml_with_password(fixture_bytes(), PASSWORD).expect("encrypt fixture"))
+        .as_slice()
+}
 
 fn encrypt_ooxml_with_password(plaintext_zip: &[u8], password: &str) -> Result<Vec<u8>> {
-    let mut cursor = Cursor::new(Vec::<u8>::new());
-    let mut rng = StdRng::from_seed([0u8; 32]);
-    let mut writer =
-        Ecma376AgileWriter::create(&mut rng, password, &mut cursor).context("create writer")?;
-    writer
-        .write_all(plaintext_zip)
-        .context("write plaintext package")?;
-    writer.finalize().context("finalize writer")?;
-    Ok(cursor.into_inner())
+    formula_office_crypto::encrypt_package_to_ole(
+        plaintext_zip,
+        password,
+        EncryptOptions {
+            spin_count: FAST_TEST_SPIN_COUNT,
+            ..Default::default()
+        },
+    )
+    .context("encrypt OOXML package to EncryptedPackage OLE")
 }
 
 #[test]
 fn library_can_diff_password_protected_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     // With the correct password, diffing the encrypted container against the underlying package
     // should produce no differences.
@@ -60,18 +77,14 @@ fn library_can_diff_password_protected_xlsb() -> Result<()> {
 
 #[test]
 fn library_errors_on_wrong_password_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let err = xlsb_diff::diff_workbooks_with_inputs(
         xlsb_diff::DiffInput {
@@ -92,19 +105,15 @@ fn library_errors_on_wrong_password_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn cli_supports_password_file_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
     let password_path = tmp.path().join("password.txt");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
     std::fs::write(&password_path, format!("{PASSWORD}\n")).context("write password file")?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
@@ -133,18 +142,14 @@ fn cli_supports_password_file_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn cli_supports_password_file_stdin_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
         .arg(&plain_path)
@@ -178,18 +183,14 @@ fn cli_supports_password_file_stdin_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn cli_succeeds_with_password_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
         .arg(&plain_path)
@@ -217,18 +218,14 @@ fn cli_succeeds_with_password_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn cli_errors_without_password_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
         .arg(&plain_path)
@@ -254,18 +251,14 @@ fn cli_errors_without_password_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn cli_errors_with_wrong_password_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
         .arg(&plain_path)
@@ -293,18 +286,14 @@ fn cli_errors_with_wrong_password_for_encrypted_xlsb() -> Result<()> {
 
 #[test]
 fn library_errors_without_password_for_encrypted_xlsb() -> Result<()> {
-    let fixture_path = Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../formula-xlsb/tests/fixtures/simple.xlsb"
-    ));
-    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
-    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+    let plaintext = fixture_bytes();
+    let encrypted = encrypted_fixture_bytes();
 
     let tmp = tempfile::tempdir().context("tempdir")?;
     let plain_path = tmp.path().join("plain.xlsb");
     let encrypted_path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
-    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+    std::fs::write(&plain_path, plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, encrypted).context("write encrypted xlsb")?;
 
     let err = xlsb_diff::diff_workbooks(&encrypted_path, &plain_path)
         .expect_err("expected encrypted input to require a password");
