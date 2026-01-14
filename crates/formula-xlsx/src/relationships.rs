@@ -183,4 +183,35 @@ mod tests {
             "expected TargetMode to be preserved, got:\n{serialized}"
         );
     }
+
+    #[test]
+    fn relationships_from_xml_is_best_effort_about_missing_type() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="../media/image1.png" TargetMode="External"/>
+  <Relationship Id="rId2" Type="urn:example:keep" Target="foo.xml"/>
+</Relationships>"#;
+
+        let rels = Relationships::from_xml(xml).expect("parse rels");
+        assert_eq!(rels.iter().count(), 2);
+
+        let r1 = rels.get("rId1").expect("rId1 present");
+        assert_eq!(r1.type_, "", "missing Type should be tolerated");
+        assert_eq!(r1.target, "../media/image1.png");
+        assert_eq!(r1.target_mode.as_deref(), Some("External"));
+
+        let serialized = String::from_utf8(rels.to_xml()).expect("utf8");
+        assert!(
+            serialized.contains(r#"Id="rId1""#) && serialized.contains(r#"Target="../media/image1.png""#),
+            "expected rId1 to be preserved, got:\n{serialized}"
+        );
+        assert!(
+            serialized.contains(r#"TargetMode="External""#),
+            "expected TargetMode to be preserved, got:\n{serialized}"
+        );
+        assert!(
+            serialized.contains(r#"Id="rId2""#) && serialized.contains(r#"Type="urn:example:keep""#),
+            "expected rId2 to be preserved, got:\n{serialized}"
+        );
+    }
 }
