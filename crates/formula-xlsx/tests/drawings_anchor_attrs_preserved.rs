@@ -6,14 +6,15 @@ use formula_xlsx::drawings::DrawingPart;
 #[test]
 fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
     let drawing_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
-          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <xdr:twoCellAnchor editAs="oneCell">
-    <xdr:from>
-      <xdr:col>0</xdr:col>
-      <xdr:colOff>0</xdr:colOff>
-      <xdr:row>0</xdr:row>
+ <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+           xmlns:xdr14="http://schemas.microsoft.com/office/drawing/2010/spreadsheetDrawing">
+   <xdr:twoCellAnchor editAs="oneCell" xdr14:anchorId="123">
+     <xdr:from>
+       <xdr:col>0</xdr:col>
+       <xdr:colOff>0</xdr:colOff>
+       <xdr:row>0</xdr:row>
       <xdr:rowOff>0</xdr:rowOff>
     </xdr:from>
     <xdr:to>
@@ -65,7 +66,12 @@ fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
             .map(|s| s.as_str()),
         Some("oneCell")
     );
-    assert!(shape.preserved.get("xlsx.anchor_attrs").is_some());
+    let attrs_json = shape
+        .preserved
+        .get("xlsx.anchor_attrs")
+        .expect("anchor attrs preserved");
+    let attrs: BTreeMap<String, String> = serde_json::from_str(attrs_json).expect("parse attrs json");
+    assert_eq!(attrs.get("xdr14:anchorId").map(|s| s.as_str()), Some("123"));
     assert!(shape
         .preserved
         .get("xlsx.client_data_xml")

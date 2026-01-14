@@ -5,6 +5,8 @@ use formula_model::drawings::{
     Anchor, AnchorPoint, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize, ImageData,
     ImageId,
 };
+use quick_xml::events::Event as XmlEvent;
+use quick_xml::Reader as XmlReader;
 use roxmltree::{Document, Node};
 
 use crate::path::resolve_target;
@@ -1176,18 +1178,31 @@ fn parse_anchor_preserved(
 ) -> std::collections::HashMap<String, String> {
     let mut preserved = std::collections::HashMap::new();
 
+    // Best-effort: preserve the **qualified** attribute names (including any prefixes) exactly as
+    // they appear in the source XML. `roxmltree` exposes only local attribute names via
+    // `Attribute::name()`, so we parse the anchor element's start tag with `quick-xml` instead.
+    //
+    // This allows round-tripping namespaced attributes like `xdr14:anchorId`.
     let mut attrs: BTreeMap<String, String> = BTreeMap::new();
-    for attr in anchor_node.attributes() {
-        // Skip namespace declarations since the drawing serializer always emits the worksheet
-        // drawing namespaces on `<xdr:wsDr>`.
-        if attr.name() == "xmlns"
-            || attr
-                .namespace()
-                .is_some_and(|ns| ns == "http://www.w3.org/2000/xmlns/")
-        {
-            continue;
+    if let Some(raw_anchor_xml) = slice_node_xml(anchor_node, doc_xml) {
+        let mut reader = XmlReader::from_reader(raw_anchor_xml.as_bytes());
+        reader.config_mut().trim_text(false);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                    for attr in e.attributes().flatten() {
+                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("").to_string();
+                        let value = attr.unescape_value().unwrap_or_default().into_owned();
+                        attrs.insert(key, value);
+                    }
+                    break;
+                }
+                Ok(XmlEvent::Eof) | Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
         }
-        attrs.insert(attr.name().to_string(), attr.value().to_string());
     }
 
     if let Some(edit_as) = anchor_node.attribute("editAs") {
