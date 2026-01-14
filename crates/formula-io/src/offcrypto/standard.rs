@@ -1119,6 +1119,39 @@ mod tests {
         assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
     }
 
+    #[test]
+    fn parse_encryption_info_standard_accepts_version_major_2_and_4() {
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(
+                EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES,
+            ),
+            size_extra: 0,
+            alg_id: CALG_AES_128,
+            alg_id_hash: CALG_SHA1,
+            key_size: 128,
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: String::new(),
+        };
+
+        let verifier = EncryptionVerifier {
+            salt: vec![0u8; 16],
+            encrypted_verifier: [0u8; 16],
+            verifier_hash_size: 20,
+            // AES verifier hash ciphertext is padded to a multiple of 16 bytes.
+            encrypted_verifier_hash: vec![0u8; 32],
+        };
+
+        let bytes = build_standard_encryption_info_bytes(&header, &verifier);
+        for major in [2u16, 4u16] {
+            let mut patched = bytes.clone();
+            patched[..2].copy_from_slice(&major.to_le_bytes());
+            parse_encryption_info_standard(&patched)
+                .unwrap_or_else(|err| panic!("expected major {major}.2 to parse, got {err:?}"));
+        }
+    }
+
     fn minimal_encryption_info_header(flags: u32, alg_id: u32) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&STANDARD_MAJOR_VERSION.to_le_bytes());

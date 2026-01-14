@@ -367,4 +367,19 @@ mod tests {
         assert_eq!(header.flags.f_aes, true);
         assert_eq!(header.alg_id, CALG_AES_128);
     }
+
+    #[test]
+    fn standard_accepts_version_major_2_and_4() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
+        let bytes = build_standard_encryption_info(flags, CALG_AES_128);
+
+        for major in [2u16, 4u16] {
+            let mut patched = bytes.clone();
+            patched[..2].copy_from_slice(&major.to_le_bytes());
+            let header = parse_standard_encryption_info(&patched).expect("should parse");
+            assert_eq!(header.flags.f_cryptoapi, true);
+            assert_eq!(header.flags.f_aes, true);
+            assert_eq!(header.alg_id, CALG_AES_128);
+        }
+    }
 }
