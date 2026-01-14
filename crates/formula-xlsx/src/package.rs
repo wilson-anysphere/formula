@@ -1150,12 +1150,14 @@ impl XlsxPackage {
         policy_on_formula_change: RecalcPolicy,
     ) -> Result<Vec<u8>, XlsxError> {
         let mut sheet_name_to_part: HashMap<String, String> = HashMap::new();
+        let mut worksheet_parts: Vec<WorksheetPartInfo> = Vec::new();
         if patches
             .iter()
             .any(|p| matches!(p.sheet, CellPatchSheet::SheetName(_)))
         {
-            for entry in self.worksheet_parts()? {
-                sheet_name_to_part.insert(entry.name, entry.worksheet_part);
+            worksheet_parts = self.worksheet_parts()?;
+            for entry in &worksheet_parts {
+                sheet_name_to_part.insert(entry.name.clone(), entry.worksheet_part.clone());
             }
         }
 
@@ -1167,10 +1169,14 @@ impl XlsxPackage {
         for patch in patches {
             let worksheet_part = match &patch.sheet {
                 CellPatchSheet::WorksheetPart(part) => part.clone(),
-                CellPatchSheet::SheetName(name) => sheet_name_to_part
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| XlsxError::Invalid(format!("unknown sheet name {name}")))?,
+                CellPatchSheet::SheetName(name) => match sheet_name_to_part.get(name).cloned() {
+                    Some(part) => part,
+                    None => worksheet_parts
+                        .iter()
+                        .find(|s| formula_model::sheet_name_eq_case_insensitive(&s.name, name))
+                        .map(|s| s.worksheet_part.clone())
+                        .ok_or_else(|| XlsxError::Invalid(format!("unknown sheet name {name}")))?,
+                },
             };
 
             patches_by_part
