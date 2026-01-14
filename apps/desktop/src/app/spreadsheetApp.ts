@@ -389,7 +389,7 @@ function lookupImageEntry(id: string, images: unknown): ImageEntry | undefined {
  * This avoids per-frame copying by returning the stored Uint8Array bytes directly and relies
  * on DrawingOverlay's ImageBitmapCache to dedupe decoding work.
  */
-class DocumentImageStore implements ImageStore {
+export class DocumentImageStore implements ImageStore {
   private readonly fallback = new Map<string, ImageEntry>();
 
   constructor(
@@ -461,8 +461,8 @@ class DocumentImageStore implements ImageStore {
               before,
               after: { bytes: entry.bytes, mimeType: entry.mimeType },
             },
-          ],
-          { source: this.options.source ?? "collab" },
+           ],
+          { source: this.options.source ?? "collab", markDirty: false },
         );
       } catch {
         // ignore
