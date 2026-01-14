@@ -308,6 +308,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
         if seen.insert(hint.clone()) {
             out.push(hint);
             if out.len() >= MAX_HINTS {
+                out.sort();
                 return out;
             }
         }
@@ -316,6 +317,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
+                    out.sort();
                     return out;
                 }
             }
@@ -336,6 +338,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
+                    out.sort();
                     return out;
                 }
             }
@@ -350,11 +353,13 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
+                    out.sort();
                     return out;
                 }
             }
         }
     }
+    out.sort();
     out
 }
 
