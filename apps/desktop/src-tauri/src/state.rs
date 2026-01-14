@@ -1757,6 +1757,7 @@ impl AppState {
         Ok(())
     }
 
+    #[cfg(any(feature = "desktop", test))]
     pub(crate) fn apply_sheet_formatting_deltas_to_engine(
         &mut self,
         payload: &crate::commands::ApplySheetFormattingDeltasRequest,

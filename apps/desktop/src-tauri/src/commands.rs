@@ -11,6 +11,7 @@ use serde::{de, Deserialize, Serialize};
 #[cfg(any(feature = "desktop", test))]
 use serde_json::json;
 use serde_json::Value as JsonValue;
+#[cfg(any(feature = "desktop", test))]
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
