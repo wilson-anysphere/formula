@@ -7446,18 +7446,26 @@ export class SpreadsheetApp {
       if (typeof URL === "undefined" || typeof (URL as any).createObjectURL !== "function") return null;
 
       const url = (URL as any).createObjectURL(file) as string;
+      let img: HTMLImageElement | null = null;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       try {
-        const img = new Image();
+        img = new Image();
         const loadPromise = new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error("Image decode failed"));
+          img!.onload = () => resolve();
+          img!.onerror = () => reject(new Error("Image decode failed"));
         });
-        img.src = url;
 
         const timeoutMs = 5_000;
         const timeout = new Promise<void>((_resolve, reject) => {
-          setTimeout(() => reject(new Error("Image decode timed out")), timeoutMs);
+          if (typeof setTimeout !== "function") return;
+          timeoutId = setTimeout(() => {
+            timeoutId = null;
+            reject(new Error("Image decode timed out"));
+          }, timeoutMs);
         });
+
+        // Assign the src after wiring handlers so we don't miss synchronous load events in tests/polyfills.
+        img.src = url;
 
         const decodePromise = typeof (img as any).decode === "function" ? (img as any).decode() : loadPromise;
         await Promise.race([decodePromise, loadPromise, timeout]);
@@ -7471,6 +7479,18 @@ export class SpreadsheetApp {
       } catch {
         return null;
       } finally {
+        if (timeoutId !== null) {
+          try {
+            clearTimeout(timeoutId);
+          } catch {
+            // Ignore clear failures (best-effort).
+          }
+          timeoutId = null;
+        }
+        if (img) {
+          img.onload = null;
+          img.onerror = null;
+        }
         try {
           (URL as any).revokeObjectURL?.(url);
         } catch {
