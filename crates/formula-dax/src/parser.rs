@@ -291,7 +291,21 @@ impl<'a> Lexer<'a> {
                 Ok(Token::BracketIdentifier(out.trim().to_string()))
             }
             c if c.is_ascii_digit() || c == '.' => {
-                let num_str = self.consume_while(|c| c.is_ascii_digit() || c == '.');
+                let mut num_str = self.consume_while(|c| c.is_ascii_digit() || c == '.');
+                // Support exponent notation like `1e3` / `1E-3`.
+                if matches!(self.peek(), Some('e' | 'E')) {
+                    num_str.push(self.bump().expect("peeked above"));
+                    if matches!(self.peek(), Some('+' | '-')) {
+                        num_str.push(self.bump().expect("peeked above"));
+                    }
+                    let exp_digits = self.consume_while(|c| c.is_ascii_digit());
+                    if exp_digits.is_empty() {
+                        return Err(DaxError::Parse(format!(
+                            "invalid number {num_str:?} (expected exponent digits)"
+                        )));
+                    }
+                    num_str.push_str(&exp_digits);
+                }
                 let num: f64 = num_str
                     .parse()
                     .map_err(|_| DaxError::Parse(format!("invalid number {num_str:?}")))?;

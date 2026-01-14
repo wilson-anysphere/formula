@@ -744,7 +744,6 @@ Supported expression forms:
 
 Unsupported / not yet implemented in the parser:
 
-- Exponent notation for numbers (`1e3`)
 - Multi-line / query-style DAX (`EVALUATE`, `DEFINE MEASURE`, etc.)
 
 ---
