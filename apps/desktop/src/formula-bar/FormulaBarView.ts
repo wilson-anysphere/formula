@@ -3591,7 +3591,8 @@ export class FormulaBarView {
     }
 
     if (kind === "reference") {
-      const nextRange = this.model.resolveReferenceText(text);
+      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : null;
+      const nextRange = cachedRange ?? this.model.resolveReferenceText(text);
       const prevRange = this.#lastEmittedHoverRange;
       const sameRange =
         nextRange == null
@@ -3643,16 +3644,20 @@ export class FormulaBarView {
     }
 
     if (kind === "identifier") {
-      const resolved = this.model.resolveNameRange(text);
-      if (!resolved) {
-        this.#clearHoverOverride();
-        return;
-      }
+      const cachedRange = this.#hoverOverrideText === text ? this.#hoverOverride : null;
+      let nextRange: RangeAddress | null = cachedRange;
+      if (!nextRange) {
+        const resolved = this.model.resolveNameRange(text);
+        if (!resolved) {
+          this.#clearHoverOverride();
+          return;
+        }
 
-      const nextRange = {
-        start: { row: resolved.startRow, col: resolved.startCol },
-        end: { row: resolved.endRow, col: resolved.endCol },
-      } satisfies RangeAddress;
+        nextRange = {
+          start: { row: resolved.startRow, col: resolved.startCol },
+          end: { row: resolved.endRow, col: resolved.endCol },
+        } satisfies RangeAddress;
+      }
 
       const prevRange = this.#lastEmittedHoverRange;
       const sameRange =
