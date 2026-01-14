@@ -6,7 +6,7 @@ What does this change do and why?
 
 - [ ] `pnpm build:web`
 - [ ] Other:
-- [ ] (Optional, maintainers) Cross-platform desktop perf check: apply the `desktop-perf-matrix` label to run startup + memory on Linux/Windows/macOS
+- [ ] (Optional, maintainers) Cross-platform desktop perf check: apply the `desktop-perf-matrix` (or `run-desktop-perf`) label to run startup + memory on Linux/Windows/macOS
 
 ## Checklist
 
