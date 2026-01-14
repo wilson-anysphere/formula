@@ -165,12 +165,9 @@ type FunctionPickerItem = { name: string; signature?: string; summary?: string }
 
 type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
-const ALL_FUNCTION_NAMES_SORTED: string[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
-  .map((name) => String(name ?? "").trim())
-  .filter((name) => name.length > 0)
-  // Keep deterministic ordering (codepoint sort); the generated artifact is already sorted,
-  // but we still normalize/trim defensively here.
-  .sort();
+// `shared/functionNames.mjs` is a generated, already-sorted list (codepoint order). Avoid
+// re-sorting at runtime on the hot startup path.
+const ALL_FUNCTION_NAMES_SORTED: string[] = Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [];
 
 const COMMON_FUNCTION_NAMES = [
   "SUM",
