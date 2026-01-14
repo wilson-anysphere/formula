@@ -322,8 +322,11 @@ Implementation status:
       decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
   `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).
-  - It verifies only the spec/Excel target (the full `EncryptedPackage` stream bytes) and returns
-    `OffcryptoError::IntegrityCheckFailed` on mismatch.
+  - When enabled, it validates the spec/Excel HMAC target (**full `EncryptedPackage` stream bytes**:
+    8-byte size prefix + ciphertext) and also accepts common real-world compatibility variants
+    (ciphertext-only, plaintext-only, and size-prefix + plaintext).
+    - Implementation: `crates/formula-offcrypto/src/lib.rs::verify_agile_integrity`.
+  - Returns `OffcryptoError::IntegrityCheckFailed` when none of the accepted targets match.
   - Other helper APIs (e.g. `decrypt_agile_ooxml_from_bytes`) currently do not perform integrity
     verification.
 - HMAC verification is strongly recommended when possible to distinguish wrong passwords from “ZIP
