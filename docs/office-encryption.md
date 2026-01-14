@@ -126,9 +126,8 @@ Currently supported in `formula-xls` (see also the fixture inventory in
   - `KeySizeBits` values: `0/40`, `56`, `128`
     - `KeySizeBits==0` is treated as 40-bit RC4.
     - Note (40-bit nuance): the derived 5-byte key material is **padded to 16 bytes** with 11 zero
-      bytes before running RC4 KSA (CryptoAPI interoperability quirk). `formula-xls` retries verifier
-      validation with the padded form when the raw 5-byte key fails. 56-bit uses 7 bytes; 128-bit
-      uses 16 bytes.
+      bytes before running RC4 KSA (CryptoAPI “effective key length” behavior). 56-bit uses 7 bytes;
+      128-bit uses 16 bytes.
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
 Not implemented:
@@ -619,6 +618,9 @@ Nuances (as implemented; mirrors Excel/Apache POI behavior):
 - **Different key-material derivation:** the legacy layout derives key material as
   `Hash(salt || UTF16LE(password))` (no 50,000-iteration spin loop).
   - Some legacy headers omit/zero `AlgIDHash`; we treat `AlgIDHash==0` as SHA-1 for compatibility.
+- **40-bit RC4 key quirk:** Excel/WinCrypt uses a 16-byte RC4 key for 40-bit encryption where the
+  first 5 bytes are derived and the remaining 11 bytes are zero (CryptoAPI “effective key length”
+  behavior).
 - **Different stream-position semantics:** the RC4 block index + in-block position are derived from
   the **absolute workbook-stream offset**. Record headers are not encrypted, but they still advance
   the RC4 “encryption stream position”.
