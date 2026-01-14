@@ -7595,6 +7595,10 @@ registerDesktopCommands({
     addToPrintArea: () => handleRibbonAddToPrintArea(),
     exportPdf: () => handleRibbonExportPdf(),
   },
+  sheetStructureHandlers: {
+    insertSheet: handleAddSheet,
+    deleteActiveSheet: handleDeleteActiveSheet,
+  },
   workbenchFileHandlers: {
     newWorkbook: () => {
       if (!tauriBackend) {
@@ -8867,14 +8871,6 @@ function handleRibbonCommand(commandId: string): void {
       return;
     case "home.cells.format.organizeSheets":
       openOrganizeSheets();
-      return;
-    case "home.cells.insert.insertSheet":
-      if (isSpreadsheetEditing() || app.isReadOnly()) return;
-      void handleAddSheet();
-      return;
-    case "home.cells.delete.deleteSheet":
-      if (isSpreadsheetEditing() || app.isReadOnly()) return;
-      void handleDeleteActiveSheet();
       return;
     default:
       if (commandId.startsWith("file.")) {
