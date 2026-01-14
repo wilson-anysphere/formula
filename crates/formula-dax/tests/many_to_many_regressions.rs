@@ -230,6 +230,135 @@ fn userelationship_override_works_with_m2m_for_columnar_dim() {
 }
 
 #[test]
+fn userelationship_override_works_with_m2m_for_columnar_dim_and_fact() {
+    // Same regression as `userelationship_override_works_with_m2m`, but with both tables
+    // columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let fact_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, fact_options);
+    // Cross keys so the active vs. USERELATIONSHIP-overridden relationship produces different totals.
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::Number(100.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(200.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let filter_a = FilterContext::empty().with_column_equals("Dim", "Attr", "A".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_a).unwrap(), 100.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_a).unwrap(),
+        200.0.into()
+    );
+
+    let filter_b = FilterContext::empty().with_column_equals("Dim", "Attr", "B".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_b).unwrap(), 200.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_b).unwrap(),
+        100.0.into()
+    );
+}
+
+#[test]
 fn userelationship_override_sees_virtual_blank_member_for_columnar_dim() {
     // Regression coverage: even when the *dimension* table is columnar-backed, an inactive
     // ManyToMany relationship with RI disabled should still surface unmatched fact keys via the
@@ -277,6 +406,132 @@ fn userelationship_override_sees_virtual_blank_member_for_columnar_dim() {
     fact.push_row(vec![2.into(), 1.into(), 999.into(), 7.0.into()])
         .unwrap();
     model.add_table(fact).unwrap();
+
+    // Active relationship A (RI enforced).
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Inactive relationship B (RI disabled) so unmatched keys map to the virtual blank member.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(model.evaluate_measure("Total", &blank_attr).unwrap(), Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
+        7.0.into()
+    );
+}
+
+#[test]
+fn userelationship_override_sees_virtual_blank_member_for_columnar_dim_and_fact() {
+    // Same regression as `userelationship_override_sees_virtual_blank_member_for_columnar_dim`, but
+    // with both tables columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let dim_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, dim_options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let fact_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, fact_options);
+    // One row matched on KeyB.
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    // One row unmatched on KeyB (should belong to blank member for relationship B).
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
 
     // Active relationship A (RI enforced).
     model
