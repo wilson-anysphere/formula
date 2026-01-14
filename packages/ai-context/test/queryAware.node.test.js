@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { pickBestRegionForQuery, scoreRegionForQuery } from "../src/queryAware.js";
+import { extractSheetSchema } from "../src/schema.js";
+
+test("queryAware: picks the Region/Revenue table for 'revenue by region'", () => {
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["Region", "Revenue", null, null, "Category", "Cost"],
+      ["North", 100, null, null, "Labor", 50],
+      ["South", 200, null, null, "Materials", 70],
+    ],
+    tables: [
+      { name: "Revenue Data", range: "A1:B3" },
+      { name: "Cost Data", range: "E1:F3" },
+    ],
+  };
+
+  const schema = extractSheetSchema(sheet);
+  const picked = pickBestRegionForQuery(schema, "revenue by region");
+
+  assert.deepStrictEqual(picked, { type: "table", index: 0, range: "Sheet1!A1:B3" });
+});
+
+test("queryAware: picks the cost table for 'cost'", () => {
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["Region", "Revenue", null, null, "Category", "Cost"],
+      ["North", 100, null, null, "Labor", 50],
+      ["South", 200, null, null, "Materials", 70],
+    ],
+    tables: [
+      { name: "Revenue Data", range: "A1:B3" },
+      { name: "Cost Data", range: "E1:F3" },
+    ],
+  };
+
+  const schema = extractSheetSchema(sheet);
+  const picked = pickBestRegionForQuery(schema, "cost");
+
+  assert.deepStrictEqual(picked, { type: "table", index: 1, range: "Sheet1!E1:F3" });
+});
+
+test("queryAware: returns null when no region matches the query", () => {
+  const schema = {
+    name: "Sheet1",
+    tables: [
+      {
+        name: "Unrelated",
+        range: "Sheet1!A1:B2",
+        columns: [{ name: "Foo", type: "string", sampleValues: [] }],
+        rowCount: 1,
+      },
+    ],
+    namedRanges: [],
+    dataRegions: [
+      {
+        range: "Sheet1!A1:B2",
+        hasHeader: true,
+        headers: ["Foo"],
+        inferredColumnTypes: ["string"],
+        rowCount: 1,
+        columnCount: 1,
+      },
+    ],
+  };
+
+  assert.equal(pickBestRegionForQuery(schema, "revenue"), null);
+});
+
+test("queryAware: prefers tables over dataRegions when scores tie", () => {
+  const schema = {
+    name: "Sheet1",
+    tables: [
+      {
+        name: "Data",
+        range: "Sheet1!A1:B3",
+        columns: [
+          { name: "Region", type: "string", sampleValues: [] },
+          { name: "Revenue", type: "number", sampleValues: [] },
+        ],
+        rowCount: 2,
+      },
+    ],
+    namedRanges: [],
+    dataRegions: [
+      {
+        range: "Sheet1!D1:E3",
+        hasHeader: true,
+        headers: ["Region", "Revenue"],
+        inferredColumnTypes: ["string", "number"],
+        rowCount: 2,
+        columnCount: 2,
+      },
+    ],
+  };
+
+  const picked = pickBestRegionForQuery(schema, "revenue by region");
+  assert.deepStrictEqual(picked, { type: "table", index: 0, range: "Sheet1!A1:B3" });
+});
+
+test("queryAware: matches camelCase / snake_case schema names", () => {
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["Foo", "Bar", null, "Baz", "Qux"],
+      [1, 2, null, 3, 4],
+      [5, 6, null, 7, 8],
+      [9, 10, null, 11, 12],
+    ],
+    tables: [
+      { name: "RevenueByRegion", range: "A1:B4" },
+      { name: "cost_data", range: "D1:E4" },
+    ],
+  };
+
+  const schema = extractSheetSchema(sheet);
+
+  assert.deepStrictEqual(pickBestRegionForQuery(schema, "revenue"), { type: "table", index: 0, range: "Sheet1!A1:B4" });
+  assert.deepStrictEqual(pickBestRegionForQuery(schema, "cost"), { type: "table", index: 1, range: "Sheet1!D1:E4" });
+});
+
+test("queryAware: picks a dataRegion when tables are absent", () => {
+  const schema = {
+    name: "Sheet1",
+    tables: [],
+    namedRanges: [],
+    dataRegions: [
+      {
+        range: "Sheet1!A1:B10",
+        hasHeader: true,
+        headers: ["Category", "Cost"],
+        inferredColumnTypes: ["string", "number"],
+        rowCount: 9,
+        columnCount: 2,
+      },
+      {
+        range: "Sheet1!D1:E10",
+        hasHeader: true,
+        headers: ["Region", "Revenue"],
+        inferredColumnTypes: ["string", "number"],
+        rowCount: 9,
+        columnCount: 2,
+      },
+    ],
+  };
+
+  assert.deepStrictEqual(pickBestRegionForQuery(schema, "cost"), { type: "dataRegion", index: 0, range: "Sheet1!A1:B10" });
+});
+
+test("queryAware: never returns negative scores", () => {
+  const headerOnlyRegion = {
+    range: "Sheet1!A1:A1",
+    hasHeader: true,
+    headers: ["Foo"],
+    inferredColumnTypes: ["string"],
+    rowCount: 0,
+    columnCount: 1,
+  };
+
+  assert.equal(scoreRegionForQuery(headerOnlyRegion, null, "bar"), 0);
+});
+
