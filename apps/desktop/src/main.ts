@@ -5534,8 +5534,6 @@ if (
       });
   });
 
-  let currentContextMenuTarget: "grid" | "drawing" = "grid";
-
   const contextMenu = new ContextMenu({
     onClose: () => {
       // Reset the "where was the context menu opened" context keys when the menu closes so
