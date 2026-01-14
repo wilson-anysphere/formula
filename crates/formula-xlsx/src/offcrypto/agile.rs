@@ -4,6 +4,16 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use digest::Digest as _;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+// Unit tests run in parallel by default. Use a thread-local counter so tests that reset/inspect
+// the counter don't race each other.
+#[cfg(test)]
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
+
 use super::encryption_info::decode_encryption_info_xml_text;
 use crate::offcrypto::{
     decode_base64_field_limited, decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key,
@@ -627,6 +637,9 @@ fn hash_bytes(hash_alg: HashAlgorithm, bytes: &[u8]) -> Vec<u8> {
 }
 
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
     let mut diff = 0u8;
     let max_len = a.len().max(b.len());
     for idx in 0..max_len {
@@ -635,6 +648,16 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= av ^ bv;
     }
     diff == 0 && a.len() == b.len()
+}
+
+#[cfg(test)]
+fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1878,6 +1901,7 @@ mod tests {
         .expect("decrypt package");
         assert_eq!(decrypted, plaintext);
 
+        reset_ct_eq_calls();
         let err = decrypt_agile_encrypted_package_stream(
             &encryption_info_stream,
             &encrypted_package,
@@ -1887,6 +1911,10 @@ mod tests {
         assert!(
             matches!(err, OffCryptoError::WrongPassword),
             "expected WrongPassword, got {err:?}"
+        );
+        assert!(
+            ct_eq_call_count() >= 1,
+            "expected ct_eq to be used for verifier digest comparison"
         );
     }
 

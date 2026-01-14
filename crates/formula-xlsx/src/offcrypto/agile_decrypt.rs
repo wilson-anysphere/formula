@@ -2,7 +2,16 @@
 
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
+#[cfg(test)]
+use std::cell::Cell;
 use std::io::{Read, Seek, SeekFrom, Write};
+
+// Unit tests run in parallel by default. Use a thread-local counter so tests that reset/inspect
+// the counter don't race each other.
+#[cfg(test)]
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
 
 use super::aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AES_BLOCK_SIZE,
@@ -1576,6 +1585,18 @@ mod tests {
             warnings.contains(&OffCryptoWarning::MissingDataIntegrity),
             "expected MissingDataIntegrity warning, got: {warnings:?}"
         );
+
+        reset_ct_eq_calls();
+        let err = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "wrong password")
+            .expect_err("wrong password should fail");
+        assert!(
+            matches!(err, OffCryptoError::WrongPassword),
+            "expected WrongPassword, got {err:?}"
+        );
+        assert!(
+            ct_eq_call_count() >= 1,
+            "expected ct_eq to be used for verifier digest comparison"
+        );
     }
 
     #[test]
@@ -1584,6 +1605,7 @@ mod tests {
         // (plaintext ZIP) rather than the EncryptedPackage stream bytes. Ensure we accept that
         // variant for compatibility.
         let password = "password";
+        reset_ct_eq_calls();
 
         // keyData (package encryption parameters).
         let key_data_salt = (0u8..=15).collect::<Vec<_>>();
@@ -1734,6 +1756,11 @@ mod tests {
         let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password)
             .expect("decrypt should succeed with plaintext-target HMAC");
         assert_eq!(decrypted, plaintext);
+        let calls = ct_eq_call_count();
+        assert!(
+            calls >= 2,
+            "expected ct_eq to be used for both verifier and HMAC comparisons (calls={calls})"
+        );
     }
 
     #[test]
@@ -2213,6 +2240,9 @@ fn compute_hmac(alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>> 
 }
 
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
     let mut diff = 0u8;
     let max_len = a.len().max(b.len());
     for idx in 0..max_len {
@@ -2221,6 +2251,16 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= av ^ bv;
     }
     diff == 0 && a.len() == b.len()
+}
+
+#[cfg(test)]
+fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 #[cfg(test)]
