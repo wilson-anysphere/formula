@@ -88,6 +88,17 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     });
   }, [store]);
 
+  // Keep the highlighted "Active" marker in sync with the host's current active sheet.
+  // This matters if the active sheet changes while the dialog is open (e.g. remote delete triggers
+  // a fallback activation in collab mode, or programmatic sheet navigation).
+  React.useEffect(() => {
+    try {
+      setActiveSheetId(host.getActiveSheetId());
+    } catch {
+      // ignore
+    }
+  }, [host, sheets]);
+
   // If the underlying store is replaced (collab) or a sheet is removed remotely while the
   // dialog is open, clear any inline UI state that references non-existent sheets so the
   // dialog doesn't get stuck in a "disabled" state.
