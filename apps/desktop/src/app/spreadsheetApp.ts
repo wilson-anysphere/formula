@@ -11730,8 +11730,16 @@ export class SpreadsheetApp {
 
     if (!selected) {
       overlay.setSelectedId(null);
+      // `DrawingOverlay.render` is async, but unit tests may stub it with a sync implementation.
+      // Handle both sync throws and async rejections so failures never surface as unhandled
+      // promise rejections.
       try {
-        overlay.render([], viewport, { drawObjects: false });
+        const result = overlay.render([], viewport, { drawObjects: false }) as unknown;
+        if (result && typeof (result as any).catch === "function") {
+          void (result as Promise<void>).catch((err) => {
+            console.warn("Chart selection overlay render failed", err);
+          });
+        }
       } catch (err) {
         console.warn("Chart selection overlay render failed", err);
       }
@@ -11747,7 +11755,12 @@ export class SpreadsheetApp {
     };
     overlay.setSelectedId(drawingId);
     try {
-      overlay.render([obj], viewport, { drawObjects: false });
+      const result = overlay.render([obj], viewport, { drawObjects: false }) as unknown;
+      if (result && typeof (result as any).catch === "function") {
+        void (result as Promise<void>).catch((err) => {
+          console.warn("Chart selection overlay render failed", err);
+        });
+      }
     } catch (err) {
       console.warn("Chart selection overlay render failed", err);
     }
@@ -12984,8 +12997,16 @@ export class SpreadsheetApp {
     const overlaySelectedId =
       this.selectedDrawingId != null ? (drawDrawingSelectionInOverlay ? this.selectedDrawingId : null) : selectedOverlayId;
     overlay.setSelectedId(overlaySelectedId);
+    // `DrawingOverlay.render` is async, but some unit tests stub it with a sync mock (returning
+    // void). Handle both: catch sync throws and attach a rejection handler for promises so we
+    // never surface unhandled rejections during scroll/resize-driven repaint storms.
     try {
-      overlay.render(objects, viewport);
+      const result = overlay.render(objects, viewport) as unknown;
+      if (result && typeof (result as any).catch === "function") {
+        void (result as Promise<void>).catch((err) => {
+          console.warn("Drawing overlay render failed", err);
+        });
+      }
     } catch (err) {
       console.warn("Drawing overlay render failed", err);
     }
