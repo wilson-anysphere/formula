@@ -39,12 +39,18 @@ describe("FormulaBarView commit/cancel UX", () => {
     const onCommit = vi.fn(() => {
       throw new Error("commit failure");
     });
-    const view = new FormulaBarView(host, { onCommit });
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onHoverRange, onReferenceHighlights });
 
+    view.setActiveCell({ address: "A1", input: "", value: null });
     view.textarea.focus();
-    view.textarea.value = "boom";
-    view.textarea.setSelectionRange(4, 4);
+    view.textarea.value = "=A1";
+    view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
+
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
     // JSDOM may log uncaught errors to the virtual console even if we prevent the window error event.
     // Silence console noise for this resilience regression test.
@@ -62,14 +68,17 @@ describe("FormulaBarView commit/cancel UX", () => {
     window.removeEventListener("error", onWindowError);
     consoleError.mockRestore();
 
+    expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onWindowError).toHaveBeenCalledTimes(1);
     const err = onWindowError.mock.calls[0]?.[0]?.error;
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toBe("commit failure");
 
     expect(view.model.isEditing).toBe(false);
-    expect(view.model.activeCell.input).toBe("boom");
+    expect(view.model.activeCell.input).toBe("=A1");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     host.remove();
   });
@@ -81,14 +90,22 @@ describe("FormulaBarView commit/cancel UX", () => {
     const onCancel = vi.fn(() => {
       throw new Error("cancel failure");
     });
-    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel, onHoverRange, onReferenceHighlights });
     const { cancel, commit } = queryActions(host);
-    view.setActiveCell({ address: "A1", input: "orig", value: null });
+    view.setActiveCell({ address: "A1", input: "=A1", value: null });
 
     view.textarea.focus();
-    view.textarea.value = "changed";
-    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
+
+    view.textarea.value = "=A1+1";
+    // Keep the cursor within the A1 reference so reference overlays are active.
+    view.textarea.setSelectionRange(2, 2);
     view.textarea.dispatchEvent(new Event("input"));
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
     expect(view.model.isEditing).toBe(true);
     expect(cancel.hidden).toBe(false);
@@ -117,11 +134,13 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect((err as Error).message).toBe("cancel failure");
 
     expect(view.model.isEditing).toBe(false);
-    expect(view.model.draft).toBe("orig");
-    expect(view.textarea.value).toBe("orig");
+    expect(view.model.draft).toBe("=A1");
+    expect(view.textarea.value).toBe("=A1");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     host.remove();
   });
