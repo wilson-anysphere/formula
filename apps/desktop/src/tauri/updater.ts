@@ -1,12 +1,7 @@
 import { showToast } from "../extensions/ui.js";
 import { t } from "../i18n/index.js";
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvoke(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
-}
+import { getTauriInvokeOrNull } from "./api";
 
 export type UpdateCheckSource = "manual";
 
@@ -17,7 +12,7 @@ export type UpdateCheckSource = "manual";
 export async function installUpdateAndRestart(): Promise<void> {
   // Prefer our backend command which installs the already-downloaded update (from the startup
   // background download). This avoids waiting for a second download when the user approves a restart.
-  const invoke = getTauriInvoke();
+  const invoke = getTauriInvokeOrNull();
   if (invoke) {
     try {
       await invoke("install_downloaded_update");
@@ -81,7 +76,7 @@ export async function installUpdateAndRestart(): Promise<void> {
  * intentionally avoids showing additional UI (except when running outside the desktop app).
  */
 export async function checkForUpdatesFromCommandPalette(source: UpdateCheckSource = "manual"): Promise<void> {
-  const invoke = getTauriInvoke();
+  const invoke = getTauriInvokeOrNull();
   if (!invoke) {
     try {
       showToast(t("updater.desktopOnly"));
@@ -94,4 +89,3 @@ export async function checkForUpdatesFromCommandPalette(source: UpdateCheckSourc
 
   await invoke("check_for_updates", { source });
 }
-

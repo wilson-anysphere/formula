@@ -1,5 +1,5 @@
 import { installStartupTimingsListeners, reportStartupWebviewLoaded } from "./startupMetrics.js";
-import { hasTauri as hasTauriRuntime } from "./api";
+import { getTauriInvokeOrNull, hasTauri as hasTauriRuntime } from "./api";
 
 // Startup performance instrumentation (no-op for web builds).
 //
@@ -59,10 +59,7 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     // Best-effort; instrumentation should never block startup.
   }
   try {
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke;
-    if (typeof invoke === "function") {
-      g[WEBVIEW_REPORTED_KEY] = true;
-    }
+    if (getTauriInvokeOrNull()) g[WEBVIEW_REPORTED_KEY] = true;
   } catch {
     // Ignore: if we can't probe the global, we'll rely on the retry loop below.
   }
@@ -83,14 +80,13 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
     // report as soon as possible (still re-emitting again once listeners are installed).
     if (!g[WEBVIEW_REPORTED_KEY]) {
-      try {
-        const invoke = (globalThis as any).__TAURI__?.core?.invoke;
-        if (typeof invoke === "function") {
+      if (getTauriInvokeOrNull()) {
+        try {
           reportStartupWebviewLoaded();
-          g[WEBVIEW_REPORTED_KEY] = true;
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
+        g[WEBVIEW_REPORTED_KEY] = true;
       }
     }
 

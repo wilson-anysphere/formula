@@ -1,5 +1,7 @@
 import type { SheetInfo, TableInfo } from "./workbookBackend";
 
+import { getTauriInvokeOrThrow, type TauriInvoke } from "./api";
+
 export type PivotCellRange = {
   start_row: number;
   start_col: number;
@@ -44,21 +46,11 @@ export type PivotTableSummary = {
   destination: PivotDestination;
 };
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
-
 export class TauriPivotBackend {
   private readonly invoke: TauriInvoke;
 
   constructor(options: { invoke?: TauriInvoke } = {}) {
-    this.invoke = options.invoke ?? getTauriInvoke();
+    this.invoke = options.invoke ?? getTauriInvokeOrThrow();
   }
 
   async addSheet(name: string, options: { index?: number } = {}): Promise<SheetInfo> {

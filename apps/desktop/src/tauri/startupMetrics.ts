@@ -1,4 +1,4 @@
-import { getTauriEventApiOrNull, type TauriListen } from "./api";
+import { getTauriEventApiOrNull, getTauriInvokeOrNull, type TauriInvoke, type TauriListen } from "./api";
 
 export type StartupTimings = {
   /**
@@ -99,19 +99,6 @@ async function nextFrame(): Promise<void> {
   await new Promise<void>((resolve) => queueMicrotask(resolve));
 }
 
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
-
-function getTauriInvoke(): TauriInvoke | null {
-  try {
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-    return typeof invoke === "function" ? invoke : null;
-  } catch {
-    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
-    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
-    return null;
-  }
-}
-
 function getTauriListen(): TauriListen | null {
   return getTauriEventApiOrNull()?.listen ?? null;
 }
@@ -176,7 +163,7 @@ export async function installStartupTimingsListeners(): Promise<void> {
  */
 export function reportStartupWebviewLoaded(): void {
   try {
-    const invoke = getTauriInvoke();
+    const invoke = getTauriInvokeOrNull();
     if (!invoke) return;
     void invoke("report_startup_webview_loaded").catch(() => {});
   } catch {
@@ -205,7 +192,7 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
     await nextFrame();
     await nextFrame();
 
-    let invoke = getTauriInvoke();
+    let invoke = getTauriInvokeOrNull();
     if (!invoke) {
       // In most environments `__TAURI__` is available immediately, but some host builds can delay
       // injection until shortly after module evaluation begins. When the early bootstrap runs we
@@ -219,7 +206,7 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
       while (!invoke && Date.now() < deadlineMs) {
         await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
         delayMs = Math.min(50, delayMs * 2);
-        invoke = getTauriInvoke();
+        invoke = getTauriInvokeOrNull();
       }
 
       if (!invoke) return { ...store };
@@ -326,7 +313,7 @@ export async function markStartupTimeToInteractive(options?: {
   };
 
   try {
-    const invoke = getTauriInvoke();
+    const invoke = getTauriInvokeOrNull();
     if (invoke) {
       try {
         await ensureFirstRenderReported(invoke);
@@ -346,7 +333,7 @@ export async function markStartupTimeToInteractive(options?: {
         while (!retriedInvoke && Date.now() < deadlineMs) {
           await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           delayMs = Math.min(50, delayMs * 2);
-          retriedInvoke = getTauriInvoke();
+          retriedInvoke = getTauriInvokeOrNull();
         }
         if (retriedInvoke) {
           try {

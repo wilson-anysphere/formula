@@ -1,7 +1,7 @@
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { showToast } from "../extensions/ui.js";
 
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
+import { getTauriInvokeOrNull, type TauriInvoke } from "./api";
 
 type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
@@ -95,11 +95,6 @@ type DocumentControllerLike = {
 
 type RangeCellEdit = { value: unknown | null; formula: string | null };
 
-function getTauriInvoke(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return invoke ?? null;
-}
-
 function resolveInvoke(engineBridge: unknown): TauriInvoke | null {
   if (engineBridge && typeof engineBridge === "object") {
     const maybe = (engineBridge as any).invoke;
@@ -107,7 +102,7 @@ function resolveInvoke(engineBridge: unknown): TauriInvoke | null {
       return maybe as TauriInvoke;
     }
   }
-  return getTauriInvoke();
+  return getTauriInvokeOrNull();
 }
 
 function valuesEqual(a: unknown, b: unknown): boolean {

@@ -1,3 +1,5 @@
+import { getTauriInvokeOrNull } from "./api";
+
 const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
 
 function parseUrlOrThrow(url: string): URL {
@@ -6,13 +8,6 @@ function parseUrlOrThrow(url: string): URL {
   } catch {
     throw new Error(`Invalid URL: ${url}`);
   }
-}
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvokeOrNull(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
 }
 
 type TauriShellOpen = (url: string, options?: Record<string, unknown>) => Promise<unknown> | unknown;

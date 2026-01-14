@@ -1,15 +1,11 @@
+import { getTauriInvokeOrNull } from "./api";
+
 export type NotifyPayload = {
   title: string;
   body?: string;
 };
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 type TauriNotify = (payload: { title: string; body?: string }) => Promise<void> | void;
-
-function getTauriInvoke(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
-}
 
 function getTauriDirectNotify(): TauriNotify | null {
   const tauri = (globalThis as any).__TAURI__;
@@ -51,7 +47,7 @@ export async function notify(payload: NotifyPayload): Promise<void> {
     }
   }
 
-  const invoke = getTauriInvoke();
+  const invoke = getTauriInvokeOrNull();
   if (invoke) {
     try {
       await invoke("show_system_notification", { title, body: body ?? null });

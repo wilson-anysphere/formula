@@ -1,11 +1,6 @@
+import { getTauriInvokeOrNull } from "./api";
+
 export type TrayStatus = "idle" | "syncing" | "error";
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvokeOrNull(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
-}
 
 /**
  * Best-effort tray status update.
@@ -22,4 +17,3 @@ export async function setTrayStatus(status: TrayStatus): Promise<void> {
     // Graceful degradation: ignore missing command / invoke failures.
   }
 }
-

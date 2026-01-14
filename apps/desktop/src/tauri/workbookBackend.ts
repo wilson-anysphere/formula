@@ -11,6 +11,8 @@ import type {
 
 import type { ImportedEmbeddedCellImage as ImportedEmbeddedCellImageInfo } from "../workbook/load/embeddedCellImages.js";
 
+import { getTauriInvokeOrThrow, type TauriInvoke } from "./api";
+
 export type {
   CellValue,
   DefinedNameInfo,
@@ -28,8 +30,6 @@ export type {
 
 export type { ImportedEmbeddedCellImageInfo };
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
 export type ImportedSheetBackgroundImageInfo = {
   sheet_name: string;
   worksheet_part: string;
@@ -38,19 +38,11 @@ export type ImportedSheetBackgroundImageInfo = {
   mime_type: string;
 };
 
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
-
 export class TauriWorkbookBackend implements WorkbookBackend {
   private readonly invoke: TauriInvoke;
 
   constructor() {
-    this.invoke = getTauriInvoke();
+    this.invoke = getTauriInvokeOrThrow();
   }
 
   async newWorkbook(): Promise<WorkbookInfo> {
