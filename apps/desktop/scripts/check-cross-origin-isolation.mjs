@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +99,33 @@ function statIsFile(p) {
   } catch {
     return false;
   }
+}
+
+function supportsTimeoutCommand() {
+  // `timeout` is typically provided by GNU coreutils, but isn't universal (e.g. some minimal
+  // developer environments). Only use it when we can probe it successfully.
+  const probe = spawnSync("timeout", ["--version"], { stdio: "ignore", shell: false });
+  return !probe.error;
+}
+
+function timeoutSupportsKillAfter() {
+  // `timeout --kill-after=...` is supported by GNU coreutils, but not by all implementations.
+  // Probe `--help` output for the flag so we can fall back to plain `timeout` in minimal envs.
+  const probe = spawnSync("timeout", ["--help"], { encoding: "utf8", shell: false });
+  if (probe.error) return false;
+  const out = `${probe.stdout ?? ""}${probe.stderr ?? ""}`;
+  return out.includes("--kill-after");
+}
+
+function parseTimeoutSeconds() {
+  const raw = process.env.FORMULA_COI_TIMEOUT_SECS;
+  if (!raw || raw.trim() === "") return 45;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    console.warn(`[coi-check] Ignoring invalid FORMULA_COI_TIMEOUT_SECS=${raw}; using default 45s.`);
+    return 45;
+  }
+  return n;
 }
 
 function maybeAddCandidate(candidates, p) {
@@ -333,7 +360,17 @@ async function main() {
     // xvfb-run-safe.sh is also safe to use on developer machines: if a working
     // DISPLAY is already available it will simply `exec` the command directly.
     runCmd = path.join(repoRoot, "scripts", "xvfb-run-safe.sh");
-    runArgs = [binary, ...args];
+    const timeoutSecs = parseTimeoutSeconds();
+    const useTimeout = timeoutSecs > 0 && supportsTimeoutCommand();
+    runArgs = useTimeout
+      ? [
+          "timeout",
+          ...(timeoutSupportsKillAfter() ? ["--kill-after=5s"] : []),
+          `${timeoutSecs}s`,
+          binary,
+          ...args,
+        ]
+      : [binary, ...args];
   }
 
   const runCode = await run(runCmd, runArgs, {
@@ -342,9 +379,15 @@ async function main() {
     shell: process.platform === "win32" ? false : undefined,
   });
   if (runCode !== 0) {
-    console.error(
-      `[coi-check] FAILED: packaged Tauri build is missing cross-origin isolation and/or Worker support (exit code ${runCode}).`,
-    );
+    if (runCode === 124) {
+      console.error("[coi-check] ERROR: COI smoke check timed out (the desktop process did not exit in time).");
+    } else if (runCode === 2) {
+      console.error("[coi-check] ERROR: COI smoke check failed due to an internal error/timeout while starting the app.");
+    } else {
+      console.error(
+        `[coi-check] FAILED: packaged Tauri build is missing cross-origin isolation and/or Worker support (exit code ${runCode}).`,
+      );
+    }
   } else {
     console.log("[coi-check] OK: packaged Tauri build is cross-origin isolated (SharedArrayBuffer + Worker ready).");
   }
