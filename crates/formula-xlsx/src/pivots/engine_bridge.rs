@@ -82,10 +82,6 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
 fn pivot_key_display_string(value: PivotValue) -> String {
     value.to_key_part().display_string()
 }
-
-fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
-    value.to_key_part()
-}
 /// Convert a parsed pivot table definition into a pivot-engine config.
 ///
 /// This is a best-effort conversion; unsupported layout / display options are
