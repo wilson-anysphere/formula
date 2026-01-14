@@ -1007,7 +1007,10 @@ impl<'a> PayloadRc4<'a> {
     }
 }
 
-fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8; 20], DecryptError> {
+fn verify_password(
+    info: &CryptoApiEncryptionInfo,
+    password: &str,
+) -> Result<Zeroizing<[u8; 20]>, DecryptError> {
     if info.header.alg_id != CALG_RC4 || info.header.alg_id_hash != CALG_SHA1 {
         return Err(DecryptError::UnsupportedEncryption(format!(
             "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
@@ -1068,13 +1071,13 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(*key_material)
+    Ok(key_material)
 }
 
 fn verify_password_legacy(
     info: &CryptoApiEncryptionInfo,
     password: &str,
-) -> Result<[u8; 20], DecryptError> {
+) -> Result<Zeroizing<[u8; 20]>, DecryptError> {
     if info.header.alg_id != CALG_RC4 || info.header.alg_id_hash != CALG_SHA1 {
         return Err(DecryptError::UnsupportedEncryption(format!(
             "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
@@ -1125,7 +1128,7 @@ fn verify_password_legacy(
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(*key_material)
+    Ok(key_material)
 }
 
 fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
@@ -1266,8 +1269,7 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
         // length-prefixed EncryptionInfo blob.
         ENCRYPTION_SUBTYPE_CRYPTOAPI => {
             let info = parse_filepass_record_payload(filepass_payload)?;
-            let key_material: Zeroizing<[u8; 20]> =
-                Zeroizing::new(verify_password(&info, password)?);
+            let key_material = verify_password(&info, password)?;
 
             let key_size_bits = info.header.key_size_bits;
             let key_len = (key_size_bits / 8) as usize;
@@ -1323,8 +1325,7 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             const RECORD_BOUNDSHEET8: u16 = 0x0085;
 
             let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
-            let key_material: Zeroizing<[u8; 20]> =
-                Zeroizing::new(verify_password_legacy(&info, password)?);
+            let key_material = verify_password_legacy(&info, password)?;
 
             let key_size_bits = info.header.key_size_bits;
             let key_len = (key_size_bits / 8) as usize;
