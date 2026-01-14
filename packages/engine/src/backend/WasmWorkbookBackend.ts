@@ -49,13 +49,13 @@ type EngineWorkbookJson = {
 type EngineWorkbookInfo = {
   path: string | null;
   origin_path: string | null;
-  sheets: Array<{
-    id: string;
-    name: string;
-    rowCount?: number;
-    colCount?: number;
-    usedRange?: UsedRangeState | null;
-  }>;
+  sheets: Array<
+    SheetInfo & {
+      rowCount?: number;
+      colCount?: number;
+      usedRange?: UsedRangeState | null;
+    }
+  >;
 };
 
 export class WasmWorkbookBackend implements WorkbookBackend {
@@ -112,10 +112,21 @@ export class WasmWorkbookBackend implements WorkbookBackend {
             }
           }
 
-          const sheets: SheetInfo[] =
-            meta.sheets.length > 0
-              ? meta.sheets.map((sheet) => ({ id: String(sheet.id), name: String(sheet.name) }))
-              : [DEFAULT_SHEET];
+          const sheets: SheetInfo[] = [];
+          if (meta.sheets.length > 0) {
+            for (const sheet of meta.sheets) {
+              const next: SheetInfo = { id: String(sheet.id), name: String(sheet.name) };
+              if (sheet.visibility) {
+                next.visibility = sheet.visibility;
+              }
+              if (sheet.tabColor) {
+                next.tabColor = sheet.tabColor;
+              }
+              sheets.push(next);
+            }
+          } else {
+            sheets.push(DEFAULT_SHEET);
+          }
 
           const info: WorkbookInfo = {
             path: meta.path ?? null,
