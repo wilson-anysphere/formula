@@ -75,6 +75,38 @@ jobs:
   assert.match(proc.stdout, /Tauri CLI version pins match/i);
 });
 
+test("ignores TAURI_CLI_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  TAURI_CLI_VERSION: 2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/release.yml": `
+name: Release
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Script mentions TAURI_CLI_VERSION yaml-ish text
+        run: |
+          # Script content; should not count as workflow YAML.
+          TAURI_CLI_VERSION: 2.9.6
+          echo ok
+env:
+  TAURI_CLI_VERSION: 2.9.5
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Tauri CLI version pins match/i);
+});
+
 test("fails when workflows pin different Tauri CLI versions", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `
@@ -101,4 +133,3 @@ jobs:
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /mismatch/i);
 });
-

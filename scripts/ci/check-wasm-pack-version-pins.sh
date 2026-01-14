@@ -15,7 +15,52 @@ cd "$repo_root"
 extract_version() {
   local file="$1"
   local line=""
-  line="$(grep -E '^[[:space:]]*WASM_PACK_VERSION[[:space:]]*:' "$file" | head -n 1 || true)"
+  # Ignore matches inside YAML block scalars (e.g. `run: |`) so non-semantic script content
+  # can't satisfy or fail this guardrail.
+  line="$(
+    awk '
+      function indent(s) {
+        match(s, /^[ ]*/);
+        return RLENGTH;
+      }
+
+      BEGIN {
+        in_block = 0;
+        block_indent = 0;
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      }
+
+      {
+        raw = $0;
+        sub(/\r$/, "", raw);
+        ind = indent(raw);
+
+        if (in_block) {
+          if (raw ~ /^[[:space:]]*$/) next;
+          if (ind > block_indent) next;
+          in_block = 0;
+        }
+
+        trimmed = raw;
+        sub(/^[[:space:]]*/, "", trimmed);
+        if (trimmed ~ /^#/) next;
+
+        line = raw;
+        sub(/#.*/, "", line);
+        is_block = (line ~ block_re);
+
+        if (line ~ /^[[:space:]]*WASM_PACK_VERSION[[:space:]]*:/) {
+          print raw;
+          exit;
+        }
+
+        if (is_block) {
+          in_block = 1;
+          block_indent = ind;
+        }
+      }
+    ' "$file"
+  )"
   if [ -z "$line" ]; then
     return 0
   fi

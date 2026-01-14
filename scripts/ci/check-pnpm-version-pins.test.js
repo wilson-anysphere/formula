@@ -171,6 +171,33 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("fails when env.PNPM_VERSION is only present in a YAML block scalar", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: \${{ env.PNPM_VERSION }}
+      - name: Script contains PNPM_VERSION yaml-ish text
+        run: |
+          PNPM_VERSION: 9.0.0
+          echo ok
+`,
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /PNPM_VERSION is not set/i);
+});
+
 test("fails when pnpm/action-setup pin mismatches package.json", { skip: !canRun }, () => {
   const proc = run({
     "package.json": `{

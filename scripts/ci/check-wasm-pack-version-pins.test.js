@@ -75,6 +75,38 @@ jobs:
   assert.match(proc.stdout, /wasm-pack version pins match/i);
 });
 
+test("ignores WASM_PACK_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  WASM_PACK_VERSION: 0.13.1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/other.yml": `
+name: Other
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Script mentions WASM_PACK_VERSION yaml-ish text
+        run: |
+          # Script content; should not count as workflow YAML.
+          WASM_PACK_VERSION: 0.13.2
+          echo ok
+env:
+  WASM_PACK_VERSION: 0.13.1
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /wasm-pack version pins match/i);
+});
+
 test("fails when workflows pin different wasm-pack versions", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `
