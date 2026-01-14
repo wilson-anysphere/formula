@@ -22,7 +22,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+GROUP_OPEN=0
+
+begin_group() {
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    if [ "${GROUP_OPEN}" -eq 1 ]; then
+      echo "::endgroup::" >&2
+    fi
+    echo "::group::$*" >&2
+    GROUP_OPEN=1
+  fi
+}
+
+end_group() {
+  if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${GROUP_OPEN}" -eq 1 ]; then
+    echo "::endgroup::" >&2
+    GROUP_OPEN=0
+  fi
+}
+
 die() {
+  end_group
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
     # GitHub Actions log annotation.
     printf '::error::validate-macos-bundle: %s\n' "$*" >&2
@@ -323,6 +343,10 @@ cleanup() {
       fi
     fi
 
+    if [ "$detached" -eq 0 ]; then
+      warn "failed to detach mounted DMG (dev='${dev}', mount='${mount_point}'). The runner may have a lingering mounted volume."
+    fi
+
     CURRENT_MOUNT_DEV=""
     CURRENT_MOUNT_POINT=""
   fi
@@ -511,6 +535,7 @@ validate_dmg() {
   [ -f "$dmg" ] || die "DMG not found: $dmg"
 
   CURRENT_DMG="$dmg"
+  begin_group "validate-macos-bundle: DMG: $dmg"
   echo "bundle: validating DMG: $dmg"
 
   attach_dmg "$dmg"
@@ -526,6 +551,7 @@ validate_dmg() {
   # Cleanly detach between DMGs to avoid piling up mounted images. The EXIT trap
   # is a safety net for failures.
   cleanup
+  end_group
 }
 
 validate_app_tarball() {
@@ -536,6 +562,7 @@ validate_app_tarball() {
   extract_dir="$(mktemp -d -t formula-app-archive)"
   CURRENT_TMP_DIRS+=("$extract_dir")
 
+  begin_group "validate-macos-bundle: updater archive: $archive"
   echo "bundle: validating updater archive: $archive"
   if ! tar -xzf "$archive" -C "$extract_dir"; then
     die "failed to extract app archive: $archive"
@@ -549,6 +576,7 @@ validate_app_tarball() {
 
   # Clean up extracted bundles between archives to keep disk usage low. The EXIT trap is a safety net.
   cleanup
+  end_group
 }
 
 dedupe_lines() {
