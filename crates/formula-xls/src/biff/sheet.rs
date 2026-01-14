@@ -241,6 +241,37 @@ fn push_sheet_metadata_warning(warnings: &mut Vec<String>, warning: impl Into<St
     }
 }
 
+/// Push a sheet-metadata warning but ensure it is present even if the warning buffer is already full.
+///
+/// This mirrors [`push_warning_bounded_force`] for the view-state/protection warning buffer so we
+/// can surface "critical" metadata warnings (like hardening caps) even when earlier parsing already
+/// exhausted the warning budget.
+fn push_sheet_metadata_warning_force(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    let warning = warning.into();
+
+    if warnings.len() < MAX_WARNINGS_PER_SHEET_METADATA {
+        warnings.push(warning);
+        return;
+    }
+
+    let replace_idx = if warnings.len() == MAX_WARNINGS_PER_SHEET_METADATA + 1
+        && warnings
+            .last()
+            .is_some_and(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED)
+    {
+        MAX_WARNINGS_PER_SHEET_METADATA.saturating_sub(1)
+    } else {
+        warnings.len().saturating_sub(1)
+    };
+
+    if let Some(slot) = warnings.get_mut(replace_idx) {
+        *slot = warning;
+    } else {
+        // Should be unreachable, but fall back to the bounded helper for safety.
+        push_sheet_metadata_warning(warnings, warning);
+    }
+}
+
 // WSBOOL (0x0081) is a bitfield of worksheet boolean properties.
 //
 // Note: In BIFF8, the outline-related flags use inverted semantics:
@@ -414,7 +445,7 @@ pub(crate) fn parse_biff_sheet_protection(
 
         scanned = scanned.saturating_add(1);
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
-            push_sheet_metadata_warning(
+            push_sheet_metadata_warning_force(
                 &mut out.warnings,
                 format!(
                     "too many BIFF records while scanning sheet protection (cap={MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN}); stopping early"
@@ -760,7 +791,7 @@ pub(crate) fn parse_biff_sheet_view_state(
 
         scanned = scanned.saturating_add(1);
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
-            push_sheet_metadata_warning(
+            push_sheet_metadata_warning_force(
                 &mut out.warnings,
                 format!(
                     "too many BIFF records while scanning sheet view state (cap={MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN}); stopping early"
@@ -4601,6 +4632,52 @@ mod tests {
     }
 
     #[test]
+    fn sheet_view_state_record_cap_warning_is_emitted_even_when_other_metadata_warnings_are_suppressed()
+    {
+        let record_cap = MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN;
+        assert!(
+            record_cap > MAX_WARNINGS_PER_SHEET_METADATA + 10,
+            "test requires record cap to exceed warning cap"
+        );
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill the metadata warning buffer with malformed WINDOW2 records (payload too short).
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 10) {
+            stream.extend_from_slice(&record(RECORD_WINDOW2, &[0u8; 1]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("view state")),
+            "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn sheet_view_state_selection_ranges_are_capped() {
         let cap = MAX_SELECTION_RANGES_PER_RECORD;
         assert!(cap >= 2, "test requires cap >= 2");
@@ -4684,6 +4761,52 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("too many BIFF records") && w.contains("sheet protection")),
             "expected record-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_protection_record_cap_warning_is_emitted_even_when_other_metadata_warnings_are_suppressed()
+    {
+        let record_cap = MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN;
+        assert!(
+            record_cap > MAX_WARNINGS_PER_SHEET_METADATA + 10,
+            "test requires record cap to exceed warning cap"
+        );
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill warnings with truncated protection records.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 10) {
+            stream.extend_from_slice(&record(RECORD_PROTECT, &[1]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("sheet protection")),
+            "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "suppression marker should remain last; warnings={:?}",
             parsed.warnings
         );
     }
