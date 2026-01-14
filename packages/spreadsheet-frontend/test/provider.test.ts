@@ -326,4 +326,36 @@ describe("EngineGridProvider", () => {
       process.off("unhandledRejection", handler);
     }
   });
+
+  it("does not hang or emit unhandled rejections when a prefetch flush hits an unexpected error", async () => {
+    const unhandled: unknown[] = [];
+    const handler = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", handler);
+
+    try {
+      const cache = {
+        engine: { recalculate: async () => [] },
+        clear: () => {},
+        getValue: () => null,
+        applyRecalcChanges: () => {},
+        isRangeCached: () => {
+          throw new Error("cache boom");
+        },
+        prefetch: async () => {},
+      } as any;
+
+      const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
+
+      const result = await Promise.race([
+        provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }).then(() => "done" as const),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 250)),
+      ]);
+
+      expect(result).toBe("done");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", handler);
+    }
+  });
 });

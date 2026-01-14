@@ -208,34 +208,45 @@ export class EngineGridProvider implements CellProvider {
         this.pendingPrefetchRanges = [];
         this.pendingPrefetchResolvers = [];
 
-        const coalesced = coalesceRange0(ranges);
-        const offset = this.headers ? 1 : 0;
+        try {
+          const coalesced = coalesceRange0(ranges);
+          const offset = this.headers ? 1 : 0;
 
-        for (const range of coalesced) {
-          const isCached = this.cache.isRangeCached(range, this.sheet);
-          if (isCached) continue;
+          for (const range of coalesced) {
+            const isCached = this.cache.isRangeCached(range, this.sheet);
+            if (isCached) continue;
 
-          try {
-            await this.cache.prefetch(range, this.sheet);
-          } catch {
-            // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
+            try {
+              await this.cache.prefetch(range, this.sheet);
+            } catch {
+              // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
+            }
+
+            this.queueInvalidation({
+              startRow: range.startRow0 + offset,
+              endRow: range.endRow0Exclusive + offset,
+              startCol: range.startCol0 + offset,
+              endCol: range.endCol0Exclusive + offset
+            });
           }
-
-          this.queueInvalidation({
-            startRow: range.startRow0 + offset,
-            endRow: range.endRow0Exclusive + offset,
-            startCol: range.startCol0 + offset,
-            endCol: range.endCol0Exclusive + offset
-          });
+        } catch {
+          // Best-effort: prefetch is an optimization. Never allow unexpected errors to wedge awaiting
+          // callers or surface as unhandled rejections from a fire-and-forget prefetch path.
+        } finally {
+          for (const resolve of resolvers) {
+            try {
+              resolve();
+            } catch {
+              // ignore
+            }
+          }
         }
-
-        for (const resolve of resolvers) resolve();
       }
     })().finally(() => {
       this.prefetchInFlight = null;
     });
 
-  return this.prefetchInFlight;
+    return this.prefetchInFlight;
   }
 }
 
