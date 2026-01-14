@@ -255,6 +255,7 @@ export function bindImageBytesToCollabSession(options: {
     : DEFAULT_MAX_IMAGE_BYTES;
   const maxImages = Number.isFinite(options?.maxImages ?? NaN) ? (options?.maxImages as number) : DEFAULT_MAX_IMAGES;
 
+  const ownsOrigin = options?.origin == null;
   const binderOrigin = options?.origin ?? { type: "collab:image-bytes-binder" };
   try {
     (session as any).localOrigins?.add?.(binderOrigin);
@@ -470,10 +471,12 @@ export function bindImageBytesToCollabSession(options: {
       } catch {
         // ignore
       }
-      try {
-        (session as any).localOrigins?.delete?.(binderOrigin);
-      } catch {
-        // ignore
+      if (ownsOrigin) {
+        try {
+          (session as any).localOrigins?.delete?.(binderOrigin);
+        } catch {
+          // ignore
+        }
       }
     },
   };

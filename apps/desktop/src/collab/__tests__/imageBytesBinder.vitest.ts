@@ -47,6 +47,20 @@ describe("imageBytesBinder", () => {
     binderB.destroy();
   });
 
+  it("does not remove a provided origin token from session.localOrigins on destroy", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+    const store = createMemoryImageStore();
+    const sharedOrigin = { type: "shared-origin" };
+    const localOrigins = new Set<any>([sharedOrigin]);
+    const session = { doc, metadata, localOrigins } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store, origin: sharedOrigin });
+    binder.destroy();
+
+    expect(localOrigins.has(sharedOrigin)).toBe(true);
+  });
+
   it("is idempotent and does not re-hydrate on unrelated metadata changes", () => {
     const doc = new Y.Doc();
     const metadata = doc.getMap("metadata");
