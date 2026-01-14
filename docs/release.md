@@ -1519,7 +1519,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
       done
       shopt -u nullglob
     fi
-    test -n "$app_tgz" || { echo "No macOS updater tarball found (see latest.json or expected *.app.tar.gz/*.tar.gz/*.tgz)" >&2; exit 1; }
+    test -n "$app_tgz" || { echo "No macOS updater tarball found (see latest.json or expected *.app.tar.gz/*.app.tgz/*.tar.gz/*.tgz)" >&2; exit 1; }
     tar -xzf "$app_tgz"
     lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
@@ -1580,6 +1580,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
    test -n "$rpm" || { echo "No .rpm file found in the current directory" >&2; exit 1; }
 
    dpkg -I "$deb"
+   rpm -qpi "$rpm"
    rpm -qpR "$rpm"
 
    # Extract and ensure the main binary has no missing shared libraries.
