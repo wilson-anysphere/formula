@@ -4,7 +4,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::cache::{parse_num_cache, parse_str_cache};
 use super::REL_NS;
@@ -264,6 +264,40 @@ fn detect_chart_kind(
     });
 
     "unknown".to_string()
+}
+
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    // Best-effort: gather any attribute/type hints that might help us extend chart-kind inference
+    // in the future. This is only used in diagnostics when no known detection path matched, so
+    // keep it simple and robust.
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        // Attribute hints.
+        for attr in ["layoutId", "chartType"] {
+            if let Some(hint) = attribute_case_insensitive(node, attr).and_then(normalize_chart_ex_kind_hint) {
+                if seen.insert(hint.clone()) {
+                    out.push(hint);
+                }
+            }
+        }
+
+        // Tag-name hints (fallback): any `*Chart` element other than the generic container.
+        let name = node.tag_name().name();
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
+            let base = lower.strip_suffix("chart").unwrap_or(&lower);
+            if !base.is_empty() {
+                let hint = lowercase_first(base);
+                if seen.insert(hint.clone()) {
+                    out.push(hint);
+                }
+            }
+        }
+    }
+
+    out
 }
 
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
