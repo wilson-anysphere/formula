@@ -1662,6 +1662,135 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "LOGNORM.DIST",
+    description: "Returns the lognormal distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "LOGNORM.INV",
+    description: "Returns the inverse of the lognormal cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "LOGNORMDIST",
+    description: "Returns the lognormal cumulative distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "EXPON.DIST",
+    description: "Returns the exponential distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "lambda", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "EXPONDIST",
+    description: "Returns the exponential distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "lambda", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "GAMMA.DIST",
+    description: "Returns the gamma distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "GAMMADIST",
+    description: "Returns the gamma distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "GAMMA.INV",
+    description: "Returns the inverse of the gamma cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+    ],
+  },
+  {
+    name: "GAMMAINV",
+    description: "Returns the inverse of the gamma cumulative distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+    ],
+  },
+  {
+    name: "BETA.DIST",
+    description: "Returns the beta distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "cumulative", type: "boolean" },
+      { name: "A", type: "value", optional: true },
+      { name: "B", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "BETA.INV",
+    description: "Returns the inverse of the beta cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "A", type: "value", optional: true },
+      { name: "B", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "BETADIST",
+    description: "Returns the beta cumulative distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "A", type: "value", optional: true },
+      { name: "B", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "BETAINV",
+    description: "Returns the inverse of the beta cumulative distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "A", type: "value", optional: true },
+      { name: "B", type: "value", optional: true },
+    ],
+  },
+  {
     name: "POISSON",
     description: "Returns the Poisson distribution.",
     args: [

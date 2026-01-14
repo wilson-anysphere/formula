@@ -360,6 +360,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("NORMSDIST", 0), "value", "Expected NORMSDIST z to be value-like");
   assert.equal(registry.getArgType("NORMINV", 0), "value", "Expected NORMINV probability to be value-like");
   assert.equal(registry.getArgType("NORMSINV", 0), "value", "Expected NORMSINV probability to be value-like");
+  assert.equal(registry.getArgType("LOGNORM.DIST", 0), "value", "Expected LOGNORM.DIST x to be value-like");
+  assert.equal(registry.getArgType("LOGNORM.DIST", 3), "boolean", "Expected LOGNORM.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("EXPON.DIST", 0), "value", "Expected EXPON.DIST x to be value-like");
+  assert.equal(registry.getArgType("EXPON.DIST", 2), "boolean", "Expected EXPON.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("GAMMA.DIST", 0), "value", "Expected GAMMA.DIST x to be value-like");
+  assert.equal(registry.getArgType("GAMMA.DIST", 3), "boolean", "Expected GAMMA.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("BETA.DIST", 0), "value", "Expected BETA.DIST x to be value-like");
+  assert.equal(registry.getArgType("BETA.DIST", 3), "boolean", "Expected BETA.DIST cumulative to be boolean");
+  assert.ok(registry.getFunction("BETA.DIST")?.args?.[4]?.optional, "Expected BETA.DIST A to be optional");
   assert.equal(registry.getArgType("POISSON", 0), "value", "Expected POISSON x to be value-like");
   assert.equal(registry.getArgType("POISSON", 2), "boolean", "Expected POISSON cumulative to be boolean");
   assert.equal(registry.getArgType("WEIBULL", 0), "value", "Expected WEIBULL x to be value-like");
