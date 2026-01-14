@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { showQuickPick } from "../extensions/ui.js";
@@ -114,6 +115,13 @@ function normalizeCssHexToExcelArgb(cssColor: string): string | null {
 type Props = {
   store: WorkbookSheetStore;
   activeSheetId: string;
+  /**
+   * When true, disable sheet-structure mutations (add/rename/move/delete/hide/tabColor).
+   *
+   * This is primarily used in collab sessions with viewer/commenter roles where mutations
+   * would otherwise diverge from the authoritative shared state.
+   */
+  readOnly?: boolean;
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
   /**
@@ -176,6 +184,7 @@ type Props = {
 export function SheetTabStrip({
   store,
   activeSheetId,
+  readOnly = false,
   onActivateSheet,
   onAddSheet,
   onPersistSheetDelete,
@@ -376,6 +385,9 @@ export function SheetTabStrip({
     const promise = (async () => {
       setRenameInFlight(true);
       try {
+        if (readOnly) {
+          throw new Error(READ_ONLY_SHEET_MUTATION_MESSAGE);
+        }
         // Read the current input value at commit time instead of trusting the latest
         // `draftName` state. React batches updates inside event handlers, so it's possible
         // for a "commit" action (Enter/blur) to run before the state update from the last
@@ -406,6 +418,10 @@ export function SheetTabStrip({
     sheetId: string,
     dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"],
   ) => {
+    if (readOnly) {
+      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+      return;
+    }
     const all = store.listAll();
     const fromIndex = all.findIndex((s) => s.id === sheetId);
     if (fromIndex < 0) return;
@@ -451,6 +467,10 @@ export function SheetTabStrip({
   };
 
   const beginRenameWithGuard = async (sheet: SheetMeta) => {
+    if (readOnly) {
+      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+      return;
+    }
     if (renameInFlight) return;
     if (editingSheetId && editingSheetId !== sheet.id) {
       const ok = await commitRename(editingSheetId);
@@ -504,6 +524,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Rename",
+        enabled: !readOnly,
         onSelect: () => {
           void beginRenameWithGuard(sheet);
         },
@@ -511,7 +532,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Hide",
-        enabled: canHide,
+        enabled: canHide && !readOnly,
         onSelect: async () => {
           const wasActive = sheet.id === activeSheetIdRef.current;
           let nextActiveId: string | null = null;
@@ -550,7 +571,7 @@ export function SheetTabStrip({
       {
         type: "submenu",
         label: "Unhide…",
-        enabled: hiddenSheets.length > 0,
+        enabled: hiddenSheets.length > 0 && !readOnly,
         items: hiddenSheets.map((hidden) => ({
           type: "item" as const,
           label: hidden.name,
@@ -577,6 +598,7 @@ export function SheetTabStrip({
       {
         type: "submenu",
         label: "Tab Color",
+        enabled: !readOnly,
         items: [
           {
             type: "item",
@@ -703,7 +725,7 @@ export function SheetTabStrip({
     items.push({
       type: "item",
       label: "Delete",
-      enabled: canDelete,
+      enabled: canDelete && !readOnly,
       onSelect: () => {
         void deleteSheet(sheet);
       },
@@ -720,7 +742,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Unhide…",
-        enabled: hiddenSheets.length > 0,
+        enabled: hiddenSheets.length > 0 && !readOnly,
         onSelect: async () => {
           try {
             const selected = await showQuickPick(
@@ -752,6 +774,10 @@ export function SheetTabStrip({
   };
 
   const deleteSheet = async (sheet: SheetMeta): Promise<void> => {
+    if (readOnly) {
+      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+      return;
+    }
     if (editingSheetId && editingSheetId !== sheet.id) {
       const ok = await commitRename(editingSheetId);
       if (!ok) return;
@@ -1029,6 +1055,7 @@ export function SheetTabStrip({
             sheet={sheet}
             active={sheet.id === activeSheetId}
             editing={editingSheetId === sheet.id}
+            readOnly={readOnly}
             dragging={draggingSheetId === sheet.id}
             dropPosition={dropIndicator?.targetSheetId === sheet.id ? dropIndicator.position : null}
             draftName={draftName}
@@ -1101,6 +1128,7 @@ export function SheetTabStrip({
         type="button"
         className="sheet-add"
         data-testid="sheet-add"
+        disabled={readOnly}
         onClick={() => {
           void (async () => {
             if (editingSheetId) {
@@ -1132,6 +1160,7 @@ function SheetTab(props: {
   sheet: SheetMeta;
   active: boolean;
   editing: boolean;
+  readOnly: boolean;
   dragging: boolean;
   dropPosition: "before" | "after" | null;
   draftName: string;
@@ -1169,7 +1198,7 @@ function SheetTab(props: {
       data-tab-color={tabColorCss ?? undefined}
       data-dragging={props.dragging ? "true" : undefined}
       data-drop-position={props.dropPosition ?? undefined}
-      draggable={!editing}
+      draggable={!editing && !props.readOnly}
       ref={props.tabRef}
       onClick={(event) => {
         // React dispatches a separate `click` event for each click in a double-click.

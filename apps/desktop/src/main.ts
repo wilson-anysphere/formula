@@ -2938,6 +2938,7 @@ function renderSheetTabs(): void {
     React.createElement(SheetTabStrip, {
       store: createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null),
       activeSheetId: app.getCurrentSheetId(),
+      readOnly: app.isReadOnly?.() === true,
       onActivateSheet: (sheetId: string) => {
         app.activateSheet(sheetId);
         restoreFocusAfterSheetNavigation();
