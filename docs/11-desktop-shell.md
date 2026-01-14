@@ -15,7 +15,8 @@ This document is a “what’s real in the repo” reference for contributors.
   - Desktop wrappers (events, notifications, updater UI, etc): `apps/desktop/src/tauri/`
     - Updater dialog + event handling: `apps/desktop/src/tauri/updaterUi.ts`
     - Notifications wrapper: `apps/desktop/src/tauri/notifications.ts`
-    - Startup timings listeners: `apps/desktop/src/tauri/startupMetrics.ts`
+    - Startup timings listeners + helpers: `apps/desktop/src/tauri/startupMetrics.ts`
+    - Startup timings bootstrap (imported first in `main.ts`): `apps/desktop/src/tauri/startupMetricsBootstrap.ts`
     - Open-file IPC helper (`open-file` / `open-file-ready`): `apps/desktop/src/tauri/openFileIpc.ts`
   - Clipboard provider + serialization helpers: `apps/desktop/src/clipboard/`
 - **Tauri (Rust):** `apps/desktop/src-tauri/`
@@ -55,7 +56,8 @@ Notes:
 - `webview_loaded_ms` is recorded in Rust from a Tauri page-load callback (`PageLoadEvent::Finished`). It is intentionally
   independent of renderer JS bootstrap/TTI work.
 - Tauri does not guarantee early events are queued before JS listeners are installed. The frontend calls
-  `reportStartupWebviewLoaded()` after installing listeners to prompt the host to (re-)emit the cached startup metrics.
+  `reportStartupWebviewLoaded()` after installing listeners (see `startupMetricsBootstrap.ts`) to prompt the host to
+  (re-)emit the cached startup metrics.
 
 ### Viewing startup timings
 

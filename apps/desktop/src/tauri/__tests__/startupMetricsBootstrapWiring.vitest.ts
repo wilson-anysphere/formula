@@ -6,7 +6,7 @@ describe("startup metrics bootstrap wiring", () => {
   it("imports startupMetricsBootstrap as the first import in main.ts (minimizes metric skew)", () => {
     // `main.ts` has a lot of side effects and isn't safe to import in unit tests.
     // Read the source and assert the bootstrap module is imported first, so the
-    // host-side startup timing capture runs before the rest of the module graph.
+    // frontend installs its startup timing listeners as early as possible.
     const mainUrl = new URL("../../main.ts", import.meta.url);
     const source = readFileSync(mainUrl, "utf8");
 
