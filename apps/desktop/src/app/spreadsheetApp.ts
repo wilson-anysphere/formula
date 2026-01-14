@@ -12129,9 +12129,9 @@ export class SpreadsheetApp {
         case "right":
           return t("command.edit.fillRight");
         case "up":
-          return "Fill Up";
+          return t("command.edit.fillUp");
         case "left":
-          return "Fill Left";
+          return t("command.edit.fillLeft");
       }
     })();
 

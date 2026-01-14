@@ -278,6 +278,8 @@ export const enUS = {
   "command.edit.clearContents": "Clear Contents",
   "command.edit.fillDown": "Fill Down",
   "command.edit.fillRight": "Fill Right",
+  "command.edit.fillUp": "Fill Up",
+  "command.edit.fillLeft": "Fill Left",
   "command.edit.selectCurrentRegion": "Select Current Region",
   "command.edit.insertDate": "Insert Date",
   "command.edit.insertTime": "Insert Time",
@@ -411,6 +413,8 @@ export const enUS = {
   "commandDescription.edit.clearContents": "Clear cell contents in the current selection",
   "commandDescription.edit.fillDown": "Fill the selection down (Excel: Ctrl+D)",
   "commandDescription.edit.fillRight": "Fill the selection right (Excel: Ctrl+R)",
+  "commandDescription.edit.fillUp": "Fill the selection up",
+  "commandDescription.edit.fillLeft": "Fill the selection left",
   "commandDescription.edit.selectCurrentRegion":
     "Select the current region around the active cell (Excel: Ctrl+Shift+* / Ctrl+Shift+8; Ctrl+* on numpad)",
   "commandDescription.edit.insertDate": "Insert the current date into the selection (Excel: Ctrl+;)",
