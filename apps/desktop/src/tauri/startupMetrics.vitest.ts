@@ -67,6 +67,40 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("retries TTI reporting when bootstrapped and __TAURI__ is injected late", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = true;
+
+      // Make `nextFrame()` fast so we hit the retry path quickly.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        (globalThis as any).__TAURI__ = undefined;
+      }
+
+      const promise = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+
+      setTimeout(() => {
+        (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      }, 100);
+
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
   it("notifies the host that the webview is ready (when running under Tauri)", async () => {
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
     reportStartupWebviewLoaded();

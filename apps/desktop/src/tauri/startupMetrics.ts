@@ -259,6 +259,28 @@ export async function markStartupTimeToInteractive(options?: {
     } catch {
       // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
     }
+  } else {
+    // If the bootstrap ran but `__TAURI__` is injected late, retry briefly so we don't miss the
+    // Rust-side TTI mark (required for the `[startup] ...` line the perf harness parses).
+    const g = globalThis as any;
+    const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
+    if (shouldRetry) {
+      const deadlineMs = Date.now() + 2_000;
+      let delayMs = 1;
+      let retriedInvoke: TauriInvoke | null = null;
+      while (!retriedInvoke && Date.now() < deadlineMs) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(50, delayMs * 2);
+        retriedInvoke = getTauriInvoke();
+      }
+      if (retriedInvoke) {
+        try {
+          await retriedInvoke("report_startup_tti");
+        } catch {
+          // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
+        }
+      }
+    }
   }
 
   return { ...store };
