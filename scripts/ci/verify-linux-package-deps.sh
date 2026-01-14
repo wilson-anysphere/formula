@@ -281,6 +281,7 @@ for deb in "${debs[@]}"; do
   #
   # But do enforce WebKitGTK **4.1** specifically (Tauri v2.9 + wry expects WebKitGTK 4.1
   # in this repo); accidentally drifting to 4.0 would break runtime compatibility.
+  assert_contains_any "$depends" "$deb" "shared-mime-info (MIME database integration)" "shared-mime-info"
   assert_contains_any "$depends" "$deb" "WebKitGTK 4.1 (webview)" "libwebkit2gtk-4\\.1"
   assert_contains_any "$depends" "$deb" "GTK3" "libgtk-3"
   assert_contains_any "$depends" "$deb" "AppIndicator (tray)" "appindicator"
@@ -314,6 +315,7 @@ for rpm_path in "${rpms[@]}"; do
   # names (Fedora/RHEL + openSUSE) rather than relying on automatic ELF dependency scanning.
 
   # 1) Explicit package requirements (Fedora/RHEL + openSUSE naming via RPM rich deps).
+  assert_contains_any "$requires" "$rpm_path" "shared-mime-info (MIME database integration)" "shared-mime-info"
   assert_contains_rich_or "$requires" "$rpm_path" "WebKitGTK 4.1 package (Fedora/RHEL vs openSUSE)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
   assert_contains_rich_or "$requires" "$rpm_path" "GTK3 package (Fedora/RHEL vs openSUSE)" "gtk3" "libgtk-3-0"
   assert_contains_rich_or "$requires" "$rpm_path" "AppIndicator/Ayatana package (Fedora/RHEL vs openSUSE)" "(libayatana-appindicator-gtk3|libappindicator-gtk3)" "(libayatana-appindicator3-1|libappindicator3-1)"

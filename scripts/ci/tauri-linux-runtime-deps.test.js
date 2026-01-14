@@ -56,6 +56,9 @@ test("tauri.conf.json declares Linux .deb runtime dependencies (WebKitGTK/GTK/Ap
   const deps = normalizeDeps(tauriConf?.bundle?.linux?.deb?.depends);
   assert.ok(deps.length > 0, "bundle.linux.deb.depends is missing/empty in tauri.conf.json");
 
+  // File associations rely on `update-mime-database`, provided by `shared-mime-info`.
+  assertAnyMatch(deps, /shared-mime-info/i);
+
   // Require WebKitGTK 4.1 explicitly (avoid drifting to 4.0).
   assertAnyMatch(deps, /libwebkit2gtk-4\.1/i);
   assertAnyMatch(deps, /libgtk-3/i);
@@ -67,6 +70,9 @@ test("tauri.conf.json declares Linux .deb runtime dependencies (WebKitGTK/GTK/Ap
 test("tauri.conf.json declares Linux .rpm runtime dependencies (WebKitGTK/GTK/AppIndicator/librsvg/OpenSSL)", () => {
   const deps = normalizeDeps(tauriConf?.bundle?.linux?.rpm?.depends);
   assert.ok(deps.length > 0, "bundle.linux.rpm.depends is missing/empty in tauri.conf.json");
+
+  // File associations rely on `update-mime-database`, provided by `shared-mime-info`.
+  assertAnyMatch(deps, /shared-mime-info/i);
 
   // We use RPM rich dependencies (`(a or b)`) to cover Fedora/RHEL + openSUSE naming differences.
   // Reject common copy/paste mistakes from Debian-style dependency syntax.
