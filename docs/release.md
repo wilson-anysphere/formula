@@ -1305,9 +1305,13 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
    distro-native packages (`.deb`/`.rpm`) for manual install/downgrade and their corresponding `.sig`
    files.
 
-   If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
-   and check the build job for the relevant platform/target (and whether the Tauri bundler step
-   failed before uploading assets).
+    If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
+    and check the build job for the relevant platform/target (and whether the Tauri bundler step
+    failed before uploading assets).
+
+    Note: SBOM/provenance publishing is warnings-only initially. If `sbom.spdx.json` or
+    `provenance-*.intoto.jsonl` are missing from the draft release, check the workflow artifacts for
+    `sbom-*` / `provenance-*` bundles and the workflow logs for upload warnings.
 
     Build provenance: the release workflow also generates **build provenance attestations** for the
     uploaded desktop artifacts. You can view them in GitHub’s **Attestations** UI for the workflow
