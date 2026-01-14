@@ -190,11 +190,14 @@ const FULLWIDTH_MACRON: char = '\u{FFE3}';
 const FULLWIDTH_BROKEN_BAR: char = '\u{FFE4}';
 const FULLWIDTH_YEN: char = '\u{FFE5}';
 const FULLWIDTH_WON: char = '\u{FFE6}';
+const COMBINING_DAKUTEN: char = '\u{3099}';
+const COMBINING_HANDAKUTEN: char = '\u{309A}';
 
 fn asc_cp932(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
+    let mut iter = input.chars().peekable();
 
-    for ch in input.chars() {
+    while let Some(ch) = iter.next() {
         if ch == FULLWIDTH_SPACE {
             out.push(' ');
             continue;
@@ -214,6 +217,22 @@ fn asc_cp932(input: &str) -> String {
         }
 
         if let Some(mapped) = fullwidth_katakana_to_halfwidth(ch) {
+            // Handle decomposed voiced/semi-voiced katakana like `ガ` (U+30AB + U+3099).
+            // Excel's ASC emits the halfwidth base + dakuten/handakuten marks (`ｶﾞ`).
+            if let Some(&next) = iter.peek() {
+                if next == COMBINING_DAKUTEN {
+                    out.push_str(mapped);
+                    out.push(HALFWIDTH_DAKUTEN);
+                    iter.next(); // consume combining mark
+                    continue;
+                }
+                if next == COMBINING_HANDAKUTEN {
+                    out.push_str(mapped);
+                    out.push(HALFWIDTH_HANDAKUTEN);
+                    iter.next(); // consume combining mark
+                    continue;
+                }
+            }
             out.push_str(mapped);
             continue;
         }

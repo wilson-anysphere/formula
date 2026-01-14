@@ -148,6 +148,17 @@ fn asc_and_dbcs_convert_under_cp932() {
         sheet.eval(r#"=ASC("￠￡￢￣￤￥￦")"#),
         Value::Text("¢£¬¯¦¥₩".to_string())
     );
+
+    // Decomposed voiced/semi-voiced katakana (base + combining mark) should match precomposed
+    // behavior.
+    assert_eq!(
+        sheet.eval("=ASC(\"カ\u{3099}\")"),
+        Value::Text("ｶﾞ".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ASC(\"ハ\u{309A}\")"),
+        Value::Text("ﾊﾟ".to_string())
+    );
 }
 
 #[test]
