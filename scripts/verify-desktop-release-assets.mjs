@@ -1065,7 +1065,17 @@ async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, to
     );
   }
 
-  console.log(`Verifying updater asset signatures for ${entries.length} platform(s)...`);
+  /**
+   * Group platform entries by updater asset name so we can avoid re-downloading the same bytes for
+   * multiple platform keys (common for macOS universal builds and `{os}-{arch}-{bundle}` variants).
+   *
+   * @type {Map<string, { asset: any; items: Array<{ platformKey: string; url: string; signatureText: string; signatureSource: string }> }>}
+   */
+  const byAssetName = new Map();
+
+  /** @type {Map<string, string>} */
+  const signatureTextCache = new Map();
+
   for (const [platformKey, entry] of entries) {
     if (!entry || typeof entry !== "object") continue;
 
@@ -1099,7 +1109,14 @@ async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, to
           `expected either platforms[${JSON.stringify(platformKey)}].signature or a release asset "${sigAssetName}"`,
         ]);
       }
-      signatureText = await downloadReleaseAssetText(sigAsset, token);
+
+      const cached = signatureTextCache.get(sigAssetName);
+      if (cached !== undefined) {
+        signatureText = cached;
+      } else {
+        signatureText = await downloadReleaseAssetText(sigAsset, token);
+        signatureTextCache.set(sigAssetName, signatureText);
+      }
       signatureSource = sigAssetName;
     }
 
@@ -1111,43 +1128,65 @@ async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, to
       ]);
     }
 
-    let parsedSig;
-    try {
-      parsedSig = parseTauriUpdaterSignature(signatureText, `${platformKey}.signature`);
-    } catch (err) {
-      throw new ActionableError(`Failed to parse updater asset signature.`, [
-        `platform: ${platformKey}`,
-        `asset: ${assetName}`,
-        `signature source: ${signatureSource}`,
-        err instanceof Error ? err.message : String(err),
-      ]);
+    const existing = byAssetName.get(assetName);
+    if (existing) {
+      existing.items.push({ platformKey, url, signatureText, signatureSource });
+    } else {
+      byAssetName.set(assetName, {
+        asset,
+        items: [{ platformKey, url, signatureText, signatureSource }],
+      });
     }
+  }
 
-    if (parsedSig.keyId && pubkeyKeyId && parsedSig.keyId !== pubkeyKeyId) {
-      throw new ActionableError(`Updater asset signature key id mismatch.`, [
-        `platform: ${platformKey}`,
-        `asset: ${assetName}`,
-        `signature key id: ${parsedSig.keyId}`,
-        `updater pubkey key id: ${pubkeyKeyId}`,
-      ]);
-    }
+  const groups = Array.from(byAssetName.entries());
+  console.log(
+    `Verifying updater asset signatures for ${entries.length} platform(s) across ${groups.length} unique asset(s)...`,
+  );
+
+  for (const [assetName, group] of groups) {
+    const { asset, items } = group;
+    if (items.length === 0) continue;
 
     const size = typeof asset.size === "number" ? asset.size : undefined;
+    const targets = items.map((i) => i.platformKey).join(", ");
     console.log(
-      `- ${platformKey}: downloading ${assetName}${
-        size ? ` (${formatBytes(size)})` : ""
-      } for signature verification...`,
+      `- downloading ${assetName}${size ? ` (${formatBytes(size)})` : ""} for signature verification (platforms: ${targets})...`,
     );
     const assetBytes = await downloadReleaseAssetBytes(asset, token);
-    const ok = verify(null, assetBytes, publicKey, parsedSig.signatureBytes);
-    if (!ok) {
-      throw new ActionableError(`Updater asset signature verification failed.`, [
-        `platform: ${platformKey}`,
-        `asset: ${assetName}`,
-        `url: ${url}`,
-        `signature source: ${signatureSource}`,
-        `This usually means the asset or signature was tampered with, or TAURI_PRIVATE_KEY does not match plugins.updater.pubkey.`,
-      ]);
+
+    for (const item of items) {
+      let parsedSig;
+      try {
+        parsedSig = parseTauriUpdaterSignature(item.signatureText, `${item.platformKey}.signature`);
+      } catch (err) {
+        throw new ActionableError(`Failed to parse updater asset signature.`, [
+          `platform: ${item.platformKey}`,
+          `asset: ${assetName}`,
+          `signature source: ${item.signatureSource}`,
+          err instanceof Error ? err.message : String(err),
+        ]);
+      }
+
+      if (parsedSig.keyId && pubkeyKeyId && parsedSig.keyId !== pubkeyKeyId) {
+        throw new ActionableError(`Updater asset signature key id mismatch.`, [
+          `platform: ${item.platformKey}`,
+          `asset: ${assetName}`,
+          `signature key id: ${parsedSig.keyId}`,
+          `updater pubkey key id: ${pubkeyKeyId}`,
+        ]);
+      }
+
+      const ok = verify(null, assetBytes, publicKey, parsedSig.signatureBytes);
+      if (!ok) {
+        throw new ActionableError(`Updater asset signature verification failed.`, [
+          `platform: ${item.platformKey}`,
+          `asset: ${assetName}`,
+          `url: ${item.url}`,
+          `signature source: ${item.signatureSource}`,
+          `This usually means the asset or signature was tampered with, or TAURI_PRIVATE_KEY does not match plugins.updater.pubkey.`,
+        ]);
+      }
     }
   }
 
