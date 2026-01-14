@@ -1920,8 +1920,13 @@ mod tests {
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
         let intermediate_key = derive_rc4_intermediate_key(password, &salt);
-        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
-            .expect("encrypt");
+        encrypt_record_payloads_in_place(
+            &mut encrypted,
+            encrypted_start,
+            &*intermediate_key,
+            key_len,
+        )
+        .expect("encrypt");
 
         // Append trailing bytes that do not form a full BIFF record header. Some writers include
         // such padding after the final EOF record.
