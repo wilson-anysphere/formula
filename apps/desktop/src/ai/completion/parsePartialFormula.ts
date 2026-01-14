@@ -731,7 +731,10 @@ export function createLocaleAwarePartialFormulaParser(options: {
       // When we know the locale (or are falling back to en-US for unsupported locales),
       // recompute the arg span/index using the effective locale separator so completion
       // behavior matches parsing semantics.
-      const openParenIndex = findOpenParenIndex(prefix, functionRegistry);
+      const openParenIndex =
+        baseline.inFunctionCall && typeof (baseline as any).openParenIndex === "number"
+          ? ((baseline as any).openParenIndex as number)
+          : findOpenParenIndex(prefix, functionRegistry);
       if (openParenIndex != null) {
         const { argIndex, currentArg } = getArgContextWithSeparator(
           prefix,
