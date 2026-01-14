@@ -1220,7 +1220,8 @@ AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails 
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
 For debugging, the workflow also writes a machine-readable JSON report (via the `--json` flag) and
-uploads it as a GitHub Actions artifact named `desktop-bundle-size-report-*`.
+uploads it as a GitHub Actions artifact named `desktop-bundle-size-report-*` (historical name; it
+contains **installer artifact** sizes).
 
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
 download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
