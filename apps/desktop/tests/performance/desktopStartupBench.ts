@@ -8,10 +8,11 @@
  *   directories can otherwise leak across runs.
  *
  * Environment isolation is implemented in `desktopStartupUtil.ts`:
- * - All platforms: `HOME` + `USERPROFILE` => `target/perf-home`
- * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `target/perf-home/xdg-*`
- * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
- * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
+ * - All platforms: `HOME` + `USERPROFILE` => a per-run directory under `target/perf-home`
+ *   (override the perf root via `FORMULA_PERF_HOME`).
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
+ * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `${HOME}/*`
+ * - macOS/Linux: `TMPDIR` => `${HOME}/tmp`
  *
  * Reset toggle:
  * - `FORMULA_DESKTOP_BENCH_RESET_HOME=1` deletes the per-run profile directory before spawning
