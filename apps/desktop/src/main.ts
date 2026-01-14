@@ -153,7 +153,7 @@ import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
 import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
-import { isRibbonMacroCommandId, registerRibbonMacroCommands } from "./commands/registerRibbonMacroCommands.js";
+import { registerRibbonMacroCommands } from "./commands/registerRibbonMacroCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -8131,43 +8131,6 @@ function handleRibbonCommand(commandId: string): void {
       });
     };
 
-    if (commandId === "format.toggleBold" || commandId === "format.toggleItalic" || commandId === "format.toggleUnderline") {
-      executeBuiltinCommand(commandId);
-      return;
-    }
-
-    if (commandId === "comments.togglePanel" || commandId === "comments.addComment") {
-      executeBuiltinCommand(commandId);
-      return;
-    }
-
-    if (isRibbonMacroCommandId(commandId)) {
-      executeBuiltinCommand(commandId);
-      return;
-    }
-
-    // Ribbon/menus/keybindings should all route clipboard actions through the CommandRegistry so
-    // execution tracking + keybinding wiring stay consistent.
-    if (commandId.startsWith("clipboard.")) {
-      executeBuiltinCommand(commandId);
-      return;
-    }
-
-    // Prefer routing ribbon commands through the CommandRegistry when a builtin command
-    // exists with the same id. This lets ribbon wiring share behavior with keyboard
-    // shortcuts + the command palette (and keeps `main.ts` switch logic small).
-    const cmd = commandRegistry.getCommand(commandId);
-    if (cmd?.source.kind === "builtin") {
-      executeBuiltinCommand(commandId);
-      return;
-    }
-
-    const command = commandRegistry.getCommand(commandId);
-    if (command) {
-      executeCommand(commandId);
-      return;
-    }
-
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
       const kind = commandId.slice(cellStylesPrefix.length);
@@ -8706,13 +8669,6 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand(commandId);
         return;
       default:
-        // If the ribbon command matches a registered command id (builtin or extension),
-        // dispatch it through the shared CommandRegistry. This keeps ribbon buttons
-        // aligned with keybindings + command palette behavior.
-        if (commandRegistry.getCommand(commandId)) {
-          executeBuiltinCommand(commandId);
-          return;
-        }
         if (commandId.startsWith("file.")) {
           showToast(`File command not implemented: ${commandId}`);
           return;
