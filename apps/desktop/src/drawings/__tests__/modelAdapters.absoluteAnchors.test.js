@@ -42,6 +42,28 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchors stor
   assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects falls back to root offsets when pos offsets are invalid", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        xEmu: 123,
+        yEmu: 456,
+        // Some mixed schemas include `pos`, but with invalid values (e.g. null) while the root is valid.
+        pos: { xEmu: null, yEmu: null },
+        size: { cx: 789, cy: 321 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
+});
+
 test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchor size from ext when size is absent", () => {
   const drawings = [
     {

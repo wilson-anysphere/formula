@@ -687,27 +687,38 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
         : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
     const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
 
-    const directEmu = readOptionalNumber(pick(record, emuKeys));
+    const readFirstNumeric = (keys: string[]): number | undefined => {
+      for (const key of keys) {
+        const candidate = readOptionalNumber((record as any)[key]);
+        if (candidate != null) return candidate;
+      }
+      return undefined;
+    };
+
+    const directEmu = readFirstNumeric(emuKeys);
     if (directEmu != null) return directEmu;
-    const px = readOptionalNumber(pick(record, pxKeys));
+    const px = readFirstNumeric(pxKeys);
     return px != null ? pxToEmu(px) : 0;
   };
-  const resolveOffsetEmu = (axis: "x" | "y"): number => resolveOffsetEmuFrom(anchorJson, axis);
-
-  const hasOffsetKeys = (record: JsonRecord, axis: "x" | "y"): boolean => {
+  const resolveOffsetEmuMaybeFrom = (record: JsonRecord, axis: "x" | "y"): number | undefined => {
     const emuKeys =
       axis === "x"
         ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
         : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
     const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
+
     for (const key of emuKeys) {
-      if (Object.prototype.hasOwnProperty.call(record, key)) return true;
+      const candidate = readOptionalNumber((record as any)[key]);
+      if (candidate != null) return candidate;
     }
     for (const key of pxKeys) {
-      if (Object.prototype.hasOwnProperty.call(record, key)) return true;
+      const candidate = readOptionalNumber((record as any)[key]);
+      if (candidate != null) return pxToEmu(candidate);
     }
-    return false;
+
+    return undefined;
   };
+  const resolveOffsetEmu = (axis: "x" | "y"): number => resolveOffsetEmuFrom(anchorJson, axis);
 
   const resolvedSize =
     size ??
@@ -755,8 +766,8 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       // and UI-like anchors (which store `pos: { xEmu, yEmu }`).
       const posValue = pick(anchorJson, ["pos"]);
       const pos = isRecord(posValue) ? posValue : null;
-      const xEmu = pos && hasOffsetKeys(pos, "x") ? resolveOffsetEmuFrom(pos, "x") : resolveOffsetEmu("x");
-      const yEmu = pos && hasOffsetKeys(pos, "y") ? resolveOffsetEmuFrom(pos, "y") : resolveOffsetEmu("y");
+      const xEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "x") : undefined) ?? resolveOffsetEmu("x");
+      const yEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "y") : undefined) ?? resolveOffsetEmu("y");
       return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
     }
     case "twoCell": {
