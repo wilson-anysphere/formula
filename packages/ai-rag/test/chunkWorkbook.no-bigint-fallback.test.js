@@ -37,3 +37,40 @@ test("chunkWorkbook: works when BigInt is unavailable (string coord keys fallbac
   }
 });
 
+test("chunkWorkbook: detectRegions connects across Number/string packing boundary when BigInt is unavailable", async () => {
+  const originalBigInt = globalThis.BigInt;
+  try {
+    // @ts-ignore - test override
+    globalThis.BigInt = undefined;
+
+    const url = new URL("../src/workbook/chunkWorkbook.js", import.meta.url);
+    url.search = "noBigIntBoundary=1";
+    const mod = await import(url.href);
+    const chunkWorkbook = mod.chunkWorkbook;
+
+    const row = 0;
+    const colNum = (1 << 20) - 1;
+    const colString = 1 << 20;
+
+    const cells = new Map();
+    // Insert the string-side key first to ensure the traversal crosses representations.
+    cells.set(`${row},${colString}`, { value: "B" });
+    cells.set(`${row},${colNum}`, { value: "A" });
+
+    const workbook = {
+      id: "wb-no-bigint-boundary",
+      sheets: [{ name: "Sheet1", cells }],
+      tables: [],
+      namedRanges: [],
+    };
+
+    const chunks = chunkWorkbook(workbook);
+    const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+    assert.equal(dataRegions.length, 1);
+    assert.deepEqual(dataRegions[0].rect, { r0: row, c0: colNum, r1: row, c1: colString });
+    assert.equal(dataRegions[0].cells[0][0].v, "A");
+    assert.equal(dataRegions[0].cells[0][1].v, "B");
+  } finally {
+    globalThis.BigInt = originalBigInt;
+  }
+});
