@@ -347,6 +347,51 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(payload.objects.find((o: DrawingObject) => o.id === 1)).toEqual(payload.after);
   });
 
+  it("fires onInteractionCommit once on pointercancel (resize), after commit-time patching", () => {
+    const startCx = pxToEmu(100);
+    const startCy = pxToEmu(100);
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img1.png" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: startCx, cy: startCy },
+      },
+      zOrder: 0,
+      preserved: {
+        "xlsx.pic_xml": `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Picture 1"/></xdr:nvPicPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${startCx}" cy="${startCy}"/></a:xfrm></xdr:spPr></xdr:pic>`,
+      },
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const commits: Array<any> = [];
+    const el = createStubElement();
+
+    new DrawingInteractionController(el, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      onInteractionCommit: (payload) => commits.push(payload),
+    });
+
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 100, clientY: 100, pointerId: 14 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 14 }));
+    el.dispatch("pointercancel", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 14 }));
+
+    expect(commits).toHaveLength(1);
+    const payload = commits[0]!;
+    expect(payload.kind).toBe("resize");
+    expect(payload.after.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(120), cy: pxToEmu(130) },
+    });
+    expect(payload.after.preserved?.["xlsx.pic_xml"]).toContain(`cx="${pxToEmu(120)}"`);
+    expect(payload.after.preserved?.["xlsx.pic_xml"]).toContain(`cy="${pxToEmu(130)}"`);
+  });
+
   it("patches xfrm off on move commit when off is non-zero", () => {
     const startOffX = pxToEmu(10);
     const startOffY = pxToEmu(20);

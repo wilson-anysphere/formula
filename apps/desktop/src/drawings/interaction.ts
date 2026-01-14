@@ -67,7 +67,7 @@ export interface DrawingInteractionCallbacks {
   beginBatch?(options: { label: string }): void;
   /** End the current undo batch. */
   endBatch?(): void;
-  /** Cancel the current undo batch (Esc / pointercancel). */
+  /** Cancel the current undo batch (Esc). */
   cancelBatch?(): void;
   onSelectionChange?(selectedId: number | null): void;
   /**
@@ -718,8 +718,12 @@ export class DrawingInteractionController {
     const active = this.dragging ?? this.resizing ?? this.rotating;
     if (!active) return;
     if (e.pointerId !== active.pointerId) return;
-    this.stopPointerEvent(e);
-    this.cancelActiveGesture();
+    // Treat `pointercancel` as a best-effort gesture commit (like pointerup). This matches
+    // the behavior of other drag interactions in the app (e.g. scrollbars) and avoids
+    // snapping the drawing back unexpectedly when the browser cancels the pointer stream.
+    //
+    // Explicit user cancellation is handled via Escape, which calls `cancelActiveGesture()`.
+    this.onPointerUp(e);
   };
 
   private cancelActiveGesture(): void {
