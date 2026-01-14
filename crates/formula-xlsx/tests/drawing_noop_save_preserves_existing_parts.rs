@@ -54,7 +54,20 @@ fn build_two_sheet_drawing_workbook() -> Vec<u8> {
         .get("xl/drawings/_rels/drawing1.xml.rels")
         .expect("base drawing1 rels")
         .clone();
-    parts.insert("xl/drawings/_rels/drawing2.xml.rels".to_string(), drawing1_rels);
+    let drawing2_rels = String::from_utf8(drawing1_rels).expect("drawing rels utf-8");
+    // Make the relationship part distinct too, so tests can detect rels swaps.
+    let drawing2_rels = drawing2_rels.replace("image1.png", "image2.png");
+    parts.insert(
+        "xl/drawings/_rels/drawing2.xml.rels".to_string(),
+        drawing2_rels.into_bytes(),
+    );
+
+    // Duplicate the image so drawing2 can reference a distinct media part.
+    let image1 = parts
+        .get("xl/media/image1.png")
+        .expect("base image1.png")
+        .clone();
+    parts.insert("xl/media/image2.png".to_string(), image1);
 
     // Replace workbook.xml to reference both worksheets.
     let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -281,6 +294,7 @@ fn multi_sheet_noop_save_preserves_all_drawing_parts() {
         "xl/worksheets/_rels/sheet1.xml.rels",
         "xl/worksheets/_rels/sheet2.xml.rels",
         "xl/media/image1.png",
+        "xl/media/image2.png",
     ] {
         assert_eq!(
             before.part(part).unwrap(),
@@ -313,6 +327,7 @@ fn multi_sheet_cell_edit_preserves_all_drawing_parts() {
         "xl/worksheets/_rels/sheet1.xml.rels",
         "xl/worksheets/_rels/sheet2.xml.rels",
         "xl/media/image1.png",
+        "xl/media/image2.png",
     ] {
         assert_eq!(
             before.part(part).unwrap(),

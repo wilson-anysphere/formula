@@ -126,7 +126,18 @@ fn build_two_sheet_drawing_workbook() -> Vec<u8> {
         .get("xl/drawings/_rels/drawing1.xml.rels")
         .expect("base drawing1 rels")
         .clone();
-    parts.insert("xl/drawings/_rels/drawing2.xml.rels".to_string(), drawing1_rels);
+    let drawing2_rels = String::from_utf8(drawing1_rels).expect("drawing rels utf-8");
+    let drawing2_rels = drawing2_rels.replace("image1.png", "image2.png");
+    parts.insert(
+        "xl/drawings/_rels/drawing2.xml.rels".to_string(),
+        drawing2_rels.into_bytes(),
+    );
+
+    let image1 = parts
+        .get("xl/media/image1.png")
+        .expect("base image1.png")
+        .clone();
+    parts.insert("xl/media/image2.png".to_string(), image1);
 
     // Replace workbook.xml to reference both worksheets.
     let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
