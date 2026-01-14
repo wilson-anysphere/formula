@@ -2,12 +2,13 @@
 
 use arrow_array::builder::StringDictionaryBuilder;
 use arrow_array::{
-    ArrayRef, DictionaryArray, Float32Array, Int16Array, Int32Array, RecordBatch, StringViewArray,
-    UInt16Array, UInt32Array, UInt64Array,
+    ArrayRef, DictionaryArray, Float16Array, Float32Array, Int16Array, Int32Array, RecordBatch,
+    StringViewArray, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use formula_columnar::arrow::{columnar_to_record_batch, record_batch_to_columnar};
 use formula_columnar::{ColumnType, Value};
+use half::f16;
 use std::sync::Arc;
 
 fn assert_tables_equal(a: &formula_columnar::ColumnarTable, b: &formula_columnar::ColumnarTable) {
@@ -27,6 +28,12 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Build a batch using alternative physical Arrow types (Float32/Int32/UInt32/UInt64)
     // and a dictionary-encoded string column with a non-UInt32 key type (Int32).
+    let f16_arr = Arc::new(Float16Array::from(vec![
+        Some(f16::from_f32(1.5)),
+        None,
+        Some(f16::from_f32(-2.0)),
+        Some(f16::from_f32(0.0)),
+    ])) as ArrayRef;
     let f32_arr = Arc::new(Float32Array::from(vec![
         Some(1.25_f32),
         None,
@@ -73,6 +80,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
     let dict_u16_arr = Arc::new(dict_u16_builder.finish()) as ArrayRef;
 
     let schema = Arc::new(Schema::new(vec![
+        Field::new("f16", DataType::Float16, true),
         Field::new("f32", DataType::Float32, true),
         Field::new("i16", DataType::Int16, true),
         Field::new("u16", DataType::UInt16, true),
@@ -99,6 +107,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
     let batch = RecordBatch::try_new(
         schema,
         vec![
+            f16_arr,
             f32_arr,
             i16_arr,
             u16_arr,
@@ -128,6 +137,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             ColumnType::Number,
             ColumnType::Number,
             ColumnType::Number,
+            ColumnType::Number,
             ColumnType::String,
             ColumnType::String,
             ColumnType::String,
@@ -137,6 +147,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
 
     let expected: Vec<Vec<Value>> = vec![
         vec![
+            Value::Number(1.5),
             Value::Number(1.25_f32 as f64),
             Value::Number(-7.0),
             Value::Number(1.0),
@@ -150,6 +161,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
         ],
         vec![
             Value::Null,
+            Value::Null,
             Value::Number(0.0),
             Value::Number(2.0),
             Value::Number(0.0),
@@ -161,6 +173,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::String(Arc::<str>::from("DV1")),
         ],
         vec![
+            Value::Number(-2.0),
             Value::Number(-3.5_f32 as f64),
             Value::Null,
             Value::Null,
@@ -173,6 +186,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::Null,
         ],
         vec![
+            Value::Number(0.0),
             Value::Number(0.0),
             Value::Number(123.0),
             Value::Number(65_535.0),

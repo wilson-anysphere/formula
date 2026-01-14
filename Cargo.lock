@@ -2030,6 +2030,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "bytes",
+ "half",
  "parquet",
 ]
 

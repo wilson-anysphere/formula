@@ -17,3 +17,7 @@ bytes = { version = "1", optional = true }
 # For `formula-columnar` we only need the Arrow integration and uncompressed
 # I/O, so keep the dependency surface minimal.
 parquet = { version = "54", optional = true, default-features = false, features = ["arrow"] }
+
+[dev-dependencies]
+# Used by Arrow `Float16Array` test vectors.
+half = "2"

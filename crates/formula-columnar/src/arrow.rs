@@ -173,7 +173,7 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
 
     // Fall back to the physical Arrow data type.
     Ok(match field.data_type() {
-        DataType::Float32 | DataType::Float64 => ColumnType::Number,
+        DataType::Float16 | DataType::Float32 | DataType::Float64 => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
         DataType::Dictionary(_, value) => match value.as_ref() {
@@ -203,6 +203,13 @@ pub(crate) fn value_from_array(
 
     match column_type {
         ColumnType::Number => match array.data_type() {
+            DataType::Float16 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Float16Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Number(f32::from(arr.value(row)) as f64))
+            }
             DataType::Float32 => {
                 let arr = array
                     .as_any()
