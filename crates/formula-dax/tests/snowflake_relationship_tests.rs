@@ -1970,6 +1970,117 @@ fn relatedtable_cascades_blank_rows_across_three_hop_snowflake_columnar_fact() {
 }
 
 #[test]
+fn pivot_grouping_includes_blank_division_group_for_unmatched_fact_keys_across_three_hop_snowflake() {
+    let model = build_three_hop_snowflake_model();
+
+    let group_by = vec![GroupByColumn::new("Divisions", "DivisionName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+
+    let result = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.rows,
+        vec![vec![Value::from("D1"), 10.0.into()], vec![Value::Blank, 5.0.into()]]
+    );
+}
+
+#[test]
+fn pivot_grouping_includes_blank_division_group_for_unmatched_fact_keys_across_three_hop_snowflake_columnar_fact(
+) {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+
+    let group_by = vec![GroupByColumn::new("Divisions", "DivisionName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+
+    let result = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.rows,
+        vec![vec![Value::from("D1"), 10.0.into()], vec![Value::Blank, 5.0.into()]]
+    );
+}
+
+#[test]
+fn summarize_includes_blank_division_group_for_unmatched_fact_keys_across_three_hop_snowflake() {
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Sales, Divisions[DivisionName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 2.into());
+}
+
+#[test]
+fn summarize_includes_blank_division_group_for_unmatched_fact_keys_across_three_hop_snowflake_columnar_fact(
+) {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Sales, Divisions[DivisionName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 2.into());
+}
+
+#[test]
+fn deep_snowflake_summarizecolumns_includes_blank_division_member_for_unmatched_fact_keys() {
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Divisions[DivisionName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 2.into());
+}
+
+#[test]
+fn deep_snowflake_summarizecolumns_includes_blank_division_member_for_unmatched_fact_keys_columnar_fact(
+) {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Divisions[DivisionName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 2.into());
+}
+
+#[test]
 fn deep_snowflake_filter_excludes_unmatched_fact_rows_when_upstream_dimension_filtered_out() {
     let model = build_three_hop_snowflake_model();
     let engine = DaxEngine::new();
