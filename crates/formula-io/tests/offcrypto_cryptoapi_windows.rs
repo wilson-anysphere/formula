@@ -144,6 +144,36 @@ impl Drop for CryptoKey {
     }
 }
 
+fn extract_session_key_bytes(kp_keyval: &[u8], expected_len: usize) -> Vec<u8> {
+    // Some providers return raw key bytes, others return a PLAINTEXTKEYBLOB:
+    //   BLOBHEADER (8) || DWORD key_bits (4) || key_bytes
+    if kp_keyval.len() == expected_len {
+        return kp_keyval.to_vec();
+    }
+
+    const PLAINTEXTKEYBLOB: u8 = 0x8;
+    const CUR_BLOB_VERSION: u8 = 0x2;
+
+    if kp_keyval.len() == 12 + expected_len
+        && kp_keyval.first().copied() == Some(PLAINTEXTKEYBLOB)
+        && kp_keyval.get(1).copied() == Some(CUR_BLOB_VERSION)
+    {
+        let key_bits = u32::from_le_bytes([kp_keyval[8], kp_keyval[9], kp_keyval[10], kp_keyval[11]]);
+        assert_eq!(
+            key_bits as usize,
+            expected_len * 8,
+            "KP_KEYVAL PLAINTEXTKEYBLOB key_bits mismatch (expected {} bits, got {key_bits})",
+            expected_len * 8
+        );
+        return kp_keyval[12..].to_vec();
+    }
+
+    panic!(
+        "unexpected KP_KEYVAL format: len={} expected_key_len={expected_len}",
+        kp_keyval.len()
+    );
+}
+
 fn derive_key_and_hash(
     provider: &CryptoProvider,
     alg_id_hash: u32,
@@ -163,6 +193,7 @@ fn derive_key_and_hash(
 fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
     let provider = CryptoProvider::acquire();
     let alg_id_hash = CALG_SHA1;
+    let hash_alg = HashAlg::from_calg_id(alg_id_hash).unwrap();
 
     // Arbitrary-but-stable input for the hash object.
     let data = b"formula-io offcrypto CryptDeriveKey cross-check";
@@ -172,14 +203,10 @@ fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
         (CALG_AES_192, 24usize),
         (CALG_AES_128, 16usize),
     ] {
-        let (hash_value, key_bytes) = derive_key_and_hash(&provider, alg_id_hash, alg_id_key, data);
-        assert_eq!(
-            key_bytes.len(),
-            key_len,
-            "CryptoAPI returned unexpected key length for alg_id_key={alg_id_key:#x}"
-        );
+        let (hash_value, key_blob) = derive_key_and_hash(&provider, alg_id_hash, alg_id_key, data);
+        let key_bytes = extract_session_key_bytes(&key_blob, key_len);
 
-        let ours = crypt_derive_key(&hash_value, key_len, HashAlg::from_calg_id(alg_id_hash).unwrap());
+        let ours = crypt_derive_key(&hash_value, key_len, hash_alg);
         assert_eq!(
             key_bytes, ours,
             "derived key mismatch for alg_id_key={alg_id_key:#x} key_len={key_len}"
