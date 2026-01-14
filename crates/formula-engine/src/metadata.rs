@@ -26,34 +26,27 @@ impl fmt::Display for FormatRun {
     }
 }
 
-/// Returns the style id for `row` in a sorted, non-overlapping run list.
+/// Returns the style id for `row` in a sorted run list.
 ///
-/// Returns `0` when no run covers `row`.
+/// Runs are expected to be sorted by `start_row` (as in `Engine::set_format_runs_by_col`).
+/// If multiple runs overlap, the *last* matching run wins to preserve deterministic behavior.
+///
+/// Returns `0` when no run covers `row` (or when only `style_id=0` runs match).
 pub fn style_id_for_row_in_runs(runs: Option<&[FormatRun]>, row: u32) -> u32 {
     let Some(runs) = runs else {
         return 0;
     };
-    if runs.is_empty() {
-        return 0;
-    }
-
-    // Runs are sorted by start_row. Find the last run whose start_row <= row.
-    let mut lo: usize = 0;
-    let mut hi: usize = runs.len();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        if runs[mid].start_row <= row {
-            lo = mid + 1;
-        } else {
-            hi = mid;
+    let mut style_id = 0;
+    for run in runs {
+        if row < run.start_row {
+            break;
+        }
+        if row >= run.end_row_exclusive {
+            continue;
+        }
+        if run.style_id != 0 {
+            style_id = run.style_id;
         }
     }
-
-    let idx = lo.saturating_sub(1);
-    let run = &runs[idx];
-    if row >= run.start_row && row < run.end_row_exclusive {
-        run.style_id
-    } else {
-        0
-    }
+    style_id
 }

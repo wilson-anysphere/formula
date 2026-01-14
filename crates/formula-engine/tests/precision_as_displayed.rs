@@ -158,6 +158,45 @@ fn precision_as_displayed_rounds_numeric_literals_using_sheet_default_style_fall
 }
 
 #[test]
+fn precision_as_displayed_rounds_using_range_run_number_format() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    // Apply the style via a range-run layer: rows 1-10 (inclusive) in column A.
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0,
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 10,
+                style_id,
+            }],
+        )
+        .unwrap();
+
+    // In-run numeric literals should round.
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+
+    // Outside the run, the default "General" format does not round 1.239.
+    engine.set_cell_value("Sheet1", "A11", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A11"), Value::Number(1.239));
+
+    // Formula results should also be rounded using the run formatting.
+    engine.set_cell_formula("Sheet1", "A2", "=1.239").unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.24));
+}
+
+#[test]
 fn precision_as_displayed_number_format_inherits_through_cell_style_layer() {
     let mut engine = Engine::new();
     let mut settings: CalcSettings = engine.calc_settings().clone();

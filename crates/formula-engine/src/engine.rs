@@ -2738,6 +2738,26 @@ impl Engine {
             .get_cell(key)
             .map(|cell| cell.style_id)
             .unwrap_or(0);
+        let run_style_id = sheet_state
+            .format_runs_by_col
+            .get(&key.addr.col)
+            .map(|runs| {
+                // Runs are expected to be sorted and non-overlapping, but we use a conservative
+                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
+                // provide unexpected overlaps.
+                let mut style_id = 0;
+                for run in runs {
+                    if key.addr.row < run.start_row {
+                        break;
+                    }
+                    if key.addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0);
         let row_style_id = sheet_state
             .row_properties
             .get(&key.addr.row)
@@ -2769,6 +2789,9 @@ impl Engine {
             col_style_id,
             sheet_style_id,
         ] {
+            if style_id == 0 {
+                continue;
+            }
             if let Some(fmt) = self
                 .workbook
                 .styles
