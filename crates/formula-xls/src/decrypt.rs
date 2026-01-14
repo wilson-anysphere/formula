@@ -2000,6 +2000,33 @@ mod tests {
     }
 
     #[test]
+    fn decryptor_rejects_cryptoapi_encryptioninfo_header_size_exceeds_max() {
+        // FILEPASS RC4 CryptoAPI with a headerSize that exceeds our defensive cap.
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // major
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&((MAX_ENCRYPTION_HEADER_SIZE as u32) + 1).to_le_bytes()); // headerSize
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&enc_info);
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
     fn decryptor_rejects_cryptoapi_encryptionverifier_hash_truncation() {
         // Build an EncryptionInfo blob whose verifier declares a 20-byte verifier hash but does not
         // provide enough bytes.
@@ -2046,6 +2073,30 @@ mod tests {
             ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes(), // wEncryptionInfo
         ]
         .concat();
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
+    fn decryptor_rejects_legacy_cryptoapi_filepass_header_size_exceeds_max() {
+        // Legacy FILEPASS layout uses wEncryptionInfo==0x0004 and embeds `headerSize` directly.
+        // Reject implausibly large header sizes before attempting to slice/allocate.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes()); // wEncryptionType
+        payload.extend_from_slice(&ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes()); // wEncryptionInfo
+        payload.extend_from_slice(&4u16.to_le_bytes()); // vMajor
+        payload.extend_from_slice(&2u16.to_le_bytes()); // vMinor
+        payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        payload.extend_from_slice(&((MAX_ENCRYPTION_HEADER_SIZE as u32) + 1).to_le_bytes()); // headerSize
 
         let stream = [
             record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
