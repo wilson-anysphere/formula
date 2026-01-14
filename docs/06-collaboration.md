@@ -315,6 +315,7 @@ Fallback for opaque / non-JWT tokens:
 - If the token is missing or does not look like a JWT payload (or decoding fails), desktop treats the token as **opaque** and falls back to:
   - the locally chosen collab identity (for presence),
   - `{ role: "editor", rangeRestrictions: [] }` for `CollabSession.setPermissions(...)` (client-side gating becomes permissive; the sync-server still enforces, including any `rangeRestrictions` supplied via token introspection in `SYNC_SERVER_AUTH_MODE=introspect` deployments).
+  - Note: the sync-server always sanitizes awareness identity fields to the **authenticated** user id. In shared-token auth mode (`SYNC_SERVER_AUTH_TOKEN`), that user id is the constant `"opaque"`, so presence identities will not distinguish between collaborators (dev-only behavior). For stable presence/attribution, prefer JWT tokens with a real `sub` (or provide a stable user id out-of-band in introspect deployments).
 
 Implementation reference: desktop JWT decode helpers live in [`apps/desktop/src/collab/jwt.ts`](../apps/desktop/src/collab/jwt.ts) (`tryDecodeJwtPayload`, `tryDeriveCollabSessionPermissionsFromJwtToken`).
 
