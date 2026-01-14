@@ -280,7 +280,6 @@ fn detect_chart_kind(
     }
 
     let hints = collect_chart_ex_kind_hints(doc);
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
     let hint_list = if hints.is_empty() {
         "<none>".to_string()
     } else {

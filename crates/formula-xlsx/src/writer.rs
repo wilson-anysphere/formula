@@ -874,6 +874,7 @@ fn sheet_xml(
     } else {
         String::new()
     };
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
