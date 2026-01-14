@@ -231,8 +231,6 @@ fn detect_chart_kind(
     doc: &Document<'_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("<none>");
-
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
     if let Some(node) = find_chart_type_node(doc) {
         let raw = node.tag_name().name();
