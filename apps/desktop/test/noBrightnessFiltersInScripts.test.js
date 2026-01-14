@@ -53,6 +53,8 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
   const patterns = [
     // CSS style strings (e.g. `style: "filter: brightness(0.9);"`).
     { re: /\bfilter\s*:\s*(?<value>[^;"'`]*)/gi, kind: "filter" },
+    // React style objects (e.g. `{ filter: "brightness(0.9)" }`).
+    { re: /\bfilter\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "filter (style object)" },
     // DOM style assignment (e.g. `el.style.filter = "brightness(0.9)"`)
     { re: /\.style\.filter\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
     // setProperty("filter", "brightness(0.9)")
@@ -60,6 +62,13 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
       re: /\.style\.setProperty\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
+    // setAttribute("style", "filter: brightness(0.9)")
+    {
+      re: /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      kind: "setAttribute(style)",
+    },
+    // cssText assignment (e.g. `el.style.cssText = "filter: brightness(0.9)"`)
+    { re: /\.style\.cssText\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.cssText" },
   ];
 
   for (const file of files) {
