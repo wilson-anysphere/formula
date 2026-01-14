@@ -92,4 +92,30 @@ describe("FormulaBarView argument preview (integration)", () => {
 
     host.remove();
   });
+
+  it("collapses whitespace in the displayed argument expression", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    view.setArgumentPreviewProvider(() => true);
+
+    const formula = "=IF(\n  SUM(A1:A2)\n    > 10,\n  B1,\n  C1\n)";
+    view.textarea.value = formula;
+
+    // Cursor inside the first IF argument but outside the nested SUM parentheses.
+    const cursor = formula.indexOf("> 10") + 1;
+    view.textarea.setSelectionRange(cursor, cursor);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushPreview();
+
+    const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+    expect(preview?.textContent).toBe("↳ SUM(A1:A2) > 10  →  TRUE");
+
+    host.remove();
+  });
 });

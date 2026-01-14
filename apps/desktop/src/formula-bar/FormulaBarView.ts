@@ -2066,12 +2066,13 @@ export class FormulaBarView {
           previewEl.dataset.argStart = String(activeArg.span.start);
           previewEl.dataset.argEnd = String(activeArg.span.end);
 
-          const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
-          previewEl.textContent = `↳ ${activeArg.argText}  →  ${rhs}`;
-          body.appendChild(previewEl);
-        } else {
-          this.#clearArgumentPreviewState();
-        }
+        const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
+        const displayArgText = formatArgumentPreviewExpression(activeArg.argText);
+        previewEl.textContent = `↳ ${displayArgText}  →  ${rhs}`;
+        body.appendChild(previewEl);
+      } else {
+        this.#clearArgumentPreviewState();
+      }
       }
 
       panel.appendChild(title);
@@ -2810,6 +2811,62 @@ function formatArgumentPreviewValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
   return String(value);
+}
+
+function isWhitespaceChar(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+/**
+ * Collapse indentation/newlines in the argument expression for display in the hint panel.
+ *
+ * Keep string literals intact (including escaped quotes) so we don't misrepresent
+ * user-entered text.
+ */
+function formatArgumentPreviewExpression(expr: string): string {
+  const text = String(expr ?? "");
+  let out = "";
+  let inString = false;
+  let pendingSpace = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] ?? "";
+    if (inString) {
+      out += ch;
+      if (ch === '"') {
+        // Escaped quote inside a string literal: "" -> "
+        if (text[i + 1] === '"') {
+          out += '"';
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      if (pendingSpace && out && !out.endsWith(" ")) out += " ";
+      pendingSpace = false;
+      out += ch;
+      inString = true;
+      continue;
+    }
+
+    if (isWhitespaceChar(ch)) {
+      pendingSpace = true;
+      continue;
+    }
+
+    if (pendingSpace) {
+      if (out && !out.endsWith(" ")) out += " ";
+      pendingSpace = false;
+    }
+
+    out += ch;
+  }
+
+  return out.trim();
 }
 
 function computeReferenceHighlights(
