@@ -231,7 +231,8 @@ fn tauri_main_capability_scopes_to_main_window() {
 
 #[test]
 fn tauri_ipc_allowlist_matches_registered_invoke_handler_commands() {
-    // The desktop frontend uses `globalThis.__TAURI__.core.invoke(...)` directly.
+    // The desktop frontend invokes `#[tauri::command]` endpoints via the Tauri JS bridge
+    // (`core.invoke`), routed through helper wrappers in `apps/desktop/src/tauri/*`.
     // This test ensures we keep the invokable command surface explicit and in sync with
     // the backend's `invoke_handler` registration list.
 

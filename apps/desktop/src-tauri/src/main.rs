@@ -2189,7 +2189,13 @@ fn main() {
   const tick = async () => {
     if (started) return;
 
-    const invoke = globalThis.__TAURI__?.core?.invoke;
+    let invoke = null;
+    try {
+      const tauri = globalThis.__TAURI__;
+      invoke = tauri?.core?.invoke ?? null;
+    } catch {
+      invoke = null;
+    }
     if (typeof invoke !== "function") {
       if (Date.now() > deadline) return;
       setTimeout(tick, 10);
@@ -2358,7 +2364,14 @@ fn main() {
   const tick = async () => {
     if (started) return;
 
-    const emit = globalThis.__TAURI__?.event?.emit;
+    let emit = null;
+    try {
+      const tauri = globalThis.__TAURI__;
+      const eventApi = tauri?.event ?? tauri?.plugin?.event ?? tauri?.plugins?.event ?? null;
+      emit = eventApi?.emit ?? null;
+    } catch {
+      emit = null;
+    }
     if (typeof emit !== "function") {
       if (Date.now() > deadline) return;
       setTimeout(tick, 50);
