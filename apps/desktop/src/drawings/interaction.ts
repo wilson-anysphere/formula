@@ -1575,7 +1575,10 @@ export function shiftAnchorPoint(
   return {
     ...point,
     cell: { row, col },
-    offset: { xEmu: Math.round(pxToEmu(xPx)), yEmu: Math.round(pxToEmu(yPx)) },
+    // Keep floating-point EMUs so zoom-scaled moves (e.g. 1px screen move at 2x zoom => 0.5px
+    // sheet move) remain reversible without accumulating integer rounding drift. DrawingML export
+    // rounds EMUs to integers at serialization time.
+    offset: { xEmu: pxToEmu(xPx), yEmu: pxToEmu(yPx) },
   };
 }
 

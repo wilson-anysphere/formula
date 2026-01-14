@@ -352,6 +352,62 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
     }
   });
 
+  it("accounts for zoom when nudging oneCell anchors (shared grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      app.setZoom(2);
+      app.activateCell({ row: 3, col: 4 }, { scrollIntoView: false, focus: false });
+      const activeBefore = app.getActiveCell();
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: 1,
+          kind: { type: "shape", label: "rect" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      app.selectDrawing(1);
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+      let updated = doc.getSheetDrawings(sheetId)[0];
+      expect(updated.anchor.type).toBe("oneCell");
+      // Moving by 1 screen px at 2x zoom shifts the underlying sheet position by 0.5px.
+      expect(updated.anchor.from.offset.xEmu).toBeCloseTo(pxToEmu(0.5));
+      expect(updated.anchor.from.offset.yEmu).toBe(0);
+      expect(app.getActiveCell()).toEqual(activeBefore);
+
+      // Ensure the move remains reversible without accumulating rounding drift.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+      updated = doc.getSheetDrawings(sheetId)[0];
+      expect(updated.anchor.type).toBe("oneCell");
+      expect(updated.anchor.from.offset.xEmu).toBe(0);
+      expect(updated.anchor.from.offset.yEmu).toBe(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("uses 10px screen steps with Shift when nudging (shared grid zoom)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
