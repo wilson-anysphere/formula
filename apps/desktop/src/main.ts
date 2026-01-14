@@ -2175,6 +2175,15 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   // commands that should also remain disabled for read-only collab roles (viewer/commenter).
   const out: Record<string, true> = { ...RIBBON_DISABLED_BY_ID_WHILE_EDITING };
 
+  // Pure view-only commands should remain enabled in read-only mode.
+  delete out["view.toggleShowFormulas"];
+  delete out["audit.togglePrecedents"];
+  delete out["audit.toggleDependents"];
+  delete out["audit.toggleTransitive"];
+  delete out["formulas.formulaAuditing.tracePrecedents"];
+  delete out["formulas.formulaAuditing.traceDependents"];
+  delete out["formulas.formulaAuditing.removeArrows"];
+
   // View-only mutations (axis sizing) should remain enabled in read-only.
   delete out["home.cells.format"];
   delete out["home.cells.format.rowHeight"];
