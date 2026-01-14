@@ -223,7 +223,7 @@ import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCel
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
 import { buildImportedDrawingLayerSnapshotAdditions } from "./workbook/load/hydrateImportedDrawings.js";
 import { hydrateSheetBackgroundImagesFromBackend } from "./workbook/load/hydrateSheetBackgroundImages.js";
-import { docColWidthsFromImportedColProperties, hiddenColsFromImportedColProperties } from "./workbook/load/importedColProperties.js";
+import { hiddenColsFromImportedColProperties, sheetColWidthsFromViewOrImportedColProperties } from "./workbook/load/importedColProperties.js";
 import {
   mergeFormattingIntoSnapshot,
   type CellFormatClampBounds,
@@ -10479,25 +10479,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     Object.assign(sheet, merged);
 
     const view = viewStateBySheetId.get(sheet.id) ?? null;
-    const persistedColWidths = (view as any)?.colWidths;
-    const hasPersistedColWidths = Array.isArray(persistedColWidths)
-      ? persistedColWidths.length > 0
-      : persistedColWidths && typeof persistedColWidths === "object"
-        ? Object.keys(persistedColWidths).length > 0
-        : false;
-    if (hasPersistedColWidths) {
-      sheet.colWidths = persistedColWidths;
-    } else {
-      const importedColProperties = importedColPropertiesBySheetId.get(sheet.id) ?? null;
-      const fallback = docColWidthsFromImportedColProperties(importedColProperties);
-      if (fallback) sheet.colWidths = fallback;
-    }
+    const importedColProperties = importedColPropertiesBySheetId.get(sheet.id) ?? null;
+    const colWidths = sheetColWidthsFromViewOrImportedColProperties(view, importedColProperties);
+    if (colWidths) sheet.colWidths = colWidths;
     const rowHeights = (view as any)?.rowHeights;
     if (rowHeights && typeof rowHeights === "object") {
       sheet.rowHeights = rowHeights;
     }
-
-    const importedColProperties = importedColPropertiesBySheetId.get(sheet.id) ?? null;
     const hiddenCols = hiddenColsFromImportedColProperties(importedColProperties);
     if (hiddenCols.length > 0) importedHiddenColsBySheetId.set(sheet.id, hiddenCols);
   }

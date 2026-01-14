@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
-import { docColWidthsFromImportedColProperties, hiddenColsFromImportedColProperties } from "../importedColProperties.js";
+import {
+  docColWidthsFromImportedColProperties,
+  hiddenColsFromImportedColProperties,
+  sheetColWidthsFromViewOrImportedColProperties,
+} from "../importedColProperties.js";
 
 describe("importedColProperties", () => {
   it("converts imported OOXML column widths into DocumentController colWidths (px)", () => {
@@ -37,16 +41,44 @@ describe("importedColProperties", () => {
     expect(hiddenColsFromImportedColProperties(payload)).toEqual([0, 1]);
   });
 
+  it("falls back to imported column widths when persisted sheet view colWidths is empty", () => {
+    const importedPayload = {
+      schemaVersion: 1,
+      colProperties: {
+        // Mirrors `fixtures/xlsx/basic/row-col-attrs.xlsx`: B column width 25 chars.
+        "1": { width: 25, hidden: false },
+      },
+    };
+
+    const view = { schemaVersion: 1, colWidths: {} };
+    expect(sheetColWidthsFromViewOrImportedColProperties(view, importedPayload)).toEqual({ "1": 180 });
+  });
+
+  it("prefers persisted sheet view colWidths when present", () => {
+    const importedPayload = {
+      schemaVersion: 1,
+      colProperties: {
+        "1": { width: 25, hidden: false },
+      },
+    };
+
+    const view = { schemaVersion: 1, colWidths: { "1": 999 } };
+    expect(sheetColWidthsFromViewOrImportedColProperties(view, importedPayload)).toEqual({ "1": 999 });
+  });
+
   it("hydrates DocumentController sheet view state with imported colWidths", () => {
     const payload = {
       schemaVersion: 1,
       colProperties: {
-        "0": { width: 12, hidden: true },
+        // Mirrors `fixtures/xlsx/basic/row-col-attrs.xlsx`: B column width 25 chars.
+        "1": { width: 25, hidden: false },
+        // C is hidden in the source workbook, but has no explicit width.
+        "2": { hidden: true },
       },
     };
 
     const colWidths = docColWidthsFromImportedColProperties(payload);
-    expect(colWidths).toEqual({ "0": 89 });
+    expect(colWidths).toEqual({ "1": 180 });
 
     const snapshot = {
       schemaVersion: 1,
@@ -66,7 +98,6 @@ describe("importedColProperties", () => {
     const doc = new DocumentController();
     doc.applyState(new TextEncoder().encode(JSON.stringify(snapshot)));
 
-    expect(doc.getSheetView("Sheet1").colWidths).toEqual({ "0": 89 });
+    expect(doc.getSheetView("Sheet1").colWidths).toEqual({ "1": 180 });
   });
 });
-

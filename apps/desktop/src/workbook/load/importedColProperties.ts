@@ -15,6 +15,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Resolve the initial `SheetViewState.colWidths` value to apply when opening a workbook.
+ *
+ * If the persisted sheet view state contains a non-empty `colWidths` override, it is used.
+ * Otherwise, we fall back to imported OOXML `<cols>` width metadata (when available).
+ */
+export function sheetColWidthsFromViewOrImportedColProperties(
+  view: unknown,
+  importedColProperties: unknown,
+): unknown | null {
+  const persistedColWidths = isPlainObject(view) ? (view as any).colWidths : (view as any)?.colWidths;
+  const hasPersisted = Array.isArray(persistedColWidths)
+    ? persistedColWidths.length > 0
+    : isPlainObject(persistedColWidths)
+      ? Object.keys(persistedColWidths).length > 0
+      : false;
+
+  if (hasPersisted) return persistedColWidths;
+  return docColWidthsFromImportedColProperties(importedColProperties);
+}
+
+/**
  * Convert a backend `get_sheet_imported_col_properties` payload into a DocumentController
  * `SheetViewState.colWidths` map (CSS px at zoom=1).
  */
@@ -62,4 +83,3 @@ export function hiddenColsFromImportedColProperties(raw: unknown): number[] {
   out.sort((a, b) => a - b);
   return out;
 }
-
