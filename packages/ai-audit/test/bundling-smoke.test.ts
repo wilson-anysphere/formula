@@ -33,14 +33,14 @@ describe("ai-audit browser bundling", () => {
       stdin: {
         sourcefile: "entry.js",
         resolveDir: pkgRoot,
-        contents: `
-          import { AIAuditRecorder, LocalStorageAIAuditStore } from "@formula/ai-audit";
-          import { BoundedAIAuditStore } from "@formula/ai-audit";
-          import { LocalStorageAIAuditStore as FromBrowserSubpath } from "@formula/ai-audit/browser";
-          console.log(AIAuditRecorder, LocalStorageAIAuditStore, FromBrowserSubpath, BoundedAIAuditStore);
-        `
-      }
-    });
+         contents: `
+           import { AIAuditRecorder, LocalStorageAIAuditStore, createDefaultAIAuditStore } from "@formula/ai-audit";
+           import { BoundedAIAuditStore } from "@formula/ai-audit";
+           import { LocalStorageAIAuditStore as FromBrowserSubpath } from "@formula/ai-audit/browser";
+           console.log(AIAuditRecorder, LocalStorageAIAuditStore, FromBrowserSubpath, BoundedAIAuditStore, createDefaultAIAuditStore);
+         `
+       }
+     });
 
     const inputFiles = Object.keys(result.metafile?.inputs ?? {});
     expect(inputFiles.some((file) => file.includes("sql.js"))).toBe(false);
