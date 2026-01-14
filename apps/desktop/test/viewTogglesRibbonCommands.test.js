@@ -57,10 +57,27 @@ test("View toggle ribbon commands are registered in CommandRegistry (no exemptio
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
       `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActions)`,
     );
+
+    // Guardrail: avoid reintroducing bespoke routing paths in the ribbon command router.
+    // These ids are registered commands and should dispatch via CommandRegistry.
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected ribbonCommandRouter.ts to not handle ${id} via switch case (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via toggleOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
+    );
   }
 
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });
-

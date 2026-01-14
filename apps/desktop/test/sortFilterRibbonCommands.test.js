@@ -52,7 +52,29 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
 
   // Guardrail: AutoFilter is a registered CommandRegistry toggle command, so it should not be
   // special-cased as a ribbon `toggleOverrides` handler (it should dispatch through CommandRegistry).
-  assert.doesNotMatch(router, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.sortFilter\.filter["']\s*:/m);
+  const autoFilterOverrideIds = ["data.sortFilter.filter", "data.sortFilter.clear", "data.sortFilter.reapply", "data.sortFilter.advanced.clearFilter"];
+  for (const id of autoFilterOverrideIds) {
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via toggleOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected ribbonCommandRouter.ts to not handle ${id} via switch case (should dispatch via CommandRegistry)`,
+    );
+  }
+  assert.doesNotMatch(
+    router,
+    /\bcommandId\.startsWith\(\s*["']data\.sortFilter\./,
+    "Did not expect ribbonCommandRouter.ts to add bespoke data.sortFilter.* prefix routing (dispatch should go through CommandRegistry)",
+  );
 
   // MVP AutoFilter commands are registered via the shared helper (invoked by registerDesktopCommands,
   // with host implementations injected from main.ts).

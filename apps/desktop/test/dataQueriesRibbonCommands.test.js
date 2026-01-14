@@ -76,7 +76,28 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
   assert.match(main, /\bregisterDesktopCommands\(/);
   assert.match(main, /\bdataQueriesHandlers\s*:/);
   assert.doesNotMatch(main, /\bregisterDataQueriesCommands\(/);
-  assert.doesNotMatch(router, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.queriesConnections\.queriesConnections["']\s*:/m);
+  for (const id of commandIds) {
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via toggleOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected ribbonCommandRouter.ts to not handle ${id} via switch case (should dispatch via CommandRegistry)`,
+    );
+  }
+  assert.doesNotMatch(
+    router,
+    /\bcommandId\.startsWith\(\s*["']data\.queriesConnections\./,
+    "Did not expect ribbonCommandRouter.ts to add bespoke data.queriesConnections.* prefix routing (dispatch should go through CommandRegistry)",
+  );
   for (const id of commandIds.slice(1)) {
     assert.doesNotMatch(
       main,
