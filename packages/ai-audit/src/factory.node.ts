@@ -48,8 +48,8 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
   }
 
   // `prefer: "sqlite"` is explicit opt-in.
-  const { SqliteAIAuditStore } = await import("./sqlite-store.ts");
-  const sqlite = await SqliteAIAuditStore.create({
+  const { createSqliteAIAuditStoreNode } = await import("./sqlite-store.node.ts");
+  const sqlite = await createSqliteAIAuditStoreNode({
     storage: options.sqlite_storage,
     retention: { max_entries, max_age_ms }
   });
@@ -83,4 +83,3 @@ function getLocalStorageOrNull(): Storage | null {
     return null;
   }
 }
-
