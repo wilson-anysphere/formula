@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
   // Vite may occasionally trigger a one-time full reload after dependency optimization.
   // Retry once if the execution context is destroyed mid-wait.
@@ -262,7 +264,7 @@ test.describe("formula auditing overlays", () => {
       (window as any).__auditingStub = { formulas };
     });
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await gotoDesktop(page, "/", { waitForIdle: false, waitForContextMenu: false });
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {

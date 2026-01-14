@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("conflict overlay styling", () => {
   test("conflict toast/dialog use tokenized radii and compact spacing", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await gotoDesktop(page, "/", { waitForIdle: false, waitForContextMenu: false });
     await expect(page.locator("#grid")).toHaveCount(1);
 
     const styles = await page.evaluate(() => {
@@ -96,7 +98,7 @@ test.describe("conflict overlay styling", () => {
 
   test("conflict surfaces remain visibly outlined in forced-colors mode", async ({ page }) => {
     await page.emulateMedia({ forcedColors: "active" });
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await gotoDesktop(page, "/", { waitForIdle: false, waitForContextMenu: false });
     await expect(page.locator("#grid")).toHaveCount(1);
 
     const border = await page.evaluate(() => {
@@ -127,4 +129,3 @@ test.describe("conflict overlay styling", () => {
     expect(border.backgroundColor).not.toBe("");
   });
 });
-
