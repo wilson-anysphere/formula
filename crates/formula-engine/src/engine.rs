@@ -481,7 +481,10 @@ impl Workbook {
         if current == display_name {
             return false;
         }
-        if display_name.is_empty() {
+        // Sheet display names are Excel worksheet tab names, so they must follow Excel's name
+        // validation rules (max length, forbidden characters, etc.). If invalid, ignore the change
+        // to preserve a consistent workbook name mapping (and avoid creating unparseable formulas).
+        if formula_model::validate_sheet_name(display_name).is_err() {
             return false;
         }
 
@@ -1763,6 +1766,9 @@ impl Engine {
     /// observed by volatile worksheet functions (e.g. `CELL("address")`) and runtime-parsed
     /// references (e.g. `INDIRECT(...)`), so a recalculation tick is sufficient to refresh
     /// dependents in automatic calculation modes (no full-workbook dirtying needed).
+    ///
+    /// Invalid Excel sheet names (e.g. containing `:` / `[]`, leading/trailing apostrophe, or names
+    /// longer than 31 UTF-16 code units) are ignored and the workbook is left unchanged.
     pub fn set_sheet_display_name(&mut self, sheet_key: &str, display_name: &str) {
         let Some(sheet_id) = self.workbook.sheet_id_by_key(sheet_key) else {
             return;
