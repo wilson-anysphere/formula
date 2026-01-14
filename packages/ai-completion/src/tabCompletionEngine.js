@@ -413,6 +413,13 @@ export class TabCompletionEngine {
           type: "formula",
           confidence: 0.35,
         });
+      } else if (spec.name === "HLOOKUP") {
+        suggestions.push({
+          text: replaceSpan(input, token.start, token.end, "XLOOKUP("),
+          displayText: "XLOOKUP(",
+          type: "formula",
+          confidence: 0.35,
+        });
       }
     }
 

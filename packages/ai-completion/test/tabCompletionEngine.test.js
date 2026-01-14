@@ -192,6 +192,26 @@ test("Typing =VLO suggests VLOOKUP(", async () => {
   );
 });
 
+test("Typing =HLO suggests HLOOKUP( and a modern XLOOKUP( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=HLO",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=HLOOKUP("),
+    `Expected a HLOOKUP( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP("),
+    `Expected an XLOOKUP( alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 
