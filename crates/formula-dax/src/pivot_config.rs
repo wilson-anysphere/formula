@@ -137,6 +137,12 @@ fn pivot_measure_from_value_field(
             let name = name.trim();
             if is_measure_reference(name) {
                 // Back-compat for configs that still carry explicit `[Measure]` strings.
+                //
+                // Note: parse + re-format so unescaped `]` characters in legacy configs are
+                // converted into valid DAX bracket identifiers (escaped as `]]`).
+                if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(name) {
+                    return PivotMeasure::new(field.name.clone(), format_dax_measure_ref(&measure));
+                }
                 return PivotMeasure::new(field.name.clone(), name.to_string());
             }
             (base_table, name)
@@ -457,10 +463,24 @@ mod tests {
             base_item: None,
         };
 
+        let legacy_measure_field = ValueField {
+            // Back-compat: some configs store measure refs as explicit `[Measure]` strings.
+            //
+            // Intentionally omit the DAX-required escaping (`]]`) so the pivot layer is responsible
+            // for producing a valid bracket identifier.
+            source_field: PivotFieldRef::CacheFieldName("[Total]USD]".to_string()),
+            name: "Total Measure Legacy".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        };
+
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region]Name")],
             column_fields: vec![],
-            value_fields: vec![sum_amount_field, total_measure_field],
+            value_fields: vec![sum_amount_field, total_measure_field, legacy_measure_field],
             filter_fields: vec![],
             calculated_fields: vec![],
             calculated_items: vec![],
@@ -478,9 +498,20 @@ mod tests {
                         Value::from("Fact[Region]Name]"),
                         Value::from("Sum Amount"),
                         Value::from("Total Measure"),
+                        Value::from("Total Measure Legacy"),
                     ],
-                    vec![Value::from("East"), Value::from(30.0), Value::from(30.0)],
-                    vec![Value::from("West"), Value::from(5.0), Value::from(5.0)],
+                    vec![
+                        Value::from("East"),
+                        Value::from(30.0),
+                        Value::from(30.0),
+                        Value::from(30.0),
+                    ],
+                    vec![
+                        Value::from("West"),
+                        Value::from(5.0),
+                        Value::from(5.0),
+                        Value::from(5.0),
+                    ],
                 ],
             }
         );
