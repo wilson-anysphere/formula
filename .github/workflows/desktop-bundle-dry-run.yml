@@ -213,8 +213,30 @@ jobs:
             exit 1
           fi
 
+      - name: Cache pinned Tauri CLI binary (cargo-tauri)
+        id: tauri-cli-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri*
+          # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
+
       - name: Install pinned Tauri CLI (cargo tauri)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
+
+      - name: Verify Tauri CLI version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${TAURI_CLI_VERSION}"
+          actual="$(cargo tauri --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
 
       - name: Print Tauri CLI version
         run: cargo tauri --version
