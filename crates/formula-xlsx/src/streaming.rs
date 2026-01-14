@@ -3744,6 +3744,14 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     }
 
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
+    let value_eq = cell_value_semantics_eq(
+        existing_t.as_deref(),
+        &inner_events,
+        &patch.value,
+        patch.shared_string_idx,
+    )?;
+    let update_value = !value_eq || clear_cached_value;
+
     // `vm="..."` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
     //
     // We generally preserve it for fidelity. The main exception is the embedded in-cell image
@@ -3771,16 +3779,6 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     } else {
         false
     };
-    let value_eq = if drop_vm_on_value_change {
-        cell_value_semantics_eq(
-            existing_t.as_deref(),
-            &inner_events,
-            &patch.value,
-            patch.shared_string_idx,
-        )?
-    } else {
-        true
-    };
     let drop_vm = if patch.vm.is_none() {
         (existing_is_rich_value_placeholder && !patch_is_rich_value_placeholder)
             || (drop_vm_on_value_change && (clear_cached_value || !value_eq))
@@ -3792,7 +3790,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     let mut has_r = false;
     for attr in cell_start.attributes() {
         let attr = attr?;
-        if attr.key.as_ref() == b"t" {
+        if attr.key.as_ref() == b"t" && update_value {
             continue;
         }
         if attr.key.as_ref() == b"s" && style_override.is_some() {
@@ -3814,12 +3812,16 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         c.push_attribute(("r", a1.as_str()));
     }
 
-    let (cell_t_owned, body_kind) = cell_representation(
-        &patch.value,
-        patch_formula,
-        existing_t.as_deref(),
-        patch.shared_string_idx,
-    )?;
+    let (cell_t_owned, body_kind) = if update_value {
+        cell_representation(
+            &patch.value,
+            patch_formula,
+            existing_t.as_deref(),
+            patch.shared_string_idx,
+        )?
+    } else {
+        (None, CellBodyKind::None)
+    };
 
     if let Some(xf_index) = style_override {
         if xf_index != 0 {
@@ -3828,8 +3830,10 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         }
     }
 
-    if let Some(t) = cell_t_owned.as_deref() {
-        c.push_attribute(("t", t));
+    if update_value {
+        if let Some(t) = cell_t_owned.as_deref() {
+            c.push_attribute(("t", t));
+        }
     }
 
     let vm_value = patch.vm.flatten().map(|vm| vm.to_string());
@@ -3847,6 +3851,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         writer,
         &inner_events,
         patch_formula,
+        update_value,
         &body_kind,
         clear_cached_value,
         &f_tag,
@@ -3862,6 +3867,7 @@ fn write_patched_cell_children<W: Write>(
     writer: &mut Writer<W>,
     inner_events: &[Event<'static>],
     patch_formula: Option<&str>,
+    update_value: bool,
     body_kind: &CellBodyKind,
     clear_cached_value: bool,
     f_tag: &str,
@@ -3870,7 +3876,8 @@ fn write_patched_cell_children<W: Write>(
     t_tag: &str,
 ) -> Result<(), StreamingPatchError> {
     let mut formula_written = patch_formula.is_none();
-    let mut value_written = matches!(body_kind, CellBodyKind::None) || clear_cached_value;
+    let mut value_written =
+        !update_value || matches!(body_kind, CellBodyKind::None) || clear_cached_value;
     let mut saw_formula = false;
     let mut saw_value = false;
 
@@ -3928,12 +3935,16 @@ fn write_patched_cell_children<W: Write>(
                         formula_written = true;
                     }
                 }
-                if !value_written {
+                if update_value && !value_written {
                     write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
 
-                idx = skip_owned_subtree(inner_events, idx);
+                if update_value || clear_cached_value {
+                    idx = skip_owned_subtree(inner_events, idx);
+                } else {
+                    idx = write_owned_subtree(writer, inner_events, idx)?;
+                }
                 continue;
             }
             Event::Empty(e)
@@ -3948,11 +3959,14 @@ fn write_patched_cell_children<W: Write>(
                         formula_written = true;
                     }
                 }
-                if !value_written {
+                if update_value && !value_written {
                     write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
 
+                if !update_value && !clear_cached_value {
+                    writer.write_event(Event::Empty(e.clone()))?;
+                }
                 idx += 1;
                 continue;
             }
@@ -3963,7 +3977,7 @@ fn write_patched_cell_children<W: Write>(
                         formula_written = true;
                     }
                 }
-                if !value_written && !saw_value {
+                if update_value && !value_written && !saw_value {
                     write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
@@ -3978,11 +3992,43 @@ fn write_patched_cell_children<W: Write>(
             write_formula_element(writer, None, formula, false, f_tag)?;
         }
     }
-    if !value_written {
+    if update_value && !value_written {
         write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
     }
 
     Ok(())
+}
+
+fn write_owned_subtree<W: Write>(
+    writer: &mut Writer<W>,
+    events: &[Event<'static>],
+    mut idx: usize,
+) -> Result<usize, StreamingPatchError> {
+    match &events[idx] {
+        Event::Start(_) => {
+            let mut depth = 0usize;
+            while idx < events.len() {
+                let ev = events[idx].clone();
+                match &ev {
+                    Event::Start(_) => depth += 1,
+                    Event::End(_) => {
+                        depth = depth.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+                writer.write_event(ev)?;
+                idx += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(idx)
+        }
+        _ => {
+            writer.write_event(events[idx].clone())?;
+            Ok(idx + 1)
+        }
+    }
 }
 
 fn skip_owned_subtree(events: &[Event<'static>], mut idx: usize) -> usize {
@@ -4249,50 +4295,86 @@ fn extract_cell_v_text(events: &[Event<'static>]) -> Result<Option<String>, Stre
 fn extract_cell_inline_string_text(
     events: &[Event<'static>],
 ) -> Result<Option<String>, StreamingPatchError> {
+    fn is_visible_inline_string_t(stack: &[Vec<u8>]) -> bool {
+        // stack: ["is", ... , "t"]
+        if !stack.last().is_some_and(|n| n.as_slice() == b"t") {
+            return false;
+        }
+        // `<rPh>` phonetic guide text is not visible.
+        if stack.iter().any(|n| n.as_slice() == b"rPh") {
+            return false;
+        }
+        // Visible text lives in either:
+        // - <is><t>...</t></is>
+        // - <is><r><t>...</t></r></is>
+        if stack.len() == 2 && stack[0].as_slice() == b"is" {
+            return true;
+        }
+        if stack.len() >= 3 && stack[0].as_slice() == b"is" && stack[1].as_slice() == b"r" {
+            return true;
+        }
+        false
+    }
+
     let mut in_is = false;
-    let mut is_depth: usize = 0;
-    let mut in_t = false;
+    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut in_visible_t = false;
     let mut out = String::new();
 
     for ev in events {
         match ev {
             Event::Start(e) => {
-                if local_name(e.name().as_ref()) == b"is" {
-                    in_is = true;
-                    is_depth = 1;
-                    in_t = false;
-                    out.clear();
+                let name = local_name(e.name().as_ref()).to_vec();
+
+                if !in_is {
+                    if name.as_slice() == b"is" {
+                        in_is = true;
+                        stack.clear();
+                        stack.push(b"is".to_vec());
+                        out.clear();
+                        in_visible_t = false;
+                    }
                     continue;
                 }
-                if in_is {
-                    is_depth += 1;
-                    if local_name(e.name().as_ref()) == b"t" {
-                        in_t = true;
-                    }
+
+                // Inside `<is>...</is>`.
+                stack.push(name.clone());
+                if name.as_slice() == b"t" && is_visible_inline_string_t(&stack) {
+                    in_visible_t = true;
                 }
             }
             Event::End(e) => {
                 if !in_is {
                     continue;
                 }
-                if local_name(e.name().as_ref()) == b"t" {
-                    in_t = false;
-                } else if local_name(e.name().as_ref()) == b"is" {
+
+                let name = local_name(e.name().as_ref()).to_vec();
+                if name.as_slice() == b"t" && in_visible_t {
+                    in_visible_t = false;
+                }
+                if name.as_slice() == b"is" {
                     return Ok(Some(out));
                 }
-                is_depth = is_depth.saturating_sub(1);
-                if is_depth == 0 {
+
+                // Best-effort: assume well-formed nesting and pop once.
+                stack.pop();
+                if stack.is_empty() {
                     in_is = false;
-                    in_t = false;
+                    in_visible_t = false;
                 }
             }
             Event::Empty(e) => {
-                if in_is && local_name(e.name().as_ref()) == b"t" {
-                    // empty <t/> contributes no text
+                let name = local_name(e.name().as_ref()).to_vec();
+                if !in_is {
+                    if name.as_slice() == b"is" {
+                        return Ok(Some(String::new()));
+                    }
+                    continue;
                 }
+                // empty <t/> contributes no visible text
             }
-            Event::Text(t) if in_t => out.push_str(&t.unescape()?.into_owned()),
-            Event::CData(t) if in_t => out.push_str(&String::from_utf8_lossy(t.as_ref())),
+            Event::Text(t) if in_visible_t => out.push_str(&t.unescape()?.into_owned()),
+            Event::CData(t) if in_visible_t => out.push_str(&String::from_utf8_lossy(t.as_ref())),
             _ => {}
         }
     }

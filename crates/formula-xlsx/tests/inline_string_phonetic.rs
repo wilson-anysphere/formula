@@ -1,8 +1,9 @@
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::load_from_bytes;
+use formula_xlsx::{load_from_bytes, patch_xlsx_streaming, WorksheetCellPatch};
 use zip::write::FileOptions;
+use zip::ZipArchive;
 use zip::{CompressionMethod, ZipWriter};
 
 fn build_inline_string_phonetic_fixture_xlsx() -> Vec<u8> {
@@ -75,6 +76,58 @@ fn load_inline_string_ignores_phonetic_text() -> Result<(), Box<dyn std::error::
     let bytes = build_inline_string_phonetic_fixture_xlsx();
     let doc = load_from_bytes(&bytes)?;
 
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet(sheet_id).expect("sheet exists");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1")?),
+        CellValue::String("Base".to_string())
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_inline_string_phonetic_subtree_on_style_only_patch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_inline_string_phonetic_fixture_xlsx();
+
+    // Apply a style-only patch (value is unchanged) to force rewriting the `<c>` start tag.
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::String("Base".to_string()),
+        None,
+    )
+    .with_xf_index(Some(1));
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+    let out_bytes = out.into_inner();
+
+    let mut archive = ZipArchive::new(Cursor::new(out_bytes.clone()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    assert!(
+        sheet_xml.contains(r#"s="1""#),
+        "expected patched cell to contain s=\"1\" style attribute:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<phoneticPr"),
+        "expected worksheet XML to preserve <phoneticPr> subtree:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<rPh"),
+        "expected worksheet XML to preserve <rPh> subtree:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("PHO"),
+        "expected worksheet XML to preserve phonetic marker text:\n{sheet_xml}"
+    );
+
+    let doc = load_from_bytes(&out_bytes)?;
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet(sheet_id).expect("sheet exists");
     assert_eq!(
