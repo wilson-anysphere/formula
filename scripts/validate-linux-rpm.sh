@@ -784,7 +784,10 @@ validate_static() {
     local matched=0
     local needle
     for needle in "$@"; do
-      if printf '%s\n' "${requires}" | grep -Eqi "${needle}"; then
+      # Avoid `printf ... | grep -q ...` under `set -o pipefail`: `grep -q` may exit early,
+      # causing the upstream `printf` to receive SIGPIPE and return a non-zero status. That
+      # would make the pipeline look like "no match" and can flake under load.
+      if grep -Eqi "${needle}" <<<"${requires}"; then
         matched=1
         break
       fi
@@ -809,9 +812,10 @@ validate_static() {
     local matched=0
     local line
     while IFS= read -r line; do
-      if printf '%s\n' "$line" | grep -Eqi "${left_re}" &&
-        printf '%s\n' "$line" | grep -Eqi "${right_re}" &&
-        printf '%s\n' "$line" | grep -Eqi "${word_boundary_or_re}"
+      # Use here-strings (not pipes) for the same SIGPIPE/pipefail reason as `assert_requires_any`.
+      if grep -Eqi "${left_re}" <<<"$line" &&
+        grep -Eqi "${right_re}" <<<"$line" &&
+        grep -Eqi "${word_boundary_or_re}" <<<"$line"
       then
         matched=1
         break
