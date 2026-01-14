@@ -3,8 +3,14 @@
 This directory contains a small, standalone generator for producing **Office-encrypted OOXML**
 workbooks (`.xlsx`) without Excel.
 
-It is primarily intended to **regenerate** the encrypted fixture binaries under
+It is an **alternative** regeneration tool for the encrypted OOXML fixtures under
 `fixtures/encrypted/ooxml/` (or to create new ones).
+
+Note: the **committed fixture bytes** in `fixtures/encrypted/ooxml/` are generated via Python +
+[`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
+`fixtures/encrypted/ooxml/README.md` for the canonical recipe, tool versions, and padding notes).
+This Apache POI generator is provided as a convenient cross-platform option, but it is **not** used
+to produce the committed fixture binaries.
 
 ## What it generates
 
