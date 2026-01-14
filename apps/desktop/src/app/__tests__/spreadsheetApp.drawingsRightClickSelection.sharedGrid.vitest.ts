@@ -482,7 +482,6 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       selectionRange: document.createElement("div"),
       activeValue: document.createElement("div"),
     };
-
     const app = new SpreadsheetApp(root, status);
     expect(app.getGridMode()).toBe("shared");
 
@@ -517,7 +516,6 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       selectionRange: document.createElement("div"),
       activeValue: document.createElement("div"),
     };
-
     const app = new SpreadsheetApp(root, status);
     expect(app.getGridMode()).toBe("shared");
 
