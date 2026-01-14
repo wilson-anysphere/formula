@@ -762,6 +762,37 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.focus).not.toHaveBeenCalled();
   });
 
+  it("no-ops undo/redo when the desktop shell reports editing via the global edit flag", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      isEditing: vi.fn(() => false),
+      undo: vi.fn(),
+      redo: vi.fn(),
+    } as any;
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+      await commandRegistry.executeCommand("edit.undo");
+      await commandRegistry.executeCommand("edit.redo");
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(app.undo).not.toHaveBeenCalled();
+    expect(app.redo).not.toHaveBeenCalled();
+  });
+
   it("registers required commands and respects edit-state guards", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {

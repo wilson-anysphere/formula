@@ -525,6 +525,9 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("undo");
         return;
       }
+      // Workbook history undo should not run while a cell/formula edit is active (including
+      // split-view secondary editor sessions surfaced via `__formulaSpreadsheetIsEditing`).
+      if (isEditingFn()) return;
       app.undo();
     },
     {
@@ -548,6 +551,9 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("redo");
         return;
       }
+      // Workbook history redo should not run while a cell/formula edit is active (including
+      // split-view secondary editor sessions surfaced via `__formulaSpreadsheetIsEditing`).
+      if (isEditingFn()) return;
       app.redo();
     },
     {
