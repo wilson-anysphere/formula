@@ -36,6 +36,8 @@ pub mod drawings;
 mod encrypted;
 pub mod embedded_cell_images;
 pub mod embedded_images;
+#[cfg(not(target_arch = "wasm32"))]
+mod encrypted_ole;
 mod formula_text;
 pub mod hyperlinks;
 mod lazy_package;
@@ -137,6 +139,8 @@ pub use read::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
+#[cfg(not(target_arch = "wasm32"))]
+pub use encrypted_ole::{load_from_encrypted_ole_bytes, read_workbook_from_encrypted_reader};
 pub use recalc_policy::RecalcPolicy;
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
