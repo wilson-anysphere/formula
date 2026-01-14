@@ -73,7 +73,9 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
       await field.fill('"0.00'); // unbalanced quotes -> invalid
       await page.getByTestId("input-box-ok").click();
       await expect(dialog).toHaveCount(0);
-      await expect(page.getByTestId("toast").first()).toHaveText("Invalid number format code.");
+      const toast = page.getByTestId("toast").first();
+      await expect(toast).toHaveAttribute("data-type", "warning");
+      await expect(toast).toContainText("Invalid number format");
       await expect.poll(() => getA1NumberFormat(page), { timeout: 5_000 }).toBe("#,##0");
 
       // Re-open the prompt to verify it pre-fills with the newly-applied format and that "General"
