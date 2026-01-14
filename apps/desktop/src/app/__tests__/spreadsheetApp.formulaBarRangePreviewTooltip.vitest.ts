@@ -195,6 +195,49 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("refreshes the tooltip sample when referenced cell values change", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=A1", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("A1");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    let cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["1"]);
+
+    // Update referenced value; the tooltip should re-render on the next hover update.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 99);
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["99"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("clears the tooltip when the active cell changes while hovering a reference in view mode", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");
