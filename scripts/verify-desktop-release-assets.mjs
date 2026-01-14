@@ -1499,6 +1499,7 @@ export {
   isPrimaryBundleOrSig,
   isPrimaryBundleAssetName,
   normalizeVersion,
+  validateReleaseExpectations,
   verifyUpdaterManifestSignature,
   validateLatestJson,
 };

@@ -6,6 +6,7 @@ import {
   filenameFromUrl,
   isPrimaryBundleAssetName,
   isPrimaryBundleOrSig,
+  validateReleaseExpectations,
   validateLatestJson,
   verifyUpdaterManifestSignature,
 } from "./verify-desktop-release-assets.mjs";
@@ -238,5 +239,205 @@ test("verifyUpdaterManifestSignature fails on key id mismatch (minisign payload)
   assert.throws(
     () => verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, pubkeyBase64),
     (err) => err instanceof ActionableError && /key id mismatch/i.test(err.message),
+  );
+});
+
+test("validateReleaseExpectations passes for complete multi-arch windows assets + updater keys", () => {
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-x86_64", "windows-x64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-aarch64", "windows-arm64"],
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
+    },
+  };
+
+  const assetNames = ["Formula_0.1.0_x64.msi", "Formula_0.1.0_arm64.msi"];
+
+  assert.doesNotThrow(() =>
+    validateReleaseExpectations({
+      manifest,
+      expectedVersion: "0.1.0",
+      assetNames,
+      expectedTargets,
+    }),
+  );
+});
+
+test("validateReleaseExpectations fails when an expected installer is missing", () => {
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
+    },
+  };
+
+  // Missing the arm64 installer.
+  const assetNames = ["Formula_0.1.0_x64.msi"];
+
+  assert.throws(
+    () =>
+      validateReleaseExpectations({
+        manifest,
+        expectedVersion: "0.1.0",
+        assetNames,
+        expectedTargets,
+      }),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("expectation errors") &&
+      err.message.includes("Missing installer asset"),
+  );
+});
+
+test("validateReleaseExpectations fails when latest.json is missing an expected updater platform key", () => {
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      // Missing windows-aarch64
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+    },
+  };
+
+  const assetNames = ["Formula_0.1.0_x64.msi", "Formula_0.1.0_arm64.msi"];
+
+  assert.throws(
+    () =>
+      validateReleaseExpectations({
+        manifest,
+        expectedVersion: "0.1.0",
+        assetNames,
+        expectedTargets,
+      }),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("Missing updater platform entry") &&
+      err.message.includes("windows-arm64"),
+  );
+});
+
+test("validateReleaseExpectations fails on ambiguous multi-arch assets that omit arch tokens", () => {
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
+    },
+  };
+
+  // Ambiguous installer: would collide across architectures if uploaded twice.
+  const assetNames = ["Formula_0.1.0_x64.msi", "Formula_0.1.0_arm64.msi", "Formula_0.1.0.msi"];
+
+  assert.throws(
+    () =>
+      validateReleaseExpectations({
+        manifest,
+        expectedVersion: "0.1.0",
+        assetNames,
+        expectedTargets,
+      }),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("Ambiguous artifacts") &&
+      err.message.includes("windows"),
+  );
+});
+
+test("validateReleaseExpectations allows missing arch token for macos-universal installers", () => {
+  const expectedTargets = [
+    {
+      id: "macos-universal",
+      os: "macos",
+      arch: "universal",
+      installerExts: [".dmg", ".pkg"],
+      updaterPlatformKeys: ["darwin-universal"],
+      allowMissingArchInInstallerName: true,
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "darwin-universal": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assetNames = ["Formula_0.1.0.dmg", "Formula_0.1.0.app.tar.gz"];
+
+  assert.doesNotThrow(() =>
+    validateReleaseExpectations({
+      manifest,
+      expectedVersion: "0.1.0",
+      assetNames,
+      expectedTargets,
+    }),
   );
 });

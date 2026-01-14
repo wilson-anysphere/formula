@@ -36,7 +36,7 @@ function printUsage() {
 Release smoke test
 
 Usage:
-  node scripts/release-smoke-test.mjs --tag vX.Y.Z [--repo owner/name] [--token <token>] [--local-bundles]
+  node scripts/release-smoke-test.mjs --tag vX.Y.Z [--repo owner/name] [--token <token>] [--local-bundles] [expectations...]
 
 Options:
   --tag            Required. Release tag (example: v0.2.3).
@@ -45,6 +45,17 @@ Options:
                      - or inferred from git remote "origin" (if possible)
   --token          GitHub token. Defaults to $GITHUB_TOKEN (if set).
   --local-bundles  Also run any platform-specific local bundle validators (if present).
+
+Expectations (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
+  --expectations <file>     Load expected targets from a JSON config file
+  --expect-windows-x64
+  --expect-windows-arm64
+  --expect-macos-universal
+  --expect-macos-x64
+  --expect-macos-arm64
+  --expect-linux-x64
+  --expect-linux-arm64
+
   -h, --help       Print this help.
 `;
   console.log(usage.trimEnd());
@@ -65,6 +76,22 @@ function parseArgs(argv) {
     }
     if (arg === "--local-bundles") {
       out.localBundles = true;
+      continue;
+    }
+    if (arg === "--expectations" || arg.startsWith("--expectations=")) {
+      const value =
+        arg === "--expectations" ? argv[i + 1] : arg.slice("--expectations=".length);
+      if (!value || value.startsWith("-")) {
+        die(`Missing value for --expectations.\n\nRun with --help for usage.`);
+      }
+      out.expectations = value;
+      if (arg === "--expectations") i++;
+      continue;
+    }
+    if (arg.startsWith("--expect-")) {
+      const list = Array.isArray(out.expectFlags) ? out.expectFlags : [];
+      list.push(arg);
+      out.expectFlags = list;
       continue;
     }
     if (arg === "--tag" || arg === "--repo" || arg === "--token") {
@@ -533,6 +560,12 @@ async function main() {
         tag,
         "--repo",
         repo,
+        ...(typeof args.expectations === "string" && args.expectations.trim().length > 0
+          ? ["--expectations", args.expectations.trim()]
+          : []),
+        ...(Array.isArray(args.expectFlags)
+          ? args.expectFlags.map((v) => String(v)).filter((v) => v.startsWith("--"))
+          : []),
       ],
       env: token ? { ...process.env, GITHUB_TOKEN: token } : process.env,
       skipIfMissing: false,
