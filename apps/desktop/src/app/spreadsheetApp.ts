@@ -21346,6 +21346,7 @@ export class SpreadsheetApp {
       return;
     }
     try {
+      const sheetId = this.sheetId;
       if (this.selectedDrawingId != null) {
         await this.cutSelectedDrawingToClipboard();
         return;
@@ -21375,14 +21376,14 @@ export class SpreadsheetApp {
       if (dlp) {
         enforceClipboardCopy({
           documentId: dlp.documentId,
-          sheetId: this.sheetId,
+          sheetId,
           range: cellRange,
           classificationStore: dlp.classificationStore,
           policy: dlp.policy
         });
       }
 
-       const grid = getCellGridFromRange(this.document, this.sheetId, cellRange) as any[][];
+       const grid = getCellGridFromRange(this.document, sheetId, cellRange) as any[][];
        const coordScratch = { row: 0, col: 0 };
        const baseRow = cellRange.start.row;
        const baseCol = cellRange.start.col;
@@ -21393,7 +21394,7 @@ export class SpreadsheetApp {
            if (!cell || cell.formula == null) continue;
            coordScratch.row = baseRow + r;
            coordScratch.col = baseCol + c;
-           const computed = this.getCellComputedValue(coordScratch) as any;
+           const computed = this.getCellComputedValueForSheetInternal(sheetId, coordScratch) as any;
            cell.value = computed ?? "";
          }
        }
@@ -21410,7 +21411,7 @@ export class SpreadsheetApp {
 
       this.document.beginBatch({ label });
       this.document.clearRange(
-        this.sheetId,
+        sheetId,
         {
           start: { row: range.startRow, col: range.startCol },
           end: { row: range.endRow, col: range.endCol }
@@ -21421,7 +21422,9 @@ export class SpreadsheetApp {
 
       this.syncEngineNow();
       this.refresh();
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
     } catch (err) {
       const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
       if (isDlpViolation) {
