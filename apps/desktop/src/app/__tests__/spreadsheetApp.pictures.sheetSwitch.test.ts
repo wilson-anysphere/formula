@@ -93,6 +93,15 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function deleteSeededCharts(app: SpreadsheetApp): void {
+  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
+  // default, that chart appears in drawings APIs (e.g. `getDrawingsDebugState`) and can break tests
+  // that assert on picture counts. Remove it so these tests can focus on sheet switching behavior.
+  for (const chart of app.listCharts()) {
+    (app as any).chartStore.deleteChart(chart.id);
+  }
+}
+
 describe("SpreadsheetApp pictures/drawings sheet switching", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
@@ -147,6 +156,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    deleteSeededCharts(app);
     const file = new File([new Uint8Array([1, 2, 3, 4])], "cat.png", { type: "image/png" });
     await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
 
@@ -188,6 +198,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     // Enable the shared-grid drawing interaction controller so pointer gestures
     // would normally commit via `commitObjects` on pointerup.
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    deleteSeededCharts(app);
 
     const file = new File([new Uint8Array([1, 2, 3, 4])], "cat.png", { type: "image/png" });
     await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
@@ -261,6 +272,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    deleteSeededCharts(app);
     const doc: any = app.getDocument();
 
     const file = new File([new Uint8Array([1, 2, 3, 4])], "cat.png", { type: "image/png" });
@@ -327,6 +339,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     };
 
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    deleteSeededCharts(app);
     const doc: any = app.getDocument();
 
     // Seed a drawing on Sheet1 and select it.
@@ -376,6 +389,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    deleteSeededCharts(app);
     const doc: any = app.getDocument();
 
     // Ensure Sheet2 exists so we can switch away while the image bytes are still loading.

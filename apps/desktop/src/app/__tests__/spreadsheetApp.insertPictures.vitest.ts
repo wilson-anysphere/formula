@@ -72,6 +72,17 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function createApp(root: HTMLElement, status: { activeCell: HTMLElement; selectionRange: HTMLElement; activeValue: HTMLElement }): SpreadsheetApp {
+  const app = new SpreadsheetApp(root, status);
+  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
+  // default, that chart appears in `getDrawingObjects()` and would make these picture-focused tests
+  // assert on the wrong object counts.
+  for (const chart of app.listCharts()) {
+    (app as any).chartStore.deleteChart(chart.id);
+  }
+  return app;
+}
+
 describe("SpreadsheetApp insertPicturesFromFiles", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -117,7 +128,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
 
     await app.insertPicturesFromFiles([file]);
@@ -150,7 +161,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const file1 = new File([new Uint8Array([1])], "a.png", { type: "image/png" });
     const file2 = new File([new Uint8Array([2])], "b.png", { type: "image/png" });
 
@@ -174,7 +185,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     // Simulate a selected chart (e.g. user previously clicked a chart). Inserting a picture should
     // clear chart selection so ribbon/panels reflect the newly-selected picture.
     (app as any).selectedChartId = "chart_123";
@@ -198,7 +209,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
 
     const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const sheetId = app.getCurrentSheetId();
 
     // Construct a minimal PNG header with an oversized IHDR width.
@@ -230,7 +241,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const docAny = app.getDocument() as any;
 
     // Force the document mutation to fail so we can assert we don't persist image bytes.

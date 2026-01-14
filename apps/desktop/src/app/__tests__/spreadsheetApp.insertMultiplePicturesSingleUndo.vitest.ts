@@ -71,6 +71,17 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function createApp(root: HTMLElement, status: { activeCell: HTMLElement; selectionRange: HTMLElement; activeValue: HTMLElement }): SpreadsheetApp {
+  const app = new SpreadsheetApp(root, status);
+  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
+  // default, that chart appears in `getDrawingObjects()` and would interfere with picture-focused
+  // tests that assert object counts.
+  for (const chart of app.listCharts()) {
+    (app as any).chartStore.deleteChart(chart.id);
+  }
+  return app;
+}
+
 describe("SpreadsheetApp insertPicturesFromFiles (multi-file) undo batching", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -122,7 +133,7 @@ describe("SpreadsheetApp insertPicturesFromFiles (multi-file) undo batching", ()
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
 

@@ -119,6 +119,12 @@ describe("SpreadsheetApp drawings undo/redo integration", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
+      // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled
+      // by default, that chart is rendered via the drawings overlay and would make these assertions
+      // on overlay object counts flaky. Remove it so the test can focus on picture undo/redo.
+      for (const chart of app.listCharts()) {
+        (app as any).chartStore.deleteChart(chart.id);
+      }
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
 
