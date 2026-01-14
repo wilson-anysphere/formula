@@ -1,4 +1,4 @@
-# MS-OFFCRYPTO Standard/CryptoAPI AES: `EncryptedPackage` decryption notes
+# MS-OFFCRYPTO Standard/CryptoAPI AES: `EncryptedPackage` decryption notes (AES-ECB)
 
 This repo detects password-protected / encrypted OOXML workbooks as an **OLE/CFB** container with
 `EncryptionInfo` + `EncryptedPackage` streams (MS-OFFCRYPTO).
@@ -31,6 +31,22 @@ cluster around:
 For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
 [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
+See also:
+
+- `docs/offcrypto-standard-cryptoapi.md` (Standard key derivation + verifier validation)
+- `docs/offcrypto-standard-cryptoapi-rc4.md` (Standard CryptoAPI RC4 notes; different block size/keying)
+
+## Implementation references in this repo
+
+- **`formula-io` `EncryptedPackage` decryptors**:
+  - `crates/formula-io/src/offcrypto/encrypted_package.rs`
+    - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV)
+    - `decrypt_standard_encrypted_package_stream` (buffered; also attempts a non-standard segmented fallback when a salt is available)
+- **`formula-offcrypto` Standard AES-ECB helper**:
+  - `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
+- **More permissive Standard decryptor (handles additional variants)**:
+  - `crates/formula-office-crypto/src/standard.rs`
+
 ## Normative spec references (MS-OFFCRYPTO)
 
 * **`\\EncryptedPackage` stream layout**: MS-OFFCRYPTO **§2.3.4.4** “`\\EncryptedPackage` Stream”.
@@ -48,7 +64,7 @@ For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
 1. `orig_size` (8-byte plaintext size prefix; `StreamSize` in the spec): decrypted package size in
    bytes.
 2. `ciphertext: [u8]` (`EncryptedData` in the spec): encrypted bytes of the underlying OPC package
-   (the `.xlsx` ZIP bytes).
+   (the `.xlsx` ZIP bytes), padded to a cipher block boundary.
 
 Compatibility note: while MS-OFFCRYPTO describes the 8-byte prefix as a `u64le`, some
 producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0). To be compatible, parse
@@ -63,16 +79,32 @@ orig_size = lo as u64 | ((hi as u64) << 32)
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 
-## AES decryption (Standard/CryptoAPI AES is AES-ECB, no IV)
+## AES decryption (baseline: AES-ECB, no IV)
 
 Decrypt the ciphertext bytes (everything after the 8-byte size prefix) with **AES-ECB(key)**:
 
-* AES key: derived from the password and `EncryptionInfo` (out of scope for this note).
+* AES key: derived from the password and `EncryptionInfo` (see `docs/offcrypto-standard-cryptoapi.md`).
 * Mode: ECB (no IV).
 * Padding: none at the crypto layer (ciphertext is block-aligned).
 * Ciphertext length must be a **multiple of 16** bytes.
 
-Implementation pointer: `crates/formula-offcrypto/src/lib.rs` (`decrypt_standard_only`).
+Implementation pointers:
+
+* `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
+* `crates/formula-io/src/offcrypto/encrypted_package.rs`: `decrypt_encrypted_package_standard_aes_to_writer`
+
+### Non-standard segmented fallback (seen in some producers)
+
+Some non-Excel producers encrypt `EncryptedPackage` as **0x1000-byte segments** using **AES-CBC**
+with a per-segment IV derived from the verifier salt and segment index:
+
+```text
+iv_i = SHA1(salt || LE32(i))[0..16]
+```
+
+This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB), but it is common enough
+that `formula-io`’s `decrypt_standard_encrypted_package_stream` attempts it as a fallback when a
+salt is available.
 
 ## Padding + truncation (do not trust PKCS#7)
 

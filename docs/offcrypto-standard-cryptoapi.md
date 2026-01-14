@@ -30,6 +30,30 @@ HMAC), see `docs/22-ooxml-encryption.md`.
 
 ---
 
+## Implementation references in this repo
+
+If you’re changing or debugging the code, start here:
+
+* Standard/CryptoAPI parsing + key derivation + verifier check:
+  * `crates/formula-offcrypto/src/lib.rs`:
+    * `parse_encryption_info` (Standard branch)
+    * `standard_derive_key` / `standard_verify_key` (Excel-default AES/SHA-1)
+  * `crates/formula-io/src/offcrypto/standard.rs`:
+    * `parse_encryption_info_standard`
+    * `verify_password_standard`
+* `EncryptedPackage` decryption helpers:
+  * `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
+  * `crates/formula-io/src/offcrypto/encrypted_package.rs`:
+    * `decrypt_encrypted_package_standard_aes_to_writer` (streaming AES-ECB)
+    * `decrypt_standard_encrypted_package_stream` (buffered; includes a non-standard segmented fallback)
+* More permissive Standard decryptor (supports more variants than `formula-offcrypto`):
+  * `crates/formula-office-crypto/src/standard.rs`
+* Related docs:
+  * `docs/offcrypto-standard-encryptedpackage.md`
+  * `docs/offcrypto-standard-cryptoapi-rc4.md`
+
+---
+
 ## 1) Detecting “Standard” encryption (`versionMinor == 2`, commonly 3.2)
 
 An encrypted OOXML file is an **OLE Compound File** (CFB) containing (at minimum) these streams:
@@ -45,11 +69,11 @@ To detect **Standard (CryptoAPI)** encryption:
    * `major: u16le`
    * `minor: u16le`
    * `flags: u32le`
-4. Standard encryption (as produced by Excel/Office 2007-era “Standard” encryption) is identified by:
+4. Standard encryption is identified by:
 
 ```text
-major = 3
 minor = 2
+major ∈ {2, 3, 4}   // Excel commonly uses 3.2; other producers may emit 4.2, etc.
 ```
 
 Some producers also emit other `*.2` major versions (e.g. `4.2`) while still using the same
@@ -313,7 +337,7 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 ```
 
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
-(AES-256), and `SHA1(inner||outer)` yields 40 bytes.
+(AES-256), and `inner || outer` yields 40 bytes for SHA‑1.
 
 ### 5.3) IV derivation: none for Standard AES-ECB
 
@@ -353,15 +377,15 @@ else:
   key = CryptDeriveKey(Hash, H_block0, keyLen=keyLen)             // §5.2.2
 ```
 
-### 6.2) Decrypt verifier + verifier-hash as a *single* stream
+### 6.2) Decrypt verifier fields (RC4 must be streamed; AES can be independent)
 
-This is the most common implementation bug:
+For **Standard RC4**, RC4 is a stream cipher and keystream position matters: the verifier and
+verifier-hash bytes must be decrypted as **one continuous stream**. The simplest approach is to
+concatenate the two ciphertext buffers and decrypt once.
 
-> **Decrypt `EncryptedVerifier` and `EncryptedVerifierHash` together as one ciphertext stream.**
-
-This matters most for **RC4**, where decrypting the two buffers separately would reset the keystream.
-For **AES-ECB**, decrypting separately happens to be equivalent (ECB has no chaining), but treating it
-as one stream keeps the implementation uniform across algorithms.
+For **Standard AES**, the verifier fields are **AES-ECB** (no IV), so there is no chaining and you
+may decrypt the two ciphertext blobs independently. (The concatenate+decrypt approach below also
+works for AES because ECB has no state.)
 
 Steps:
 
@@ -580,47 +604,19 @@ payload is **AES-ECB** encrypted ZIP bytes (then truncated to `origSize`).
 
 ### 8.2) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
 
-This second vector is useful because it demonstrates a common bug:
-**for AES-128, you still must run the `CryptDeriveKey` ipad/opad step**, even though the desired key
-length (16 bytes) is smaller than the SHA‑1 digest length (20 bytes).
+A common bug is to treat the AES-128 key as a simple truncation:
+`key = H_block0[0:16]`. Standard AES does **not** do that: the `CryptDeriveKey` ipad/opad expansion
+is still applied.
 
-Parameters:
-
-* Hash algorithm: SHA‑1
-* Cipher: AES‑128
-* KeySize: 128 bits → 16 bytes
-* spinCount: 50,000
-* `block = 0`
-
-Inputs:
-
-```text
-password = "Password1234_"
-passwordUtf16le =
-  50 00 61 00 73 00 73 00 77 00 6f 00 72 00 64 00 31 00 32 00 33 00 34 00 5f 00
-
-salt =
-  e8 82 66 49 0c 5b d1 ee bd 2b 43 94 e3 f8 30 ef
-```
-
-Derived values:
-
-```text
-H_final  = a00d5360ec463ee782df8c267525ae9ac66cd605
-H_block0 = e2f8cde457e5d449eb205057c88d201d14531ff3
-
-key (AES-128, 16 bytes; CryptDeriveKey result) =
-  40b13a71f90b966e375408f2d181a1aa
-
-Sanity check:
+Using the §8.1 values:
 
 ```text
 H_block0[0:16] =
-  e2f8cde457e5d449eb205057c88d201d
-```
+  11958e53fc62fdebc0107e2fae865014
 
-This is **not** the AES-128 key; if your code uses `H_block0[0:16]` directly, you will derive the
-wrong key.
+key (AES-128, 16 bytes; CryptDeriveKey result) =
+  5e8727d6c94408a903aececf1382b380
+```
 
 ### 8.3) RC4 per-block key example (128-bit)
 
