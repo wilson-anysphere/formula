@@ -2,7 +2,7 @@
 
 This document is a *from-scratch* implementation guide for decrypting **MS Office “Standard” encryption**
 (`EncryptionInfo` `versionMinor == 2`, commonly **3.2**) used by password-protected OOXML files (e.g.
-`.xlsx`, `.docx`, `.pptx`)
+`.xlsx`, `.xlsm`, `.xlsb`, `.docx`, `.pptx`)
 stored inside an OLE Compound File.
 
 It focuses on:
