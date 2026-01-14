@@ -6,6 +6,7 @@ use quick_xml::Reader;
 
 use crate::openxml::{parse_relationships, resolve_relationship_target, resolve_target};
 use crate::package::{XlsxError, XlsxPackage};
+use crate::sheet_metadata::parse_workbook_sheets;
 use crate::XlsxDocument;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,6 +14,12 @@ pub struct PivotChartPart {
     pub part_name: String,
     pub pivot_source_name: Option<String>,
     pub pivot_source_part: Option<String>,
+    pub placed_on_drawings: Vec<String>,
+    /// Sheet parts (worksheets or chartsheets) that host this chart (e.g. `xl/worksheets/sheet1.xml`,
+    /// `xl/chartsheets/sheet1.xml`).
+    pub placed_on_sheets: Vec<String>,
+    /// Workbook sheet names for [`Self::placed_on_sheets`] when resolvable from `xl/workbook.xml`.
+    pub placed_on_sheet_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,7 +48,18 @@ impl XlsxPackage {
     pub fn pivot_chart_parts_with_placement(
         &self,
     ) -> Result<Vec<PivotChartWithPlacement>, XlsxError> {
-        parse_pivot_chart_parts_with_placement(self)
+        // `pivot_chart_parts()` now resolves placement metadata directly on `PivotChartPart`, so this
+        // API is just a convenience wrapper that avoids duplicating relationship traversal.
+        let charts = self.pivot_chart_parts()?;
+        let mut out = Vec::with_capacity(charts.len());
+        for chart in charts {
+            out.push(PivotChartWithPlacement {
+                placed_on_drawings: chart.placed_on_drawings.clone(),
+                placed_on_sheets: chart.placed_on_sheets.clone(),
+                chart,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -87,14 +105,121 @@ where
     Part: Fn(&str) -> Option<&'a [u8]>,
     Resolve: Fn(&str, &str) -> Result<Option<String>, XlsxError>,
 {
+    let part_names: Vec<String> = part_names
+        .into_iter()
+        .map(|name| name.as_ref().strip_prefix('/').unwrap_or(name.as_ref()).to_string())
+        .collect();
+
     let mut chart_parts = Vec::new();
-    for name in part_names {
-        let name = name.as_ref();
-        let name = name.strip_prefix('/').unwrap_or(name);
+    let mut drawing_rels = Vec::new();
+    let mut worksheet_rels = Vec::new();
+    let mut chartsheet_rels = Vec::new();
+
+    for name in &part_names {
         if name.starts_with("xl/charts/") && name.ends_with(".xml") {
-            chart_parts.push(name.to_string());
+            chart_parts.push(name.clone());
+        } else if name.starts_with("xl/drawings/_rels/") && name.ends_with(".rels") {
+            drawing_rels.push(name.clone());
+        } else if name.starts_with("xl/worksheets/_rels/") && name.ends_with(".rels") {
+            worksheet_rels.push(name.clone());
+        } else if name.starts_with("xl/chartsheets/_rels/") && name.ends_with(".rels") {
+            chartsheet_rels.push(name.clone());
         }
     }
+
+    // Ensure deterministic output and avoid duplicates when producers emit multiple equivalent
+    // part names.
+    chart_parts.sort();
+    chart_parts.dedup();
+    drawing_rels.sort();
+    drawing_rels.dedup();
+    worksheet_rels.sort();
+    worksheet_rels.dedup();
+    chartsheet_rels.sort();
+    chartsheet_rels.dedup();
+
+    let mut chart_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for rels_name in drawing_rels {
+        let Some(rels_bytes) = part(&rels_name) else {
+            continue;
+        };
+        // Best-effort: malformed `.rels` parts are ignored.
+        let relationships = match parse_relationships(rels_bytes) {
+            Ok(relationships) => relationships,
+            Err(_) => continue,
+        };
+        let drawing_part = drawing_part_name_from_rels(&rels_name);
+        for rel in relationships {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            if !is_chart_relationship_type(&rel.type_uri) {
+                continue;
+            }
+            let target = resolve_target(&drawing_part, &rel.target);
+            if target.starts_with("xl/charts/") && target.ends_with(".xml") {
+                chart_to_drawings
+                    .entry(target)
+                    .or_default()
+                    .insert(drawing_part.clone());
+            }
+        }
+    }
+
+    let mut drawing_to_sheets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut chart_to_chartsheets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for rels_name in worksheet_rels.into_iter().chain(chartsheet_rels) {
+        let Some(rels_bytes) = part(&rels_name) else {
+            continue;
+        };
+        // Best-effort: malformed `.rels` parts are ignored.
+        let relationships = match parse_relationships(rels_bytes) {
+            Ok(relationships) => relationships,
+            Err(_) => continue,
+        };
+
+        let is_worksheet = rels_name.starts_with("xl/worksheets/_rels/");
+        let sheet_part = if is_worksheet {
+            worksheet_part_name_from_rels(&rels_name)
+        } else {
+            chartsheet_part_name_from_rels(&rels_name)
+        };
+
+        for rel in relationships {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            let type_uri = rel.type_uri.trim();
+            if is_drawing_relationship_type(type_uri) {
+                let target = resolve_target(&sheet_part, &rel.target);
+                if target.starts_with("xl/drawings/") {
+                    drawing_to_sheets
+                        .entry(target)
+                        .or_default()
+                        .insert(sheet_part.clone());
+                }
+            } else if !is_worksheet && is_chart_relationship_type(type_uri) {
+                // Chartsheets can link directly to chart parts without an intermediate drawing.
+                let target = resolve_target(&sheet_part, &rel.target);
+                if target.starts_with("xl/charts/") && target.ends_with(".xml") {
+                    chart_to_chartsheets
+                        .entry(target)
+                        .or_default()
+                        .insert(sheet_part.clone());
+                }
+            }
+        }
+    }
+
+    let sheet_name_by_part = sheet_name_by_part_with(&part, &resolve_relationship_target);
 
     let mut parts = Vec::with_capacity(chart_parts.len());
     for part_name in chart_parts {
@@ -114,182 +239,119 @@ where
             None => None,
         };
 
+        let placed_on_drawings = chart_to_drawings
+            .get(&part_name)
+            .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        let mut placed_on_sheets: BTreeSet<String> = BTreeSet::new();
+        for drawing in &placed_on_drawings {
+            if let Some(sheets) = drawing_to_sheets.get(drawing) {
+                placed_on_sheets.extend(sheets.iter().cloned());
+            }
+        }
+        if let Some(sheets) = chart_to_chartsheets.get(&part_name) {
+            placed_on_sheets.extend(sheets.iter().cloned());
+        }
+        let placed_on_sheets = placed_on_sheets.into_iter().collect::<Vec<_>>();
+
+        let mut placed_on_sheet_names: BTreeSet<String> = BTreeSet::new();
+        for sheet_part in &placed_on_sheets {
+            if let Some(name) = sheet_name_by_part.get(sheet_part) {
+                placed_on_sheet_names.insert(name.clone());
+            }
+        }
+        let placed_on_sheet_names = placed_on_sheet_names.into_iter().collect::<Vec<_>>();
+
         parts.push(PivotChartPart {
             part_name,
             pivot_source_name: parsed.and_then(|parsed| parsed.pivot_source_name),
             pivot_source_part,
+            placed_on_drawings,
+            placed_on_sheets,
+            placed_on_sheet_names,
         });
     }
 
     Ok(parts)
 }
 
-fn parse_pivot_chart_parts_with_placement(
-    package: &XlsxPackage,
-) -> Result<Vec<PivotChartWithPlacement>, XlsxError> {
-    let parts = parse_pivot_chart_parts(package)?;
-
-    let chart_to_drawings = build_chart_to_drawings_map(package)?;
-    let drawing_to_sheets = build_drawing_to_sheets_map(package)?;
-
-    let mut out = Vec::with_capacity(parts.len());
-    for chart in parts {
-        let placed_on_drawings = chart_to_drawings
-            .get(&chart.part_name)
-            .map(|set| set.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-
-        let mut placed_on_sheets: BTreeSet<String> = BTreeSet::new();
-        for drawing_part in &placed_on_drawings {
-            if let Some(sheets) = drawing_to_sheets.get(drawing_part) {
-                placed_on_sheets.extend(sheets.iter().cloned());
-            }
-        }
-
-        out.push(PivotChartWithPlacement {
-            chart,
-            placed_on_drawings,
-            placed_on_sheets: placed_on_sheets.into_iter().collect(),
-        });
-    }
-
-    Ok(out)
-}
-
-fn build_chart_to_drawings_map(
-    package: &XlsxPackage,
-) -> Result<BTreeMap<String, BTreeSet<String>>, XlsxError> {
-    let drawing_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/drawings/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let mut chart_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for rels_name in drawing_rels {
-        let rels_bytes = package
-            .part(&rels_name)
-            .ok_or_else(|| XlsxError::MissingPart(rels_name.clone()))?;
-        let relationships = parse_relationships(rels_bytes)?;
-        let drawing_part = part_name_from_rels(&rels_name, "xl/drawings/");
-
-        for rel in relationships {
-            if rel
-                .target_mode
-                .as_deref()
-                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-            {
-                continue;
-            }
-
-            let target = resolve_target(&drawing_part, &rel.target);
-            if is_chart_part(&target) {
-                chart_to_drawings
-                    .entry(target)
-                    .or_default()
-                    .insert(drawing_part.clone());
-            }
-        }
-    }
-
-    Ok(chart_to_drawings)
-}
-
-fn build_drawing_to_sheets_map(
-    package: &XlsxPackage,
-) -> Result<BTreeMap<String, BTreeSet<String>>, XlsxError> {
-    const REL_TYPE_DRAWING: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
-
-    let worksheet_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/worksheets/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let chartsheet_rels = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/chartsheets/_rels/") && name.ends_with(".rels"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let mut drawing_to_sheets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-
-    for rels_name in worksheet_rels {
-        let sheet_part = part_name_from_rels(&rels_name, "xl/worksheets/");
-        collect_sheet_drawings(
-            package,
-            &rels_name,
-            &sheet_part,
-            REL_TYPE_DRAWING,
-            &mut drawing_to_sheets,
-        )?;
-    }
-
-    for rels_name in chartsheet_rels {
-        let sheet_part = part_name_from_rels(&rels_name, "xl/chartsheets/");
-        collect_sheet_drawings(
-            package,
-            &rels_name,
-            &sheet_part,
-            REL_TYPE_DRAWING,
-            &mut drawing_to_sheets,
-        )?;
-    }
-
-    Ok(drawing_to_sheets)
-}
-
-fn collect_sheet_drawings(
-    package: &XlsxPackage,
-    rels_name: &str,
-    sheet_part: &str,
-    drawing_rel_type: &str,
-    drawing_to_sheets: &mut BTreeMap<String, BTreeSet<String>>,
-) -> Result<(), XlsxError> {
-    let rels_bytes = package
-        .part(rels_name)
-        .ok_or_else(|| XlsxError::MissingPart(rels_name.to_string()))?;
-    let relationships = parse_relationships(rels_bytes)?;
-
-    for rel in relationships {
-        if rel.type_uri != drawing_rel_type {
-            continue;
-        }
-        if rel
-            .target_mode
-            .as_deref()
-            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-        {
-            continue;
-        }
-
-        let target = resolve_target(sheet_part, &rel.target);
-        if is_drawing_part(&target) {
-            drawing_to_sheets
-                .entry(target)
-                .or_default()
-                .insert(sheet_part.to_string());
-        }
-    }
-
-    Ok(())
-}
-
-fn part_name_from_rels(rels_name: &str, base_dir: &str) -> String {
-    // Example: `xl/drawings/_rels/drawing1.xml.rels` -> `xl/drawings/drawing1.xml`
-    // Example: `xl/worksheets/_rels/sheet1.xml.rels` -> `xl/worksheets/sheet1.xml`
-    let prefix = format!("{base_dir}_rels/");
-    let trimmed = rels_name.strip_prefix(&prefix).unwrap_or(rels_name);
+fn drawing_part_name_from_rels(rels_name: &str) -> String {
+    // Example: xl/drawings/_rels/drawing1.xml.rels -> xl/drawings/drawing1.xml
+    let trimmed = rels_name
+        .strip_prefix("xl/drawings/_rels/")
+        .unwrap_or(rels_name);
     let trimmed = trimmed.strip_suffix(".rels").unwrap_or(trimmed);
-    format!("{base_dir}{trimmed}")
+    format!("xl/drawings/{trimmed}")
 }
 
-fn is_chart_part(part_name: &str) -> bool {
-    part_name.starts_with("xl/charts/chart") && part_name.ends_with(".xml")
+fn worksheet_part_name_from_rels(rels_name: &str) -> String {
+    // Example: xl/worksheets/_rels/sheet1.xml.rels -> xl/worksheets/sheet1.xml
+    let trimmed = rels_name
+        .strip_prefix("xl/worksheets/_rels/")
+        .unwrap_or(rels_name);
+    let trimmed = trimmed.strip_suffix(".rels").unwrap_or(trimmed);
+    format!("xl/worksheets/{trimmed}")
 }
 
-fn is_drawing_part(part_name: &str) -> bool {
-    part_name.starts_with("xl/drawings/drawing") && part_name.ends_with(".xml")
+fn chartsheet_part_name_from_rels(rels_name: &str) -> String {
+    // Example: xl/chartsheets/_rels/sheet1.xml.rels -> xl/chartsheets/sheet1.xml
+    let trimmed = rels_name
+        .strip_prefix("xl/chartsheets/_rels/")
+        .unwrap_or(rels_name);
+    let trimmed = trimmed.strip_suffix(".rels").unwrap_or(trimmed);
+    format!("xl/chartsheets/{trimmed}")
+}
+
+fn is_drawing_relationship_type(type_uri: &str) -> bool {
+    // Most producers use the canonical OfficeDocument relationship URI, but some third-party
+    // tools may vary the prefix. Since we only need to locate drawing parts, match by suffix.
+    type_uri.trim_end().ends_with("/drawing")
+}
+
+fn is_chart_relationship_type(type_uri: &str) -> bool {
+    // Most producers use the canonical OfficeDocument relationship URI, but some third-party
+    // tools may vary the prefix. Since we only need to locate chart parts, match by suffix.
+    type_uri.trim_end().ends_with("/chart")
+}
+
+fn sheet_name_by_part_with<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
+    resolve_relationship_target: &impl Fn(&str, &str) -> Result<Option<String>, XlsxError>,
+) -> BTreeMap<String, String> {
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = match part(workbook_part) {
+        Some(bytes) => bytes,
+        None => return BTreeMap::new(),
+    };
+    let workbook_xml = match String::from_utf8(workbook_xml.to_vec()) {
+        Ok(xml) => xml,
+        Err(_) => return BTreeMap::new(),
+    };
+    let sheets = match parse_workbook_sheets(&workbook_xml) {
+        Ok(sheets) => sheets,
+        Err(_) => return BTreeMap::new(),
+    };
+
+    let mut out = BTreeMap::new();
+    for sheet in sheets {
+        let resolved = resolve_relationship_target(workbook_part, &sheet.rel_id)
+            .ok()
+            .flatten()
+            .or_else(|| {
+                let guess_ws = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+                if part(&guess_ws).is_some() {
+                    return Some(guess_ws);
+                }
+                let guess_cs = format!("xl/chartsheets/sheet{}.xml", sheet.sheet_id);
+                part(&guess_cs).map(|_| guess_cs)
+            });
+        if let Some(part) = resolved {
+            out.insert(part, sheet.name);
+        }
+    }
+
+    out
 }
 
 #[derive(Debug)]
@@ -381,6 +443,9 @@ mod tests {
         assert_eq!(parts[0].part_name, "xl/charts/chart1.xml");
         assert_eq!(parts[0].pivot_source_name.as_deref(), Some("PivotTable1"));
         assert_eq!(parts[0].pivot_source_part, None);
+        assert!(parts[0].placed_on_drawings.is_empty());
+        assert!(parts[0].placed_on_sheets.is_empty());
+        assert!(parts[0].placed_on_sheet_names.is_empty());
     }
 
     #[test]
