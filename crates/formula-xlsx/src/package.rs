@@ -663,6 +663,19 @@ pub fn theme_palette_from_reader<R: Read + Seek>(
     Ok(Some(parse_theme_palette(&theme_xml)?))
 }
 
+/// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
+/// entire package, enforcing a maximum part size.
+pub fn theme_palette_from_reader_limited<R: Read + Seek>(
+    reader: R,
+    max_bytes: u64,
+) -> Result<Option<ThemePalette>, XlsxError> {
+    let Some(theme_xml) = read_part_from_reader_limited(reader, "xl/theme/theme1.xml", max_bytes)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(parse_theme_palette(&theme_xml)?))
+}
+
 /// Resolve ordered workbook sheets to worksheet part names without inflating the entire package.
 ///
 /// This is the streaming counterpart of [`XlsxPackage::worksheet_parts`]. It is intentionally
@@ -710,6 +723,157 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         Err(zip::result::ZipError::FileNotFound) => None,
         Err(err) => return Err(err.into()),
     };
+
+    let relationships = match rels_bytes.as_deref() {
+        Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
+        .into_iter()
+        .map(|rel| (rel.id.clone(), rel))
+        .collect();
+
+    let workbook_part = "xl/workbook.xml";
+    let mut out = Vec::with_capacity(sheets.len());
+    for sheet in sheets {
+        let resolved = rel_by_id
+            .get(&sheet.rel_id)
+            .filter(|rel| {
+                !rel.target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            })
+            .map(|rel| crate::path::resolve_target(workbook_part, &rel.target))
+            .or_else(|| {
+                let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+                part_names.contains(&candidate).then_some(candidate)
+            });
+
+        let Some(worksheet_part) = resolved else {
+            continue;
+        };
+
+        out.push(WorksheetPartInfo {
+            name: sheet.name,
+            sheet_id: sheet.sheet_id,
+            rel_id: sheet.rel_id,
+            visibility: sheet.visibility,
+            worksheet_part,
+        });
+    }
+
+    Ok(out)
+}
+
+/// Resolve ordered workbook sheets to worksheet part names without inflating the entire package,
+/// enforcing a maximum size for any XML part that must be loaded (`xl/workbook.xml` and
+/// `xl/_rels/workbook.xml.rels`).
+pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
+    mut reader: R,
+    max_part_bytes: u64,
+) -> Result<Vec<WorksheetPartInfo>, XlsxError> {
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = zip::ZipArchive::new(reader)?;
+
+    let mut part_names: HashSet<String> = HashSet::new();
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
+        // producers that include it by normalizing to canonical part names.
+        let name = file.name();
+        let canonical = name.strip_prefix('/').unwrap_or(name);
+        part_names.insert(canonical.to_string());
+    }
+
+    fn read_zip_part_required<R: Read + Seek>(
+        zip: &mut zip::ZipArchive<R>,
+        name: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, XlsxError> {
+        let part = name.strip_prefix('/').unwrap_or(name).to_string();
+        let mut file = open_zip_part(zip, name)?;
+        if file.is_dir() {
+            return Err(XlsxError::Invalid(format!("{name} is a directory")));
+        }
+
+        let declared_size = file.size();
+        if declared_size > max_bytes {
+            return Err(XlsxError::PartTooLarge {
+                part,
+                size: declared_size,
+                max: max_bytes,
+            });
+        }
+
+        let mut buf = Vec::new();
+        let take_limit = max_bytes.saturating_add(1);
+        let mut limited = file.take(take_limit);
+        limited.read_to_end(&mut buf)?;
+        if (buf.len() as u64) > max_bytes {
+            return Err(XlsxError::PartTooLarge {
+                part,
+                size: buf.len() as u64,
+                max: max_bytes,
+            });
+        }
+        Ok(buf)
+    }
+
+    fn read_zip_part_optional<R: Read + Seek>(
+        zip: &mut zip::ZipArchive<R>,
+        name: &str,
+        max_bytes: u64,
+    ) -> Result<Option<Vec<u8>>, XlsxError> {
+        match open_zip_part(zip, name) {
+            Ok(file) => {
+                if file.is_dir() {
+                    return Ok(None);
+                }
+                let part = name.strip_prefix('/').unwrap_or(name).to_string();
+                let declared_size = file.size();
+                if declared_size > max_bytes {
+                    return Err(XlsxError::PartTooLarge {
+                        part,
+                        size: declared_size,
+                        max: max_bytes,
+                    });
+                }
+                let mut buf = Vec::new();
+                let take_limit = max_bytes.saturating_add(1);
+                let mut limited = file.take(take_limit);
+                limited.read_to_end(&mut buf)?;
+                if (buf.len() as u64) > max_bytes {
+                    return Err(XlsxError::PartTooLarge {
+                        part,
+                        size: buf.len() as u64,
+                        max: max_bytes,
+                    });
+                }
+                Ok(Some(buf))
+            }
+            Err(zip::result::ZipError::FileNotFound) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    let workbook_xml = match read_zip_part_required(&mut zip, "xl/workbook.xml", max_part_bytes) {
+        Ok(bytes) => bytes,
+        Err(XlsxError::Zip(zip::result::ZipError::FileNotFound)) => {
+            return Err(XlsxError::MissingPart("xl/workbook.xml".to_string()))
+        }
+        Err(err) => return Err(err),
+    };
+    let workbook_xml = String::from_utf8(workbook_xml)?;
+    let sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let rels_bytes = read_zip_part_optional(
+        &mut zip,
+        "xl/_rels/workbook.xml.rels",
+        max_part_bytes,
+    )?;
 
     let relationships = match rels_bytes.as_deref() {
         Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),

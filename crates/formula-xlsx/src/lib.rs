@@ -91,9 +91,10 @@ pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
     read_part_from_reader, read_part_from_reader_limited,
     rewrite_content_types_workbook_content_type, rewrite_content_types_workbook_kind,
-    theme_palette_from_reader, worksheet_parts_from_reader, CellPatch as PackageCellPatch,
-    CellPatchSheet, MacroPresence, WorkbookKind, WorksheetPartInfo, XlsxError, XlsxPackage,
-    XlsxPackageLimits, MAX_XLSX_PACKAGE_PART_BYTES, MAX_XLSX_PACKAGE_TOTAL_BYTES,
+    theme_palette_from_reader, theme_palette_from_reader_limited, worksheet_parts_from_reader,
+    worksheet_parts_from_reader_limited, CellPatch as PackageCellPatch, CellPatchSheet,
+    MacroPresence, WorkbookKind, WorksheetPartInfo, XlsxError, XlsxPackage, XlsxPackageLimits,
+    MAX_XLSX_PACKAGE_PART_BYTES, MAX_XLSX_PACKAGE_TOTAL_BYTES,
 };
 pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{

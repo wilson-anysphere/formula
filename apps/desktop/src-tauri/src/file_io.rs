@@ -47,12 +47,15 @@ const XLTX_WORKBOOK_CONTENT_TYPE: &str =
 const XLTM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.template.macroEnabled.main+xml";
 const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEnabled.main+xml";
 
-// Limits for extracting individual parts from untrusted XLSX/XLSM ZIP containers during
-// patch-based save flows. These should be generous enough for legitimate workbooks but finite to
-// prevent ZIP-bomb OOM via untrusted uncompressed size metadata.
+// Limits for extracting individual parts from untrusted XLSX/XLSM ZIP containers. These should be
+// generous enough for legitimate workbooks but finite to prevent ZIP-bomb OOM via untrusted
+// uncompressed size metadata.
 const XLSX_CONTENT_TYPES_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const XLSX_WORKBOOK_XML_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const XLSX_WORKSHEET_XML_MAX_BYTES: u64 = 128 * 1024 * 1024;
+const XLSX_THEME_XML_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const XLSX_POWER_QUERY_XML_MAX_BYTES: u64 = 32 * 1024 * 1024;
+const XLSX_VBA_PROJECT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
@@ -699,7 +702,15 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
     out.vba_project_bin = open_reader()
         .ok()
-        .and_then(|r| formula_xlsx::read_part_from_reader(r, "xl/vbaProject.bin").ok().flatten());
+        .and_then(|r| {
+            formula_xlsx::read_part_from_reader_limited(
+                r,
+                "xl/vbaProject.bin",
+                XLSX_VBA_PROJECT_MAX_BYTES,
+            )
+            .ok()
+            .flatten()
+        });
     out.vba_project_signature_bin = open_reader().ok().and_then(|r| {
         formula_xlsx::read_part_from_reader_limited(
             r,
@@ -710,7 +721,11 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
             .flatten()
     });
     if let Some(power_query_xml) = open_reader().ok().and_then(|r| {
-        formula_xlsx::read_part_from_reader(r, FORMULA_POWER_QUERY_PART)
+        formula_xlsx::read_part_from_reader_limited(
+            r,
+            FORMULA_POWER_QUERY_PART,
+            XLSX_POWER_QUERY_XML_MAX_BYTES,
+        )
             .ok()
             .flatten()
     }) {
@@ -722,7 +737,9 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
     }
     if let Ok(reader) = open_reader() {
-        if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(reader) {
+        if let Ok(parts) =
+            formula_xlsx::worksheet_parts_from_reader_limited(reader, XLSX_WORKBOOK_XML_MAX_BYTES)
+        {
             for part in parts {
                 worksheet_parts_by_name.insert(part.name, part.worksheet_part);
             }
@@ -743,7 +760,9 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         }
     }
     if let Ok(reader) = open_reader() {
-        if let Ok(palette) = formula_xlsx::theme_palette_from_reader(reader) {
+        if let Ok(palette) =
+            formula_xlsx::theme_palette_from_reader_limited(reader, XLSX_THEME_XML_MAX_BYTES)
+        {
             out.theme_palette = palette;
         }
     }
@@ -1708,7 +1727,11 @@ fn workbook_xml_sheet_order_override(
     let workbook_xml =
         std::str::from_utf8(&workbook_xml_bytes).context("decode xl/workbook.xml")?;
 
-    let worksheet_parts = formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_bytes))
+    let worksheet_parts =
+        formula_xlsx::worksheet_parts_from_reader_limited(
+            Cursor::new(origin_bytes),
+            XLSX_WORKBOOK_XML_MAX_BYTES,
+        )
         .context("resolve worksheet parts")?;
     if worksheet_parts.is_empty() {
         return Ok(None);
@@ -1810,7 +1833,10 @@ fn sheet_metadata_part_overrides(
     // renamed in-app (the origin workbook.xml might not be rewritten yet).
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
     let mut rel_id_by_part: HashMap<String, String> = HashMap::new();
-    if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(Cursor::new(bytes)) {
+    if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader_limited(
+        Cursor::new(bytes),
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    ) {
         for part in parts {
             rel_id_by_part.insert(part.worksheet_part.clone(), part.rel_id.clone());
             worksheet_parts_by_name.insert(part.name, part.worksheet_part);
