@@ -850,23 +850,6 @@ fn decode_rgce_impl(
                     }
                     args.reverse();
 
-                    let convert_namex_udf = |name: &str| -> Option<String> {
-                        let (at, name) = if let Some(rest) = name.strip_prefix('@') {
-                            ("@", rest)
-                        } else {
-                            ("", name)
-                        };
-                        let rest = name.strip_prefix("ExternName_IXTI")?;
-                        let (ixti_str, idx_str) = rest.split_once("_N")?;
-                        let ixti: u16 = ixti_str.parse().ok()?;
-                        let idx: u16 = idx_str.parse().ok()?;
-                        Some(format!("{at}ExternName{ixti}:{idx}"))
-                    };
-
-                    if let Some(converted) = convert_namex_udf(&func_name_text) {
-                        func_name_text = converted;
-                    }
-
                     let mut text = String::new();
                     text.push_str(&func_name_text);
                     text.push('(');
