@@ -41,6 +41,26 @@ describe("ContextManager promptContext", () => {
     expect(pretty.length - out1.promptContext.length).toBeGreaterThan(100);
   });
 
+  it("does not inline raw range/table attachment data into promptContext", async () => {
+    const cm = new ContextManager({
+      tokenBudgetTokens: 1_000_000,
+      // Disable redaction so we can assert directly on the prompt output.
+      redactor: (text: string) => text,
+    });
+
+    const sheet = { name: "Sheet1", values: [[1]] };
+    const secret = "TOP SECRET";
+    const out = await cm.buildContext({
+      sheet,
+      query: "hi",
+      attachments: [{ type: "table" as const, reference: "SalesTable", data: { snapshot: secret } }],
+    });
+
+    expect(out.promptContext).toContain("## attachments");
+    expect(out.promptContext).toContain("SalesTable");
+    expect(out.promptContext).not.toContain(secret);
+  });
+
   it("does not leak schema column sampleValues into the prompt schema JSON", async () => {
     const cm = new ContextManager({
       tokenBudgetTokens: 1_000_000,

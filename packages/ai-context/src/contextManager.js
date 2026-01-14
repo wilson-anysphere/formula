@@ -304,6 +304,31 @@ function normalizeDlpOptions(dlp) {
  */
 
 /**
+ * Prompt-sanitize attachment objects.
+ *
+ * Some callers (e.g. UI layers) may attach rich `data` payloads for selections or tables
+ * (including sampled cell values). Those payloads are prompt-unsafe and can bypass
+ * DLP/redaction if they are inlined directly into a model prompt.
+ *
+ * As a safe default, we never include raw `data` for `range` or `table` attachments in
+ * prompt context. `formula`/`chart` attachments keep their bounded `data` payloads.
+ *
+ * @param {unknown[] | null | undefined} attachments
+ * @returns {unknown[] | null | undefined}
+ */
+function compactAttachmentsForPrompt(attachments) {
+  if (!Array.isArray(attachments)) return attachments;
+  return attachments.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const type = item.type;
+    if (type !== "range" && type !== "table") return item;
+    // Drop raw data (can contain copied workbook values).
+    const { data: _data, ...rest } = /** @type {any} */ (item);
+    return rest;
+  });
+}
+
+/**
  * @typedef {{
  *   vectorStore: any,
  *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
@@ -952,13 +977,14 @@ export class ContextManager {
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
     const includeRestrictedContentForStructured =
       dlp?.includeRestrictedContent ?? dlp?.include_restricted_content ?? false;
-    const attachmentsForPrompt = shouldReturnRedactedStructured
+    const attachmentsForPromptUnsafe = shouldReturnRedactedStructured
       ? redactStructuredValue(params.attachments ?? [], this.redactor, {
           signal,
           includeRestrictedContent: includeRestrictedContentForStructured,
           policyAllowsRestrictedContent,
         })
       : params.attachments;
+    const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe);
     const schemaOut = shouldReturnRedactedStructured
       ? redactStructuredValue(schema, this.redactor, {
           signal,
@@ -1499,13 +1525,14 @@ export class ContextManager {
     let promptContext = "";
     if (includePromptContext) {
       const shouldRedactPromptStruct = Boolean(dlp) && overallDecision?.decision === DLP_DECISION.REDACT;
-      const attachmentsForPrompt = shouldRedactPromptStruct
+      const attachmentsForPromptUnsafe = shouldRedactPromptStruct
         ? redactStructuredValue(params.attachments ?? [], this.redactor, {
             signal,
             includeRestrictedContent,
             policyAllowsRestrictedContent,
           })
         : params.attachments;
+      const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe);
 
       const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
       const schemaRestrictedDecision = dlp
