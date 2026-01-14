@@ -3518,7 +3518,9 @@ pub async fn power_query_credential_get(
 pub async fn power_query_credential_set(
     window: tauri::WebviewWindow,
     scope_key: LimitedString<{ crate::power_query_validation::MAX_CREDENTIAL_SCOPE_KEY_LEN }>,
-    secret: JsonValue,
+    secret: crate::ipc_limits::LimitedJsonValue<
+        { crate::power_query_validation::MAX_CREDENTIAL_SECRET_BYTES },
+    >,
 ) -> Result<PowerQueryCredentialEntry, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3530,6 +3532,7 @@ pub async fn power_query_credential_set(
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
     let scope_key = scope_key.into_inner();
+    let secret = secret.into_inner();
     crate::power_query_validation::validate_power_query_credential_payload(&scope_key, &secret)
         .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -3729,7 +3732,9 @@ pub async fn power_query_refresh_state_get(
 pub async fn power_query_refresh_state_set(
     window: tauri::WebviewWindow,
     workbook_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
-    state: JsonValue,
+    state: crate::ipc_limits::LimitedJsonValue<
+        { crate::power_query_validation::MAX_REFRESH_STATE_BYTES },
+    >,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3740,6 +3745,7 @@ pub async fn power_query_refresh_state_set(
     ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
+    let state = state.into_inner();
     crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
         .map_err(|e| e.to_string())?;
     let workbook_id = workbook_id.into_inner();
@@ -3812,18 +3818,31 @@ pub fn power_query_state_set(
 #[tauri::command]
 pub async fn sql_query(
     window: tauri::WebviewWindow,
-    connection: JsonValue,
+    connection: crate::ipc_limits::LimitedJsonValue<
+        { crate::ipc_limits::MAX_SQL_QUERY_CONNECTION_BYTES },
+    >,
     sql: LimitedString<{ crate::ipc_limits::MAX_SQL_QUERY_TEXT_BYTES }>,
-    params: Option<LimitedVec<JsonValue, { crate::ipc_limits::MAX_SQL_QUERY_PARAMS }>>,
-    credentials: Option<JsonValue>,
+    params: Option<
+        LimitedVec<
+            crate::ipc_limits::LimitedJsonValue<{ crate::ipc_limits::MAX_SQL_QUERY_PARAM_BYTES }>,
+            { crate::ipc_limits::MAX_SQL_QUERY_PARAMS },
+        >,
+    >,
+    credentials: Option<
+        crate::ipc_limits::LimitedJsonValue<{ crate::ipc_limits::MAX_SQL_QUERY_CREDENTIALS_BYTES }>,
+    >,
 ) -> Result<crate::sql::SqlQueryResult, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
 
+    let connection = connection.into_inner();
     let sql = sql.into_inner();
-    let params = params.map(|p| p.into_inner()).unwrap_or_default();
+    let params = params
+        .map(|p| p.into_inner().into_iter().map(|v| v.into_inner()).collect())
+        .unwrap_or_default();
+    let credentials = credentials.map(|v| v.into_inner());
     crate::sql::sql_query(connection, sql, params, credentials)
         .await
         .map_err(|e| e.to_string())
@@ -3834,16 +3853,22 @@ pub async fn sql_query(
 #[tauri::command]
 pub async fn sql_get_schema(
     window: tauri::WebviewWindow,
-    connection: JsonValue,
+    connection: crate::ipc_limits::LimitedJsonValue<
+        { crate::ipc_limits::MAX_SQL_QUERY_CONNECTION_BYTES },
+    >,
     sql: LimitedString<{ crate::ipc_limits::MAX_SQL_QUERY_TEXT_BYTES }>,
-    credentials: Option<JsonValue>,
+    credentials: Option<
+        crate::ipc_limits::LimitedJsonValue<{ crate::ipc_limits::MAX_SQL_QUERY_CREDENTIALS_BYTES }>,
+    >,
 ) -> Result<crate::sql::SqlSchemaResult, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
 
+    let connection = connection.into_inner();
     let sql = sql.into_inner();
+    let credentials = credentials.map(|v| v.into_inner());
     crate::sql::sql_get_schema(connection, sql, credentials)
         .await
         .map_err(|e| e.to_string())
@@ -4071,7 +4096,7 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
     use std::collections::HashMap;
 
     use crate::resource_limits::{
-        MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+        MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES,
     };
 
     let pkg = match open_xlsx_package_for_ipc_extraction(xlsx_bytes) {
@@ -4081,7 +4106,8 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
 
     let worksheets = match pkg.worksheet_parts() {
         Ok(parts) => parts,
-        Err(_) => match formula_xlsx::worksheet_parts_from_reader(std::io::Cursor::new(xlsx_bytes)) {
+        Err(_) => match formula_xlsx::worksheet_parts_from_reader(std::io::Cursor::new(xlsx_bytes))
+        {
             Ok(parts) => parts,
             Err(_) => return Vec::new(),
         },
@@ -4102,11 +4128,9 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
             continue;
         };
 
-        let Ok(Some(target_part)) = formula_xlsx::openxml::resolve_relationship_target(
-            &pkg,
-            &worksheet_part,
-            &rel_id,
-        ) else {
+        let Ok(Some(target_part)) =
+            formula_xlsx::openxml::resolve_relationship_target(&pkg, &worksheet_part, &rel_id)
+        else {
             continue;
         };
 
@@ -4125,7 +4149,8 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
         if let Some((bytes_base64, mime_type, byte_len)) =
             cached_by_target.get(&target_part).cloned()
         {
-            if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
+            if total_bytes.saturating_add(byte_len)
+                > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
             {
                 continue;
             }
@@ -8614,7 +8639,11 @@ pub use crate::network_fetch::NetworkFetchResult;
 pub async fn network_fetch(
     window: tauri::WebviewWindow,
     url: LimitedString<MAX_IPC_URL_BYTES>,
-    init: Option<JsonValue>,
+    init: Option<
+        crate::ipc_limits::LimitedJsonValue<
+            { crate::ipc_limits::MAX_IPC_NETWORK_FETCH_INIT_BYTES },
+        >,
+    >,
 ) -> Result<NetworkFetchResult, String> {
     let origin_url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(window.label(), "network access", ipc_origin::Verb::Is)?;
@@ -8625,7 +8654,7 @@ pub async fn network_fetch(
     ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
 
     let url = url.into_inner();
-    let init = init.unwrap_or(JsonValue::Null);
+    let init = init.map(|v| v.into_inner()).unwrap_or(JsonValue::Null);
     crate::network_fetch::network_fetch_impl(url.as_ref(), &init).await
 }
 
@@ -11190,7 +11219,8 @@ export default async function main(ctx) {
 
         let cursor = Cursor::new(Vec::new());
         let mut zip = ZipWriter::new(cursor);
-        let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
         let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -11218,11 +11248,13 @@ export default async function main(ctx) {
 
         zip.start_file("xl/workbook.xml", options).unwrap();
         zip.write_all(workbook_xml).unwrap();
-        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
         zip.write_all(workbook_rels).unwrap();
         zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
         zip.write_all(sheet_xml).unwrap();
-        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options).unwrap();
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
         zip.write_all(sheet_rels).unwrap();
         zip.start_file("xl/media/image1.png", options).unwrap();
         zip.write_all(b"png-bytes").unwrap();
@@ -11333,7 +11365,8 @@ export default async function main(ctx) {
 
         let cursor = Cursor::new(Vec::new());
         let mut zip = ZipWriter::new(cursor);
-        let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
         let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -11361,11 +11394,13 @@ export default async function main(ctx) {
 
         zip.start_file("xl/workbook.xml", options).unwrap();
         zip.write_all(workbook_xml).unwrap();
-        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
         zip.write_all(workbook_rels).unwrap();
         zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
         zip.write_all(sheet_xml).unwrap();
-        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options).unwrap();
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
         zip.write_all(sheet_rels).unwrap();
         zip.start_file("xl/media/image1.png", options).unwrap();
         zip.write_all(b"png-bytes").unwrap();
@@ -11373,12 +11408,15 @@ export default async function main(ctx) {
         let bytes = zip.finish().unwrap().into_inner();
 
         let extracted = extract_imported_sheet_background_images_from_xlsx_bytes(&bytes);
-        assert_eq!(extracted.len(), 1, "sanity check: expected extraction to succeed");
+        assert_eq!(
+            extracted.len(),
+            1,
+            "sanity check: expected extraction to succeed"
+        );
 
         // Now forge the ZIP metadata to claim the worksheet XML is larger than our IPC package part
         // cap; extraction should reject the package without attempting to inflate it.
-        let oversized_len =
-            crate::resource_limits::MAX_IPC_XLSX_PACKAGE_PART_BYTES as u32 + 1;
+        let oversized_len = crate::resource_limits::MAX_IPC_XLSX_PACKAGE_PART_BYTES as u32 + 1;
         let patched =
             patch_zip_entry_uncompressed_size(bytes, "xl/worksheets/sheet1.xml", oversized_len);
 

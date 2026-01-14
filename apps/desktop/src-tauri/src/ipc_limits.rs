@@ -29,6 +29,14 @@ pub const MAX_IPC_WORKBOOK_PASSWORD_BYTES: usize = 1_024; // 1 KiB
 /// forcing the backend to allocate and parse multi-megabyte "URLs".
 pub const MAX_IPC_URL_BYTES: usize = 8_192; // 8 KiB
 
+/// Maximum size (in bytes) of the `init` object accepted by the `network_fetch` IPC command.
+///
+/// Rationale: `network_fetch` is a privileged escape hatch (CORS-less networking via the desktop
+/// backend). The `init` payload includes headers/body/method options and is treated as untrusted
+/// input from extensions / the WebView. Keeping it bounded prevents a compromised WebView from
+/// sending multi-megabyte JSON structures that force large allocations during IPC deserialization.
+pub const MAX_IPC_NETWORK_FETCH_INIT_BYTES: usize = 1024 * 1024; // 1 MiB
+
 /// Maximum size (in bytes) of the OAuth loopback redirect URI accepted over IPC.
 ///
 /// This is kept separate from `MAX_IPC_URL_BYTES` so the limit can be tightened independently if
@@ -108,6 +116,19 @@ pub const MAX_IPC_MARKETPLACE_ID_BYTES: usize = 256;
 
 /// Maximum size (in bytes) of marketplace version identifiers accepted over IPC.
 pub const MAX_IPC_MARKETPLACE_VERSION_BYTES: usize = 128;
+
+/// Maximum number of items/entries accepted for any single JSON array/object passed over IPC.
+///
+/// This is a coarse backstop used by `LimitedJsonValue` to avoid allocating arbitrarily large
+/// `Vec`/`Map` values during IPC deserialization. Specific payloads may enforce stricter limits
+/// after deserialization as needed.
+pub const MAX_IPC_JSON_CONTAINER_LEN: usize = 10_000;
+
+/// Maximum nesting depth for JSON payloads passed over IPC.
+///
+/// This guards against stack overflows and pathological deeply nested JSON values from untrusted
+/// WebView input.
+pub const MAX_IPC_JSON_DEPTH: usize = 64;
 
 /// Maximum size (in bytes) of system notification titles accepted over IPC.
 ///
@@ -205,6 +226,321 @@ impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> 
         }
 
         deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
+    }
+}
+
+/// A JSON wrapper that enforces a maximum "budget" during deserialization.
+///
+/// Some privileged IPC commands accept arbitrary JSON objects from the WebView (e.g. `network_fetch`
+/// options, SQL connection descriptors, credential payloads). Deserializing those payloads into
+/// `serde_json::Value` without limits allows a compromised WebView to send very large strings or
+/// deeply nested objects/arrays, forcing the backend to allocate excessive memory before it can
+/// validate the payload.
+///
+/// `LimitedJsonValue` applies conservative limits during deserialization:
+/// - A maximum total "byte budget" (`MAX_BYTES`) approximating the serialized size / in-memory
+///   string content.
+/// - A maximum container length (`MAX_IPC_JSON_CONTAINER_LEN`) for any single array/object.
+/// - A maximum nesting depth (`MAX_IPC_JSON_DEPTH`).
+///
+/// These checks are best-effort and intended for DoS resistance, not as a semantic validation of
+/// the JSON structure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitedJsonValue<const MAX_BYTES: usize>(JsonValue);
+
+impl<const MAX_BYTES: usize> LimitedJsonValue<MAX_BYTES> {
+    pub fn into_inner(self) -> JsonValue {
+        self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> AsRef<JsonValue> for LimitedJsonValue<MAX_BYTES> {
+    fn as_ref(&self) -> &JsonValue {
+        &self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> From<LimitedJsonValue<MAX_BYTES>> for JsonValue {
+    fn from(value: LimitedJsonValue<MAX_BYTES>) -> Self {
+        value.0
+    }
+}
+
+fn consume_json_budget<E, const MAX_BYTES: usize>(
+    remaining: &mut usize,
+    bytes: usize,
+) -> Result<(), E>
+where
+    E: de::Error,
+{
+    if *remaining < bytes {
+        return Err(E::custom(format!(
+            "JSON value is too large (max {MAX_BYTES} bytes)"
+        )));
+    }
+    *remaining -= bytes;
+    Ok(())
+}
+
+struct LimitedJsonValueSeed<'a, const MAX_BYTES: usize> {
+    remaining: &'a mut usize,
+    depth: usize,
+}
+
+impl<'de, const MAX_BYTES: usize> de::DeserializeSeed<'de> for LimitedJsonValueSeed<'_, MAX_BYTES> {
+    type Value = JsonValue;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(LimitedJsonValueVisitor::<MAX_BYTES> {
+            remaining: self.remaining,
+            depth: self.depth,
+        })
+    }
+}
+
+struct LimitedJsonKeySeed<'a, const MAX_BYTES: usize> {
+    remaining: &'a mut usize,
+}
+
+impl<'de, const MAX_BYTES: usize> de::DeserializeSeed<'de> for LimitedJsonKeySeed<'_, MAX_BYTES> {
+    type Value = String;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(LimitedJsonStringVisitor::<MAX_BYTES> {
+            remaining: self.remaining,
+        })
+    }
+}
+
+struct LimitedJsonStringVisitor<'a, const MAX_BYTES: usize> {
+    remaining: &'a mut usize,
+}
+
+impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedJsonStringVisitor<'_, MAX_BYTES> {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a string")
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        // Include 2 bytes for surrounding quotes to better approximate serialized size.
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(v.to_owned())
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(v.to_owned())
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(v)
+    }
+}
+
+struct LimitedJsonValueVisitor<'a, const MAX_BYTES: usize> {
+    remaining: &'a mut usize,
+    depth: usize,
+}
+
+impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedJsonValueVisitor<'_, MAX_BYTES> {
+    type Value = JsonValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, 4)?;
+        Ok(JsonValue::Null)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_unit()
+    }
+
+    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        // "false" is 5 bytes; use it as a conservative upper bound.
+        let bytes = if v { 4 } else { 5 };
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, bytes)?;
+        Ok(JsonValue::Bool(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        // Conservative upper bound for integer string length + sign.
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, 32)?;
+        Ok(JsonValue::Number(serde_json::Number::from(v)))
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, 32)?;
+        Ok(JsonValue::Number(serde_json::Number::from(v)))
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, 32)?;
+        let Some(num) = serde_json::Number::from_f64(v) else {
+            return Err(E::custom("invalid number"));
+        };
+        Ok(JsonValue::Number(num))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(JsonValue::String(v.to_owned()))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(JsonValue::String(v.to_owned()))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        consume_json_budget::<E, MAX_BYTES>(self.remaining, v.len().saturating_add(2))?;
+        Ok(JsonValue::String(v))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: de::SeqAccess<'de>,
+    {
+        if self.depth >= MAX_IPC_JSON_DEPTH {
+            return Err(de::Error::custom(format!(
+                "JSON value is too deeply nested (max {MAX_IPC_JSON_DEPTH} levels)"
+            )));
+        }
+
+        let remaining = self.remaining;
+        consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 2)?;
+
+        let cap = seq.size_hint().unwrap_or(0).min(MAX_IPC_JSON_CONTAINER_LEN);
+        let mut out = Vec::with_capacity(cap);
+
+        let next_depth = self.depth.saturating_add(1);
+        for _ in 0..MAX_IPC_JSON_CONTAINER_LEN {
+            match seq.next_element_seed(LimitedJsonValueSeed::<MAX_BYTES> {
+                remaining: &mut *remaining,
+                depth: next_depth,
+            })? {
+                Some(v) => {
+                    consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 1)?;
+                    out.push(v);
+                }
+                None => return Ok(JsonValue::Array(out)),
+            }
+        }
+
+        if seq.next_element::<de::IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format!(
+                "JSON array is too large (max {MAX_IPC_JSON_CONTAINER_LEN} items)"
+            )));
+        }
+
+        Ok(JsonValue::Array(out))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        if self.depth >= MAX_IPC_JSON_DEPTH {
+            return Err(de::Error::custom(format!(
+                "JSON value is too deeply nested (max {MAX_IPC_JSON_DEPTH} levels)"
+            )));
+        }
+
+        let remaining = self.remaining;
+        consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 2)?;
+
+        let cap = map.size_hint().unwrap_or(0).min(MAX_IPC_JSON_CONTAINER_LEN);
+        let mut out = serde_json::Map::with_capacity(cap);
+
+        let next_depth = self.depth.saturating_add(1);
+        for _ in 0..MAX_IPC_JSON_CONTAINER_LEN {
+            let Some(key) = map.next_key_seed(LimitedJsonKeySeed::<MAX_BYTES> {
+                remaining: &mut *remaining,
+            })?
+            else {
+                return Ok(JsonValue::Object(out));
+            };
+
+            // Approximate `:` separator.
+            consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 1)?;
+            let value = map.next_value_seed(LimitedJsonValueSeed::<MAX_BYTES> {
+                remaining: &mut *remaining,
+                depth: next_depth,
+            })?;
+            // Approximate `,` separator.
+            consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 1)?;
+            out.insert(key, value);
+        }
+
+        if map.next_key::<de::IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format!(
+                "JSON object is too large (max {MAX_IPC_JSON_CONTAINER_LEN} entries)"
+            )));
+        }
+
+        Ok(JsonValue::Object(out))
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedJsonValue<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut remaining = MAX_BYTES;
+        let seed = LimitedJsonValueSeed::<MAX_BYTES> {
+            remaining: &mut remaining,
+            depth: 0,
+        };
+        let value = de::DeserializeSeed::deserialize(seed, deserializer)?;
+        Ok(LimitedJsonValue(value))
     }
 }
 
@@ -346,6 +682,23 @@ mod tests {
         let parsed = serde_json::from_str::<LimitedString<MAX_IPC_PATH_BYTES>>(&json)
             .expect("expected LimitedString to deserialize");
         assert_eq!(parsed.as_str(), ok);
+    }
+
+    #[test]
+    fn limited_json_value_rejects_oversized_payloads_during_deserialization() {
+        // JSON string serialization adds 2 bytes for the surrounding quotes.
+        let ok = "\"aaaaaaaa\""; // 8 bytes + 2 quotes == 10 bytes
+        let parsed = serde_json::from_str::<LimitedJsonValue<10>>(ok)
+            .expect("expected LimitedJsonValue to deserialize");
+        assert_eq!(parsed.as_ref(), &JsonValue::String("aaaaaaaa".to_string()));
+
+        let too_big = "\"aaaaaaaaa\""; // 9 bytes + 2 quotes == 11 bytes
+        let err = serde_json::from_str::<LimitedJsonValue<10>>(too_big)
+            .expect_err("expected LimitedJsonValue deserialization to fail");
+        assert!(
+            err.to_string().contains("max 10 bytes"),
+            "expected error to mention limit, got: {err}"
+        );
     }
 
     #[test]

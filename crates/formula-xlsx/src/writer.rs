@@ -648,6 +648,7 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     out.push_str("/>");
     out
 }
+
 #[cfg(test)]
 mod sheet_format_pr_tests {
     use super::sheet_format_pr_xml;

@@ -1,4 +1,5 @@
 use desktop::commands::LimitedString;
+use desktop::ipc_limits::LimitedJsonValue;
 
 #[test]
 fn limited_string_deserialize_enforces_max_len() {
@@ -11,6 +12,25 @@ fn limited_string_deserialize_enforces_max_len() {
     let msg = err.to_string();
     assert!(
         msg.contains("max 4 bytes"),
+        "expected error to mention max length, got: {msg}"
+    );
+}
+
+#[test]
+fn limited_json_value_deserialize_enforces_max_len() {
+    // JSON string serialization adds 2 bytes for surrounding quotes.
+    let ok: LimitedJsonValue<10> =
+        serde_json::from_str("\"aaaaaaaa\"").expect("expected payload to deserialize");
+    assert_eq!(
+        ok.as_ref(),
+        &serde_json::Value::String("aaaaaaaa".to_string())
+    );
+
+    let err = serde_json::from_str::<LimitedJsonValue<10>>("\"aaaaaaaaa\"")
+        .expect_err("expected oversized payload to fail during deserialization");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("max 10 bytes"),
         "expected error to mention max length, got: {msg}"
     );
 }
@@ -49,6 +69,21 @@ fn assert_marker_has_ipc_string_cap(src: &str, marker: &str, limit_tokens: &[&st
     assert!(
         snippet.contains("LimitedString") && snippet_has_limits,
         "expected {marker} to reference LimitedString<...> with limits={limit_tokens:?}\n--- snippet ---\n{}",
+        &snippet[..snippet.len().min(400)]
+    );
+}
+
+fn assert_fn_has_ipc_json_cap(src: &str, fn_decl: &str, limit_tokens: &[&str]) {
+    let start = src
+        .find(fn_decl)
+        .unwrap_or_else(|| panic!("expected function declaration {fn_decl:?} to exist"));
+    let body = &src[start..];
+    let snippet = &body[..body.len().min(2000)];
+
+    let snippet_has_limits = limit_tokens.iter().all(|t| snippet.contains(t));
+    assert!(
+        snippet.contains("LimitedJsonValue") && snippet_has_limits,
+        "expected {fn_decl} to enforce IPC JSON caps via LimitedJsonValue<...>; limits={limit_tokens:?}\n--- snippet ---\n{}",
         &snippet[..snippet.len().min(400)]
     );
 }
@@ -317,5 +352,42 @@ fn privileged_ipc_commands_have_string_length_caps() {
             "MAX_SIGNATURE_BASE64_BYTES",
             "MAX_PUBLIC_KEY_PEM_BYTES",
         ],
+    );
+}
+
+#[test]
+fn privileged_ipc_commands_have_json_length_caps() {
+    let commands_src = include_str!("../src/commands.rs");
+    assert_fn_has_ipc_json_cap(
+        commands_src,
+        "pub async fn network_fetch",
+        &["MAX_IPC_NETWORK_FETCH_INIT_BYTES"],
+    );
+    assert_fn_has_ipc_json_cap(
+        commands_src,
+        "pub async fn sql_query",
+        &[
+            "MAX_SQL_QUERY_CONNECTION_BYTES",
+            "MAX_SQL_QUERY_PARAM_BYTES",
+            "MAX_SQL_QUERY_CREDENTIALS_BYTES",
+        ],
+    );
+    assert_fn_has_ipc_json_cap(
+        commands_src,
+        "pub async fn sql_get_schema",
+        &[
+            "MAX_SQL_QUERY_CONNECTION_BYTES",
+            "MAX_SQL_QUERY_CREDENTIALS_BYTES",
+        ],
+    );
+    assert_fn_has_ipc_json_cap(
+        commands_src,
+        "pub async fn power_query_credential_set",
+        &["MAX_CREDENTIAL_SECRET_BYTES"],
+    );
+    assert_fn_has_ipc_json_cap(
+        commands_src,
+        "pub async fn power_query_refresh_state_set",
+        &["MAX_REFRESH_STATE_BYTES"],
     );
 }
