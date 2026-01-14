@@ -317,8 +317,10 @@ To maximize real-world compatibility:
 - `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` will try both strategies in
   their main decrypt paths (treating a verifier mismatch as a signal to retry with the alternative
   IV derivation).
-- `crates/formula-offcrypto`’s `agile_verify_password` / `agile_secret_key` helpers also try both
-  strategies (not all entrypoints do).
+- `crates/formula-offcrypto` also tries both strategies anywhere it can validate the verifier
+  hashes (e.g. `decrypt_encrypted_package` for Agile, and the `agile_verify_password` /
+  `agile_secret_key` helpers). When verifier fields are missing, it falls back to the common
+  `IV = saltValue[..blockSize]` behavior.
 
 ## Decrypting `EncryptedPackage`
 
