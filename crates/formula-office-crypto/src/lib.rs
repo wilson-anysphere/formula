@@ -379,6 +379,27 @@ mod tests {
     }
 
     #[test]
+    fn detects_encrypted_ooxml_ole_container_with_case_variant_stream_names() {
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        ole.create_stream("/encryptioninfo")
+            .expect("create /encryptioninfo stream");
+        ole.create_stream("/ENCRYPTEDPACKAGE")
+            .expect("create /ENCRYPTEDPACKAGE stream");
+        let bytes = ole.into_inner().into_inner();
+
+        // Ensure detection is tolerant to casing (some producers vary stream case).
+        assert!(is_encrypted_ooxml_ole(&bytes));
+
+        // Ensure we reach a format-related error instead of failing to open streams.
+        let err = decrypt_encrypted_package_ole(&bytes, "password").expect_err("expected error");
+        assert!(
+            matches!(err, OfficeCryptoError::InvalidFormat(_)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn parses_standard_encryption_info_minimal() {
         let info_bytes = standard::tests::standard_encryption_info_fixture();
         let header = util::parse_encryption_info_header(&info_bytes).expect("parse header");
