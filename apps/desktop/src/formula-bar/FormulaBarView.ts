@@ -3178,6 +3178,7 @@ export class FormulaBarView {
       const needsEscapeDraft = ESCAPE_HTML_TEST_RE.test(draft);
 
       const refs = coloredReferences;
+      const canIdentifierBeReference = Boolean(this.model.extractFormulaReferencesOptions()?.resolveName);
       let refCursor = 0;
 
       const findContainingRef = (start: number, end: number) => {
@@ -3217,7 +3218,7 @@ export class FormulaBarView {
         // Only `reference` and `identifier` spans can correspond to extracted references
         // (A1 refs / structured refs are tokenized as `reference`, named ranges as `identifier`).
         // Avoid the per-token reference containment checks for everything else.
-        if (kind !== "reference" && kind !== "identifier") {
+        if (kind !== "reference" && !(kind === "identifier" && canIdentifierBeReference)) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
           return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
         }
