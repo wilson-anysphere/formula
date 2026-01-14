@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 use formula_engine::{
+    metadata::FormatRun as EngineFormatRun,
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, metadata::FormatRun as EngineFormatRun,
-    NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
-    Value as EngineValue,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
+    ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
@@ -4694,7 +4694,7 @@ impl WasmWorkbook {
                     // Style-only cells are not represented in the sparse JS input map (`toJson`),
                     // but still need to be present in the calc engine so worksheet info functions
                     // like `CELL("format")` / `CELL("protect")` can observe their formatting
-                    // metadata. The style id has already been applied above.
+                    // metadata. The style id has already been applied above via `set_cell_style_id`.
                     continue;
                 }
 
