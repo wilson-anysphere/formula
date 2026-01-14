@@ -191,6 +191,48 @@ test("ai-rag module exports match adjacent .d.ts files", { skip: !hasTypeScript 
   }
 });
 
+test("ai-rag every src .js file has an adjacent .d.ts", async () => {
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+  const missing = [];
+ 
+  async function collectJsFiles(dir) {
+    /** @type {string[]} */
+    const out = [];
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        out.push(...(await collectJsFiles(fullPath)));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".js")) continue;
+      out.push(fullPath);
+    }
+    return out;
+  }
+ 
+  const jsFiles = await collectJsFiles(srcDir);
+  for (const jsPath of jsFiles) {
+    const dtsPath = jsPath.slice(0, -".js".length) + ".d.ts";
+    try {
+      const s = await stat(dtsPath);
+      if (!s.isFile()) {
+        missing.push(relative(srcDir, jsPath).split("\\").join("/"));
+      }
+    } catch {
+      missing.push(relative(srcDir, jsPath).split("\\").join("/"));
+    }
+  }
+ 
+  if (missing.length === 0) return;
+  missing.sort((a, b) => a.localeCompare(b));
+  assert.fail(
+    `Missing adjacent .d.ts file for ${missing.length} src .js module(s):\n` +
+      missing.map((m) => `  - ${m}`).join("\n"),
+  );
+});
+
 test("ai-rag d.ts smoke test (public API stays in sync)", { skip: !hasTypeScript }, () => {
   assert.ok(ts);
   const configPath = fileURLToPath(new URL("./tsconfig.dts-smoke.json", import.meta.url));
