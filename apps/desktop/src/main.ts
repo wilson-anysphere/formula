@@ -2516,7 +2516,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       if (format === "mixed") return t("ribbon.label.mixed");
 
       const normalized = typeof format === "string" ? format.trim() : "";
-      if (!normalized || normalized.toLowerCase() === "general") return t("command.format.numberFormat.general");
+      const normalizedLower = normalized.toLowerCase();
+      const localizedGeneral = t("command.format.numberFormat.general").trim().toLowerCase();
+      if (!normalized || normalizedLower === "general" || (localizedGeneral && normalizedLower === localizedGeneral)) {
+        return t("command.format.numberFormat.general");
+      }
 
       const compact = normalized.toLowerCase().replace(/\s+/g, "");
 
