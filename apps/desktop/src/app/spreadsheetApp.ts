@@ -3774,6 +3774,12 @@ export class SpreadsheetApp {
    * - worksheet background images (tiled pattern behind the grid)
    */
   setWorkbookImages(images: ImageEntry[]): void {
+    // Cancel any in-flight background image decode so stale results don't race
+    // the updated image bytes (and to avoid leaking decoded bitmaps if the
+    // previous decode completes after caches are cleared).
+    this.activeSheetBackgroundAbort?.abort();
+    this.activeSheetBackgroundAbort = null;
+
     const doc: any = this.document as any;
     const existingImages: unknown = doc?.images;
     const existingIds = existingImages instanceof Map ? Array.from(existingImages.keys()).map((id) => String(id ?? "")) : [];
@@ -3814,8 +3820,6 @@ export class SpreadsheetApp {
     this.sharedGrid?.renderer?.clearImageCache?.();
 
     // Image bytes may have changed; invalidate decoded bitmaps.
-    this.activeSheetBackgroundAbort?.abort();
-    this.activeSheetBackgroundAbort = null;
     this.workbookImageBitmaps.clear();
     // Force a reload even when the active sheet points at the same image id.
     this.activeSheetBackgroundImageId = null;
@@ -4127,13 +4131,18 @@ export class SpreadsheetApp {
       }
     }
 
-    if (!desiredId) return;
+    if (!desiredId) {
+      this.activeSheetBackgroundAbort?.abort();
+      this.activeSheetBackgroundAbort = null;
+      return;
+    }
 
     const raw = (this.document as any).getImage?.(desiredId);
     const entry = normalizeImageEntry(desiredId, raw);
     if (!entry) return;
 
     const token = ++this.activeSheetBackgroundLoadToken;
+    this.activeSheetBackgroundAbort?.abort();
     const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
     this.activeSheetBackgroundAbort = abort;
     const signal = abort?.signal;

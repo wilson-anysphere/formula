@@ -5484,7 +5484,6 @@ export class CanvasGridRenderer {
         min: quadrant.minCol,
         maxExclusive: quadrant.maxColExclusive
       });
-
       const startRow = rowsRange.start;
       const endRow = rowsRange.end;
       const startCol = colsRange.start;
