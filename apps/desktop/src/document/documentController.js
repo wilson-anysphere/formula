@@ -6410,9 +6410,20 @@ export class DocumentController {
       return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
     })();
 
+    // Guard against memory / decode DoS when loading snapshots containing image bytes:
+    // - avoid allocating unbounded Uint8Arrays from numeric-key objects / arrays
+    // - avoid decoding huge base64 strings
+    //
+    // Keep in sync with `MAX_INSERT_IMAGE_BYTES` (drawings/insertImageLimits.ts).
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MiB
+
     const parseBytes = (value) => {
-      if (value instanceof Uint8Array) return value.slice();
+      if (value instanceof Uint8Array) {
+        if (value.byteLength > MAX_IMAGE_BYTES) return null;
+        return value.slice();
+      }
       if (Array.isArray(value)) {
+        if (value.length > MAX_IMAGE_BYTES) return null;
         const out = new Uint8Array(value.length);
         for (let i = 0; i < value.length; i++) {
           const n = Number(value[i]);
@@ -6431,6 +6442,8 @@ export class DocumentController {
           const maxIndex = Number(numericKeys[numericKeys.length - 1]);
           const declaredLength = Number(value.length);
           const length = Number.isInteger(declaredLength) && declaredLength >= maxIndex + 1 ? declaredLength : maxIndex + 1;
+          if (!Number.isFinite(length) || length <= 0) return null;
+          if (length > MAX_IMAGE_BYTES) return null;
           const out = new Uint8Array(length);
           for (const k of numericKeys) {
             const idx = Number(k);
@@ -6442,8 +6455,30 @@ export class DocumentController {
         }
       }
       if (typeof value === "string" && value) {
+        // Fast length guard before allocating intermediate strings (trim/slice).
+        // Base64 expands bytes by ~4/3; allow generous overhead for optional `data:` prefixes
+        // and whitespace/newlines.
+        const roughMaxChars = Math.ceil(((MAX_IMAGE_BYTES + 2) * 4) / 3) + 128;
+        if (value.length > roughMaxChars * 2) return null;
         try {
-          return decodeBase64(value);
+          let base64 = value.trim();
+          if (!base64) return null;
+          // Strip `data:*;base64,` prefix if present.
+          if (base64.startsWith("data:")) {
+            const comma = base64.indexOf(",");
+            if (comma === -1) return null;
+            base64 = base64.slice(comma + 1).trim();
+            if (!base64) return null;
+          }
+
+          const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+          const estimated = Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+          if (estimated > MAX_IMAGE_BYTES) return null;
+
+          const decoded = decodeBase64(base64);
+          if (!decoded || decoded.length === 0) return null;
+          if (decoded.length > MAX_IMAGE_BYTES) return null;
+          return decoded;
         } catch {
           return null;
         }

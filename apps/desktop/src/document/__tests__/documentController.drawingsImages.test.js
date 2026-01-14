@@ -137,6 +137,33 @@ test("applyState trims mimeType strings when loading images", () => {
   assert.equal(doc.getImage("img1")?.mimeType, "image/png");
 });
 
+test("applyState ignores images with oversized declared byte lengths (defensive)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [],
+        },
+      ],
+      images: [
+        // Numeric-key object with an absurd declared length; should not allocate a huge Uint8Array.
+        { id: "img1", mimeType: "image/png", bytes: { length: 1_000_000_000, 0: 1 } },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.equal(doc.getImage("img1"), null);
+});
+
 test("drawing helpers support numeric ids (overlay-compatible)", () => {
   const doc = new DocumentController();
 
