@@ -172,6 +172,17 @@ function Build-MinimalFormula {
   return "=$FunctionName(" + ($args -join ",") + ")"
 }
 
+function Expected-SentinelTranslations {
+  param([Parameter(Mandatory = $true)][string]$LocaleId)
+
+  switch ($LocaleId) {
+    "de-DE" { return @{ SUM = "SUMME"; IF = "WENN"; TRUE = "WAHR"; FALSE = "FALSCH" } }
+    "es-ES" { return @{ SUM = "SUMA"; IF = "SI"; TRUE = "VERDADERO"; FALSE = "FALSO" } }
+    "fr-FR" { return @{ SUM = "SOMME"; IF = "SI"; TRUE = "VRAI"; FALSE = "FAUX" } }
+    default { return $null }
+  }
+}
+
 function Parse-LocalizedFunctionName {
   param([Parameter(Mandatory = $true)][string]$FormulaLocal)
 
@@ -207,6 +218,43 @@ function Parse-LocalizedFunctionName {
   }
 
   return $s.Trim()
+}
+
+function Warn-IfExcelLocaleSeemsMisconfigured {
+  param(
+    [Parameter(Mandatory = $true)][object]$RangeObj,
+    [Parameter(Mandatory = $true)][string]$LocaleId
+  )
+
+  $expected = Expected-SentinelTranslations -LocaleId $LocaleId
+  if ($null -eq $expected) { return }
+
+  $checks = @(
+    @{ canonical = "SUM"; formula = "=SUM(1,1)" },
+    @{ canonical = "IF"; formula = "=IF(TRUE,1,1)" },
+    @{ canonical = "TRUE"; formula = "=TRUE()" },
+    @{ canonical = "FALSE"; formula = "=FALSE()" }
+  )
+
+  foreach ($c in $checks) {
+    $canonical = [string]$c.canonical
+    $formula = [string]$c.formula
+    $want = [string]$expected[$canonical]
+
+    try {
+      $RangeObj.Clear()
+      Set-RangeFormula -RangeObj $RangeObj -Formula $formula
+      $local = [string]$RangeObj.FormulaLocal
+      $got = Parse-LocalizedFunctionName -FormulaLocal $local
+      if (-not $got) { throw "Parsed localized name was empty (FormulaLocal=$local)" }
+
+      if ($got.ToUpperInvariant() -ne $want.ToUpperInvariant()) {
+        Write-Warning ("Excel locale validation: expected {0} -> {1} for -LocaleId {2}, got {3} (FormulaLocal={4})" -f $canonical, $want, $LocaleId, $got, $local)
+      }
+    } catch {
+      Write-Warning ("Excel locale validation: failed for {0} (formula={1}): {2}" -f $canonical, $formula, $_.Exception.Message)
+    }
+  }
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot ".." "..")
@@ -299,6 +347,11 @@ try {
   $sheet = $workbook.Worksheets.Item(1)
   $sheet.Name = "FunctionTranslations"
   $cell = $sheet.Range("A1")
+
+  # If we're extracting for a locale we know well, do a quick sanity check
+  # against a few sentinel translations so users don't accidentally generate
+  # (e.g.) de-DE.json from an en-US Excel install.
+  Warn-IfExcelLocaleSeemsMisconfigured -RangeObj $cell -LocaleId $LocaleId
 
   $i = 0
   $total = $functionList.Count
