@@ -55,7 +55,7 @@ test.describe("keyboard navigation: Tab grid traversal + F6 focus cycling", () =
     });
   }
 
-  test("F6 / Shift+F6 cycles focus across ribbon, formula bar, sheet tabs, and grid", async ({ page }) => {
+  test("F6 / Shift+F6 cycles focus across ribbon, formula bar, grid, sheet tabs, and status bar", async ({ page }) => {
     await gotoDesktop(page, "/?grid=legacy");
 
     const ribbonRoot = page.getByTestId("ribbon-root");
