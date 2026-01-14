@@ -730,10 +730,14 @@ Supported expression forms:
   - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
     **table** valued.
 - Table constructors (limited one-column literals): `{ 1, 2, 3 }`  
-  Separators may be `,` or `;`. Nested table constructors are not supported. Currently these table
-  constructors are only supported:
-  - on the RHS of the `IN` operator (`expr IN { ... }`), and
-  - as the first argument to `CONTAINSROW({ ... }, value)`.
+  Separators may be `,` or `;`. Nested table constructors are not supported.
+  These evaluate to a **virtual one-column table** with a synthetic column named `[Value]`, and can
+  be used:
+  - on the RHS of the `IN` operator (`expr IN { ... }`)
+  - as the first argument to `CONTAINSROW({ ... }, value)`
+  - as a table expression in iterators and table functions (e.g. `COUNTROWS({1,2,3})`,
+    `SUMX({1,2,3}, [Value])`, `FILTER({1,2,3}, [Value] > 1)`).
+  Table literals can also be bound to a `VAR` and referenced by name.
 
 Unsupported / not yet implemented in the parser:
 
@@ -907,8 +911,8 @@ This is not an exhaustive list, but the most common contributor-facing constrain
 - **DAX language coverage**
   - Variables (`VAR`/`RETURN`) are supported.
   - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
-    and are currently only supported on the RHS of the `IN` operator and as the first argument to
-    `CONTAINSROW`.
+    and evaluate to a one-column virtual table with a synthetic `[Value]` column (usable in iterators),
+    as well as membership tests via `IN` and `CONTAINSROW`.
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
