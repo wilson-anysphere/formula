@@ -18,9 +18,17 @@ const STANDARD_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/standard.xlsx"
 ));
+const STANDARD_4_2_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/standard-4.2.xlsx"
+));
 const STANDARD_RC4_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/standard-rc4.xlsx"
+));
+const STANDARD_LARGE_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/standard-large.xlsx"
 ));
 const STANDARD_PLAINTEXT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -85,10 +93,28 @@ fn decrypts_standard_encrypted_package() {
 }
 
 #[test]
+fn decrypts_standard_4_2_encrypted_package() {
+    // Some producers emit `EncryptionInfo` version 4.2 for Standard/CryptoAPI encryption
+    // (still `versionMinor == 2`). Ensure we can decrypt Apache POI-produced files.
+    let decrypted =
+        decrypt_encrypted_package(STANDARD_4_2_FIXTURE, "password").expect("decrypt standard 4.2");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
 fn decrypts_standard_rc4_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_RC4_FIXTURE, "password").expect("decrypt standard rc4");
     assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_standard_large_encrypted_package() {
+    let decrypted =
+        decrypt_encrypted_package(STANDARD_LARGE_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
 
@@ -249,7 +275,20 @@ fn wrong_password_returns_invalid_password() {
         "expected InvalidPassword, got {err:?}"
     );
 
+    let err = decrypt_encrypted_package(STANDARD_4_2_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
     let err = decrypt_encrypted_package(STANDARD_RC4_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
+    let err =
+        decrypt_encrypted_package(STANDARD_LARGE_FIXTURE, "wrong").expect_err("expected error");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
