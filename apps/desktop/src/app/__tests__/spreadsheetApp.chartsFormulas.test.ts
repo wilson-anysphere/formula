@@ -143,4 +143,41 @@ describe("SpreadsheetApp chart formula evaluation", () => {
     app.destroy();
     root.remove();
   });
+
+  it("updates chart data caches when formula cells depend on inputs outside the chart range", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    const sheetToken = /[^A-Za-z0-9_]/.test(sheetId) ? `'${sheetId.replace(/'/g, "''")}'` : sheetId;
+
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, 5);
+    doc.setCellFormula(sheetId, { row: 0, col: 1 }, "=A1*2");
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: `${sheetToken}!B1:B1`,
+      title: "Formula Dependency Chart",
+      position: `${sheetToken}!C1`,
+    });
+
+    const models = (app as any).chartModels as Map<string, any>;
+    expect(models.get(result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(10);
+
+    // Change a referenced cell that is *outside* the chart range. The chart values cache
+    // should refresh after a normal app redraw.
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, 7);
+    app.refresh();
+
+    expect(models.get(result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
+
+    app.destroy();
+    root.remove();
+  });
 });

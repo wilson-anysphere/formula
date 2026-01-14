@@ -1080,6 +1080,14 @@ export class SpreadsheetApp {
    * when scrolled into view.
    */
   private readonly dirtyChartIds = new Set<string>();
+  /**
+   * Whether a chart's referenced ranges include at least one formula cell.
+   *
+   * This is used as a conservative signal for when a recalculation event may affect chart
+   * values even if the triggering cell deltas were outside the chart's direct ranges (e.g.
+   * a chart plots `B1` where `B1` is a formula referencing `A1`).
+   */
+  private readonly chartHasFormulaCells = new Map<string, boolean>();
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
@@ -2361,6 +2369,23 @@ export class SpreadsheetApp {
       // refresh their cached series data when scrolled into view.
       this.markChartsDirtyFromDeltas(payload?.deltas);
 
+      // When formulas may have been recalculated, the chart ranges can change even if the
+      // triggering cell deltas were outside the chart's direct ranges (e.g. a chart plots
+      // `B1` where `B1` is `=A1*2`, and the user edits `A1`).
+      //
+      // If we're not relying on the WASM engine's computed-value deltas, conservatively mark
+      // charts that contain formulas as dirty so their cached data refreshes on the next
+      // render.
+      if (payload?.recalc) {
+        const sheetCount = (this.document as any)?.model?.sheets?.size;
+        const useEngineCache =
+          (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+        const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
+        if (!hasWasmEngine || !useEngineCache) {
+          this.markFormulaChartsDirty();
+        }
+      }
+
       // DocumentController changes can also include sheet-level view deltas
       // (e.g. frozen panes). In shared-grid mode, frozen panes must be pushed
       // down to the CanvasGridRenderer explicitly.
@@ -3192,6 +3217,7 @@ export class SpreadsheetApp {
     this.outlineButtons.clear();
     this.chartModels.clear();
     this.dirtyChartIds.clear();
+    this.chartHasFormulaCells.clear();
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
@@ -3418,6 +3444,19 @@ export class SpreadsheetApp {
     }
 
     for (const id of affected) this.dirtyChartIds.add(id);
+  }
+
+  private markFormulaChartsDirty(): void {
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (charts.length === 0) return;
+
+    for (const chart of charts) {
+      const hasFormula = this.chartHasFormulaCells.get(chart.id);
+      // If we haven't scanned the chart ranges yet, be conservative and assume formulas
+      // might be present so charts don't get stuck with stale cached values.
+      if (hasFormula === false) continue;
+      this.dirtyChartIds.add(chart.id);
+    }
   }
 
   focus(): void {
@@ -9222,7 +9261,7 @@ export class SpreadsheetApp {
       const memo = new Map<string, Map<number, SpreadsheetValue>>();
       const stack = new Map<string, Set<number>>();
       return {
-        getRange: (rangeRef: string) => {
+        getRange: (rangeRef: string, flags?: { sawFormula: boolean }) => {
           const parsed = parseA1Range(rangeRef);
           if (!parsed) return [];
           const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
@@ -9234,7 +9273,7 @@ export class SpreadsheetApp {
             coordScratch.row = r;
             for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
               coordScratch.col = c;
-              row.push(this.computeCellValue(sheetId, coordScratch, memo, stack, { useEngineCache }));
+              row.push(this.computeCellValue(sheetId, coordScratch, memo, stack, { useEngineCache }, flags));
             }
             out.push(row);
           }
@@ -9368,16 +9407,18 @@ export class SpreadsheetApp {
             placeholder: `Chart range too large (>${MAX_CHART_DATA_CELLS.toLocaleString()} cells)`,
           };
           this.chartModels.set(chart.id, base);
+          this.chartHasFormulaCells.set(chart.id, false);
           this.dirtyChartIds.delete(chart.id);
         } else {
           if (!provider) provider = createProvider();
+          const rangeFlags = { sawFormula: false };
 
           const nextSeries = base.series.map((ser, idx) => {
             const def = chart.series[idx];
-            const categories = def.categories ? toCategoryCache(flatten(provider!.getRange(def.categories))) : [];
-            const values = def.values ? toNumberCache(flatten(provider!.getRange(def.values))) : [];
-            const xValues = def.xValues ? toNumberCache(flatten(provider!.getRange(def.xValues))) : [];
-            const yValues = def.yValues ? toNumberCache(flatten(provider!.getRange(def.yValues))) : [];
+            const categories = def.categories ? toCategoryCache(flatten(provider!.getRange(def.categories, rangeFlags))) : [];
+            const values = def.values ? toNumberCache(flatten(provider!.getRange(def.values, rangeFlags))) : [];
+            const xValues = def.xValues ? toNumberCache(flatten(provider!.getRange(def.xValues, rangeFlags))) : [];
+            const yValues = def.yValues ? toNumberCache(flatten(provider!.getRange(def.yValues, rangeFlags))) : [];
 
             const pieFallback =
               base.chartType.kind === "pie" && categories.length === 0 && values.length > 0
@@ -9398,6 +9439,7 @@ export class SpreadsheetApp {
           });
 
           this.chartModels.set(chart.id, { ...base, series: nextSeries });
+          this.chartHasFormulaCells.set(chart.id, rangeFlags.sawFormula);
           this.dirtyChartIds.delete(chart.id);
         }
       }
@@ -9423,6 +9465,10 @@ export class SpreadsheetApp {
     for (const id of this.dirtyChartIds) {
       if (keep.has(id)) continue;
       this.dirtyChartIds.delete(id);
+    }
+    for (const id of this.chartHasFormulaCells.keys()) {
+      if (keep.has(id)) continue;
+      this.chartHasFormulaCells.delete(id);
     }
 
     if (this.selectedChartId != null && !keep.has(this.selectedChartId)) {
@@ -14791,7 +14837,8 @@ export class SpreadsheetApp {
     cell: CellCoord,
     memo: Map<string, Map<number, SpreadsheetValue>>,
     stack: Map<string, Set<number>>,
-    options: { useEngineCache: boolean }
+    options: { useEngineCache: boolean },
+    flags?: { sawFormula: boolean }
   ): SpreadsheetValue {
     if (options.useEngineCache) {
       const sheetCache = this.getComputedValuesByCoordForSheet(sheetId);
@@ -14799,11 +14846,18 @@ export class SpreadsheetApp {
         const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
         const cached = sheetCache.get(key);
         // `computedValuesByCoord` never stores `undefined`; a missing entry always returns undefined.
-        if (cached !== undefined) return cached;
+        if (cached !== undefined) {
+          if (flags) {
+            const state = this.document.getCell(sheetId, cell) as { formula: string | null };
+            if (state?.formula != null) flags.sawFormula = true;
+          }
+          return cached;
+        }
       }
     }
 
     const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    if (flags && state?.formula != null) flags.sawFormula = true;
 
     // Fast path: plain values do not participate in reference cycles and do not need to
     // be memoized per evaluation call. Avoid generating A1/key strings for them.
