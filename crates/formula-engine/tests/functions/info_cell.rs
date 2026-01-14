@@ -518,16 +518,19 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles_for_metadat
         Value::Number(n) => assert!(n != 0.0, "expected non-zero width, got {n}"),
         other => panic!("expected number for CELL(\"width\"), got {other:?}"),
     }
+    assert_eq!(sheet.circular_reference_count(), 0);
 
     match sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"protect\"))") {
         Value::Number(n) => assert!(n != 0.0, "expected non-zero protect, got {n}"),
         other => panic!("expected number for CELL(\"protect\"), got {other:?}"),
     }
+    assert_eq!(sheet.circular_reference_count(), 0);
 
     assert_eq!(
         sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"prefix\"))"),
         Value::Text(String::new())
     );
+    assert_eq!(sheet.circular_reference_count(), 0);
 
     // Format metadata keys consult number format style state, but should still avoid implicit
     // self-references for dynamic dependency tracing.
@@ -535,14 +538,17 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles_for_metadat
         sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"format\"))"),
         Value::Text("G".to_string())
     );
+    assert_eq!(sheet.circular_reference_count(), 0);
     assert_number(
         &sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"color\"))"),
         0.0,
     );
+    assert_eq!(sheet.circular_reference_count(), 0);
     assert_number(
         &sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"parentheses\"))"),
         0.0,
     );
+    assert_eq!(sheet.circular_reference_count(), 0);
 }
 
 #[test]

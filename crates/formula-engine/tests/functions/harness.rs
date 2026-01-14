@@ -81,6 +81,10 @@ impl TestSheet {
         self.engine.bytecode_program_count()
     }
 
+    pub fn circular_reference_count(&self) -> usize {
+        self.engine.circular_reference_count()
+    }
+
     pub fn eval(&mut self, formula: &str) -> Value {
         self.set_formula(self.scratch_cell, formula);
         self.recalc();
