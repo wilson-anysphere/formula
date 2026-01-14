@@ -1648,6 +1648,23 @@ test("Typing =SUM('My Sheet'!A1 suggests auto-closing parens without needing sch
   );
 });
 
+test("Typing =SUM(Table1[Amount] suggests auto-closing parens without needing schema", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(Table1[Amount]";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Table1[Amount])"),
+    `Expected a pure paren-close suggestion for a structured reference, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =ABS(A1 suggests auto-closing parens for a value arg cell reference", async () => {
   const engine = new TabCompletionEngine();
 
@@ -1662,6 +1679,23 @@ test("Typing =ABS(A1 suggests auto-closing parens for a value arg cell reference
   assert.ok(
     suggestions.some((s) => s.text === "=ABS(A1)"),
     `Expected ABS to suggest closing parens after a cell reference, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =ABS(Table1[Amount] suggests auto-closing parens for a structured reference value arg", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ABS(Table1[Amount]";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ABS(Table1[Amount])"),
+    `Expected ABS to suggest closing parens after a structured reference, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

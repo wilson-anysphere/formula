@@ -2785,6 +2785,30 @@ function looksLikeCompleteColumnRangeArg(text) {
   return looksLikeA1CellReference(`${start}1`) && looksLikeA1CellReference(`${end}1`);
 }
 
+function looksLikeCompleteBracketedRefArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (!trimmed.includes("[")) return false;
+  if (!trimmed.endsWith("]")) return false;
+  // Sheet-qualified refs are handled elsewhere (and will contain `!`).
+  if (trimmed.includes("!")) return false;
+
+  const firstBracket = trimmed.indexOf("[");
+  // Avoid auto-closing for things like `Table1 [Col]` (space before '[') since that's likely
+  // still being typed or is invalid structured-ref syntax.
+  if (firstBracket > 0 && /\s/.test(trimmed.slice(0, firstBracket))) return false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] !== "[") continue;
+    const end = findMatchingBracketEnd(trimmed, i, trimmed.length);
+    if (end == null) return false;
+    i = end - 1;
+  }
+
+  return true;
+}
+
 function looksLikeCompleteA1RangeArg(text) {
   if (typeof text !== "string") return false;
   const trimmed = text.trim();
@@ -2812,7 +2836,8 @@ function looksLikeCompleteRangeOrCellArg(text) {
   return (
     looksLikeCompleteA1RangeArg(rangeText) ||
     looksLikeCompleteA1CellArg(rangeText) ||
-    looksLikeCompleteColumnRangeArg(rangeText)
+    looksLikeCompleteColumnRangeArg(rangeText) ||
+    looksLikeCompleteBracketedRefArg(rangeText)
   );
 }
 

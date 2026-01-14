@@ -93,6 +93,7 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
             - `=SUM(A1` → `=SUM(A1)`
             - `=SUM(A1:A10` → `=SUM(A1:A10)` (even if the range is empty)
             - `=SUM(Sheet2!A1` → `=SUM(Sheet2!A1)` (even without a `SchemaProvider`)
+            - `=SUM(Table1[Amount]` → `=SUM(Table1[Amount])` (balanced structured ref brackets; even without a `SchemaProvider`)
         - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
           - When no enum/heuristic suggestions apply, the engine falls back to **nested function-name completion**
             at the cursor (still enforcing the formula bar’s “pure insertion” constraint).
@@ -103,6 +104,7 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
             `suggestArgumentValues()` may still offer a low-confidence **auto-close parens** suggestion when the function
             could be complete after the current argument:
             - `=ABS(A1` → `=ABS(A1)`
+            - `=ABS(Table1[Amount]` → `=ABS(Table1[Amount])`
             - `=ABS(5` → `=ABS(5)`
             - `=TEXT(A1,"yyyy-mm-dd"` → `=TEXT(A1,"yyyy-mm-dd")`
 
