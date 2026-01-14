@@ -51,8 +51,9 @@ const BIFF8_ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
 // Some BIFF8 RC4 CryptoAPI workbooks use an older FILEPASS layout where the second field is
-// `wEncryptionInfo == 0x0004` rather than `wEncryptionSubType == 0x0002`; treat it as CryptoAPI
-// for dispatch.
+// `wEncryptionInfo == 0x0004` (rather than `wEncryptionSubType == 0x0002`). In that layout the
+// CryptoAPI `EncryptionHeader`/`EncryptionVerifier` structures are embedded directly in the
+// FILEPASS payload (rather than using a length-prefixed `EncryptionInfo` blob).
 const BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY: u16 = 0x0004;
 
 // BIFF record ids used by the legacy XOR obfuscation scheme that are either not encrypted or
@@ -1535,6 +1536,24 @@ mod tests {
         let payload = [
             0x01, 0x00, // wEncryptionType
             0x02, 0x00, // subType (CryptoAPI)
+            0xDE, 0xAD, 0xBE, 0xEF,
+        ];
+        let parsed = parse_filepass_record(BiffVersion::Biff8, &payload).expect("parse");
+        assert_eq!(
+            parsed,
+            BiffEncryption::Biff8Rc4CryptoApi {
+                filepass_payload: payload.to_vec()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_biff8_rc4_cryptoapi_legacy_filepass() {
+        // Some BIFF8 RC4 CryptoAPI workbooks use an older FILEPASS layout where the second
+        // field is `wEncryptionInfo == 0x0004` (rather than `wEncryptionSubType == 0x0002`).
+        let payload = [
+            0x01, 0x00, // wEncryptionType
+            0x04, 0x00, // wEncryptionInfo (legacy CryptoAPI)
             0xDE, 0xAD, 0xBE, 0xEF,
         ];
         let parsed = parse_filepass_record(BiffVersion::Biff8, &payload).expect("parse");
