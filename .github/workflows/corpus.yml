@@ -365,8 +365,8 @@ jobs:
                   for k, v in top:
                       prev_v = prev_kinds.get(k)
                       prev_i = int(prev_v) if isinstance(prev_v, int) and not isinstance(prev_v, bool) else 0
-                      parts.append(f\"{k}={v} ({v - prev_i:+d})\")
-                  lines.append(f\"- Top round-trip failure kinds: {', '.join(parts)}\")
+                      parts.append(f"{k}={v} ({v - prev_i:+d})")
+                  lines.append(f"- Top round-trip failure kinds: {', '.join(parts)}")
            
           prev_diff = prev.get("diff_totals") or {}
           cur_diff = cur.get("diff_totals") or {}
