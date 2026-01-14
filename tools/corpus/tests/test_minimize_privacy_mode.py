@@ -71,6 +71,126 @@ class MinimizePrivacyModeTests(unittest.TestCase):
             triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
             triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
 
+    def test_minimize_private_mode_redacts_out_xlsx_paths_in_json_and_stdout(self) -> None:
+        import tools.corpus.minimize as minimize_mod
+        import tools.corpus.triage as triage_mod
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_run_rust_triage = triage_mod._run_rust_triage
+        original_minimize_pkg = minimize_mod.minimize_workbook_package
+        argv = sys.argv
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {"diff": {"details": {"counts": {"critical": 0, "warning": 0, "info": 0, "total": 0}}}},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            def _fake_minimize_workbook_package(*args, **kwargs):  # type: ignore[no-untyped-def]
+                # Return minimal data; main() should still redact the path when writing JSON/stdout.
+                return ({"diff_counts": {"critical": 0}, "critical_parts": []}, [], b"min-bytes")
+
+            minimize_mod.minimize_workbook_package = _fake_minimize_workbook_package  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as td:
+                td_path = Path(td)
+                input_path = td_path / "sensitive-name.xlsx"
+                input_path.write_bytes(_make_empty_zip())
+                out_path = td_path / "out.json"
+                out_xlsx = td_path / "nested" / "minimized.xlsx"
+
+                sys.argv = [
+                    "tools.corpus.minimize",
+                    "--input",
+                    str(input_path),
+                    "--out",
+                    str(out_path),
+                    "--out-xlsx",
+                    str(out_xlsx),
+                    "--privacy-mode",
+                    "private",
+                ]
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", new=buf):
+                    rc = minimize_mod.main()
+                self.assertEqual(rc, 0)
+
+                out = json.loads(out_path.read_text(encoding="utf-8"))
+                minimized = out.get("minimized") or {}
+                self.assertIsInstance(minimized, dict)
+                self.assertEqual(minimized.get("path"), out_xlsx.name)
+                self.assertNotIn(str(td_path), json.dumps(out))
+
+                stdout = buf.getvalue()
+                self.assertNotIn(str(td_path), stdout)
+                self.assertNotIn("sensitive-name.xlsx", stdout)
+        finally:
+            sys.argv = argv
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+            minimize_mod.minimize_workbook_package = original_minimize_pkg  # type: ignore[assignment]
+
+    def test_minimize_private_mode_hashes_minimized_errors(self) -> None:
+        import tools.corpus.minimize as minimize_mod
+        import tools.corpus.triage as triage_mod
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_run_rust_triage = triage_mod._run_rust_triage
+        original_minimize_pkg = minimize_mod.minimize_workbook_package
+        argv = sys.argv
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {"diff": {"details": {"counts": {"critical": 1, "warning": 0, "info": 0, "total": 1}}}},
+                "result": {"open_ok": True, "round_trip_ok": False},
+            }
+
+            def _boom(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise RuntimeError("Sensitive /home/alice/minimized.xlsx")
+
+            minimize_mod.minimize_workbook_package = _boom  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as td:
+                td_path = Path(td)
+                input_path = td_path / "sensitive-name.xlsx"
+                input_path.write_bytes(_make_empty_zip())
+                out_path = td_path / "out.json"
+                out_xlsx = td_path / "nested" / "minimized.xlsx"
+
+                sys.argv = [
+                    "tools.corpus.minimize",
+                    "--input",
+                    str(input_path),
+                    "--out",
+                    str(out_path),
+                    "--out-xlsx",
+                    str(out_xlsx),
+                    "--privacy-mode",
+                    "private",
+                ]
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", new=buf):
+                    rc = minimize_mod.main()
+                self.assertEqual(rc, 0)
+
+                out = json.loads(out_path.read_text(encoding="utf-8"))
+                minimized = out.get("minimized") or {}
+                self.assertIsInstance(minimized, dict)
+                err = minimized.get("error")
+                self.assertIsInstance(err, str)
+                self.assertTrue(err.startswith("sha256="))
+                self.assertNotIn("/home/alice", err)
+                self.assertNotIn("minimized.xlsx", err)
+
+                stdout = buf.getvalue()
+                self.assertNotIn("/home/alice", stdout)
+                self.assertNotIn(str(td_path), stdout)
+        finally:
+            sys.argv = argv
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+            minimize_mod.minimize_workbook_package = original_minimize_pkg  # type: ignore[assignment]
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -802,14 +802,10 @@ def main() -> int:
         use_default=not args.no_default_diff_ignore,
     )
 
-    summary = minimize_workbook(
-        workbook,
-        rust_exe=rust_exe,
-        diff_ignore=diff_ignore,
-        diff_limit=max(0, int(args.diff_limit)),
-    )
+    def _apply_privacy_mode(summary: dict[str, Any]) -> None:
+        if args.privacy_mode != triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
+            return
 
-    if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
         # Match triage privacy-mode behavior to avoid leaking local filenames or corporate domains
         # when summary JSON is uploaded as an artifact.
         summary["display_name"] = triage_mod._anonymized_display_name(  # noqa: SLF001
@@ -819,9 +815,9 @@ def main() -> int:
         summary["run_url"] = triage_mod._redact_run_url(  # noqa: SLF001
             summary.get("run_url"), privacy_mode=args.privacy_mode
         )
-        # Do not leak local output paths; keep only the basename.
         minimized = summary.get("minimized")
         if isinstance(minimized, dict):
+            # Do not leak local output paths; keep only the basename.
             p = minimized.get("path")
             if isinstance(p, str) and p:
                 minimized["path"] = Path(p).name
@@ -831,6 +827,13 @@ def main() -> int:
         err = summary.get("critical_part_hashes_error")
         if isinstance(err, str) and err:
             summary["critical_part_hashes_error"] = f"sha256={triage_mod._sha256_text(err)}"  # noqa: SLF001
+
+    summary = minimize_workbook(
+        workbook,
+        rust_exe=rust_exe,
+        diff_ignore=diff_ignore,
+        diff_limit=max(0, int(args.diff_limit)),
+    )
 
     workbook_id = summary["sha256"][:16]
     out_path = args.out or (Path("tools/corpus/out/minimize") / f"{workbook_id}.json")
@@ -868,6 +871,7 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 (tooling)
             summary["minimized"] = {"error": str(e)}
 
+    _apply_privacy_mode(summary)
     write_json(out_path, summary)
 
     # Privacy-safe stdout summary: parts + counts only (no raw XML/text).
@@ -900,11 +904,17 @@ def main() -> int:
                 f"NOTE: rels_critical_ids may be incomplete (rerun is capped at {MAX_DIFF_ENTRIES_AUTO_RERUN} diffs)."
             )
 
-    print(f"Wrote summary: {out_path}")
+    wrote_summary = str(out_path)
+    if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
+        wrote_summary = out_path.name
+    print(f"Wrote summary: {wrote_summary}")
     if out_xlsx is not None:
         minimized = summary.get("minimized")
         if isinstance(minimized, dict) and "path" in minimized:
-            print(f"Wrote minimized workbook: {out_xlsx}")
+            wrote_min = str(out_xlsx)
+            if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
+                wrote_min = out_xlsx.name
+            print(f"Wrote minimized workbook: {wrote_min}")
         elif isinstance(minimized, dict) and "error" in minimized:
             print(f"Minimized workbook not written: {minimized['error']}")
     return 0
