@@ -68,6 +68,13 @@ type SuperRefineCtx = {
 };
 
 abstract class BaseSchema<T> {
+  // Match Zod's runtime shape enough for test introspection.
+  readonly _def: { typeName: string; [key: string]: any };
+
+  protected constructor(typeName: string, extraDef: Record<string, unknown> = {}) {
+    this._def = { typeName, ...extraDef };
+  }
+
   abstract _parse(input: unknown, path: ZodPath): ParseResult<T>;
 
   parse(input: unknown): T {
@@ -83,101 +90,126 @@ abstract class BaseSchema<T> {
   }
 
   optional(): BaseSchema<T | undefined> {
-    return new OptionalSchema(this);
+    return new ZodOptional(this);
   }
 
   default(defaultValue: T): BaseSchema<T> {
-    return new DefaultSchema(this, defaultValue);
+    return new ZodDefault(this, defaultValue);
   }
 
   refine(check: (value: T) => boolean, message: string): BaseSchema<T> {
-    return new RefineSchema(this, check, message);
+    return new ZodEffects(this, { kind: "refine", check, message });
   }
 
   superRefine(check: (value: T, ctx: SuperRefineCtx) => void): BaseSchema<T> {
-    return new SuperRefineSchema(this, check);
+    return new ZodEffects(this, { kind: "superRefine", check });
+  }
+
+  nullable(): BaseSchema<T | null> {
+    return new ZodNullable(this);
   }
 }
 
-class OptionalSchema<T> extends BaseSchema<T | undefined> {
-  constructor(private readonly inner: BaseSchema<T>) {
-    super();
+export class ZodOptional<T> extends BaseSchema<T | undefined> {
+  constructor(readonly _defInnerType: BaseSchema<T>) {
+    super("ZodOptional", { innerType: _defInnerType });
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<T | undefined> {
     if (input === undefined) return ok(undefined);
-    return this.inner._parse(input, path);
+    return this._defInnerType._parse(input, path);
   }
 }
 
-class DefaultSchema<T> extends BaseSchema<T> {
-  constructor(
-    private readonly inner: BaseSchema<T>,
-    private readonly defaultValue: T
-  ) {
-    super();
+export class ZodDefault<T> extends BaseSchema<T> {
+  constructor(readonly _defInnerType: BaseSchema<T>, private readonly defaultValue: T) {
+    super("ZodDefault", { innerType: _defInnerType });
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<T> {
     if (input === undefined) {
       // Validate defaults through the inner schema (mirrors real Zod behavior).
-      return this.inner._parse(this.defaultValue, path);
+      return this._defInnerType._parse(this.defaultValue, path);
     }
-    return this.inner._parse(input, path);
+    return this._defInnerType._parse(input, path);
   }
 }
 
-class RefineSchema<T> extends BaseSchema<T> {
-  constructor(
-    private readonly inner: BaseSchema<T>,
-    private readonly check: (value: T) => boolean,
-    private readonly message: string
-  ) {
-    super();
+export class ZodNullable<T> extends BaseSchema<T | null> {
+  constructor(readonly _defInnerType: BaseSchema<T>) {
+    super("ZodNullable", { innerType: _defInnerType });
   }
 
-  _parse(input: unknown, path: ZodPath): ParseResult<T> {
-    const res = this.inner._parse(input, path);
-    if (!res.ok) return res;
-    if (!this.check(res.data)) {
-      return fail(path, this.message, "custom");
-    }
-    return res;
+  _parse(input: unknown, path: ZodPath): ParseResult<T | null> {
+    if (input === null) return ok(null);
+    return this._defInnerType._parse(input, path);
   }
 }
 
-class SuperRefineSchema<T> extends BaseSchema<T> {
+type EffectsDef<T> =
+  | { kind: "preprocess"; transform: (input: unknown) => unknown }
+  | { kind: "refine"; check: (value: T) => boolean; message: string }
+  | { kind: "superRefine"; check: (value: T, ctx: SuperRefineCtx) => void };
+
+export class ZodEffects<T> extends BaseSchema<T> {
+  readonly _defSchema: BaseSchema<T>;
+  private readonly effect: EffectsDef<T>;
+
   constructor(
-    private readonly inner: BaseSchema<T>,
-    private readonly check: (value: T, ctx: SuperRefineCtx) => void
+    schema: BaseSchema<T>,
+    effect: EffectsDef<T>
   ) {
-    super();
+    super("ZodEffects", { schema });
+    this._defSchema = schema;
+    this.effect = effect;
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<T> {
-    const res = this.inner._parse(input, path);
-    if (!res.ok) return res;
-
-    const issues: ZodIssue[] = [];
-    const ctx: SuperRefineCtx = {
-      addIssue: (issue) => {
-        const rel = issue.path ?? [];
-        issues.push({
-          code: issue.code ?? "custom",
-          message: issue.message,
-          path: [...path, ...rel],
-        });
-      },
-    };
-
-    try {
-      this.check(res.data, ctx);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      issues.push({ code: "custom", message, path });
+    if (this.effect.kind === "preprocess") {
+      let next: unknown = input;
+      try {
+        next = this.effect.transform(input);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return fail(path, message, "custom");
+      }
+      return this._defSchema._parse(next, path);
     }
 
-    if (issues.length) return { ok: false, issues };
+    const res = this._defSchema._parse(input, path);
+    if (!res.ok) return res;
+
+    if (this.effect.kind === "refine") {
+      if (!this.effect.check(res.data)) {
+        return fail(path, this.effect.message, "custom");
+      }
+      return res;
+    }
+
+    if (this.effect.kind === "superRefine") {
+      const issues: ZodIssue[] = [];
+      const ctx: SuperRefineCtx = {
+        addIssue: (issue) => {
+          const rel = issue.path ?? [];
+          issues.push({
+            code: issue.code ?? "custom",
+            message: issue.message,
+            path: [...path, ...rel],
+          });
+        },
+      };
+
+      try {
+        this.effect.check(res.data, ctx);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        issues.push({ code: "custom", message, path });
+      }
+
+      if (issues.length) return { ok: false, issues };
+      return res;
+    }
+
     return res;
   }
 }
@@ -186,7 +218,7 @@ class ZodString extends BaseSchema<string> {
   constructor(
     private readonly constraints: { minLen?: number; url?: boolean } = {}
   ) {
-    super();
+    super("ZodString");
   }
 
   min(len: number): ZodString {
@@ -228,7 +260,7 @@ class ZodNumber extends BaseSchema<number> {
   constructor(
     private readonly constraints: { int?: boolean; positive?: boolean } = {}
   ) {
-    super();
+    super("ZodNumber");
   }
 
   int(): ZodNumber {
@@ -257,6 +289,10 @@ class ZodNumber extends BaseSchema<number> {
 }
 
 class ZodBoolean extends BaseSchema<boolean> {
+  constructor() {
+    super("ZodBoolean");
+  }
+
   _parse(input: unknown, path: ZodPath): ParseResult<boolean> {
     if (typeof input !== "boolean") {
       return fail(path, `Expected boolean, received ${input === null ? "null" : typeof input}`, "invalid_type");
@@ -266,6 +302,10 @@ class ZodBoolean extends BaseSchema<boolean> {
 }
 
 class ZodNull extends BaseSchema<null> {
+  constructor() {
+    super("ZodNull");
+  }
+
   _parse(input: unknown, path: ZodPath): ParseResult<null> {
     if (input !== null) {
       return fail(path, `Expected null, received ${input === undefined ? "undefined" : typeof input}`, "invalid_type");
@@ -278,7 +318,7 @@ class ZodEnum<T extends string> extends BaseSchema<T> {
   readonly options: readonly T[];
 
   constructor(values: readonly T[]) {
-    super();
+    super("ZodEnum");
     this.options = [...values];
   }
 
@@ -295,7 +335,7 @@ class ZodEnum<T extends string> extends BaseSchema<T> {
 
 class ZodUnion<T> extends BaseSchema<T> {
   constructor(private readonly schemas: BaseSchema<any>[]) {
-    super();
+    super("ZodUnion");
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<T> {
@@ -315,7 +355,7 @@ class ZodArray<T> extends BaseSchema<T[]> {
     private readonly element: BaseSchema<T>,
     private readonly constraints: { minLen?: number } = {}
   ) {
-    super();
+    super("ZodArray");
   }
 
   min(len: number): ZodArray<T> {
@@ -344,11 +384,11 @@ class ZodArray<T> extends BaseSchema<T[]> {
   }
 }
 
-class ZodObject<TShape extends Record<string, BaseSchema<any>>> extends BaseSchema<{
+export class ZodObject<TShape extends Record<string, BaseSchema<any>>> extends BaseSchema<{
   [K in keyof TShape]: any;
 }> {
-  constructor(private readonly shape: TShape) {
-    super();
+  constructor(readonly shape: TShape) {
+    super("ZodObject");
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<any> {
@@ -376,7 +416,7 @@ class ZodObject<TShape extends Record<string, BaseSchema<any>>> extends BaseSche
 
 class ZodRecord<V> extends BaseSchema<Record<string, V>> {
   constructor(private readonly valueSchema: BaseSchema<V>) {
-    super();
+    super("ZodRecord");
   }
 
   _parse(input: unknown, path: ZodPath): ParseResult<Record<string, V>> {
@@ -397,28 +437,13 @@ class ZodRecord<V> extends BaseSchema<Record<string, V>> {
   }
 }
 
-class ZodPreprocess<T> extends BaseSchema<T> {
-  constructor(
-    private readonly transform: (input: unknown) => unknown,
-    private readonly inner: BaseSchema<T>
-  ) {
-    super();
-  }
-
-  _parse(input: unknown, path: ZodPath): ParseResult<T> {
-    let next: unknown = input;
-    try {
-      next = this.transform(input);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return fail(path, message, "custom");
-    }
-    return this.inner._parse(next, path);
-  }
-}
-
 export const z = {
   ZodIssueCode: { custom: "custom" as const },
+  ZodObject,
+  ZodEffects,
+  ZodDefault,
+  ZodOptional,
+  ZodNullable,
   string: () => new ZodString(),
   number: () => new ZodNumber(),
   boolean: () => new ZodBoolean(),
@@ -428,6 +453,6 @@ export const z = {
   array: <T>(schema: BaseSchema<T>) => new ZodArray(schema),
   object: <TShape extends Record<string, BaseSchema<any>>>(shape: TShape) => new ZodObject(shape),
   record: <V>(schema: BaseSchema<V>) => new ZodRecord(schema),
-  preprocess: <T>(transform: (input: unknown) => unknown, schema: BaseSchema<T>) => new ZodPreprocess(transform, schema),
+  preprocess: <T>(transform: (input: unknown) => unknown, schema: BaseSchema<T>) =>
+    new ZodEffects(schema, { kind: "preprocess", transform }),
 };
-
