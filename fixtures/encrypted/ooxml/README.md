@@ -12,12 +12,15 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `agile.xlsx` / `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
+- `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
 
 ## Fixtures
 
 - `plaintext.xlsx` – unencrypted ZIP-based workbook (starts with `PK`).
   - Copied from `fixtures/xlsx/basic/basic.xlsx`.
+- `plaintext-excel.xlsx` – unencrypted ZIP-based workbook produced by Microsoft Excel (starts with `PK`).
+  - Copied from `crates/formula-offcrypto/tests/fixtures/outputs/example.xlsx`.
 - `agile.xlsx` – Agile encrypted OOXML.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `password`
@@ -33,15 +36,18 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionHeader.algId` = `CALG_RC4` (`0x00006801`)
   - Decrypts to `plaintext.xlsx` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
-   - `EncryptionInfo` header version **Major 4 / Minor 4**
-   - Decrypts to `plaintext.xlsx` with password `""`
+    - `EncryptionInfo` header version **Major 4 / Minor 4**
+    - Decrypts to `plaintext.xlsx` with password `""`
 - `agile-unicode.xlsx` – Agile encrypted OOXML with a Unicode open password.
-   - `EncryptionInfo` header version **Major 4 / Minor 4**
-   - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
+- `agile-unicode-excel.xlsx` – Agile encrypted OOXML with a Unicode open password.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext-excel.xlsx` with password `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 - `plaintext-large.xlsx` – unencrypted ZIP-based workbook, intentionally **> 4096 bytes**.
    - Copied from `fixtures/xlsx/basic/comments.xlsx`.
 - `agile-large.xlsx` – Agile encrypted OOXML.
-   - `EncryptionInfo` header version **Major 4 / Minor 4**
+    - `EncryptionInfo` header version **Major 4 / Minor 4**
    - Decrypts to `plaintext-large.xlsx` with password `password`
 - `standard-large.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
@@ -86,7 +92,7 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   pins the committed Agile `EncryptionInfo` XML parameters (`spinCount` / algorithms) to prevent
   accidental fixture regeneration drift (and to keep decryption CI performance predictable).
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
-  end-to-end decryption for `agile.xlsx`, `agile-empty-password.xlsx`, and `agile-unicode.xlsx` against `plaintext.xlsx`,
+  end-to-end decryption for `agile.xlsx`, `agile-empty-password.xlsx`, and `agile-unicode.xlsx` against `plaintext.xlsx`, plus `agile-unicode-excel.xlsx` against `plaintext-excel.xlsx`,
   plus macro-enabled `.xlsm` fixture coverage (`agile-basic.xlsm` / `standard-basic.xlsm` against
   `plaintext-basic.xlsm`, validating `xl/vbaProject.bin` preservation and `.xlsm` format detection),
   plus on-the-fly Agile encryption/decryption (via `ms_offcrypto_writer`) for
@@ -115,6 +121,7 @@ silent drift.
 | agile.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-large.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-unicode.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
+| agile-unicode-excel.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-basic.xlsm | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-empty-password.xlsx | 1000 | AES | ChainingModeCBC | 128 | SHA256 | 16 |
 
@@ -128,6 +135,7 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-rc4.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode-excel.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-basic.xlsm
@@ -151,6 +159,7 @@ Pinned expectations:
 | `agile.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
 | `agile-large.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
 | `agile-unicode.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
+| `agile-unicode-excel.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
 | `agile-empty-password.xlsx` | 1000 | SHA256 | 128 | AES | ChainingModeCBC | 16 |
 
 ## Provenance

@@ -77,6 +77,17 @@ fn detects_encrypted_ooxml_agile_unicode_fixture() {
     assert_encrypted_ooxml_bytes_detected(&bytes, "agile-unicode");
 }
 
+#[test]
+fn detects_encrypted_ooxml_agile_unicode_excel_fixture() {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/agile-unicode-excel.xlsx"
+    ));
+
+    let bytes = std::fs::read(fixture_path).expect("read agile-unicode-excel encrypted fixture");
+    assert_encrypted_ooxml_bytes_detected(&bytes, "agile-unicode-excel");
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StandardEncryptionInfoParams {
     version_flags: u32,

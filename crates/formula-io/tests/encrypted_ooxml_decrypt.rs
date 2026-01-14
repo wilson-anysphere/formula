@@ -7,26 +7,12 @@ use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 
 use ms_offcrypto_writer::Ecma376AgileWriter;
-use zip::write::FileOptions;
 
 use formula_io::{
     detect_workbook_format, open_workbook_model, open_workbook_model_with_password,
     open_workbook_with_password, Error, Workbook, WorkbookFormat,
 };
 use formula_model::{CellRef, CellValue};
-
-fn build_tiny_zip() -> Vec<u8> {
-    let cursor = Cursor::new(Vec::new());
-    let mut writer = zip::ZipWriter::new(cursor);
-    writer
-        .start_file(
-            "hello.txt",
-            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored),
-        )
-        .expect("start zip file");
-    writer.write_all(b"hello").expect("write zip contents");
-    writer.finish().expect("finish zip").into_inner()
-}
 
 fn build_tiny_xlsx() -> Vec<u8> {
     let mut workbook = formula_model::Workbook::new();
@@ -66,8 +52,8 @@ fn xlsb_fixture_bytes() -> Vec<u8> {
 #[test]
 fn open_workbook_with_password_decrypts_agile_encrypted_package() {
     let password = "correct horse battery staple";
-    let plain_zip = build_tiny_zip();
-    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+    let plain_xlsx = build_tiny_xlsx();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_xlsx, password);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("encrypted.xlsx");
@@ -92,11 +78,16 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package() {
     let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
     match wb {
         Workbook::Xlsx(package) => {
-            let contents = package
-                .read_part("hello.txt")
-                .expect("read hello.txt")
-                .expect("hello.txt missing in zip");
-            assert_eq!(contents, b"hello");
+            let workbook_xml = package
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .expect("xl/workbook.xml missing in zip");
+            let workbook_xml_str =
+                std::str::from_utf8(&workbook_xml).expect("xl/workbook.xml must be valid UTF-8");
+            assert!(
+                workbook_xml_str.contains("Sheet1"),
+                "expected xl/workbook.xml to mention Sheet1, got:\n{workbook_xml_str}"
+            );
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }
@@ -126,7 +117,7 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
 }
 
 #[test]
-fn open_workbook_with_password_rejects_encrypted_xlsb() {
+fn open_workbook_with_password_decrypts_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -135,16 +126,19 @@ fn open_workbook_with_password_rejects_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let err =
-        open_workbook_with_password(&path, Some(password)).expect_err("expected error on xlsb");
-    assert!(
-        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
-        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
-    );
+    let wb =
+        open_workbook_with_password(&path, Some(password)).expect("expected XLSB to decrypt/open");
+    match wb {
+        Workbook::Xlsb(wb) => {
+            assert_eq!(wb.sheet_metas().len(), 1);
+            assert_eq!(wb.sheet_metas()[0].name, "Sheet1");
+        }
+        other => panic!("expected Workbook::Xlsb, got {other:?}"),
+    }
 }
 
 #[test]
-fn open_workbook_model_with_password_rejects_encrypted_xlsb() {
+fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -153,11 +147,16 @@ fn open_workbook_model_with_password_rejects_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let err =
-        open_workbook_model_with_password(&path, Some(password)).expect_err("expected error on xlsb");
-    assert!(
-        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
-        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
+    let model =
+        open_workbook_model_with_password(&path, Some(password)).expect("expected model to open");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("Hello".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::Number(42.5)
     );
 }
 
@@ -179,6 +178,21 @@ fn assert_expected_contents(workbook: &formula_model::Workbook) {
     assert_eq!(
         sheet.value(CellRef::from_a1("B1").unwrap()),
         CellValue::String("Hello".to_string())
+    );
+}
+
+fn assert_expected_excel_contents(workbook: &formula_model::Workbook) {
+    assert_eq!(workbook.sheets.len(), 1, "expected exactly one sheet");
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("lorem".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("ipsum".to_string())
     );
 }
 
@@ -281,6 +295,7 @@ fn errors_on_wrong_password_fixtures() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
     let agile_unicode_path = fixture_path("agile-unicode.xlsx");
+    let agile_unicode_excel_path = fixture_path("agile-unicode-excel.xlsx");
     let agile_basic_path = fixture_path("agile-basic.xlsm");
     let standard_basic_path = fixture_path("standard-basic.xlsm");
 
@@ -289,6 +304,7 @@ fn errors_on_wrong_password_fixtures() {
         &agile_empty_password_path,
         &standard_path,
         &agile_unicode_path,
+        &agile_unicode_excel_path,
         &agile_basic_path,
         &standard_basic_path,
     ] {
@@ -310,6 +326,18 @@ fn decrypts_agile_unicode_password() {
 }
 
 #[test]
+fn decrypts_agile_unicode_excel_password() {
+    let plaintext_path = fixture_path("plaintext-excel.xlsx");
+    let encrypted_path = fixture_path("agile-unicode-excel.xlsx");
+
+    let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext-excel.xlsx");
+    assert_expected_excel_contents(&plaintext);
+
+    let wb = open_model_with_password(&encrypted_path, "pässwörd🔒");
+    assert_expected_excel_contents(&wb);
+}
+
+#[test]
 fn agile_unicode_password_different_normalization_fails() {
     // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
     let nfd = "pa\u{0308}sswo\u{0308}rd";
@@ -319,6 +347,26 @@ fn agile_unicode_password_different_normalization_fails() {
     );
 
     let path = fixture_path("agile-unicode.xlsx");
+    assert!(
+        matches!(
+            open_workbook_model_with_password(&path, Some(nfd)),
+            Err(Error::InvalidPassword { .. })
+        ),
+        "expected InvalidPassword error for NFD-normalized password"
+    );
+}
+
+#[test]
+fn agile_unicode_excel_password_different_normalization_fails() {
+    // NFC password is "pässwörd🔒" (U+00E4, U+00F6). NFD decomposes those into combining marks, but
+    // leaves the non-BMP emoji alone.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒";
+    assert_ne!(
+        nfd, "pässwörd🔒",
+        "strings should differ before UTF-16 encoding"
+    );
+
+    let path = fixture_path("agile-unicode-excel.xlsx");
     assert!(
         matches!(
             open_workbook_model_with_password(&path, Some(nfd)),

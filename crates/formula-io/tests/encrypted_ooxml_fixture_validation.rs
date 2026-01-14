@@ -49,6 +49,7 @@ const AGILE_FIXTURES: &[(&str, &str)] = &[
     ("agile.xlsx", "plaintext.xlsx"),
     ("agile-empty-password.xlsx", "plaintext.xlsx"),
     ("agile-unicode.xlsx", "plaintext.xlsx"),
+    ("agile-unicode-excel.xlsx", "plaintext-excel.xlsx"),
     ("agile-large.xlsx", "plaintext-large.xlsx"),
     ("agile-basic.xlsm", "plaintext-basic.xlsm"),
 ];
