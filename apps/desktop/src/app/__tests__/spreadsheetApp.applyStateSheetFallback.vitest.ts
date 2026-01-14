@@ -186,4 +186,30 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
       app.destroy();
     }
   });
+
+  it("prefers the next visible sheet to the right when applyState removes the first sheet", () => {
+    const app = new SpreadsheetApp(createRoot(), createStatus());
+    try {
+      seedThreeSheets(app);
+      const doc = app.getDocument();
+      const activateSpy = vi.spyOn(app, "activateSheet");
+
+      app.activateSheet("Sheet1");
+      activateSpy.mockClear();
+
+      // Restore a snapshot that removes Sheet1 but keeps Sheet2 + Sheet3.
+      const snapshotDoc = new DocumentController();
+      snapshotDoc.setCellValue("Sheet2", { row: 0, col: 0 }, "B");
+      snapshotDoc.setCellValue("Sheet3", { row: 0, col: 0 }, "C");
+      const snapshot = snapshotDoc.encodeState();
+
+      doc.applyState(snapshot);
+
+      // Excel-like: delete active sheet -> activate the next visible sheet to the right (Sheet2).
+      expect(app.getCurrentSheetId()).toBe("Sheet2");
+      expect(activateSpy).toHaveBeenCalledWith("Sheet2");
+    } finally {
+      app.destroy();
+    }
+  });
 });

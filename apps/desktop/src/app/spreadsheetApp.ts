@@ -1227,6 +1227,7 @@ export class SpreadsheetApp {
   private formulaRangePreviewTooltipUpdateUnsubscribe: (() => void) | null = null;
   private undoRedoSheetOrderSnapshot: string[] | null = null;
   private suppressActiveSheetGuard = false;
+  private lastKnownSheetOrder: string[] = ["Sheet1"];
 
   private gridCanvas: HTMLCanvasElement;
   // Legacy-only chart canvas. When canvas charts are enabled, ChartStore charts render as drawing
@@ -3740,7 +3741,17 @@ export class SpreadsheetApp {
       const activeId = this.sheetId;
       if (!activeId) return;
 
+      const priorKnownOrder = this.lastKnownSheetOrder;
       const source = typeof payload?.source === "string" ? payload.source : "";
+      const sheetOrderDelta = payload?.sheetOrderDelta ?? null;
+      const afterOrder = Array.isArray(sheetOrderDelta?.after) ? sheetOrderDelta.after : null;
+      if (source !== "applyState" && afterOrder && afterOrder.length > 0) {
+        const normalized = afterOrder.filter((id: unknown) => typeof id === "string" && id.trim() !== "");
+        if (normalized.length > 0) {
+          this.lastKnownSheetOrder = normalized;
+        }
+      }
+
       const docAny = this.document as any;
       const sheetsMap: unknown = docAny?.model?.sheets;
       const sheetMetaMap: unknown = docAny?.sheetMeta;
@@ -3752,6 +3763,15 @@ export class SpreadsheetApp {
       // removed so we don't keep them as the active sheet and accidentally recreate them later via
       // lazy reads (`getCell`, `getSheetView`).
       const isApplyState = source === "applyState" && sheetMeta != null;
+      const applyStateSheetIds = isApplyState ? Array.from(sheetMeta.keys()) : null;
+
+      // Legacy/lazy creation path: some callers still materialize sheets by writing to an unseen
+      // sheet id (without emitting sheetMeta/order deltas). If the sheet count changed, refresh
+      // our last-known sheet ordering so applyState fallback can still pick correct adjacencies.
+      if (!isApplyState && sheetsMap instanceof Map && sheetsMap.size !== this.lastKnownSheetOrder.length) {
+        const ids = this.document.getSheetIds();
+        if (ids.length > 0) this.lastKnownSheetOrder = ids;
+      }
       const hasActiveMeta = !isApplyState || sheetMeta.has(activeId);
 
       const visibilityRaw = sheetMeta && hasActiveMeta ? sheetMeta.get(activeId)?.visibility : undefined;
@@ -3759,12 +3779,17 @@ export class SpreadsheetApp {
         visibilityRaw === "visible" || visibilityRaw === "hidden" || visibilityRaw === "veryHidden" ? visibilityRaw : "visible";
       const sheetExists = sheetsMap instanceof Map ? sheetsMap.has(activeId) : this.document.getSheetIds().includes(activeId);
       const sheetIsVisible = hasActiveMeta && visibility === "visible";
-      if (sheetExists && sheetIsVisible) return;
+      if (sheetExists && sheetIsVisible) {
+        if (isApplyState && applyStateSheetIds && applyStateSheetIds.length > 0) {
+          this.lastKnownSheetOrder = applyStateSheetIds;
+        }
+        return;
+      }
 
-      const sheetIds = this.document.getSheetIds();
+      const sheetIds = isApplyState ? applyStateSheetIds ?? [] : this.document.getSheetIds();
       if (sheetIds.length === 0) return;
 
-      const candidateSheetIds = isApplyState ? sheetIds.filter((id) => sheetMeta!.has(id)) : sheetIds;
+      const candidateSheetIds = sheetIds;
       if (candidateSheetIds.length === 0) return;
 
       const visibleSheetIds = isApplyState
@@ -3783,10 +3808,16 @@ export class SpreadsheetApp {
         if (Array.isArray(this.undoRedoSheetOrderSnapshot) && this.undoRedoSheetOrderSnapshot.length > 0) {
           return this.undoRedoSheetOrderSnapshot;
         }
-        const delta = payload?.sheetOrderDelta;
-        const before = Array.isArray(delta?.before) ? delta.before : null;
+        const before = Array.isArray(sheetOrderDelta?.before) ? sheetOrderDelta.before : null;
         if (before && before.length > 0) return before;
-        return sheetIds;
+        // `applyState` reorders `model.sheets` so removed sheets appear after the restored sheet
+        // set. When the active sheet is removed, this post-change ordering does not preserve the
+        // deleted sheet's original neighbors, so use the last-known pre-applyState order when
+        // available.
+        if (isApplyState && Array.isArray(priorKnownOrder) && priorKnownOrder.length > 0) {
+          return priorKnownOrder;
+        }
+        return isApplyState ? this.document.getSheetIds() : sheetIds;
       })();
 
       // Pick an adjacent visible sheet using the pre-change order when available (for deletes),
@@ -3804,9 +3835,18 @@ export class SpreadsheetApp {
         visibleSheetIds[0] ??
         candidateSheetIds[0] ??
         null;
-      if (!fallback || fallback === activeId) return;
+      if (!fallback || fallback === activeId) {
+        if (isApplyState && applyStateSheetIds && applyStateSheetIds.length > 0) {
+          this.lastKnownSheetOrder = applyStateSheetIds;
+        }
+        return;
+      }
 
       this.activateSheet(fallback);
+
+      if (isApplyState && applyStateSheetIds && applyStateSheetIds.length > 0) {
+        this.lastKnownSheetOrder = applyStateSheetIds;
+      }
     });
 
     this.auditingUnsubscribe = this.document.on("change", (payload: any) => {
