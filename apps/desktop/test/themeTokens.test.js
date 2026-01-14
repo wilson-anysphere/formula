@@ -81,6 +81,23 @@ test("tokens.css defines required design tokens", () => {
   }
 });
 
+test("tokens.css defines the shared spacing scale (2px base) per mockups", () => {
+  const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
+  const css = fs.readFileSync(tokensPath, "utf8");
+
+  const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
+  assert.ok(rootMatch, "tokens.css missing :root block");
+
+  const vars = parseVarsFromBlock(rootMatch[1]);
+  assert.equal(vars["space-0"], "0px");
+  assert.equal(vars["space-1"], "2px");
+  assert.equal(vars["space-2"], "4px");
+  assert.equal(vars["space-3"], "6px");
+  assert.equal(vars["space-4"], "8px");
+  assert.equal(vars["space-5"], "12px");
+  assert.equal(vars["space-6"], "16px");
+});
+
 test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
   const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
@@ -93,6 +110,30 @@ test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
   assert.equal(vars["radius-sm"], "3px");
   assert.equal(vars["radius-xs"], "2px");
   assert.equal(vars["radius-pill"], "999px");
+});
+
+test("space tokens stay consistent across themes (no accidental overrides)", () => {
+  const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
+
+  /** @type {Record<string, string>} */
+  const expected = {
+    "space-0": "0px",
+    "space-1": "2px",
+    "space-2": "4px",
+    "space-3": "6px",
+    "space-4": "8px",
+    "space-5": "12px",
+    "space-6": "16px",
+  };
+
+  for (const [token, value] of Object.entries(expected)) {
+    const values = collectVarAssignments(css, token);
+    assert.ok(values.length > 0, `Expected tokens.css to define --${token}`);
+    for (const actual of values) {
+      assert.equal(actual, value, `Expected --${token} to always be ${value} (got ${actual})`);
+    }
+  }
 });
 
 test("radius tokens stay consistent across themes (no accidental overrides)", () => {
