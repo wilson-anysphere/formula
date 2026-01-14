@@ -5141,6 +5141,13 @@ export class SpreadsheetApp {
       const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
       const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
       if (!hasWasmEngine || !useEngineCache) {
+        // If the WASM engine is unavailable (missing bundle, init failure, etc) but we previously
+        // cached computed values, clear them so the in-process evaluator is authoritative.
+        // Otherwise `getCellComputedValue` may keep returning stale engine-derived values even
+        // though no further engine updates are possible.
+        if (!hasWasmEngine) {
+          this.clearComputedValuesByCoord();
+        }
         if (this.sharedGrid && this.sharedProvider) {
           this.sharedProvider.invalidateAll();
         } else if (!this.sharedGrid) {
