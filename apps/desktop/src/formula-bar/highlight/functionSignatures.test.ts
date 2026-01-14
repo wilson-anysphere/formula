@@ -10,6 +10,15 @@ describe("functionSignatures", () => {
     expect(parts.some((p) => p.kind === "paramActive")).toBe(true);
   });
 
+  it("resolves localized function names to canonical signatures (de-DE SUMME -> SUM)", () => {
+    const sig = getFunctionSignature("SUMME", { localeId: "de-DE" });
+    expect(sig).toBeTruthy();
+    // Displayed name should match the localized formula text.
+    expect(sig?.name).toBe("SUMME");
+    // Params come from the canonical signature.
+    expect(sig?.params[0]?.name).toBe("number1");
+  });
+
   it("prefers curated signatures when available (XLOOKUP)", () => {
     const sig = getFunctionSignature("XLOOKUP");
     expect(sig).toBeTruthy();
@@ -32,4 +41,3 @@ describe("functionSignatures", () => {
     expect(sig?.name).toBe("_XLFN.SEQUENCE");
   });
 });
-

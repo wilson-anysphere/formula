@@ -1,5 +1,14 @@
 import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.mjs";
 
+// Translation tables from the Rust engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+//
+// We use these to support formula-bar hints for localized function names like
+// de-DE `SUMME(...)` by mapping them back to canonical signatures (`SUM`).
+import DE_DE_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
+
 type FunctionParam = { name: string; optional?: boolean };
 
 type FunctionSignature = {
@@ -19,6 +28,36 @@ const CATALOG_BY_NAME = new Map<string, CatalogFunction>();
 for (const fn of (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? []) {
   if (fn?.name) CATALOG_BY_NAME.set(fn.name.toUpperCase(), fn);
 }
+
+function casefoldIdent(ident: string): string {
+  // Mirror Rust's locale behavior (`casefold_ident` / `casefold`): Unicode-aware uppercasing.
+  return String(ident ?? "").toUpperCase();
+}
+
+type FunctionTranslationMap = Map<string, string>;
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
+  const localizedToCanonical: FunctionTranslationMap = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    const canonUpper = casefoldIdent(canonical.trim());
+    const locUpper = casefoldIdent(localized.trim());
+    // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
+    if (canonUpper && locUpper && canonUpper !== locUpper) {
+      localizedToCanonical.set(locUpper, canonUpper);
+    }
+  }
+  return localizedToCanonical;
+}
+
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = {
+  "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
+  "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
+  "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+};
 
 const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
   DATE: {
@@ -324,16 +363,25 @@ const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
   },
 };
 
-export function getFunctionSignature(name: string): FunctionSignature | null {
-  const requested = name.toUpperCase();
+export function getFunctionSignature(name: string, opts: { localeId?: string } = {}): FunctionSignature | null {
+  const requested = casefoldIdent(name);
   const lookup = requested.startsWith("_XLFN.") ? requested.slice("_XLFN.".length) : requested;
 
-  const known = FUNCTION_SIGNATURES[lookup] ?? signatureFromCatalog(lookup);
+  // If the requested name is localized (e.g. `SUMME` in de-DE), map it back to the canonical
+  // name (`SUM`) so we can reuse the curated signature list / function catalog metadata.
+  const localeId =
+    opts.localeId?.trim?.() ||
+    (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() ||
+    "en-US";
+  const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  const canonical = localeMap?.get(lookup) ?? lookup;
+
+  const known = FUNCTION_SIGNATURES[canonical] ?? signatureFromCatalog(canonical);
   if (!known) return null;
 
-  // Preserve any `_xlfn.` prefix in the displayed name so formula-bar hints
-  // match pasted formulas from Excel files.
-  return lookup === requested ? known : { ...known, name: requested };
+  // Preserve any `_xlfn.` prefix *and* localized naming in the displayed name so formula-bar hints
+  // match the text users see/typed.
+  return requested === canonical ? known : { ...known, name: requested };
 }
 
 type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };

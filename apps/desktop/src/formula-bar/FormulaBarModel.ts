@@ -333,7 +333,7 @@ export class FormulaBarModel {
 
     if (hasEngineLocaleForDraft && this.#engineFunctionContext) {
       const ctx = this.#engineFunctionContext;
-      const signature = getFunctionSignature(ctx.name);
+      const signature = getFunctionSignature(ctx.name, { localeId });
       if (!signature) return null;
 
       return {
@@ -364,7 +364,7 @@ export class FormulaBarModel {
     }
 
     if (!context) return null;
-    const signature = getFunctionSignature(context.name);
+    const signature = getFunctionSignature(context.name, { localeId });
     if (!signature) return null;
     return {
       context,

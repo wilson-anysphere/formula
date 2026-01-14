@@ -102,6 +102,41 @@ describe("FormulaBarView function hint UI", () => {
     }
   });
 
+  it("shows function hints for localized function names (de-DE SUMME)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SUMME(A1; B1)";
+
+      const inFirstArg = view.textarea.value.indexOf("A1") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+
+      expect(getSignatureName(host)).toBe("SUMME(");
+      expect(getActiveParamText(host)).toBe("number1");
+
+      const inSecondArg = view.textarea.value.indexOf("B1") + 1;
+      view.textarea.setSelectionRange(inSecondArg, inSecondArg);
+      view.textarea.dispatchEvent(new Event("select"));
+      await nextFrame();
+
+      expect(getActiveParamText(host)).toBe("[number2]");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("updates the active parameter as the cursor moves across commas", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

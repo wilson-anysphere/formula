@@ -164,6 +164,43 @@ describe("FormulaBarView argument preview (integration)", () => {
     }
   });
 
+  it("renders argument previews for localized function names (de-DE SUMME)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+      view.focus({ cursor: "end" });
+
+      const provider = vi.fn((expr: string) => {
+        if (expr === "A1") return 10;
+        return "(preview unavailable)";
+      });
+      view.setArgumentPreviewProvider(provider);
+
+      const formula = "=SUMME(A1; B1)";
+      view.textarea.value = formula;
+
+      const cursor = formula.indexOf("A1") + 1;
+      view.textarea.setSelectionRange(cursor, cursor);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await flushPreview();
+
+      const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+      expect(preview?.textContent).toBe("↳ A1  →  10");
+      expect(provider).toHaveBeenCalledWith("A1");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("ignores stale async preview results when the cursor moves between arguments", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
