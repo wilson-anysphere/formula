@@ -290,6 +290,8 @@ export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });
   private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
+  private shapeTextCachePruneSource: DrawingObject[] | null = null;
+  private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
   private selectedId: number | null = null;
   private renderSeq = 0;
@@ -863,24 +865,19 @@ export class DrawingOverlay {
       // can finish out-of-order and must not evict newer cache entries.
       if (completed && seq === this.renderSeq && this.shapeTextCache.size > 0) {
         // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
-        // delete/undo/redo sessions. We only do the (allocating) prune when it's likely stale.
-        const liveShapeCount = drawObjects
-          ? shapeCount
-          : (() => {
-              let count = 0;
-              for (const obj of objects) {
-                if (obj.kind.type === "shape") count += 1;
-              }
-              return count;
-            })();
+        // delete/undo/redo sessions. Avoid per-frame allocations by only pruning when the
+        // object list changes (or appears to have been mutated in place).
+        const sourceChanged =
+          this.shapeTextCachePruneSource !== objects || this.shapeTextCachePruneLength !== objects.length;
+        this.shapeTextCachePruneSource = objects;
+        this.shapeTextCachePruneLength = objects.length;
 
-        if (this.shapeTextCache.size > liveShapeCount) {
-          const liveShapeIds = new Set<number>();
-          for (const obj of objects) {
-            if (obj.kind.type === "shape") liveShapeIds.add(obj.id);
-          }
+        if (sourceChanged) {
           for (const id of this.shapeTextCache.keys()) {
-            if (!liveShapeIds.has(id)) this.shapeTextCache.delete(id);
+            const obj = this.spatialIndex.getObject(id);
+            if (!obj || obj.kind.type !== "shape") {
+              this.shapeTextCache.delete(id);
+            }
           }
         }
       }
@@ -967,6 +964,8 @@ export class DrawingOverlay {
     this.themeObserver = null;
     this.bitmapCache.clear();
     this.shapeTextCache.clear();
+    this.shapeTextCachePruneSource = null;
+    this.shapeTextCachePruneLength = 0;
     // Release any cached drawing object references (spatial index stores objects + rects).
     this.spatialIndex.rebuild([], this.geom, 1);
     this.cssVarStyle = undefined;
