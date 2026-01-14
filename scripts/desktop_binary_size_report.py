@@ -440,6 +440,36 @@ def main() -> int:
     # for any cargo/rustc subprocess calls in this report.
     if os.environ.get("RUSTUP_TOOLCHAIN") and (repo_root / "rust-toolchain.toml").is_file():
         os.environ.pop("RUSTUP_TOOLCHAIN", None)
+
+    # Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
+    # when many agents build/test concurrently. Preserve any explicit override and
+    # keep CI caching behavior intact.
+    #
+    # Note: some environments pre-set `CARGO_HOME=$HOME/.cargo`. Treat that value as
+    # "unset" in non-CI runs so we still get per-repo isolation by default.
+    # To explicitly keep `CARGO_HOME=$HOME/.cargo` in local runs, set
+    # `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
+    default_global_cargo_home = Path.home() / ".cargo"
+    cargo_home = os.environ.get("CARGO_HOME")
+    cargo_home_path = Path(cargo_home).expanduser() if cargo_home else None
+    is_ci = _is_truthy_env(os.environ.get("CI"))
+    if not cargo_home or (
+        not is_ci
+        and not os.environ.get("FORMULA_ALLOW_GLOBAL_CARGO_HOME")
+        and cargo_home_path == default_global_cargo_home
+    ):
+        os.environ["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
+    Path(os.environ["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
+
+    # Ensure tools installed via `cargo install` under this CARGO_HOME are available.
+    cargo_bin_dir = Path(os.environ["CARGO_HOME"]) / "bin"
+    cargo_bin_dir.mkdir(parents=True, exist_ok=True)
+    path_entries = os.environ.get("PATH", "").split(os.pathsep) if os.environ.get("PATH") else []
+    if str(cargo_bin_dir) not in path_entries:
+        os.environ["PATH"] = (
+            f"{cargo_bin_dir}{os.pathsep}{os.environ['PATH']}" if os.environ.get("PATH") else str(cargo_bin_dir)
+        )
+
     package = _desktop_package_name(repo_root)
     bin_name = DEFAULT_BIN_NAME
     features = args.features
