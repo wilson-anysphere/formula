@@ -997,7 +997,11 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
               // complete DrawingTransform for the UI overlay model.
               const flipH = typeof flipHRaw === "boolean" ? flipHRaw : false;
               const flipV = typeof flipVRaw === "boolean" ? flipVRaw : false;
-              transform = { rotationDeg, flipH, flipV };
+              const candidate = { rotationDeg, flipH, flipV };
+              // Avoid synthesizing a redundant identity transform so snapshots remain stable.
+              if (candidate.rotationDeg !== 0 || candidate.flipH || candidate.flipV) {
+                transform = candidate;
+              }
             }
           }
         }
