@@ -62,6 +62,19 @@ test("validate-windows-bundles.ps1 performs best-effort NSIS marker scanning", (
   );
 });
 
+test("validate-windows-bundles.ps1 uses token-bounded x-scheme-handler markers (avoid prefix false positives)", () => {
+  assert.match(
+    text,
+    /x-scheme-handler\/\$scheme;/,
+    "Expected validator to search for x-scheme-handler/<scheme>; (semicolon-delimited) to avoid matching x-scheme-handler/<scheme>-extra.",
+  );
+  assert.doesNotMatch(
+    text,
+    /\"x-scheme-handler\/\$scheme\"\s*,/,
+    "Expected validator to avoid bare x-scheme-handler/$scheme markers without a token boundary.",
+  );
+});
+
 test("validate-windows-bundles.ps1 validates all configured file association extensions (not just .xlsx) via MSI", () => {
   assert.match(
     text,

@@ -465,6 +465,41 @@ test(
 );
 
 test(
+  "validate-macos-bundle fails when Info.plist declares an invalid URL scheme value like 'formula://'",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    writeComplianceResources(appRoot);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+      urlSchemes: ["formula://"],
+    });
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidator({ dmgPath, binDir });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /invalid url scheme/i);
+  },
+);
+
+test(
   "validate-macos-bundle fails when required file association is missing",
   { skip: !hasBash },
   () => {

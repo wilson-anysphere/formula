@@ -1253,15 +1253,17 @@ try {
     if ([string]::IsNullOrWhiteSpace($scheme)) { $scheme = "formula" }
     $scheme = $scheme.TrimEnd("/").TrimEnd(":")
  
-    $markers = @(
-      "URL Protocol",
-      "URL protocol",
-      "x-scheme-handler/$scheme",
-      "\$scheme\shell\open\command",
-      "$scheme\shell\open\command",
-      $dotExt,
-      $dotExt.ToUpperInvariant()
-    )
+      $markers = @(
+        "URL Protocol",
+        "URL protocol",
+        # Token-delimited marker to avoid prefix false-positives (e.g. avoid treating
+        # x-scheme-handler/<scheme>-extra as satisfying x-scheme-handler/<scheme>).
+        "x-scheme-handler/$scheme;",
+        "\$scheme\shell\open\command",
+        "$scheme\shell\open\command",
+        $dotExt,
+        $dotExt.ToUpperInvariant()
+      )
  
     return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
@@ -1283,13 +1285,15 @@ try {
     if ([string]::IsNullOrWhiteSpace($scheme)) { $scheme = "formula" }
     $scheme = $scheme.TrimEnd("/").TrimEnd(":")
  
-    $markers = @(
-      "URL Protocol",
-      "URL protocol",
-      "x-scheme-handler/$scheme",
-      "\$scheme\shell\open\command",
-      "$scheme\shell\open\command"
-    )
+      $markers = @(
+        "URL Protocol",
+        "URL protocol",
+        # Token-delimited marker to avoid prefix false-positives (e.g. avoid treating
+        # x-scheme-handler/<scheme>-extra as satisfying x-scheme-handler/<scheme>).
+        "x-scheme-handler/$scheme;",
+        "\$scheme\shell\open\command",
+        "$scheme\shell\open\command"
+      )
  
     return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
@@ -1486,15 +1490,20 @@ try {
         } catch {
           $msg = $_.Exception.Message
           if ($msg -match 'Failed to open MSI for inspection') {
-            Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
-            # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
-            $needles = @(
-              "URL Protocol",
-              "URL protocol",
-              $primaryScheme,
-              "\$primaryScheme\shell\open\command",
-              "$primaryScheme\shell\open\command"
-            )
+              Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
+              # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
+              $needles = @(
+                "URL Protocol",
+                "URL protocol",
+                "Software\\Classes\\$primaryScheme",
+                "Software\Classes\$primaryScheme",
+                "HKEY_CLASSES_ROOT\\$primaryScheme",
+                "HKEY_CLASSES_ROOT$primaryScheme",
+                "HKCR\\$primaryScheme",
+                "HKCR $primaryScheme",
+                "\$primaryScheme\shell\open\command",
+                "$primaryScheme\shell\open\command"
+              )
             $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
             if ([string]::IsNullOrWhiteSpace($marker)) {
               throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$primaryScheme://' in the MSI binary: $($msi.FullName)"
@@ -1516,7 +1525,7 @@ try {
     foreach ($exe in $exeInstallers) {
       $integrationMarker = Find-ExeDesktopIntegrationMarker -Exe $exe -ExtensionNoDot $requiredExtensionNoDot -UrlScheme $primaryScheme
       if ([string]::IsNullOrWhiteSpace($integrationMarker)) {
-        throw "EXE installer did not contain any expected desktop integration marker strings. This validation is heuristic for NSIS installers.`n- Installer: $($exe.FullName)`n- Looked for: URL Protocol, x-scheme-handler/$primaryScheme, \\$primaryScheme\\shell\\open\\command, .$requiredExtensionNoDot"
+        throw "EXE installer did not contain any expected desktop integration marker strings. This validation is heuristic for NSIS installers.`n- Installer: $($exe.FullName)`n- Looked for: URL Protocol, x-scheme-handler/$primaryScheme;, \\$primaryScheme\\shell\\open\\command, .$requiredExtensionNoDot"
       }
       Write-Host ("EXE marker scan: found {0}" -f $integrationMarker)
  

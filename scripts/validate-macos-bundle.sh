@@ -248,32 +248,60 @@ if [ "${#EXPECTED_FILE_EXTENSIONS[@]}" -eq 0 ]; then
 fi
 
 get_expected_url_schemes() {
-  # Keep this in sync with apps/desktop/src-tauri/Info.plist, which is merged into the generated
-  # app bundle Info.plist during packaging.
-  local config_plist="$REPO_ROOT/apps/desktop/src-tauri/Info.plist"
-  if [ -f "$config_plist" ]; then
+  # Source of truth for configured deep-link schemes is apps/desktop/src-tauri/tauri.conf.json:
+  #   plugins.deep-link.desktop.schemes
+  #
+  # CFBundleURLSchemes entries in Info.plist should contain only the *scheme name*
+  # (e.g. "formula"), but we normalize common config values like "formula://" here.
+  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  if [ -f "$tauri_conf" ]; then
     local schemes
     set +e
     schemes="$(
-      python3 - "$config_plist" <<'PY'
-import plistlib
+      python3 - "$tauri_conf" <<'PY'
+import json
+import re
 import sys
 
+path = sys.argv[1]
 try:
-    with open(sys.argv[1], "rb") as f:
-        data = plistlib.load(f)
+    with open(path, "r", encoding="utf-8") as f:
+        conf = json.load(f)
 except Exception:
     raise SystemExit(1)
 
-schemes = []
-for url_type in data.get("CFBundleURLTypes", []) or []:
-    for s in url_type.get("CFBundleURLSchemes", []) or []:
-        if isinstance(s, str) and s:
-            val = s.strip().lower()
-            if val:
-                schemes.append(val)
+plugins = conf.get("plugins") or {}
+deep_link = plugins.get("deep-link") or {}
+desktop = deep_link.get("desktop")
 
-for s in schemes:
+schemes = set()
+
+def normalize(value: str) -> str:
+    v = value.strip().lower()
+    v = re.sub(r"[:/]+$", "", v)
+    return v
+
+def add_protocol(protocol):
+    if not isinstance(protocol, dict):
+        return
+    raw = protocol.get("schemes")
+    values = []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [v for v in raw if isinstance(v, str)]
+    for v in values:
+        val = normalize(v)
+        if val:
+            schemes.add(val)
+
+if isinstance(desktop, list):
+    for protocol in desktop:
+        add_protocol(protocol)
+else:
+    add_protocol(desktop)
+
+for s in sorted(schemes):
     print(s)
 PY
     )"
@@ -306,6 +334,13 @@ validate_plist_url_scheme() {
   if [ "${#expected_schemes[@]}" -eq 0 ]; then
     expected_schemes=("formula")
   fi
+
+  local expected
+  for expected in "${expected_schemes[@]}"; do
+    if [[ "$expected" == *:* || "$expected" == */* ]]; then
+      die "Expected URL scheme value contains invalid character(s): '$expected'. Expected scheme names only (no ':' or '/'). (Check apps/desktop/src-tauri/tauri.conf.json plugins.deep-link.desktop.schemes)"
+    fi
+  done
 
   local found
   set +e
@@ -343,6 +378,18 @@ PY
     die "failed to parse Info.plist at ${plist_path}"
   fi
 
+  local invalid=()
+  local scheme
+  while IFS= read -r scheme; do
+    [ -n "$scheme" ] || continue
+    if [[ "$scheme" == *:* || "$scheme" == */* ]]; then
+      invalid+=("$scheme")
+    fi
+  done <<<"$found"
+  if [ "${#invalid[@]}" -gt 0 ]; then
+    die "Info.plist declares invalid URL scheme value(s): ${invalid[*]}. Expected CFBundleURLSchemes entries to be scheme names only (no ':' or '/'). (Check apps/desktop/src-tauri/Info.plist)"
+  fi
+
   local missing=()
   local expected
   for expected in "${expected_schemes[@]}"; do
@@ -359,7 +406,7 @@ PY
     if [ -z "$found_one_line" ]; then
       found_one_line="(none)"
     fi
-    die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check apps/desktop/src-tauri/Info.plist)"
+    die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check apps/desktop/src-tauri/tauri.conf.json plugins.deep-link.desktop.schemes and apps/desktop/src-tauri/Info.plist)"
   fi
 }
 
