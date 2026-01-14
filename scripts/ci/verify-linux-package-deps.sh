@@ -209,6 +209,27 @@ assert_contains_any() {
   fi
 }
 
+assert_contains_rich_or() {
+  local haystack="$1"
+  local artifact="$2"
+  local label="$3"
+  local left_re="$4"
+  local right_re="$5"
+
+  # RPM rich dependencies are expressed as boolean expressions, e.g.:
+  #   (webkit2gtk4.1 or libwebkit2gtk-4_1-0)
+  #
+  # We require distro-specific alternatives to be declared as a *single* rich dependency
+  # entry (instead of listing both packages separately as two Requires, which would make
+  # the RPM uninstallable on at least one distro family).
+  local pattern
+  pattern="(${left_re}).*\\bor\\b.*(${right_re})|(${right_re}).*\\bor\\b.*(${left_re})"
+
+  if ! printf '%s\n' "$haystack" | grep -Eqi "$pattern"; then
+    fail "$artifact: missing RPM rich dependency OR expression (${label}); expected a line containing both '${left_re}' and '${right_re}' joined by 'or'"
+  fi
+}
+
 echo "verify-linux-package-deps: found ${#debs[@]} .deb and ${#rpms[@]} .rpm artifact(s)"
 echo "::group::verify-linux-package-deps: bundle directories"
 printf ' - %s\n' "${bundle_dirs[@]}"
@@ -289,6 +310,12 @@ for rpm_path in "${rpms[@]}"; do
   # names (Fedora/RHEL + openSUSE) rather than relying on automatic ELF dependency scanning.
 
   # 1) Explicit package requirements (Fedora/RHEL + openSUSE naming via RPM rich deps).
+  assert_contains_rich_or "$requires" "$rpm_path" "WebKitGTK 4.1 package (Fedora/RHEL vs openSUSE)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
+  assert_contains_rich_or "$requires" "$rpm_path" "GTK3 package (Fedora/RHEL vs openSUSE)" "gtk3" "libgtk-3-0"
+  assert_contains_rich_or "$requires" "$rpm_path" "AppIndicator/Ayatana package (Fedora/RHEL vs openSUSE)" "(libayatana-appindicator-gtk3|libappindicator-gtk3)" "(libayatana-appindicator3-1|libappindicator3-1)"
+  assert_contains_rich_or "$requires" "$rpm_path" "librsvg package (Fedora/RHEL vs openSUSE)" "librsvg2" "librsvg-2-2"
+  assert_contains_rich_or "$requires" "$rpm_path" "OpenSSL package (Fedora/RHEL vs openSUSE)" "openssl-libs" "libopenssl3"
+
   assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 package (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
   assert_contains_any "$requires" "$rpm_path" "GTK3 package" "(^|[^a-z0-9])gtk3([^a-z0-9]|$)" "libgtk-3-0"
   assert_contains_any "$requires" "$rpm_path" "AppIndicator/Ayatana package (tray)" \
