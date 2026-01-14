@@ -194,6 +194,28 @@ fn assert_blank_member_semantics(model: &DataModel) {
         engine
             .evaluate(
                 model,
+                "COUNTA(Customers[Region])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "COUNT(Customers[Region])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
                 "COUNTROWS(ALL(Customers[Region]))",
                 &empty,
                 &RowContext::default(),
@@ -216,8 +238,58 @@ fn assert_blank_member_semantics(model: &DataModel) {
     // Filtering to the blank member should include unmatched fact rows for measures.
     let blank_region = FilterContext::empty().with_column_equals("Customers", "Region", Value::Blank);
     assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "COUNTBLANK(Customers[Region])",
+                &blank_region,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "COUNTA(Customers[Region])",
+                &blank_region,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
         model.evaluate_measure("Total Sales", &blank_region).unwrap(),
         7.0.into()
+    );
+
+    let non_blank_regions = FilterContext::empty().with_column_in(
+        "Customers",
+        "Region",
+        vec!["East".into(), "West".into()],
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "COUNTBLANK(Customers[Region])",
+                &non_blank_regions,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "COUNTA(Customers[Region])",
+                &non_blank_regions,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
     );
 
     // Filtering the dimension to non-blank values should exclude the unmatched fact rows (the
