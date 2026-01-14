@@ -1992,16 +1992,6 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         }
     };
 
-    if matches!(
-        sniff_ooxml_zip_workbook_kind(&decrypted),
-        Some(WorkbookFormat::Xlsb)
-    ) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
-
     Ok(Some(decrypted))
 }
 
