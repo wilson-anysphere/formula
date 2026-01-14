@@ -63,6 +63,19 @@ fn zip_part_string(bytes: &[u8], part_name: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+fn assert_two_drawing_markers(bytes: &[u8]) {
+    let drawing1 = zip_part_string(bytes, "xl/drawings/drawing1.xml").expect("drawing1.xml");
+    let drawing2 = zip_part_string(bytes, "xl/drawings/drawing2.xml").expect("drawing2.xml");
+    assert!(
+        drawing1.contains("Picture 1"),
+        "expected drawing1.xml to contain marker text"
+    );
+    assert!(
+        drawing2.contains("Picture 2"),
+        "expected drawing2.xml to contain marker text"
+    );
+}
+
 fn build_two_sheet_drawing_workbook() -> Vec<u8> {
     let base = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
     let cursor = Cursor::new(base);
@@ -105,7 +118,10 @@ fn build_two_sheet_drawing_workbook() -> Vec<u8> {
         .get("xl/drawings/drawing1.xml")
         .expect("base drawing1.xml")
         .clone();
-    parts.insert("xl/drawings/drawing2.xml".to_string(), drawing1);
+    let drawing2 = String::from_utf8(drawing1.clone()).expect("drawing xml utf-8");
+    // Make drawing2 distinct so tests can detect accidental swaps.
+    let drawing2 = drawing2.replace("Picture 1", "Picture 2");
+    parts.insert("xl/drawings/drawing2.xml".to_string(), drawing2.into_bytes());
     let drawing1_rels = parts
         .get("xl/drawings/_rels/drawing1.xml.rels")
         .expect("base drawing1 rels")
@@ -237,6 +253,7 @@ fn xlsx_document_roundtrip_preserves_multi_sheet_drawing_relationship_mapping() 
     let in_parts = drawing_part_names(&input);
     let out_parts = drawing_part_names(&saved);
     assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
+    assert_two_drawing_markers(&saved);
 }
 
 #[test]
@@ -286,6 +303,7 @@ fn xlsx_document_roundtrip_preserves_drawing_mapping_after_sheet_reorder() {
     assert_eq!(sheet1_out_target, "../drawings/drawing1.xml");
     assert_eq!(sheet2_out_id, "rId1");
     assert_eq!(sheet2_out_target, "../drawings/drawing2.xml");
+    assert_two_drawing_markers(&saved);
 }
 
 #[test]
@@ -325,6 +343,7 @@ fn xlsx_document_roundtrip_preserves_drawing_mapping_after_cell_edit() {
     let in_parts = drawing_part_names(&input);
     let out_parts = drawing_part_names(&saved);
     assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
+    assert_two_drawing_markers(&saved);
 }
 
 #[test]
@@ -371,6 +390,7 @@ fn xlsx_document_roundtrip_preserves_drawing_mapping_after_drawing_edit() {
     let in_parts = drawing_part_names(&input);
     let out_parts = drawing_part_names(&saved);
     assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
+    assert_two_drawing_markers(&saved);
 }
 
 #[test]
