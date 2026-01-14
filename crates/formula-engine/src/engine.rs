@@ -28,8 +28,9 @@ use formula_format::{
     DateSystem as FmtDateSystem, FormatOptions as FmtFormatOptions, Value as FmtValue,
 };
 use formula_model::{
-    rewrite_table_names_in_formula, validate_table_name, CellId, CellRef, ColProperties, Range,
-    RowProperties, Style, StyleTable, Table, TableError, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    rewrite_table_names_in_formula, validate_table_name, CellId, CellRef, ColProperties,
+    HorizontalAlignment, Range, RowProperties, Style, StyleTable, Table, TableError, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
 };
 use formula_model::table::TableColumn;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -78,6 +79,21 @@ pub struct EngineInfo {
     pub origin: Option<String>,
     /// Per-sheet override for `INFO("origin")`, keyed by internal sheet id.
     pub origin_by_sheet: HashMap<SheetId, String>,
+}
+
+/// A compressed formatting segment applied to a single column.
+///
+/// This mirrors the document model's `formatRunsByCol` representation:
+/// - Each run covers rows `[start_row, end_row_exclusive)`.
+/// - `style_id` references the workbook [`StyleTable`] (`0` is the default/empty style).
+///
+/// When computing effective formatting, these runs have precedence:
+/// `sheet < col < row < range-run < cell`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatRun {
+    pub start_row: u32,
+    pub end_row_exclusive: u32,
+    pub style_id: u32,
 }
 
 #[derive(Debug, Error)]
@@ -282,6 +298,8 @@ struct Sheet {
     row_properties: BTreeMap<u32, RowProperties>,
     /// Per-column formatting/visibility overrides.
     col_properties: BTreeMap<u32, ColProperties>,
+    /// Compressed formatting runs keyed by 0-based column index.
+    format_runs_by_col: BTreeMap<u32, Vec<FormatRun>>,
 }
 
 impl Default for Sheet {
@@ -298,6 +316,7 @@ impl Default for Sheet {
             col_count: EXCEL_MAX_COLS,
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
+            format_runs_by_col: BTreeMap::new(),
         }
     }
 }
@@ -1099,6 +1118,88 @@ impl Engine {
         }
     }
 
+    /// Replace the set of formatting runs for a column.
+    ///
+    /// Runs are interpreted as row ranges `[start_row, end_row_exclusive)`.
+    /// The run style layer has precedence `sheet < col < row < range-run < cell`.
+    pub fn set_format_runs_by_col(
+        &mut self,
+        sheet: &str,
+        col_0based: u32,
+        mut runs: Vec<FormatRun>,
+    ) -> Result<(), EngineError> {
+        if col_0based >= EXCEL_MAX_COLS {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::ColumnOutOfRange,
+            ));
+        }
+
+        // Validate rows are within the engine's supported bounds.
+        for run in &runs {
+            if run.start_row >= run.end_row_exclusive {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
+            }
+            if run.start_row >= i32::MAX as u32 || run.end_row_exclusive > i32::MAX as u32 {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
+            }
+        }
+
+        // Keep deterministic ordering.
+        runs.sort_by_key(|r| (r.start_row, r.end_row_exclusive, r.style_id));
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+
+        // Ensure the sheet dimensions include the formatted column and any run endpoints.
+        if self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: 0,
+                col: col_0based,
+            },
+        ) {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            self.mark_all_compiled_cells_dirty();
+        }
+        if let Some(max_row) = runs.iter().map(|r| r.end_row_exclusive.saturating_sub(1)).max() {
+            if self.workbook.grow_sheet_dimensions(
+                sheet_id,
+                CellAddr {
+                    row: max_row,
+                    col: col_0based,
+                },
+            ) {
+                self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+                self.mark_all_compiled_cells_dirty();
+            }
+        }
+
+        {
+            let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+                return Ok(());
+            };
+
+            // Store only non-default style runs to keep the representation sparse.
+            runs.retain(|r| r.style_id != 0);
+            if runs.is_empty() {
+                sheet.format_runs_by_col.remove(&col_0based);
+            } else {
+                sheet.format_runs_by_col.insert(col_0based, runs);
+            }
+        }
+
+        // Formatting changes can affect worksheet information functions that consult formatting
+        // (e.g. `CELL("prefix")`). Conservatively refresh all compiled formula cells.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        Ok(())
+    }
     /// Set workbook file metadata (directory + filename).
     ///
     /// This is used by worksheet/workbook information functions like `CELL("filename")` and
@@ -9418,6 +9519,7 @@ struct Snapshot {
     sheet_dimensions: Vec<(u32, u32)>,
     sheet_default_style_ids: Vec<Option<u32>>,
     sheet_default_col_width: Vec<Option<f32>>,
+    format_runs_by_col: Vec<BTreeMap<u32, Vec<FormatRun>>>,
     values: HashMap<CellKey, Value>,
     phonetics: HashMap<CellKey, String>,
     style_ids: HashMap<CellKey, u32>,
@@ -9492,6 +9594,18 @@ impl Snapshot {
                     s.default_col_width
                 } else {
                     None
+                }
+            })
+            .collect();
+        let format_runs_by_col = workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.format_runs_by_col.clone()
+                } else {
+                    BTreeMap::new()
                 }
             })
             .collect();
@@ -9622,6 +9736,7 @@ impl Snapshot {
             sheet_dimensions,
             sheet_default_style_ids,
             sheet_default_col_width,
+            format_runs_by_col,
             values,
             phonetics,
             style_ids,
@@ -9821,6 +9936,76 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         Value::Blank
+    }
+
+    fn cell_horizontal_alignment(
+        &self,
+        sheet_id: usize,
+        addr: CellAddr,
+    ) -> Option<HorizontalAlignment> {
+        let (rows, cols) = self.sheet_dimensions(sheet_id);
+        if addr.row >= rows || addr.col >= cols {
+            return None;
+        }
+
+        let mut out: Option<HorizontalAlignment> = None;
+
+        // Resolve style layers using document precedence:
+        // sheet < col < row < range-run < cell.
+        let sheet_style_id = self.sheet_default_style_id(sheet_id).unwrap_or(0);
+        let col_style_id = self
+            .col_properties
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let row_style_id = self
+            .row_properties
+            .get(sheet_id)
+            .and_then(|rows| rows.get(&addr.row))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let run_style_id = self
+            .format_runs_by_col
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .map(|runs| {
+                // Runs are expected to be sorted and non-overlapping, but we use a conservative
+                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
+                // provide unexpected overlaps.
+                let mut style_id = 0;
+                for run in runs {
+                    if addr.row < run.start_row {
+                        break;
+                    }
+                    if addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0);
+        let cell_style_id = self.cell_style_id(sheet_id, addr);
+
+        for style_id in [sheet_style_id, col_style_id, row_style_id, run_style_id, cell_style_id] {
+            if style_id == 0 {
+                continue;
+            }
+            let Some(style) = self.styles.get(style_id) else {
+                continue;
+            };
+            let Some(horizontal) = style
+                .alignment
+                .as_ref()
+                .and_then(|alignment| alignment.horizontal)
+            else {
+                continue;
+            };
+            out = Some(horizontal);
+        }
+
+        out
     }
 
     fn external_data_provider(&self) -> Option<&dyn ExternalDataProvider> {
@@ -15341,12 +15526,14 @@ mod tests {
     fn cell_width_reflects_column_metadata() {
         let mut engine = Engine::new();
         engine
-            // Put the formula in a different cell to avoid creating a self-reference cycle.
+            // Place the formula outside of the referenced column to avoid creating a circular
+            // dependency in the calc graph. `CELL("width")` returns column metadata, not the
+            // referenced cell's computed value.
             .set_cell_formula("Sheet1", "B1", r#"=CELL("width", A1)"#)
             .unwrap();
         engine.recalculate_single_threaded();
-        // Excel returns the column width rounded down to whole characters, with a `0.0` fractional
-        // marker when the column uses the sheet default width.
+        // Excel's CELL("width") returns the integer part of the width, with a `0`/`1` in the first
+        // decimal place indicating whether the column uses the sheet default width.
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(8.0));
 
         // Column widths are stored in Excel "character" units (OOXML `col/@width`).

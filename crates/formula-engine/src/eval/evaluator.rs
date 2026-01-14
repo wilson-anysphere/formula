@@ -11,6 +11,7 @@ use crate::functions::{
 use crate::locale::ValueLocaleConfig;
 use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
 use crate::LocaleConfig;
+use formula_model::HorizontalAlignment;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -220,6 +221,16 @@ pub trait ValueResolver {
         None
     }
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    /// Returns the effective horizontal alignment for the given cell, if available.
+    ///
+    /// This is used by worksheet information functions like `CELL("prefix")`.
+    fn cell_horizontal_alignment(
+        &self,
+        _sheet_id: usize,
+        _addr: CellAddr,
+    ) -> Option<HorizontalAlignment> {
+        None
+    }
     /// Resolve a sheet id back to its display name.
     ///
     /// This is used by worksheet information functions like `CELL("address")`.
@@ -1750,6 +1761,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn get_cell_phonetic(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {
         match sheet_id {
             FnSheetId::Local(id) => self.resolver.get_cell_phonetic(*id, addr),
+            FnSheetId::External(_) => None,
+        }
+    }
+
+    fn cell_horizontal_alignment(
+        &self,
+        sheet_id: &FnSheetId,
+        addr: CellAddr,
+    ) -> Option<HorizontalAlignment> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.cell_horizontal_alignment(*id, addr),
             FnSheetId::External(_) => None,
         }
     }

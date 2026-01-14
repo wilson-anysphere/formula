@@ -70,7 +70,7 @@ pub use editing::{
 };
 pub use engine::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
-    EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope,
+    EngineInfo, ExternalDataProvider, ExternalValueProvider, FormatRun, NameDefinition, NameScope,
     PrecedentNode, RecalcMode, RecalcValueChange, SheetId,
 };
 pub use parser::{

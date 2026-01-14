@@ -160,7 +160,9 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         "filename" => Some(CellInfoType::Filename),
         // Notes:
-        // - `CELL("width")` consults column metadata when available.
+        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43).
+        // - `CELL("prefix")` consults the cell's effective horizontal alignment.
+        // - `CELL("protect")` consults the cell's effective protection formatting.
         // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
         //   cell number format string, but do not consider conditional formatting rules.
         _ => None,
@@ -206,21 +208,8 @@ fn resolve_horizontal_alignment(
     sheet_id: &SheetId,
     addr: CellAddr,
 ) -> HorizontalAlignment {
-    let Some(styles) = ctx.style_table() else {
-        return HorizontalAlignment::General;
-    };
-
-    for style_id in style_layer_ids(ctx, sheet_id, addr) {
-        if let Some(style) = styles.get(style_id) {
-            if let Some(alignment) = &style.alignment {
-                if let Some(horizontal) = alignment.horizontal {
-                    return horizontal;
-                }
-            }
-        }
-    }
-
-    HorizontalAlignment::General
+    ctx.cell_horizontal_alignment(sheet_id, addr)
+        .unwrap_or(HorizontalAlignment::General)
 }
 
 fn resolve_number_format<'a>(
@@ -411,11 +400,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             Value::Number(info.parentheses as f64)
         }
         CellInfoType::Width => {
-            // `CELL("width")` consults column metadata.
-            //
-            // Do *not* record a cell-value dependency on the referenced cell. The output depends on
-            // column properties, not the referenced cell's value, and recording it can introduce
-            // spurious circular references (e.g. `=CELL("width", A1)` in A1).
+            // `CELL("width")` consults column metadata but should avoid recording an implicit
+            // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
+            let cell_ref = record_explicit_cell(ctx);
 
             // Excel returns a number where the integer part is the column width (in characters),
             // rounded down, and the first decimal digit is `0` when the column uses the sheet
@@ -426,14 +413,14 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // Column widths are stored in Excel "character" units (OOXML `col/@width`).
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
-            let props = ctx.col_properties(&reference.sheet_id, addr.col);
+            let props = ctx.col_properties(&cell_ref.sheet_id, addr.col);
             if props.as_ref().is_some_and(|p| p.hidden) {
                 return Value::Number(0.0);
             }
 
             let (width, is_custom) = match props.and_then(|p| p.width) {
                 Some(w) => (w as f64, true),
-                None => match ctx.sheet_default_col_width(&reference.sheet_id) {
+                None => match ctx.sheet_default_col_width(&cell_ref.sheet_id) {
                     Some(w) => (w as f64, false),
                     None => (EXCEL_STANDARD_COL_WIDTH, false),
                 },
@@ -475,6 +462,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 HorizontalAlignment::Fill => "\\",
                 HorizontalAlignment::General | HorizontalAlignment::Justify => "",
             };
+
             Value::Text(prefix.to_string())
         }
         CellInfoType::Filename => {

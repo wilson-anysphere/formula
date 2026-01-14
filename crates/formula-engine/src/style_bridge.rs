@@ -57,15 +57,22 @@ pub fn ui_style_to_model_style(value: &JsonValue) -> Style {
 
     // --- alignment ---
     if let Some(alignment) = obj.get("alignment").and_then(|v| v.as_object()) {
-        let horizontal = alignment
-            .get("horizontal")
-            .and_then(|v| v.as_str())
-            .and_then(parse_horizontal_alignment);
-        if horizontal.is_some() {
-            out.alignment = Some(Alignment {
-                horizontal,
-                ..Default::default()
-            });
+        if let Some(horizontal_value) = alignment.get("horizontal") {
+            // The UI model uses `null` to represent an explicit clear (fall back to General),
+            // whereas missing keys mean "leave unchanged".
+            let horizontal = if horizontal_value.is_null() {
+                Some(HorizontalAlignment::General)
+            } else {
+                horizontal_value
+                    .as_str()
+                    .and_then(parse_horizontal_alignment)
+            };
+            if horizontal.is_some() {
+                out.alignment = Some(Alignment {
+                    horizontal,
+                    ..Default::default()
+                });
+            }
         }
     }
 
@@ -119,6 +126,15 @@ mod tests {
         assert_eq!(
             style.alignment.as_ref().and_then(|a| a.horizontal).as_ref(),
             Some(&HorizontalAlignment::Left)
+        );
+    }
+
+    #[test]
+    fn ui_style_alignment_horizontal_null_maps_to_general() {
+        let style = ui_style_to_model_style(&json!({ "alignment": { "horizontal": null } }));
+        assert_eq!(
+            style.alignment.as_ref().and_then(|a| a.horizontal).as_ref(),
+            Some(&HorizontalAlignment::General)
         );
     }
 

@@ -6,6 +6,7 @@ use crate::eval::{CellAddr, CompiledExpr};
 use crate::locale::ValueLocaleConfig;
 use crate::value::{ErrorKind, Lambda, Value};
 use crate::LocaleConfig;
+use formula_model::HorizontalAlignment;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 pub(crate) mod array_lift;
@@ -203,6 +204,16 @@ pub trait FunctionContext {
     /// This is used by the `PHONETIC` worksheet function. Most backends do not model phonetic
     /// guides, so the default implementation returns `None`.
     fn get_cell_phonetic(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
+        None
+    }
+    /// Returns the effective horizontal alignment for the given cell, if available.
+    ///
+    /// This is used by worksheet information functions like `CELL("prefix")`.
+    fn cell_horizontal_alignment(
+        &self,
+        _sheet_id: &SheetId,
+        _addr: CellAddr,
+    ) -> Option<HorizontalAlignment> {
         None
     }
     fn iter_reference_cells<'a>(

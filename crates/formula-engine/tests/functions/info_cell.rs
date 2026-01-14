@@ -383,6 +383,191 @@ fn cell_protect_ignores_sheet_protection_enabled() {
 }
 
 #[test]
+fn cell_prefix_alignment_codes_match_excel() {
+    use formula_engine::Engine;
+    use formula_model::{Alignment, HorizontalAlignment};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
+        .unwrap();
+
+    // Default alignment ("General") returns the empty string.
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+
+    for (alignment, expected) in [
+        (HorizontalAlignment::Left, "'"),
+        (HorizontalAlignment::Right, "\""),
+        (HorizontalAlignment::Center, "^"),
+        (HorizontalAlignment::Fill, "\\"),
+        // Excel returns "" for other alignments, including Justify.
+        (HorizontalAlignment::Justify, ""),
+    ] {
+        let style_id = engine.intern_style(Style {
+            alignment: Some(Alignment {
+                horizontal: Some(alignment),
+                ..Default::default()
+            }),
+            ..Style::default()
+        });
+        engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "B1"),
+            Value::Text(expected.to_string()),
+            "alignment={alignment:?}"
+        );
+    }
+}
+
+#[test]
+fn cell_prefix_general_is_empty_for_text_and_number() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+}
+
+#[test]
+fn cell_prefix_respects_layered_alignment_and_explicit_clears() {
+    use formula_engine::Engine;
+    use formula_model::{Alignment, HorizontalAlignment};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
+        .unwrap();
+
+    let style_left = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Left),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_right = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Right),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_center = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Center),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_general = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::General),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+
+    // sheet < col < row < range-run < cell precedence.
+    engine.set_col_style_id("Sheet1", 0, Some(style_left)); // col A
+    engine.set_row_style_id("Sheet1", 0, Some(style_right)); // row 1
+    engine.recalculate_single_threaded();
+    // Row overrides col.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\"".to_string()));
+
+    // Cell override wins.
+    engine.set_cell_style_id("Sheet1", "A1", style_center).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("^".to_string()));
+
+    // Explicit clear should override inherited formatting and revert to General (empty prefix).
+    engine.set_cell_style_id("Sheet1", "A1", style_general).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+}
+
+#[test]
+fn cell_prefix_respects_range_run_precedence() {
+    use formula_engine::{Engine, FormatRun};
+    use formula_model::{Alignment, HorizontalAlignment};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
+        .unwrap();
+
+    let style_right = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Right),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_center = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Center),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_fill = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Fill),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+    let style_general = engine.intern_style(Style {
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::General),
+            ..Default::default()
+        }),
+        ..Style::default()
+    });
+
+    engine.set_row_style_id("Sheet1", 0, Some(style_right));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\"".to_string()));
+
+    // Range-run overrides row/col.
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0, // col A
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 10,
+                style_id: style_center,
+            }],
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("^".to_string()));
+
+    // Cell override wins over range-run.
+    engine.set_cell_style_id("Sheet1", "A1", style_fill).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\\".to_string()));
+
+    // Explicitly clearing the cell alignment should not fall back to the range run.
+    engine.set_cell_style_id("Sheet1", "A1", style_general).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 
