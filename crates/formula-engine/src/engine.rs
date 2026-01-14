@@ -21841,6 +21841,19 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_graph_preserves_cell_phonetic_metadata() {
+        let mut engine = Engine::new();
+        engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+        engine
+            .set_cell_phonetic("Sheet1", "A1", Some("ふりがな".to_string()))
+            .unwrap();
+        assert_eq!(engine.get_cell_phonetic("Sheet1", "A1"), Some("ふりがな"));
+
+        engine.rebuild_graph().unwrap();
+        assert_eq!(engine.get_cell_phonetic("Sheet1", "A1"), Some("ふりがな"));
+    }
+
+    #[test]
     fn bytecode_compile_report_classifies_unsupported_expressions() {
         let mut engine = Engine::new();
         engine
