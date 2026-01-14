@@ -2127,6 +2127,7 @@ dependencies = [
  "statrs",
  "thiserror 2.0.17",
  "unicode-ident",
+ "unicode-normalization",
  "unicode-segmentation",
  "wide",
 ]

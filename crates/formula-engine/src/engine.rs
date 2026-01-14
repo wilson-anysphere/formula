@@ -281,9 +281,15 @@ struct Workbook {
 
 impl Workbook {
     fn sheet_key(name: &str) -> String {
-        // Excel treats sheet names as case-insensitive. Use a normalized lookup key while
-        // preserving the original display name.
-        crate::value::casefold(name)
+        // Excel compares sheet names case-insensitively across Unicode and applies compatibility
+        // normalization (NFKC). Keep the engine's sheet-name lookup behavior aligned with
+        // `formula_model::sheet_name_eq_case_insensitive`, and ensure runtime-resolved sheet names
+        // (e.g. INDIRECT) match Excel behavior.
+        //
+        // Note: `casefold` alone is not enough here; e.g. U+212A KELVIN SIGN (K) should match
+        // ASCII 'K' after NFKC normalization.
+        use unicode_normalization::UnicodeNormalization;
+        name.nfkc().flat_map(|c| c.to_uppercase()).collect()
     }
 
     fn ensure_sheet(&mut self, name: &str) -> SheetId {
@@ -11571,6 +11577,16 @@ fn rewrite_defined_name_structural(
     ctx_sheet: &str,
     edit: &StructuralEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so build
+    // a mapping from sheet name -> tab index using the workbook's current sheet ordering.
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
+        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
+    }
+
     let origin = crate::CellAddr::new(0, 0);
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
     for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
@@ -11630,6 +11646,16 @@ fn rewrite_defined_name_range_map(
     ctx_sheet: &str,
     edit: &RangeMapEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so build
+    // a mapping from sheet name -> tab index using the workbook's current sheet ordering.
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
+        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
+    }
+
     let origin = crate::CellAddr::new(0, 0);
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
     for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
