@@ -60,6 +60,9 @@ generated artifacts that must stay in sync:
 - Function catalog (`shared/functionCatalog.json`):
   - `pnpm generate:function-catalog`
 - Locale function-name translation TSVs (`crates/formula-engine/src/locale/data/*.tsv`):
+  - Normalize locale sources (omits identity mappings + enforces stable casing):
+    - `pnpm normalize:locale-function-sources`
+    - `pnpm check:locale-function-sources`
   - `pnpm generate:locale-function-tsv`
   - `pnpm check:locale-function-tsv`
   - For Spanish (`es-ES`), locale sources must come from a full-catalog Excel extraction (do not
