@@ -1714,6 +1714,68 @@ pub(crate) fn split_external_sheet_span_key(key: &str) -> Option<(&str, &str, &s
     Some((workbook, start, end))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_external_sheet_key_parses_workbook_and_sheet() {
+        let key = "[Book.xlsx]Sheet1";
+        let (workbook, sheet) = split_external_sheet_key(key).unwrap();
+        assert_eq!(workbook, "Book.xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn split_external_sheet_span_key_parses_workbook_and_sheet_span() {
+        let key = "[Book.xlsx]Sheet1:Sheet3";
+        let (workbook, start, end) = split_external_sheet_span_key(key).unwrap();
+        assert_eq!(workbook, "Book.xlsx");
+        assert_eq!(start, "Sheet1");
+        assert_eq!(end, "Sheet3");
+    }
+
+    #[test]
+    fn split_external_sheet_key_uses_last_closing_bracket_for_workbook_id() {
+        // Workbook ids can contain `[` / `]` in a path prefix, so we must locate the *last* `]`.
+        let key = "[C:\\[foo]\\Book.xlsx]Sheet1";
+        let (workbook, sheet) = split_external_sheet_key(key).unwrap();
+        assert_eq!(workbook, "C:\\[foo]\\Book.xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn split_external_sheet_key_rejects_invalid_inputs() {
+        for key in [
+            "Book.xlsx]Sheet1",  // missing leading '['
+            "[Book.xlsxSheet1",  // missing closing ']'
+            "[]Sheet1",          // empty workbook
+            "[Book.xlsx]",       // empty sheet
+        ] {
+            assert!(
+                split_external_sheet_key(key).is_none(),
+                "expected None for key {key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_external_sheet_span_key_rejects_missing_endpoints() {
+        for key in ["[Book.xlsx]Sheet1:", "[Book.xlsx]:Sheet2"] {
+            assert!(
+                split_external_sheet_span_key(key).is_none(),
+                "expected None for key {key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_external_sheet_key_accepts_single_sheet_rejects_span() {
+        assert!(is_valid_external_sheet_key("[Book.xlsx]Sheet1"));
+        assert!(!is_valid_external_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
+    }
+}
+
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn eval_arg(&self, expr: &CompiledExpr) -> FnArgValue {
         match self.eval_value(expr) {
