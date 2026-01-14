@@ -4794,6 +4794,102 @@ mod tests {
     }
 
     #[test]
+    fn agile_verify_integrity_mismatch_uses_constant_time_compare() {
+        use cbc::Encryptor;
+        use cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
+
+        fn encrypt_aes128_cbc_no_padding(key: &[u8; 16], iv: &[u8; 16], plaintext: &[u8]) -> Vec<u8> {
+            assert_eq!(plaintext.len() % 16, 0);
+            let mut buf = plaintext.to_vec();
+            Encryptor::<Aes128>::new_from_slices(key, iv)
+                .unwrap()
+                .encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
+                .unwrap();
+            buf
+        }
+
+        // Cover both common (SHA1) and legacy (MD5) hash algorithms for dataIntegrity.
+        for hash_alg in [HashAlgorithm::Sha1, HashAlgorithm::Md5] {
+            util::reset_ct_eq_calls();
+
+            let hash_len = hash_output_len(hash_alg);
+            let padded_len = ((hash_len + 15) / 16) * 16;
+
+            let key_data_salt = vec![0x11u8; 16];
+            let secret_key = [0x22u8; 16]; // AES-128
+            let encrypted_package = b"EncryptedPackage bytes (including header/ciphertext)";
+
+            // Choose an HMAC key whose prefix length matches the hash output size.
+            let mut hmac_key_raw = vec![0u8; padded_len];
+            for (idx, b) in hmac_key_raw.iter_mut().take(hash_len).enumerate() {
+                *b = (idx as u8).wrapping_add(1);
+            }
+            let hmac_key = &hmac_key_raw[..hash_len];
+
+            // Compute the actual HMAC, then flip a bit so verification fails.
+            let mut expected_hmac = match hash_alg {
+                HashAlgorithm::Md5 => {
+                    let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(hmac_key)
+                        .expect("HMAC key length is unrestricted");
+                    mac.update(encrypted_package);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                HashAlgorithm::Sha1 => {
+                    let mut mac =
+                        <Hmac<Sha1> as Mac>::new_from_slice(hmac_key).expect("HMAC key unrestricted");
+                    mac.update(encrypted_package);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                other => panic!("unexpected hash algorithm in test: {other:?}"),
+            };
+            expected_hmac[0] ^= 0x01;
+
+            let mut expected_hmac_raw = vec![0u8; padded_len];
+            expected_hmac_raw[..hash_len].copy_from_slice(&expected_hmac[..hash_len]);
+
+            let iv_key =
+                derive_iv_from_salt_and_block_key(&key_data_salt, hash_alg, &BLK_KEY_HMAC_KEY);
+            let iv_value =
+                derive_iv_from_salt_and_block_key(&key_data_salt, hash_alg, &BLK_KEY_HMAC_VALUE);
+
+            let data_integrity = AgileDataIntegrity {
+                encrypted_hmac_key: encrypt_aes128_cbc_no_padding(&secret_key, &iv_key, &hmac_key_raw),
+                encrypted_hmac_value: encrypt_aes128_cbc_no_padding(
+                    &secret_key,
+                    &iv_value,
+                    &expected_hmac_raw,
+                ),
+            };
+
+            let info = AgileEncryptionInfo {
+                key_data_salt: key_data_salt.clone(),
+                key_data_hash_algorithm: hash_alg,
+                key_data_block_size: 16,
+                data_integrity: None,
+                spin_count: 0,
+                password_salt: vec![0u8; 16],
+                password_hash_algorithm: HashAlgorithm::Sha1,
+                password_key_bits: 128,
+                encrypted_key_value: vec![0u8; 16],
+                encrypted_verifier_hash_input: vec![0u8; 16],
+                encrypted_verifier_hash_value: vec![0u8; 16],
+            };
+
+            let err = verify_agile_integrity(&info, &data_integrity, &secret_key, encrypted_package)
+                .expect_err("expected integrity mismatch");
+            assert!(
+                matches!(err, OffcryptoError::IntegrityCheckFailed),
+                "expected IntegrityCheckFailed, got {err:?}"
+            );
+
+            assert!(
+                util::ct_eq_call_count() >= 1,
+                "expected ct_eq helper to be invoked (hash_alg={hash_alg})"
+            );
+        }
+    }
+
+    #[test]
     fn agile_spin_count_just_below_limit_succeeds() {
         let limits = DecryptLimits {
             max_spin_count: Some(10),
