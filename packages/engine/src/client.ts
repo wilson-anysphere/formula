@@ -154,10 +154,15 @@ export interface EngineClient {
   setEngineInfo(info: EngineInfoDto, options?: RpcOptions): Promise<void>;
   /**
    * Set (or clear) the workbook-level default for `INFO("origin")`.
+   *
+   * This is a legacy workbook-level fallback surfaced when no per-sheet origin is set.
    */
   setInfoOrigin(origin: string | null, options?: RpcOptions): Promise<void>;
   /**
-   * Set (or clear) the per-sheet override for `INFO("origin")`.
+   * Set (or clear) the per-sheet origin for `INFO("origin")`.
+   *
+   * @deprecated Prefer `setSheetOrigin(sheet, origin)` for clarity. This method is retained as a
+   * backward-compatible alias.
    */
   setInfoOriginForSheet(sheet: string, origin: string | null, options?: RpcOptions): Promise<void>;
   /**

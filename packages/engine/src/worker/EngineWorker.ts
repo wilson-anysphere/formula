@@ -642,11 +642,20 @@ export class EngineWorker {
     await this.invoke("setEngineInfo", { info: normalized }, options);
   }
 
+  /**
+   * Legacy workbook-level fallback for `INFO("origin")`.
+   *
+   * Prefer `setSheetOrigin` for UI-driven per-sheet viewport state; this method exists for backward
+   * compatibility and to support older callers that model origin as a workbook-level string.
+   */
   async setInfoOrigin(origin: string | null, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setInfoOrigin", { origin }, options);
   }
 
+  /**
+   * @deprecated Prefer `setSheetOrigin(sheet, origin)` for clarity. This method is a legacy alias.
+   */
   async setInfoOriginForSheet(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setInfoOriginForSheet", { sheet, origin }, options);
