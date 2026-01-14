@@ -126,6 +126,7 @@ describe("engine sync helpers", () => {
     readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
     readonly internStyleCalls: unknown[] = [];
     readonly setStyleCalls: Array<{ address: string; styleId: number; sheet?: string }> = [];
+    readonly colWidthCalls: Array<{ sheet: string; col: number; widthChars: number | null }> = [];
     readonly recalcCalls: Array<string | undefined> = [];
     constructor(private readonly recalcResult: CellChange[]) {}
 
@@ -144,6 +145,10 @@ describe("engine sync helpers", () => {
 
     async setCellStyleId(sheet: string, address: string, styleId: number): Promise<void> {
       this.setStyleCalls.push({ address, styleId, sheet });
+    }
+
+    async setColWidth(sheet: string, col: number, widthChars: number | null): Promise<void> {
+      this.colWidthCalls.push({ sheet, col, widthChars });
     }
 
     async recalculate(sheet?: string): Promise<CellChange[]> {
@@ -335,5 +340,27 @@ describe("engine sync helpers", () => {
     expect(setRowStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
     expect(setColStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
     expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
+  });
+
+  it("syncs sheet view column width overrides into the engine (CELL width metadata)", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+
+    doc.setColWidth("Sheet1", 0, 120);
+    unsubscribe();
+
+    expect(Array.isArray(payload?.sheetViewDeltas)).toBe(true);
+    expect(payload.sheetViewDeltas).toHaveLength(1);
+
+    const engine = new FakeEngine([]);
+    await engineApplyDocumentChange(engine, payload);
+
+    // 120px -> Excel character width (1/256 precision): floor(((120-5)/7)*256)/256
+    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.42578125 }]);
+    // Column resizes should trigger a recalc even though DocumentController emits `recalc: false`.
+    expect(engine.recalcCalls).toEqual([undefined]);
   });
 });

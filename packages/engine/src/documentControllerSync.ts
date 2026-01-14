@@ -1,6 +1,7 @@
 import type { CellChange } from "./protocol.ts";
 import { toA1 } from "./backend/a1.ts";
 import { normalizeFormulaTextOpt } from "./backend/formula.ts";
+import { docColWidthPxToExcelChars } from "./excelColumnWidth.ts";
 
 export type EngineCellScalar = number | string | boolean | null;
 
@@ -46,25 +47,28 @@ export interface EngineSyncTarget {
   setCells?: (
     updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
   ) => Promise<void> | void;
-  /**
-   * Intern a formatting/protection style object into the engine and return its engine-specific id.
-   *
-   * Optional: engines that don't implement formatting metadata can omit this method.
-   */
-  internStyle?: (style: unknown) => Promise<number> | number;
-  /**
-   * Set the engine style id for a single cell.
-   *
-   * Optional: engines that don't implement formatting metadata can omit this method.
-   */
-  setCellStyleId?: (sheet: string, address: string, styleId: number) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
+  /**
+   * Update a worksheet's column width metadata (OOXML `col/@width` units).
+   *
+   * The engine treats this as sheet-scoped metadata that can affect worksheet information
+   * functions like `CELL("width")`.
+   *
+   * - `sheet` is the worksheet id/name (e.g. `"Sheet1"`).
+   * - `col` is 0-based (A=0).
+   * - `widthChars` is expressed in Excel character units (1.0 = width of one '0' digit),
+   *   matching OOXML.
+   * - `null` clears the override back to the sheet default.
+   */
+  setColWidth?: (sheet: string, col: number, widthChars: number | null) => Promise<void> | void;
   /**
    * Optional row/col/sheet formatting layer metadata APIs.
    *
    * These are additive and may not be implemented by all engine targets.
    * Sync helpers must treat them as best-effort.
    */
+  internStyle?: (styleObj: unknown) => Promise<number> | number;
+  setCellStyleId?: (sheet: string, address: string, styleId: number) => Promise<void> | void;
   setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
   setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
   setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
@@ -179,6 +183,12 @@ function cellStateToEngineInput(cell: DocumentCellState): EngineCellScalar | nul
     if (normalized != null) return normalized;
   }
   return coerceDocumentValueToScalar(cell.value);
+}
+
+function isAxisValueEqual(a: number | null, b: number | null): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) <= 1e-6;
 }
 
 /**
@@ -390,6 +400,9 @@ export async function engineApplyDocumentChange(
   const sheetStyleDeltas: Array<{ sheetId: string; afterStyleId: number }> = Array.isArray(payload?.sheetStyleDeltas)
     ? payload.sheetStyleDeltas
     : [];
+  const sheetViewDeltas: Array<{ sheetId: string; before: any; after: any }> = Array.isArray(payload?.sheetViewDeltas)
+    ? payload.sheetViewDeltas
+    : [];
 
   // If the caller supplied `getStyleById`, seed a style sync context so both
   // `engineApplyDeltas` (cell styles) and the row/col/sheet helpers can resolve
@@ -446,11 +459,56 @@ export async function engineApplyDocumentChange(
     }
   }
 
+  // Apply sheet view metadata deltas (currently: column widths) into the engine model.
+  //
+  // DocumentController stores widths in base CSS px (zoom=1). The formula engine model stores
+  // widths in Excel character units (OOXML `col/@width`).
+  let didApplyAnyColWidths = false;
+  if (typeof engine.setColWidth === "function" && sheetViewDeltas.length > 0) {
+    for (const delta of sheetViewDeltas) {
+      const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : "";
+      if (!sheetId) continue;
+
+      const beforeColWidths = delta?.before?.colWidths ?? null;
+      const afterColWidths = delta?.after?.colWidths ?? null;
+      if (!beforeColWidths && !afterColWidths) continue;
+
+      const keys = new Set<string>();
+      for (const key of Object.keys(beforeColWidths ?? {})) keys.add(key);
+      for (const key of Object.keys(afterColWidths ?? {})) keys.add(key);
+
+      for (const key of keys) {
+        const col = Number(key);
+        // The WASM engine is Excel-bounded (16,384 cols). DocumentController view state can
+        // contain arbitrary indices (e.g. external/collab inputs), so clamp.
+        if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
+
+        const rawBefore = beforeColWidths?.[key];
+        const rawAfter = afterColWidths?.[key];
+        const before = rawBefore != null && Number.isFinite(rawBefore) && rawBefore > 0 ? rawBefore : null;
+        const after = rawAfter != null && Number.isFinite(rawAfter) && rawAfter > 0 ? rawAfter : null;
+        if (isAxisValueEqual(before, after)) continue;
+
+        didApplyAnyColWidths = true;
+        const widthChars = after == null ? null : docColWidthPxToExcelChars(after);
+        await engine.setColWidth(sheetId, col, widthChars);
+      }
+    }
+  }
+
   const recalcFlag = typeof payload?.recalc === "boolean" ? (payload.recalc as boolean) : undefined;
-  const shouldRecalculate = options.recalculate ?? recalcFlag ?? true;
+  let shouldRecalculate = options.recalculate ?? recalcFlag ?? true;
+
+  // Column resizes can affect worksheet information functions like `CELL("width")`, but
+  // DocumentController emits view deltas with `recalc: false`. Override so width-dependent
+  // formulas update when the user resizes columns.
+  if (didApplyAnyColWidths && options.recalculate !== false) {
+    shouldRecalculate = true;
+  }
+
   if (!shouldRecalculate) return [];
 
-  const didApplyAnyUpdates = didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles;
+  const didApplyAnyUpdates = didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyColWidths;
   if (!didApplyAnyUpdates && recalcFlag !== true && options.recalculate !== true) return [];
   return await engine.recalculate();
 }
