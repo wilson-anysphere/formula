@@ -1,4 +1,35 @@
-use formula_engine::{Engine, ErrorKind, Value};
+use formula_engine::eval::CellAddr;
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct TestExternalProvider {
+    sheet_order: Mutex<HashMap<String, Vec<String>>>,
+}
+
+impl TestExternalProvider {
+    fn set_sheet_order(&self, workbook: &str, order: impl Into<Vec<String>>) {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .insert(workbook.to_string(), order.into());
+    }
+}
+
+impl ExternalValueProvider for TestExternalProvider {
+    fn get(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+        None
+    }
+
+    fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .get(workbook)
+            .cloned()
+    }
+}
 
 #[test]
 fn sheet_reports_current_and_referenced_sheet_numbers() {
@@ -41,6 +72,67 @@ fn sheets_reports_workbook_sheet_count_and_3d_reference_span() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(1.0));
+}
+
+#[test]
+fn sheet_reports_external_sheet_number_when_order_available() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn sheet_returns_na_for_external_sheet_when_order_unavailable() {
+    let provider = Arc::new(TestExternalProvider::default());
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
+fn sheet_reports_external_sheet_number_for_3d_span_argument() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
 }
 
 #[test]

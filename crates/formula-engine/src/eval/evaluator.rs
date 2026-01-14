@@ -1895,6 +1895,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.resolver.sheet_id(name)
     }
 
+    fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.resolver.external_sheet_order(workbook)
+    }
+
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         self.resolver.external_data_provider()
     }

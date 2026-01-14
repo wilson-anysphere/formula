@@ -1,10 +1,13 @@
+use std::cmp::Ordering;
+
 use crate::eval::CompiledExpr;
+use crate::eval::split_external_sheet_key;
 use crate::functions::information::workbook as workbook_info;
 use crate::functions::{
     ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId, ThreadSafety,
     ValueType, Volatility,
 };
-use crate::value::{ErrorKind, Value};
+use crate::value::{cmp_case_insensitive, ErrorKind, Value};
 
 inventory::submit! {
     FunctionSpec {
@@ -20,17 +23,76 @@ inventory::submit! {
     }
 }
 
-fn sheet_number_value(sheet_id: &SheetId) -> Value {
-    match workbook_info::sheet_number(sheet_id) {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(e),
+fn external_sheet_index(ctx: &dyn FunctionContext, sheet_key: &str) -> Option<usize> {
+    let (workbook, sheet) = split_external_sheet_key(sheet_key)?;
+    let order = ctx.external_sheet_order(workbook)?;
+    order
+        .iter()
+        .position(|s| cmp_case_insensitive(s, sheet) == Ordering::Equal)
+}
+
+fn sheet_number_value(ctx: &dyn FunctionContext, sheet_id: &SheetId) -> Value {
+    match sheet_id {
+        SheetId::External(key) => match external_sheet_index(ctx, key) {
+            Some(idx) => Value::Number((idx + 1) as f64),
+            None => Value::Error(ErrorKind::NA),
+        },
+        _ => match workbook_info::sheet_number(sheet_id) {
+            Ok(n) => Value::Number(n),
+            Err(e) => Value::Error(e),
+        },
     }
 }
 
-fn sheet_number_value_for_references(references: &[Reference]) -> Value {
+fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Reference]) -> Value {
     match workbook_info::sheet_number_for_references(references) {
         Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(e),
+        Err(_e) => {
+            // If there are no local sheets in the reference union, attempt to resolve the sheet
+            // order for an external workbook.
+            let mut workbook: Option<String> = None;
+            let mut order: Option<Vec<String>> = None;
+            let mut min_idx: Option<usize> = None;
+
+            for r in references {
+                let SheetId::External(key) = &r.sheet_id else {
+                    return Value::Error(ErrorKind::NA);
+                };
+                let Some((wb, sheet)) = split_external_sheet_key(key) else {
+                    return Value::Error(ErrorKind::NA);
+                };
+
+                match &workbook {
+                    Some(existing) if existing != wb => return Value::Error(ErrorKind::NA),
+                    Some(_) => {}
+                    None => {
+                        workbook = Some(wb.to_string());
+                        order = ctx.external_sheet_order(wb);
+                        if order.is_none() {
+                            return Value::Error(ErrorKind::NA);
+                        }
+                    }
+                }
+
+                let order = order.as_ref().expect("checked is_none above");
+                let idx = match order
+                    .iter()
+                    .position(|s| cmp_case_insensitive(s, sheet) == Ordering::Equal)
+                {
+                    Some(idx) => idx,
+                    None => return Value::Error(ErrorKind::NA),
+                };
+                min_idx = Some(match min_idx {
+                    Some(existing) => existing.min(idx),
+                    None => idx,
+                });
+            }
+
+            match min_idx {
+                Some(idx) => Value::Number((idx + 1) as f64),
+                None => Value::Error(ErrorKind::NA),
+            }
+        }
     }
 }
 
@@ -40,10 +102,12 @@ fn sheet_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     match ctx.eval_arg(&args[0]) {
-        ArgValue::Reference(r) => sheet_number_value(&r.sheet_id),
-        ArgValue::ReferenceUnion(ranges) => sheet_number_value_for_references(&ranges),
-        ArgValue::Scalar(Value::Reference(r)) => sheet_number_value(&r.sheet_id),
-        ArgValue::Scalar(Value::ReferenceUnion(ranges)) => sheet_number_value_for_references(&ranges),
+        ArgValue::Reference(r) => sheet_number_value(ctx, &r.sheet_id),
+        ArgValue::ReferenceUnion(ranges) => sheet_number_value_for_references(ctx, &ranges),
+        ArgValue::Scalar(Value::Reference(r)) => sheet_number_value(ctx, &r.sheet_id),
+        ArgValue::Scalar(Value::ReferenceUnion(ranges)) => {
+            sheet_number_value_for_references(ctx, &ranges)
+        }
         ArgValue::Scalar(Value::Text(name)) => {
             let name = name.trim();
             if name.is_empty() {

@@ -337,6 +337,17 @@ pub trait FunctionContext {
         None
     }
 
+    /// Return the sheet order for an external workbook.
+    ///
+    /// This is used by workbook information functions like `SHEET` when passed an external
+    /// reference such as `=[Book.xlsx]Sheet1!A1`. Implementations should return the workbook's
+    /// sheet names (without the `[Book.xlsx]` prefix) in tab order.
+    ///
+    /// Returning `None` indicates that the sheet order is unavailable.
+    fn external_sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
