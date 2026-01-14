@@ -15,17 +15,17 @@ pub enum BytecodeCompileReason {
     /// The formula was rejected because it is volatile.
     ///
     /// Note: The bytecode backend now supports *thread-safe* volatile formulas (e.g. `NOW()`,
-    /// `TODAY()`) as long as they do not require dynamic dependency tracking. As a result this
-    /// reason is no longer emitted by the engine, but is kept for backward compatibility with
-    /// earlier coverage-reporting tooling.
+    /// `TODAY()`), so this reason is no longer emitted by the engine. It is kept for backward
+    /// compatibility with earlier coverage-reporting tooling.
     Volatile,
     /// The formula calls a non-thread-safe function and cannot be evaluated in the bytecode VM.
     NotThreadSafe,
     /// The formula uses dynamic dependency functions (e.g. `OFFSET`, `INDIRECT`) which require
     /// dependency tracing during evaluation.
     ///
-    /// The bytecode backend does not yet implement dynamic dependency tracing, so these formulas
-    /// must fall back to the AST evaluator.
+    /// Note: The bytecode backend now implements dependency tracing for bytecode evaluation, so
+    /// this reason is no longer emitted by the engine. It is kept for backward compatibility with
+    /// earlier coverage-reporting tooling.
     DynamicDependencies,
     /// Lowering the canonical formula AST into the bytecode AST failed.
     LowerError(bytecode::LowerError),

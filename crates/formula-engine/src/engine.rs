@@ -3510,18 +3510,13 @@ impl Engine {
         expr: &crate::Expr,
         key: CellKey,
         thread_safe: bool,
-        dynamic_deps: bool,
+        _dynamic_deps: bool,
     ) -> Result<Arc<bytecode::Program>, BytecodeCompileReason> {
         if !self.bytecode_enabled {
             return Err(BytecodeCompileReason::Disabled);
         }
         if !thread_safe {
             return Err(BytecodeCompileReason::NotThreadSafe);
-        }
-        // Dynamic-dependency formulas (e.g. OFFSET/INDIRECT) require dependency tracing during
-        // evaluation, which the bytecode backend does not yet implement.
-        if dynamic_deps {
-            return Err(BytecodeCompileReason::DynamicDependencies);
         }
 
         let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);

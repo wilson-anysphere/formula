@@ -7613,7 +7613,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason() {
+fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_indirect() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=INDIRECT(\"A1\")")
@@ -7626,7 +7626,7 @@ fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason() {
     assert_eq!(
         stats
             .fallback_reasons
-            .get(&BytecodeCompileReason::DynamicDependencies)
+            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("INDIRECT")))
             .copied()
             .unwrap_or(0),
         1
@@ -7636,11 +7636,14 @@ fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason() {
     assert_eq!(report.len(), 1);
     assert_eq!(report[0].sheet, "Sheet1");
     assert_eq!(report[0].addr, parse_a1("A1").unwrap());
-    assert_eq!(report[0].reason, BytecodeCompileReason::DynamicDependencies);
+    assert_eq!(
+        report[0].reason,
+        BytecodeCompileReason::UnsupportedFunction(Arc::from("INDIRECT"))
+    );
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason_for_offset() {
+fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_offset() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=OFFSET(A2,0,0)")
@@ -7653,7 +7656,7 @@ fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason_for_offset() {
     assert_eq!(
         stats
             .fallback_reasons
-            .get(&BytecodeCompileReason::DynamicDependencies)
+            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("OFFSET")))
             .copied()
             .unwrap_or(0),
         1
@@ -7663,7 +7666,10 @@ fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason_for_offset() {
     assert_eq!(report.len(), 1);
     assert_eq!(report[0].sheet, "Sheet1");
     assert_eq!(report[0].addr, parse_a1("A1").unwrap());
-    assert_eq!(report[0].reason, BytecodeCompileReason::DynamicDependencies);
+    assert_eq!(
+        report[0].reason,
+        BytecodeCompileReason::UnsupportedFunction(Arc::from("OFFSET"))
+    );
 }
 
 #[test]
