@@ -15545,6 +15545,41 @@ mod tests {
     }
 
     #[test]
+    fn cell_contents_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=CELL("contents", A1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        // Match the CELL("contents") implementation: ensure the serialized formula has a leading '='.
+        let formula = engine.get_cell_formula("Sheet1", "A1").expect("formula stored");
+        let mut expected = formula.to_string();
+        if !expected.trim_start().starts_with('=') {
+            expected.insert(0, '=');
+        }
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text(expected)
+        );
+    }
+
+    #[test]
+    fn cell_type_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=CELL("type", A1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        // CELL("type") reports "v" when the referenced cell contains a value or a formula.
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text("v".to_string())
+        );
+    }
+
+    #[test]
     fn multithreaded_and_singlethreaded_match_for_volatiles_given_same_recalc_context() {
         fn setup(engine: &mut Engine) {
             engine
