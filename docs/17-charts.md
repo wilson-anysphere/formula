@@ -29,11 +29,13 @@ At a high level the extractor:
       (Excel 2016+ “modern” charts).
     - **Chart style** (`xl/charts/styleN.xml`) and **chart colors** (`xl/charts/colorsN.xml`) via
       relationship type or filename heuristics.
+    - **Chart user shapes** (`xl/drawings/drawingN.xml`) via the
+      `…/relationships/chartUserShapes` relationship type (callouts, overlays, etc).
     - The `.rels` XML bytes are stored alongside extracted parts so that callers can follow
       relationships without retaining the full `XlsxPackage` in memory.
 5. Returns a `formula_xlsx::drawingml::charts::ChartObject` containing:
     - `parts.chart` (the classic `c:chartSpace` part) plus optional `parts.chart_ex`, `parts.style`,
-      `parts.colors` as raw bytes (`OpcPart`).
+      `parts.colors`, and `parts.user_shapes` as raw bytes (`OpcPart`).
    - `model: Option<ChartModel>` parsed best-effort (see below).
    - `diagnostics` for missing parts / parsing failures while extracting.
 
@@ -99,7 +101,9 @@ From `parse_chart_ex()`:
   - `xl/charts/chartN.xml` (`ChartParts.chart.bytes`)
     - and its `.rels` payload (`ChartParts.chart.rels_bytes`) when present
   - `xl/charts/chartExN.xml` + `xl/charts/_rels/chartExN.xml.rels` when present
+    - (available as `ChartParts.chart_ex.bytes` / `ChartParts.chart_ex.rels_bytes`)
   - `xl/charts/styleN.xml` / `xl/charts/colorsN.xml` when present
+  - `xl/drawings/drawingN.xml` + `xl/drawings/_rels/drawingN.xml.rels` when present (chart user shapes)
 - Raw `<xdr:graphicFrame>` XML (`ChartObject.drawing_frame_xml`) is extracted exactly as a slice
   of the drawing part.
 
@@ -386,7 +390,7 @@ pub struct ChartObject {
     pub drawing_part: String,
     pub anchor: Anchor,
     pub drawing_frame_xml: String,
-    pub parts: ChartParts,           // raw OPC parts (chart/chartEx/style/colors) + `.rels` bytes
+    pub parts: ChartParts,           // raw OPC parts (chart/chartEx/style/colors/userShapes) + `.rels` bytes
     pub model: Option<ChartModel>,   // parsed best-effort (may be None)
     pub diagnostics: Vec<ChartDiagnostic>,
 }
