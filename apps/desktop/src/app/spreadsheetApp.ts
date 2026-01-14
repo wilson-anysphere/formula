@@ -6460,6 +6460,7 @@ export class SpreadsheetApp {
     this.syncScrollbars();
     if (didClamp) this.notifyScrollListeners();
     this.refresh();
+    this.syncWasmSheetOrigin();
   }
 
   private syncActiveSheetBackgroundImage(): void {
