@@ -75,7 +75,7 @@ export async function promptAndApplyAxisSizing(
   kind: AxisSizingKind,
   options: { isEditing?: () => boolean } = {},
 ): Promise<void> {
-  const isEditing = options.isEditing ?? (() => app.isEditing());
+  const isEditing = options.isEditing ?? (() => app.isEditing() || (globalThis as any).__formulaSpreadsheetIsEditing === true);
   if (isEditing()) return;
 
   // `selectedRowIndices()` / `selectedColIndices()` enumerate every row/col in every selection range into a Set.

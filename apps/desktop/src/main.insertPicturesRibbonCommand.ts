@@ -19,7 +19,9 @@ export async function handleInsertPicturesRibbonCommand(commandId: string, app: 
       //
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const appAny = app as any;
-      if (typeof appAny?.isEditing === "function" && appAny.isEditing() === true) {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+      if (primaryEditing || globalEditing === true) {
         return true;
       }
 

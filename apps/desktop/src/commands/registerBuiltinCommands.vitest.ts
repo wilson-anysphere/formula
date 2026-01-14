@@ -679,6 +679,37 @@ describe("registerBuiltinCommands: view toggles", () => {
     expect(layoutController.setSplitDirection).not.toHaveBeenCalled();
     expect(app.focus).toHaveBeenCalledTimes(1);
   });
+
+  it("view.toggleSplitView no-ops when the desktop shell reports editing via the global edit flag", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+      setSplitDirection: vi.fn(),
+    } as any;
+
+    const app = {
+      isEditing: () => false,
+      focus: vi.fn(),
+    } as any;
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+      await commandRegistry.executeCommand("view.toggleSplitView");
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(layoutController.setSplitDirection).not.toHaveBeenCalled();
+    expect(app.focus).not.toHaveBeenCalled();
+  });
 });
 
 describe("registerBuiltinCommands: core editing/view/audit commands", () => {

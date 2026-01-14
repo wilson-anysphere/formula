@@ -31,7 +31,10 @@ export function registerBuiltinCommands(params: {
   app: SpreadsheetApp;
   layoutController: LayoutController;
   /**
-   * Optional spreadsheet edit-state predicate. When omitted, falls back to `app.isEditing()`.
+   * Optional spreadsheet edit-state predicate.
+   *
+   * When omitted, falls back to `app.isEditing()` and the desktop-shell-owned
+   * `globalThis.__formulaSpreadsheetIsEditing` flag (when present).
    *
    * The desktop shell passes a custom predicate that includes split-view secondary editor state.
    */
@@ -103,7 +106,13 @@ export function registerBuiltinCommands(params: {
   };
 
   const isEditingFn =
-    isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? Boolean((app as any).isEditing()) : false));
+    isEditing ??
+    (() => {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      const appAny = app as any;
+      const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+      return primaryEditing || globalEditing === true;
+    });
   const isReadOnlyFn = (): boolean => {
     try {
       return typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;

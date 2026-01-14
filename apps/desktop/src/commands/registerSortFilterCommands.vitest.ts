@@ -44,6 +44,22 @@ describe("registerSortFilterCommands", () => {
     expect(sortSelection).not.toHaveBeenCalled();
   });
 
+  it("does not execute sort commands while editing (split-view secondary editor via global flag)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const app = {} as any;
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      registerSortFilterCommands({ commandRegistry, app });
+      await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ);
+      await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA);
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(sortSelection).not.toHaveBeenCalled();
+  });
+
   it("does not open the custom sort dialog while editing", async () => {
     const commandRegistry = new CommandRegistry();
     const app = {} as any;

@@ -180,7 +180,13 @@ export function registerDesktopCommands(params: {
   const commandCategoryData = t("commandCategory.data");
   const commandCategoryFile = t("menu.file");
   const isEditingFn =
-    isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
+    isEditing ??
+    (() => {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      const appAny = app as any;
+      const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+      return primaryEditing || globalEditing === true;
+    });
   const focusGrid = (): void => {
     try {
       (app as any).focus?.();

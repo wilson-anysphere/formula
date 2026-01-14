@@ -19,7 +19,14 @@ export function registerAxisSizingCommands(params: {
   category?: string | null;
 }): void {
   const { commandRegistry, app, isEditing = null, category = null } = params;
-  const isEditingFn = isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
+  const isEditingFn =
+    isEditing ??
+    (() => {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      const appAny = app as any;
+      const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+      return primaryEditing || globalEditing === true;
+    });
 
   commandRegistry.registerBuiltinCommand(
     AXIS_SIZING_COMMAND_IDS.rowHeight,

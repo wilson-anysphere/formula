@@ -134,4 +134,33 @@ describe("ribbon/axisSizing", () => {
     expect(view.rowHeights).toEqual({ "0": 42 });
     expect(focus).toHaveBeenCalledTimes(1);
   });
+
+  it("no-ops while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const setRowHeightSpy = vi.spyOn(doc, "setRowHeight");
+    vi.mocked(showInputBox).mockResolvedValue("42");
+
+    const focus = vi.fn();
+    const app = {
+      getSelectionRanges: () => [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      getCurrentSheetId: () => sheetId,
+      getDocument: () => doc,
+      focus,
+      isEditing: () => false,
+    };
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      await promptAndApplyAxisSizing(app, "rowHeight");
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+    expect(setRowHeightSpy).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+  });
 });

@@ -20,7 +20,10 @@ export function registerSortFilterCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
   /**
-   * Optional spreadsheet edit-state predicate. When omitted, falls back to `app.isEditing()`.
+   * Optional spreadsheet edit-state predicate.
+   *
+   * When omitted, falls back to `app.isEditing()` and the desktop-shell-owned
+   * `globalThis.__formulaSpreadsheetIsEditing` flag (when present).
    *
    * The desktop shell passes a custom predicate that includes split-view secondary editing state.
    */
@@ -32,8 +35,9 @@ export function registerSortFilterCommands(params: {
     if (typeof isEditingParam === "function") return isEditingParam();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const appAny = app as any;
-    if (typeof appAny?.isEditing === "function") return Boolean(appAny.isEditing());
-    return false;
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+    return primaryEditing || globalEditing === true;
   };
 
   const category = t("commandCategory.data");

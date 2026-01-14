@@ -39,7 +39,10 @@ export function registerHomeStylesCommands(params: {
   applyFormattingToSelection: ApplyFormattingToSelection;
   showQuickPick: <T>(items: QuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   /**
-   * Optional spreadsheet edit-state predicate. When omitted, falls back to `app.isEditing()`.
+   * Optional spreadsheet edit-state predicate.
+   *
+   * When omitted, falls back to `app.isEditing()` and the desktop-shell-owned
+   * `globalThis.__formulaSpreadsheetIsEditing` flag (when present).
    *
    * The desktop shell passes a custom predicate that includes split-view secondary editing state.
    */
@@ -49,8 +52,10 @@ export function registerHomeStylesCommands(params: {
 
   const isEditingActive = (): boolean => {
     if (typeof isEditingParam === "function") return isEditingParam();
-    if (typeof (app as any)?.isEditing === "function") return Boolean((app as any).isEditing());
-    return false;
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    const appAny = app as any;
+    const primaryEditing = typeof appAny?.isEditing === "function" && appAny.isEditing() === true;
+    return primaryEditing || globalEditing === true;
   };
 
   const focusGrid = (): void => {

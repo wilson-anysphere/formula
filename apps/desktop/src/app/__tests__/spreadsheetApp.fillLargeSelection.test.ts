@@ -109,6 +109,7 @@ describe("SpreadsheetApp fill large selections", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
     else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
