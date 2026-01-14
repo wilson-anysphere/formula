@@ -292,6 +292,79 @@ describe("engine.worker INFO() metadata integration", () => {
       dispose();
     }
   });
+
+  it('supports legacy setInfoOrigin / setInfoOriginForSheet fallbacks for INFO("origin")', async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalInfo.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=INFO("origin")', sheet: "Sheet1" },
+            { address: "A1", value: '=INFO("origin")', sheet: "Sheet2" },
+          ],
+        },
+      });
+
+      const read = async (id: number, sheet: string) => {
+        const resp = await sendRequest(port, { type: "request", id, method: "getCell", params: { address: "A1", sheet } });
+        expect(resp.ok).toBe(true);
+        return resp.result.value as unknown;
+      };
+
+      await sendRequest(port, { type: "request", id: 2, method: "recalculate", params: {} });
+      expect(await read(3, "Sheet1")).toBe("$A$1");
+      expect(await read(4, "Sheet2")).toBe("$A$1");
+
+      // Workbook-level legacy origin (A1 string) should be normalized to absolute form.
+      await sendRequest(port, { type: "request", id: 5, method: "setInfoOrigin", params: { origin: "B2" } });
+      await sendRequest(port, { type: "request", id: 6, method: "recalculate", params: {} });
+      expect(await read(7, "Sheet1")).toBe("$B$2");
+      expect(await read(8, "Sheet2")).toBe("$B$2");
+
+      // Per-sheet legacy override should take precedence.
+      await sendRequest(port, {
+        type: "request",
+        id: 9,
+        method: "setInfoOriginForSheet",
+        params: { sheet: "Sheet1", origin: "C5" },
+      });
+      await sendRequest(port, { type: "request", id: 10, method: "recalculate", params: {} });
+      expect(await read(11, "Sheet1")).toBe("$C$5");
+      expect(await read(12, "Sheet2")).toBe("$B$2");
+
+      // Non-A1 legacy origin strings should be returned verbatim for backward compatibility.
+      await sendRequest(port, { type: "request", id: 13, method: "setInfoOrigin", params: { origin: "workbook-origin" } });
+      await sendRequest(port, { type: "request", id: 14, method: "recalculate", params: {} });
+      expect(await read(15, "Sheet1")).toBe("$C$5");
+      expect(await read(16, "Sheet2")).toBe("workbook-origin");
+
+      // Clearing the per-sheet override should fall back to the workbook-level legacy string.
+      await sendRequest(port, {
+        type: "request",
+        id: 17,
+        method: "setInfoOriginForSheet",
+        params: { sheet: "Sheet1", origin: "" },
+      });
+      await sendRequest(port, { type: "request", id: 18, method: "recalculate", params: {} });
+      expect(await read(19, "Sheet1")).toBe("workbook-origin");
+      expect(await read(20, "Sheet2")).toBe("workbook-origin");
+
+      // Clearing the workbook-level origin should restore the `$A$1` default.
+      await sendRequest(port, { type: "request", id: 21, method: "setInfoOrigin", params: { origin: "" } });
+      await sendRequest(port, { type: "request", id: 22, method: "recalculate", params: {} });
+      expect(await read(23, "Sheet1")).toBe("$A$1");
+      expect(await read(24, "Sheet2")).toBe("$A$1");
+    } finally {
+      dispose();
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;

@@ -44,6 +44,18 @@ function normalizeOriginA1(origin) {
   return `$${col}$${row}`;
 }
 
+function legacyOriginForExcel(origin) {
+  const s = String(origin ?? "").trim();
+  if (s === "") return "";
+  const match = /^\$?([A-Za-z]+)\$?([1-9][0-9]*)$/.exec(s);
+  if (!match) return s;
+  const [, colRaw, rowRaw] = match;
+  const row = Number(rowRaw);
+  if (!Number.isInteger(row) || row < 1) return s;
+  const col = colRaw.toUpperCase();
+  return `$${col}$${row}`;
+}
+
 function workbookDirForExcel(dir) {
   const d = String(dir ?? "");
   if (d === "") return "";
@@ -93,6 +105,10 @@ export class WasmWorkbook {
     // Excel INFO("origin") is derived from the sheet view state (top-left visible cell).
     // Model it per-sheet and default to "$A$1".
     this.sheetOriginBySheet = new Map();
+
+    // Legacy `EngineInfo.origin` / `origin_by_sheet` plumbing (still supported by the real engine).
+    this.infoOrigin = null;
+    this.infoOriginBySheet = new Map();
   }
 
   _sheetMap(map, sheet) {
@@ -130,6 +146,20 @@ export class WasmWorkbook {
       this.sheetOriginBySheet.delete(sheetName);
     } else {
       this.sheetOriginBySheet.set(sheetName, normalized);
+    }
+  }
+
+  setInfoOrigin(origin) {
+    this.infoOrigin = normalizeInfoString(origin, { key: "origin" });
+  }
+
+  setInfoOriginForSheet(sheet, origin) {
+    const sheetName = normalizeSheet(sheet);
+    const normalized = normalizeInfoString(origin, { key: "origin" });
+    if (normalized == null) {
+      this.infoOriginBySheet.delete(sheetName);
+    } else {
+      this.infoOriginBySheet.set(sheetName, normalized);
     }
   }
 
@@ -189,7 +219,15 @@ export class WasmWorkbook {
       case "totmem":
         return typeof this.totmem === "number" && Number.isFinite(this.totmem) ? this.totmem : "#N/A";
       case "origin": {
-        return this.sheetOriginBySheet.get(sheetName) ?? "$A$1";
+        const sheetOrigin = this.sheetOriginBySheet.get(sheetName);
+        if (sheetOrigin != null) return sheetOrigin;
+
+        const legacySheetOrigin = this.infoOriginBySheet.get(sheetName);
+        if (legacySheetOrigin != null) return legacyOriginForExcel(legacySheetOrigin);
+
+        if (this.infoOrigin != null) return legacyOriginForExcel(this.infoOrigin);
+
+        return "$A$1";
       }
       default:
         return "#VALUE!";
