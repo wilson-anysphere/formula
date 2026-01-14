@@ -339,6 +339,22 @@ jobs:
             cargo build -p desktop --bin formula-desktop --features desktop --release --locked
           fi
 
+      - name: Desktop size report (binary + dist)
+        env:
+          # Optional: define these as GitHub Actions "Variables" to enable gating without
+          # changing the workflow. Leaving them unset (or empty) keeps the report informational.
+          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
+          FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB }}
+        run: python scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
+
+      - name: Upload desktop size report (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-size-report
+          path: desktop-size-report.json
+          if-no-files-found: ignore
+
       - name: Cache cargo-bloat binary
         if: always() && steps.build_desktop_binary.outcome == 'success'
         id: cargo-bloat-cache
@@ -359,30 +375,13 @@ jobs:
 
       - name: Desktop Rust binary size breakdown (cargo-bloat)
         if: always() && steps.build_desktop_binary.outcome == 'success'
-        # Informational only (for now). The report script writes markdown to both stdout and the
-        # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
+        # Informational by default. Set `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (and a
+        # `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB` budget) to turn this into a regression gate.
         continue-on-error: ${{ !(vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == '1' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'true' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'yes' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'on') }}
         env:
           FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
         run: python3 scripts/desktop_binary_size_report.py --no-build
-
-      - name: Desktop size report (binary + dist)
-        env:
-          # Optional: define these as GitHub Actions "Variables" to enable gating without
-          # changing the workflow. Leaving them unset (or empty) keeps the report informational.
-          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
-          FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB }}
-        run: python3 scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
-
-      - name: Upload desktop size report (JSON)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: desktop-size-report
-          path: desktop-size-report.json
-          if-no-files-found: ignore
-
   desktop-tauri-check:
     name: Desktop (Tauri) Rust compile check
     needs: conflict-marker-guard
