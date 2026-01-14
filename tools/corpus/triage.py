@@ -1213,7 +1213,8 @@ def _build_rust_helper() -> Path:
         # In CI, always treat build failures as fatal to avoid masking real regressions.
         if exe.exists() and not is_ci:
             print(
-                f"warning: failed to build Rust triage helper (exit {e.returncode}); using existing binary: {exe}",
+                f"warning: failed to build Rust triage helper (exit {e.returncode}); using existing binary: {exe}\n"
+                "note: this is a local-only fallback; CI treats Rust build failures as fatal",
                 file=sys.stderr,
             )
             return exe
