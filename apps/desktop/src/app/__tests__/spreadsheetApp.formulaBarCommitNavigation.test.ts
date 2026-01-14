@@ -179,6 +179,41 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     formulaBar.remove();
   });
 
+  it("preserves multi-cell selection ranges when committing via Tab from the formula bar", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    // Select A1:B1 (single range, multiple cells).
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 } }, { scrollIntoView: false, focus: false });
+    expect(app.getSelectionRanges()).toEqual([{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]);
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    // Commit with Tab should move the active cell within the selection, without collapsing the selection range.
+    input!.focus();
+    input!.value = "1";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 1 });
+    expect(app.getSelectionRanges()).toEqual([{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("commits and navigates on Tab/Shift+Tab/Enter even when the grid has focus (range selection mode)", () => {
     const root = createRoot();
     const status = {

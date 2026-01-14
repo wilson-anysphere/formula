@@ -58,6 +58,7 @@ import { reconcileClipboardCopyContextForPaste } from "./clipboardPasteContext";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { computeCurrentRegionRange } from "../selection/currentRegion";
 import { navigateSelectionByKey } from "../selection/navigation";
+import { cellInRange } from "../selection/range";
 import { SelectionRenderer } from "../selection/renderer";
 import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
 import { AuditingOverlayRenderer } from "../grid/auditing-overlays/AuditingOverlayRenderer";
@@ -17664,10 +17665,30 @@ export class SpreadsheetApp {
     // Restore selection to the original edit cell (sheet + cell), even if the user navigated
     // to another sheet while picking ranges. Navigation after commit (Enter/Tab) should be
     // relative to the original edit cell, not whatever cell/range was active during range-picking.
-    this.activateCell(
-      { sheetId: target.sheetId, row: target.cell.row, col: target.cell.col },
-      { scrollIntoView: false, focus: false }
-    );
+    //
+    // When possible, preserve the existing selection ranges so Tab/Enter navigation cycles within
+    // a multi-cell selection (Excel-like).
+    if (target.sheetId !== this.sheetId) {
+      this.activateCell(
+        { sheetId: target.sheetId, row: target.cell.row, col: target.cell.col },
+        { scrollIntoView: false, focus: false }
+      );
+    } else {
+      const primaryRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0] ?? null;
+      if (primaryRange && cellInRange(target.cell, primaryRange)) {
+        this.selection = buildSelection(
+          {
+            ranges: this.selection.ranges,
+            active: target.cell,
+            anchor: this.selection.anchor,
+            activeRangeIndex: this.selection.activeRangeIndex,
+          },
+          this.limits
+        );
+      } else {
+        this.selection = setActiveCell(this.selection, target.cell, this.limits);
+      }
+    }
 
     if (commit.reason === "enter" || commit.reason === "tab") {
       const next = navigateSelectionByKey(
@@ -17706,7 +17727,29 @@ export class SpreadsheetApp {
 
     if (target) {
       // Restore the original edit location (sheet + cell).
-      this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
+      if (target.sheetId !== this.sheetId) {
+        this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
+      } else {
+        const primaryRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0] ?? null;
+        if (primaryRange && cellInRange(target.cell, primaryRange)) {
+          this.selection = buildSelection(
+            {
+              ranges: this.selection.ranges,
+              active: target.cell,
+              anchor: this.selection.anchor,
+              activeRangeIndex: this.selection.activeRangeIndex,
+            },
+            this.limits
+          );
+          this.ensureActiveCellVisible();
+          this.scrollCellIntoView(this.selection.active);
+          if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+          this.refresh();
+          this.focus();
+        } else {
+          this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
+        }
+      }
       this.renderReferencePreview();
       return;
     }
