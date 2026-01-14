@@ -198,6 +198,7 @@ Implementation:
   - Set max size to `0` to disable caching entirely.
   - Call `clearEncryptionKeyCache()` (exported by `@formula/collab-encryption`) during teardown/tests to release cached keys.
 - Session + binder both treat **any** `enc` presence as “encrypted” (even if malformed) to avoid accidentally falling back to plaintext duplicates under legacy cell-key encodings.
+- Binder write guard: when a cell already has an `enc` payload, `bindYjsToDocumentController` requires that the key resolver returns a **matching `keyId`** (and treats unknown payload schemas as non-writable). This prevents older clients from clobbering encrypted content they cannot decrypt (including future encryption versions) just because they have some unrelated key material.
 - Versioning diffs (`packages/versioning/src/yjs/*` + `semanticDiff`) treat `enc` as meaningful cell content for modified/moved/format-only detection without requiring decryption, and surface only minimal metadata (e.g. key id) in diff records.
 
 Usage:
