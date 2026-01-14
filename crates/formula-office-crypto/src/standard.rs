@@ -314,7 +314,6 @@ pub(crate) fn verify_password_standard(
                     if key_len > hash_alg.digest_len() {
                         return Err(OfficeCryptoError::InvalidPassword);
                     }
-
                     let deriver_rc4 = StandardKeyDeriver::new(
                         hash_alg,
                         header.key_bits,
@@ -1279,7 +1278,10 @@ pub(crate) mod tests {
             .expect("correct password should verify");
         let err = verify_password_standard(&header, &verifier, wrong_password)
             .expect_err("wrong password");
-        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+        assert!(
+            matches!(err, OfficeCryptoError::InvalidPassword),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
