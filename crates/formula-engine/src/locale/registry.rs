@@ -466,6 +466,18 @@ static ALL_LOCALES: [&FormulaLocale; 8] = [
     &ES_ES,
 ];
 
+/// Enumerate every [`FormulaLocale`] that the engine ships with.
+///
+/// This iterator is the source of truth for the set of *canonical* locale ids returned by
+/// [`get_locale`] (after locale id normalization).
+///
+/// Notes:
+/// - The list includes "minimal" DBCS locales (`ja-JP`, `zh-CN`, `zh-TW`, `ko-KR`). These currently
+///   reuse `en-US` punctuation/function names, but are still distinct locale registrations so higher
+///   layers can enable workbook semantics that depend on the locale id (e.g. codepage-driven DBCS
+///   behavior).
+/// - Callers should not rely on the iteration order. Sort by [`FormulaLocale::id`] when producing
+///   user-visible output.
 pub fn iter_locales() -> impl Iterator<Item = &'static FormulaLocale> {
     ALL_LOCALES.iter().copied()
 }

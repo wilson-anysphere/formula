@@ -14,3 +14,16 @@ fn dbcs_locale_ids_are_registered() {
     }
 }
 
+#[test]
+fn iter_locales_includes_all_expected_locale_ids() {
+    let supported: Vec<&'static str> = locale::iter_locales().map(|locale| locale.id).collect();
+
+    for id in [
+        "en-US", "de-DE", "fr-FR", "es-ES", "ja-JP", "zh-CN", "zh-TW", "ko-KR",
+    ] {
+        assert!(
+            supported.contains(&id),
+            "iter_locales() missing locale id: {id}"
+        );
+    }
+}
