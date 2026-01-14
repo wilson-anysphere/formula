@@ -926,6 +926,67 @@ fn decode_rgce_impl(
 
                 stack.push(ExprFragment::new(text));
             }
+            // PtgName: [nameId: u32][reserved: u16]
+            0x23 | 0x43 | 0x63 => {
+                if input.len() < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+
+                let name_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                // Skip reserved u16.
+                input = &input[6..];
+
+                // Best-effort: we don't have workbook name context in this crate, so emit a stable
+                // placeholder that is parseable as an Excel identifier.
+                let is_value_class = (ptg & 0x60) == 0x40;
+                let mut text = String::new();
+                let mut precedence = 100;
+                if is_value_class {
+                    // Value-class names can require legacy implicit intersection (e.g. when the
+                    // underlying defined name refers to a multi-cell range). Without workbook
+                    // context we can't know, so conservatively emit `@` to preserve scalar
+                    // semantics.
+                    text.push('@');
+                    precedence = 70;
+                }
+                text.push_str(&format!("Name_{name_id}"));
+
+                stack.push(ExprFragment {
+                    text,
+                    precedence,
+                    contains_union: false,
+                    is_missing: false,
+                });
+            }
+            // PtgNameX: [ixti: u16][nameIndex: u16]
+            0x39 | 0x59 | 0x79 => {
+                if input.len() < 4 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let name_index = u16::from_le_bytes([input[2], input[3]]);
+                input = &input[4..];
+
+                // Best-effort: emit a stable placeholder identifier. Avoid characters like `:` and
+                // `{}` which would be treated as operators / invalid names by Excel formula
+                // parsers.
+                let is_value_class = (ptg & 0x60) == 0x40;
+                let mut text = String::new();
+                let mut precedence = 100;
+                if is_value_class {
+                    text.push('@');
+                    precedence = 70;
+                }
+                text.push_str(&format!("ExternName_IXTI{ixti}_N{name_index}"));
+
+                stack.push(ExprFragment {
+                    text,
+                    precedence,
+                    contains_union: false,
+                    is_missing: false,
+                });
+            }
             // PtgRef
             0x24 | 0x44 | 0x64 => {
                 if rgce.len().saturating_sub(i) < 6 {
