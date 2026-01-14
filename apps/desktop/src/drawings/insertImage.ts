@@ -17,7 +17,7 @@ export async function insertImageFromFile(
     images: ImageStore;
   },
 ): Promise<{ objects: DrawingObject[]; image: ImageEntry }> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const bytes = await readFileBytes(file);
   const mimeType = file.type || guessMimeType(file.name);
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType };
   opts.images.set(image);
@@ -108,6 +108,46 @@ export function decodeBase64ToBytes(base64: string, opts: { maxBytes?: number } 
   }
 
   return null;
+}
+
+async function readFileBytes(file: File): Promise<Uint8Array> {
+  const anyFile = file as any;
+  if (typeof anyFile?.arrayBuffer === "function") {
+    const buffer: ArrayBuffer = await anyFile.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  // JSDOM's `File` implementation does not always provide `arrayBuffer()`. Prefer
+  // `FileReader` when available since it exists in both browsers and jsdom.
+  const FileReaderCtor = (globalThis as any)?.FileReader as typeof FileReader | undefined;
+  if (typeof FileReaderCtor === "function") {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReaderCtor();
+      reader.onload = () => {
+        const result = reader.result;
+        if (result instanceof ArrayBuffer) {
+          resolve(new Uint8Array(result));
+          return;
+        }
+        reject(new Error("FileReader did not return an ArrayBuffer"));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read file bytes"));
+      try {
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // Final fallback: use Fetch's Body mixin if available.
+  const ResponseCtor = (globalThis as any)?.Response as typeof Response | undefined;
+  if (typeof ResponseCtor === "function") {
+    const buffer = await new ResponseCtor(file as any).arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  throw new Error("Unable to read file bytes: File.arrayBuffer/FileReader/Response unavailable");
 }
 
 function guessMimeType(name: string): string {
