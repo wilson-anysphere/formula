@@ -1,6 +1,6 @@
 mod common;
 
-use common::build_model;
+use common::{build_model, build_model_bidirectional};
 use formula_dax::{DaxEngine, FilterContext, RowContext};
 use pretty_assertions::assert_eq;
 
@@ -54,4 +54,37 @@ fn crossfilter_none_disables_relationship_propagation_for_measure() {
         )
         .unwrap();
     assert_eq!(with_crossfilter_none, 4.into());
+}
+
+#[test]
+fn crossfilter_oneway_can_override_bidirectional_relationship() {
+    let model = build_model_bidirectional();
+    let filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
+
+    let engine = DaxEngine::new();
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(Customers)",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    // Override the relationship direction to the default one-way (dimension -> fact) and confirm
+    // the fact-side filter no longer shrinks the Customers table.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], ONEWAY))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
 }
