@@ -8,6 +8,7 @@ import type { GridPresence } from "../presence/types.ts";
 import type { GridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_FONT_FAMILY } from "./defaultFontFamilies.ts";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "./pngDimensions.ts";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager.ts";
 import { alignScrollToDevicePixels as alignScrollToDevicePixelsUtil } from "../virtualization/alignScrollToDevicePixels.ts";
@@ -230,6 +231,42 @@ function getCanvasImageSourceDimensions(source: CanvasImageSource): { width: num
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
   if (width <= 0 || height <= 0) return null;
   return { width, height };
+}
+
+const MIN_PNG_BYTES = 33;
+
+function assertPngNotTooLarge(dims: { width: number; height: number }): void {
+  const pixels = dims.width * dims.height;
+  if (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || pixels > MAX_PNG_PIXELS) {
+    throw new Error(`Image dimensions too large (${dims.width}x${dims.height})`);
+  }
+}
+
+function guardPngBytes(bytes: Uint8Array): void {
+  const dims = readPngDimensions(bytes);
+  if (!dims) return;
+  assertPngNotTooLarge(dims);
+  if (bytes.byteLength < MIN_PNG_BYTES) {
+    throw new Error("Invalid PNG: truncated IHDR");
+  }
+}
+
+async function guardPngBlob(blob: Blob): Promise<void> {
+  // Fast path: only read enough bytes to parse IHDR width/height.
+  const slice = blob.slice(0, 24) as any;
+  if (typeof slice?.arrayBuffer !== "function") return;
+  let header: ArrayBuffer;
+  try {
+    header = await slice.arrayBuffer();
+  } catch {
+    return;
+  }
+  const dims = readPngDimensions(new Uint8Array(header));
+  if (!dims) return;
+  assertPngNotTooLarge(dims);
+  if (blob.size < MIN_PNG_BYTES) {
+    throw new Error("Invalid PNG: truncated IHDR");
+  }
 }
 
 function padRect(rect: Rect, padding: number): Rect {
@@ -1256,6 +1293,7 @@ export class CanvasGridRenderer {
     if (source instanceof Blob) {
       if (typeof create !== "function") return null;
       try {
+        await guardPngBlob(source);
         return await create(source);
       } catch (err) {
         // Chrome can decode some malformed PNGs via `<img>` but rejects
@@ -1273,11 +1311,13 @@ export class CanvasGridRenderer {
 
     if (source instanceof ArrayBuffer) {
       if (typeof create !== "function") return null;
+      guardPngBytes(new Uint8Array(source));
       return await create(new Blob([source]));
     }
 
     if (source instanceof Uint8Array) {
       if (typeof create !== "function") return null;
+      guardPngBytes(source);
       // Copy into a standalone buffer to avoid retaining oversized backing stores.
       const buffer = new ArrayBuffer(source.byteLength);
       new Uint8Array(buffer).set(source);

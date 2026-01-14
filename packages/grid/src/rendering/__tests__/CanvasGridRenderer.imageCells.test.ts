@@ -110,8 +110,32 @@ function createRecordingContext(canvas: HTMLCanvasElement): { ctx: CanvasRenderi
   return { ctx: ctx as unknown as CanvasRenderingContext2D, rec };
 }
 
+function createPngHeaderBytes(width: number, height: number, totalBytes = 33): Uint8Array {
+  const bytes = new Uint8Array(totalBytes);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  // 13-byte IHDR chunk length.
+  bytes[8] = 0x00;
+  bytes[9] = 0x00;
+  bytes[10] = 0x00;
+  bytes[11] = 0x0d;
+  // IHDR chunk type.
+  bytes[12] = 0x49;
+  bytes[13] = 0x48;
+  bytes[14] = 0x44;
+  bytes[15] = 0x52;
+
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return bytes;
+}
+
 async function flushMicrotasks(): Promise<void> {
-  // Two turns is usually enough to flush `async` + `finally` chains.
+  // Several turns helps flush async chains that include multiple `await` boundaries
+  // (resolver -> header sniff -> createImageBitmap -> finally handlers).
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
 }
@@ -252,6 +276,74 @@ describe("CanvasGridRenderer image cells", () => {
     expect(imageResolver).toHaveBeenCalledTimes(1);
     expect(content.rec.drawImages.length).toBe(0);
     expect(content.rec.fillTexts.some((args) => args[0] === "Missing image")).toBe(true);
+  });
+
+  it("rejects PNG images with huge IHDR dimensions without invoking createImageBitmap", async () => {
+    // Avoid synchronous RAF side effects; this test controls when renders occur.
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "png_bomb", altText: "Bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createPngHeaderBytes(10_001, 1);
+    // Return raw bytes so the renderer's PNG guard can run in jsdom environments (jsdom's Blob
+    // implementation does not support reading bytes back via `arrayBuffer`).
+    const imageResolver = vi.fn(async () => bytes);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("png_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "Bomb")).toBe(true);
   });
 
   it("falls back to decoding via <img> when createImageBitmap(blob) throws InvalidStateError", async () => {
