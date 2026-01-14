@@ -35,65 +35,63 @@ function connectDocs(docA, docB) {
 }
 
 test("FormulaConflictMonitor ignores invalid cell keys instead of throwing", () => {
-  // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
-  const docA = new Y.Doc();
-  docA.clientID = 1;
-  const docB = new Y.Doc();
-  docB.clientID = 2;
+  for (const cellKey of ["bad-key", "Sheet1:x:y"]) {
+    // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
+    const docA = new Y.Doc();
+    docA.clientID = 1;
+    const docB = new Y.Doc();
+    docB.clientID = 2;
 
-  const localOrigin = { type: "local-a" };
+    const localOrigin = { type: "local-a" };
 
-  /** @type {Array<any>} */
-  const conflicts = [];
+    /** @type {Array<any>} */
+    const conflicts = [];
 
-  const monitor = new FormulaConflictMonitor({
-    doc: docA,
-    localUserId: "user-a",
-    origin: localOrigin,
-    localOrigins: new Set([localOrigin]),
-    onConflict: (c) => conflicts.push(c),
-  });
+    const monitor = new FormulaConflictMonitor({
+      doc: docA,
+      localUserId: "user-a",
+      origin: localOrigin,
+      localOrigins: new Set([localOrigin]),
+      onConflict: (c) => conflicts.push(c),
+    });
 
-  let disconnect = connectDocs(docA, docB);
+    let disconnect = connectDocs(docA, docB);
 
-  const cellKey = "bad-key";
+    // Ensure both docs have a shared base cell map so concurrent edits race on the
+    // formula key (not on the `cells[cellKey] = new Y.Map()` insertion).
+    docA.transact(() => {
+      docA.getMap("cells").set(cellKey, new Y.Map());
+    }, localOrigin);
+    assert.ok(docB.getMap("cells").get(cellKey), "expected base cell map to sync to docB");
 
-  // Ensure both docs have a shared base cell map so concurrent edits race on the
-  // formula key (not on the `cells[cellKey] = new Y.Map()` insertion).
-  docA.transact(() => {
-    docA.getMap("cells").set(cellKey, new Y.Map());
-  }, localOrigin);
-  assert.ok(docB.getMap("cells").get(cellKey), "expected base cell map to sync to docB");
+    // Simulate offline concurrent formula edits.
+    disconnect();
 
-  // Simulate offline concurrent formula edits.
-  disconnect();
+    monitor.setLocalFormula(cellKey, "=1");
 
-  monitor.setLocalFormula(cellKey, "=1");
+    docB.transact(() => {
+      const cells = docB.getMap("cells");
+      let cell = /** @type {Y.Map<any>} */ (cells.get(cellKey));
+      if (!cell) {
+        cell = new Y.Map();
+        cells.set(cellKey, cell);
+      }
+      cell.set("formula", "=2");
+      cell.set("value", null);
+      cell.set("modified", Date.now());
+    });
 
-  docB.transact(() => {
-    const cells = docB.getMap("cells");
-    let cell = /** @type {Y.Map<any>} */ (cells.get(cellKey));
-    if (!cell) {
-      cell = new Y.Map();
-      cells.set(cellKey, cell);
-    }
-    cell.set("formula", "=2");
-    cell.set("value", null);
-    cell.set("modified", Date.now());
-  });
+    // Reconnect and sync state. Invalid keys should not crash the monitor.
+    assert.doesNotThrow(() => {
+      disconnect = connectDocs(docA, docB);
+    });
 
-  // Reconnect and sync state. Previously, invalid keys could throw when the
-  // conflict monitor attempted to parse the cell key for the emitted conflict.
-  assert.doesNotThrow(() => {
-    disconnect = connectDocs(docA, docB);
-  });
+    // Invalid keys are ignored for conflict emission.
+    assert.equal(conflicts.length, 0);
 
-  // Invalid keys are ignored for conflict emission.
-  assert.equal(conflicts.length, 0);
-
-  monitor.dispose();
-  disconnect();
-  docA.destroy();
-  docB.destroy();
+    monitor.dispose();
+    disconnect();
+    docA.destroy();
+    docB.destroy();
+  }
 });
-

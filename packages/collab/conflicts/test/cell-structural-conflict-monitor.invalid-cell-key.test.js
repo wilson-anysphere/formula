@@ -24,6 +24,13 @@ test("CellStructuralConflictMonitor ignores invalid cell keys instead of throwin
       local: {},
       remote: {},
     });
+    monitor._emitConflict({
+      type: "cell",
+      reason: "content",
+      sourceCellKey: "Sheet1:x:y",
+      local: {},
+      remote: {},
+    });
   });
 
   assert.equal(monitor.listConflicts().length, 0);
@@ -31,4 +38,3 @@ test("CellStructuralConflictMonitor ignores invalid cell keys instead of throwin
   monitor.dispose();
   doc.destroy();
 });
-

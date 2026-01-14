@@ -7,7 +7,14 @@ import { tryEvaluateFormula } from "./formula-eval.js";
 
 function safeCellRefFromKey(cellKey) {
   try {
-    return cellRefFromKey(cellKey);
+    const ref = cellRefFromKey(cellKey);
+    const sheetId = ref?.sheetId;
+    const row = ref?.row;
+    const col = ref?.col;
+    if (typeof sheetId !== "string" || sheetId === "") return null;
+    if (!Number.isInteger(row) || row < 0) return null;
+    if (!Number.isInteger(col) || col < 0) return null;
+    return ref;
   } catch {
     return null;
   }

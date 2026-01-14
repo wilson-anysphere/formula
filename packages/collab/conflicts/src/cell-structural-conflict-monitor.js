@@ -900,13 +900,20 @@ export class CellStructuralConflictMonitor {
       // by corrupted docs or malicious/buggy clients and should not crash observers.
       return;
     }
-    const addr = `${numberToCol(ref.col)}${ref.row + 1}`;
+    const sheetId = String(ref?.sheetId ?? "");
+    const row = Number(ref?.row);
+    const col = Number(ref?.col);
+    if (!sheetId) return;
+    if (!Number.isInteger(row) || row < 0) return;
+    if (!Number.isInteger(col) || col < 0) return;
 
+    const addr = `${numberToCol(col)}${row + 1}`;
+ 
     const conflict = /** @type {CellStructuralConflict} */ ({
       id: crypto.randomUUID(),
       type: input.type,
       reason: input.reason,
-      sheetId: ref.sheetId,
+      sheetId,
       cell: addr,
       cellKey: input.sourceCellKey,
       local: simplifyOpForConflict(input.local),
