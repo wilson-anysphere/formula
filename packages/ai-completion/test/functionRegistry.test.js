@@ -251,11 +251,17 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("ZTEST")?.args?.[2]?.optional, "Expected ZTEST sigma to be optional");
 
   // Additional common stats functions
+  assert.equal(registry.getArgType("LARGE", 1), "number", "Expected LARGE k to be numeric");
+  assert.equal(registry.getArgType("SMALL", 1), "number", "Expected SMALL k to be numeric");
+  assert.equal(registry.getArgType("PERCENTILE.INC", 1), "number", "Expected PERCENTILE.INC k to be numeric");
   assert.ok(registry.isRangeArg("PERCENTILE.EXC", 0), "Expected PERCENTILE.EXC array to be a range");
+  assert.equal(registry.getArgType("PERCENTILE.EXC", 1), "number", "Expected PERCENTILE.EXC k to be numeric");
+  assert.equal(registry.getArgType("PERCENTILE", 1), "number", "Expected PERCENTILE k to be numeric");
   assert.ok(registry.isRangeArg("QUARTILE.EXC", 0), "Expected QUARTILE.EXC array to be a range");
   assert.ok(registry.isRangeArg("RANK.AVG", 1), "Expected RANK.AVG ref to be a range");
   assert.ok(registry.isRangeArg("MODE.SNGL", 0), "Expected MODE.SNGL arg1 to be a range");
   assert.ok(registry.isRangeArg("TRIMMEAN", 0), "Expected TRIMMEAN array to be a range");
+  assert.equal(registry.getArgType("TRIMMEAN", 1), "value", "Expected TRIMMEAN percent to be value-like");
 
   // Dynamic array helpers
   assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
@@ -349,6 +355,9 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("MIRR", 0), "Expected MIRR values to be a range");
   assert.ok(registry.isRangeArg("PROB", 0), "Expected PROB x_range to be a range");
   assert.ok(registry.isRangeArg("PROB", 1), "Expected PROB prob_range to be a range");
+  assert.equal(registry.getArgType("PROB", 2), "value", "Expected PROB lower_limit to be value-like");
+  assert.equal(registry.getArgType("PROB", 3), "value", "Expected PROB upper_limit to be value-like");
+  assert.ok(registry.getFunction("PROB")?.args?.[3]?.optional, "Expected PROB upper_limit to be optional");
   assert.ok(registry.isRangeArg("SERIESSUM", 3), "Expected SERIESSUM coefficients to be a range");
 
   // Common distribution functions: keep cumulative flags boolean while treating scalar inputs as value-like.
@@ -405,7 +414,9 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.isRangeArg("WORKDAY", 0), false, "Expected WORKDAY start_date not to be a range");
   assert.equal(registry.getArgType("WORKDAY", 0), "value", "Expected WORKDAY start_date to be value-like");
   assert.equal(registry.isRangeArg("WORKDAY", 1), false, "Expected WORKDAY days not to be a range");
+  assert.equal(registry.getArgType("WORKDAY", 1), "value", "Expected WORKDAY days to be value-like");
   assert.ok(registry.isRangeArg("WORKDAY", 2), "Expected WORKDAY holidays to be a range");
+  assert.equal(registry.getArgType("WORKDAY.INTL", 1), "value", "Expected WORKDAY.INTL days to be value-like");
   assert.ok(registry.isRangeArg("WORKDAY.INTL", 3), "Expected WORKDAY.INTL holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS", 2), "Expected NETWORKDAYS holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS.INTL", 3), "Expected NETWORKDAYS.INTL holidays to be a range");
@@ -433,6 +444,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getFunction("DATE")?.args?.[0]?.name, "year", "Expected DATE arg1 to be year");
   assert.equal(registry.getArgType("DATE", 0), "value", "Expected DATE year to be value-like");
   assert.equal(registry.getFunction("EDATE")?.args?.[0]?.name, "start_date", "Expected EDATE arg1 to be start_date");
+  assert.equal(registry.getArgType("EDATE", 1), "value", "Expected EDATE months to be value-like");
+  assert.equal(registry.getArgType("EOMONTH", 1), "value", "Expected EOMONTH months to be value-like");
   assert.equal(registry.getArgType("YEAR", 0), "value", "Expected YEAR serial_number to be value-like");
   assert.equal(registry.getArgType("WEEKDAY", 0), "value", "Expected WEEKDAY serial_number to be value-like");
   assert.equal(registry.getArgType("ISOWEEKNUM", 0), "value", "Expected ISOWEEKNUM serial_number to be value-like");

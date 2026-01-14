@@ -4188,6 +4188,24 @@ test("HYPGEOM.DIST scalar args suggest a left-cell reference (value-like)", asyn
   );
 });
 
+test("WORKDAY days suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=WORKDAY(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=WORKDAY(A1, B1"),
+    `Expected WORKDAY to suggest a left-cell reference for days, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
   const engine = new TabCompletionEngine();
 

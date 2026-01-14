@@ -714,7 +714,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns a date that is a specified number of working days before or after a start date.",
     args: [
       { name: "start_date", type: "value" },
-      { name: "days", type: "number" },
+      { name: "days", type: "value" },
       { name: "holidays", type: "range", optional: true },
     ],
   },
@@ -762,7 +762,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the serial number of the date that is the indicated number of months before or after a specified date.",
     args: [
       { name: "start_date", type: "value" },
-      { name: "months", type: "number" },
+      { name: "months", type: "value" },
     ],
   },
   {
@@ -770,7 +770,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the serial number for the last day of the month that is the indicated number of months before or after a specified date.",
     args: [
       { name: "start_date", type: "value" },
-      { name: "months", type: "number" },
+      { name: "months", type: "value" },
     ],
   },
   {
@@ -878,7 +878,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns a date that is a specified number of working days before or after a start date with custom weekends.",
     args: [
       { name: "start_date", type: "value" },
-      { name: "days", type: "number" },
+      { name: "days", type: "value" },
       { name: "weekend", type: "number", optional: true },
       { name: "holidays", type: "range", optional: true },
     ],
@@ -1434,7 +1434,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the mean of the interior portion of a data set.",
     args: [
       { name: "array", type: "range" },
-      { name: "percent", type: "number" },
+      { name: "percent", type: "value" },
     ],
   },
   {
@@ -2057,8 +2057,8 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "x_range", type: "range" },
       { name: "prob_range", type: "range" },
-      { name: "lower_limit", type: "number" },
-      { name: "upper_limit", type: "number", optional: true },
+      { name: "lower_limit", type: "value" },
+      { name: "upper_limit", type: "value", optional: true },
     ],
   },
   {
