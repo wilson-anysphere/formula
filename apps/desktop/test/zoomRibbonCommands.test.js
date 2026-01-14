@@ -59,6 +59,11 @@ test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry
   assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.openPicker["']/);
   // Alias used by the ribbon dropdown trigger id.
   assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.zoom["']/);
+  // The alias should be registered but hidden from the command palette to avoid duplicate "Zoom" entries.
+  assert.match(
+    commands,
+    /\bregisterBuiltinCommand\(\s*[\s\S]*?["']view\.zoom\.zoom["'][\s\S]*?\bwhen:\s*["']false["']/m,
+  );
   // Zoom preset commands are registered dynamically via a helper.
   assert.match(commands, /\bview\.zoom\.zoom\$\{value\}/);
   assert.match(commands, /\bfor\s*\(const\s+percent\s+of\s+\[25,\s*50,\s*75,\s*100,\s*150,\s*200,\s*400\]\)/);

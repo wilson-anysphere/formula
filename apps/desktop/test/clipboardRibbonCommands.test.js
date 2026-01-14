@@ -58,6 +58,9 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
     "clipboard.cut",
     "clipboard.copy",
     "clipboard.paste",
+    // Ribbon schema still includes an "All" item under Paste Special; it should be registered
+    // for schema coverage but hidden from the command palette to avoid duplicate "Paste" entries.
+    "clipboard.pasteSpecial.all",
     "clipboard.pasteSpecial",
     "clipboard.pasteSpecial.values",
     "clipboard.pasteSpecial.formulas",
@@ -76,6 +79,12 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
       `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
     );
   }
+
+  assert.match(
+    builtins,
+    /\bregisterBuiltinCommand\(\s*[\s\S]*?["']clipboard\.pasteSpecial\.all["'][\s\S]*?\bwhen:\s*["']false["']/m,
+    "Expected clipboard.pasteSpecial.all to be hidden via when: \"false\" (avoid duplicate command palette entries)",
+  );
 
   // The ribbon should be mounted through the CommandRegistry bridge so registered commands
   // are executed via commandRegistry.executeCommand(...).
