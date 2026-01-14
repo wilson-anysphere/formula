@@ -2266,12 +2266,15 @@ function looksLikeR1C1CellReference(name) {
 function suggestStructuredRefs(prefix, tables) {
   /** @type {{text:string, confidence:number}[]} */
   const out = [];
-  const trimmed = (prefix ?? "").trim();
+  // Preserve the exact typed prefix to ensure suggestions are representable as
+  // pure insertions at the caret (no deletions). In particular, do *not* trim:
+  // users can legitimately type whitespace inside column names (e.g. `First Name`).
+  const typed = (prefix ?? "").toString();
 
   // If the user typed something like Table1[Col, use that as a strong hint.
-  const bracketIdx = trimmed.indexOf("[");
-  const tablePrefix = bracketIdx >= 0 ? trimmed.slice(0, bracketIdx) : trimmed;
-  const colPrefix = bracketIdx >= 0 ? trimmed.slice(bracketIdx + 1).replaceAll("]", "") : "";
+  const bracketIdx = typed.indexOf("[");
+  const tablePrefix = bracketIdx >= 0 ? typed.slice(0, bracketIdx) : typed;
+  const colPrefix = bracketIdx >= 0 ? typed.slice(bracketIdx + 1).replaceAll("]", "") : "";
 
   for (const table of tables) {
     const tableName = (table?.name ?? "").toString();
@@ -2285,16 +2288,16 @@ function suggestStructuredRefs(prefix, tables) {
       if (!colName) continue;
       if (colPrefix && !startsWithIgnoreCase(colName, colPrefix)) continue;
       const canonical = `${tableName}[${colName}]`;
-      if (trimmed && !startsWithIgnoreCase(canonical, trimmed)) continue;
-      const text = completeIdentifier(canonical, trimmed);
+      if (typed && !startsWithIgnoreCase(canonical, typed)) continue;
+      const text = completeIdentifier(canonical, typed);
       out.push({
         text,
         confidence: clamp01(0.6 + ratioBoost(colPrefix || tablePrefix, colName || tableName) * 0.25),
       });
       // Lower confidence alternative that includes #All.
       const allCanonical = `${tableName}[[#All],[${colName}]]`;
-      if (trimmed && !startsWithIgnoreCase(allCanonical, trimmed)) continue;
-      out.push({ text: completeIdentifier(allCanonical, trimmed), confidence: 0.35 });
+      if (typed && !startsWithIgnoreCase(allCanonical, typed)) continue;
+      out.push({ text: completeIdentifier(allCanonical, typed), confidence: 0.35 });
     }
   }
 

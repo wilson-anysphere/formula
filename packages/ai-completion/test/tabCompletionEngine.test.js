@@ -4048,6 +4048,49 @@ test("Structured references are not suggested when the user types '[' before the
   assert.equal(suggestions.length, 0);
 });
 
+test("Structured references do not delete trailing whitespace (pure insertion)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+    },
+  });
+
+  const currentInput = "=SUM(Tab ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
+test("Structured references support column names with spaces (pure insertion)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["First Name"] }],
+    },
+  });
+
+  const currentInput = "=SUM(Table1[First ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Table1[First Name])"),
+    `Expected a structured ref completion for a spaced column name, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-name prefixes are suggested as SheetName! inside range args (=SUM(she → sheet2!) without auto-closing parens", async () => {
   const engine = new TabCompletionEngine({
     schemaProvider: {
