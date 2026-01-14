@@ -9674,6 +9674,37 @@ export class SpreadsheetApp {
     this.selectDrawing(result.duplicatedId);
   }
 
+  private duplicateSelectedChart(): void {
+    const chartId = this.selectedChartId;
+    if (!chartId) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const chart = this.getChartRecordById(chartId);
+    if (!chart) return;
+
+    // Match drawing duplication semantics: offset the duplicate by ~10px in *document* space,
+    // independent of the current zoom level.
+    const viewport = this.getDrawingInteractionViewportScratch();
+    const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+    const offsetDocPx = 10;
+    const dxPx = offsetDocPx * zoom;
+    const dyPx = offsetDocPx * zoom;
+
+    const currentAnchor = chartRecordToDrawingObject(chart).anchor;
+    const nextAnchor = shiftAnchor(currentAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+    const duplicated = this.chartStore.duplicateChart(chartId, { anchor: drawingAnchorToChartAnchor(nextAnchor) });
+    if (!duplicated) return;
+
+    this.setSelectedChartId(duplicated.id);
+  }
+
   bringSelectedDrawingForward(): void {
     this.arrangeSelectedDrawing("forward");
   }
@@ -15824,6 +15855,7 @@ export class SpreadsheetApp {
     // Never hijack keys while editing text (cell editor, formula bar, inline edit).
     if (this.isEditing()) return false;
 
+    const primary = e.ctrlKey || e.metaKey;
     const key = e.key;
     if (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown") {
       e.preventDefault();
@@ -15844,6 +15876,60 @@ export class SpreadsheetApp {
       // `shiftAnchor` expects deltas in screen pixels and converts to sheet units internally
       // based on the provided `zoom` value.
       this.nudgeSelectedChart(dxPx, dyPx);
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && !e.shiftKey && (key === "d" || key === "D")) {
+      e.preventDefault();
+      this.duplicateSelectedChart();
+      this.focus();
+      return true;
+    }
+
+    const arrange = (direction: "forward" | "backward" | "front" | "back") => {
+      if (this.useCanvasCharts) {
+        // In `?canvasCharts=1` mode charts are treated as drawing objects, so reuse the drawing
+        // arrange implementation to ensure Selection Pane + split view update.
+        this.arrangeSelectedDrawing(direction);
+        return;
+      }
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
+      this.chartStore.arrangeChart(this.selectedChartId!, direction);
+    };
+
+    // Excel-like z-order shortcuts (override auditing shortcuts while a chart is selected).
+    if (primary && !e.altKey && !e.shiftKey && e.code === "BracketRight") {
+      e.preventDefault();
+      arrange("forward");
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && !e.shiftKey && e.code === "BracketLeft") {
+      e.preventDefault();
+      arrange("backward");
+      this.focus();
+      return true;
+    }
+
+    // Optional: Ctrl/Cmd+Shift+]/[ for to-front/to-back.
+    if (primary && !e.altKey && e.shiftKey && e.code === "BracketRight") {
+      e.preventDefault();
+      arrange("front");
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && e.shiftKey && e.code === "BracketLeft") {
+      e.preventDefault();
+      arrange("back");
       this.focus();
       return true;
     }

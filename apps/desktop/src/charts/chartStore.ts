@@ -288,6 +288,27 @@ export class ChartStore {
     return true;
   }
 
+  duplicateChart(chartId: string, overrides: { anchor?: ChartAnchor } = {}): ChartRecord | null {
+    const id = String(chartId ?? "").trim();
+    if (!id) return null;
+    const source = this.charts.find((chart) => chart.id === id);
+    if (!source) return null;
+
+    const nextId = `chart_${this.nextId++}`;
+    const next: ChartRecord = {
+      ...source,
+      id: nextId,
+      chartType: { ...source.chartType },
+      series: source.series.map((ser) => ({ ...ser })),
+      anchor: { ...((overrides.anchor ?? source.anchor) as any) },
+    };
+
+    this.charts = [...this.charts, next];
+    this.rebuildIndexById();
+    this.options.onChange?.();
+    return next;
+  }
+
   setDefaultSheet(sheetId: string): void {
     this.options.defaultSheet = sheetId;
   }
