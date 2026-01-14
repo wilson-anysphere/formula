@@ -1276,6 +1276,13 @@ fn agile_decrypt_package_key(
     ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
         let password_key = &info.password_key;
 
+        fn truncate_and_zeroize_spare(buf: &mut Zeroizing<Vec<u8>>, new_len: usize) {
+            buf.truncate(new_len);
+            for slot in buf.spare_capacity_mut() {
+                slot.write(0);
+            }
+        }
+
         let verifier_input_iv = password_key_iv(password_key, mode, &VERIFIER_HASH_INPUT_BLOCK)?;
         let verifier_value_iv = password_key_iv(password_key, mode, &VERIFIER_HASH_VALUE_BLOCK)?;
         let key_value_iv = password_key_iv(password_key, mode, &KEY_VALUE_BLOCK)?;
@@ -1298,7 +1305,7 @@ fn agile_decrypt_package_key(
                     "decrypted verifierHashInput shorter than blockSize".into(),
                 ));
             }
-            decrypted.truncate(password_key.block_size);
+            truncate_and_zeroize_spare(&mut decrypted, password_key.block_size);
             decrypted
         };
 
@@ -1320,7 +1327,7 @@ fn agile_decrypt_package_key(
                     "decrypted verifierHashValue shorter than hashSize".into(),
                 ));
             }
-            decrypted.truncate(password_key.hash_size);
+            truncate_and_zeroize_spare(&mut decrypted, password_key.hash_size);
             decrypted
         };
 
@@ -1352,7 +1359,7 @@ fn agile_decrypt_package_key(
                     "decrypted keyValue shorter than keyData.keyBits".into(),
                 ));
             }
-            decrypted.truncate(package_key_len);
+            truncate_and_zeroize_spare(&mut decrypted, package_key_len);
             decrypted
         };
 
