@@ -74,7 +74,8 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package() {
         "expected Error::InvalidPassword, got {err:?}"
     );
 
-    // Correct password => decrypted ZIP is passed through to XlsxPackage.
+    // Correct password => decrypted ZIP is routed into the lazy/streaming OPC package wrapper
+    // (`Workbook::Xlsx` / `XlsxLazyPackage`).
     let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
     match wb {
         Workbook::Xlsx(package) => {
