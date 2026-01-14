@@ -1382,8 +1382,17 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     gh attestation verify path/to/Formula-Setup-x64.msi --repo wilson-anysphere/formula
     ```
 
-    Note: this verifies attestations stored by GitHub (online). The `provenance-*.intoto.jsonl` files
-    attached to the release are the raw Sigstore bundles produced during the workflow run.
+    To verify using the **provenance bundle attached to the release** (without fetching attestations
+    from the GitHub API), download the matching `provenance-*.intoto.jsonl` asset and pass it via
+    `--bundle`:
+
+    ```bash
+    gh attestation verify path/to/Formula-Setup-x64.msi --repo wilson-anysphere/formula \
+      --bundle provenance-x86_64-pc-windows-msvc.intoto.jsonl
+    ```
+
+    Note: `gh attestation verify` still verifies against Sigstore trust roots/certificates; the
+    `provenance-*.intoto.jsonl` files are the raw Sigstore bundles produced during the workflow run.
 2. Download `latest.json` and confirm `platforms` includes entries for:
    - `darwin-x86_64` (macOS Intel; points at the updater tarball)
    - `darwin-aarch64` (macOS Apple Silicon; points at the updater tarball)
