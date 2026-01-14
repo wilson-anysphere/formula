@@ -551,10 +551,12 @@ fn agile_decrypt_accepts_short_hmac_key() {
 }
 
 #[test]
-fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
-    // Synthetic Agile EncryptionInfo where the password-key-encryptor saltValue is shorter than
-    // blockSize. Some producers still work by using the derived-IV mode (Hash(salt||blockKey))
-    // instead of using the raw salt bytes as the CBC IV.
+fn agile_decrypt_falls_back_to_derived_iv_for_password_key_encryptor_blobs() {
+    // Synthetic Agile EncryptionInfo where the password key-encryptor blobs are encrypted with a
+    // derived IV (Hash(saltValue || blockKey)) instead of Excel's typical `IV = saltValue[..blockSize]`.
+    //
+    // Formula should try the Excel IV strategy first, then fall back to the derived IV strategy on
+    // verifier mismatch.
     let password = "pw";
     let plain_zip = build_tiny_zip();
 
@@ -565,7 +567,7 @@ fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
     let key_encrypt_key_len = 16usize;
 
     let key_data_salt: Vec<u8> = (0u8..=15).collect();
-    let password_salt: Vec<u8> = (16u8..=23).collect(); // 8 bytes (shorter than blockSize=16)
+    let password_salt: Vec<u8> = (16u8..=31).collect();
     let spin_count = 10u32;
 
     let package_key: Vec<u8> = (32u8..=47).collect(); // AES-128 keyValue
@@ -584,6 +586,14 @@ fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
 
     // --- Build password key encryptor fields ---------------------------------------------------
     let password_hash = hash_password(password, &password_salt, spin_count, hash_alg).unwrap();
+    let salt_iv = &password_salt[..block_size];
+    let derived_iv =
+        derive_iv(&password_salt, &VERIFIER_HASH_INPUT_BLOCK, block_size, hash_alg).unwrap();
+    assert_ne!(
+        derived_iv.as_slice(),
+        salt_iv,
+        "derived-IV scheme should not accidentally match Excel's saltValue IV"
+    );
 
     let verifier_input: Vec<u8> = b"abcdefghijklmnop".to_vec();
     let verifier_hash: Vec<u8> = sha1::Sha1::digest(&verifier_input).to_vec();
@@ -633,7 +643,7 @@ fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
   <dataIntegrity encryptedHmacKey="{ehk_b64}" encryptedHmacValue="{ehv_b64}"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey saltSize="8" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
+      <p:encryptedKey saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
                       spinCount="{spin_count}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
                       saltValue="{password_salt_b64}"
                       encryptedVerifierHashInput="{evhi_b64}"
@@ -660,6 +670,13 @@ fn agile_decrypt_supports_short_password_salt_with_derived_iv() {
     let decrypted =
         decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
     assert_eq!(decrypted, plain_zip);
+
+    let err = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "wrong-password")
+        .expect_err("wrong password should fail");
+    assert!(
+        matches!(err, OffCryptoError::WrongPassword),
+        "expected WrongPassword, got: {err:?}"
+    );
 }
 
 #[test]

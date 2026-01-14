@@ -265,17 +265,6 @@ fn decrypt_agile_package_key_from_password_best_effort(
             package_key_len,
             PasswordKeyIvDerivation::Derived,
         ),
-        Err(OffCryptoError::InvalidAttribute { ref element, ref attr, .. })
-            if element == "p:encryptedKey" && attr == "saltValue" =>
-        {
-            decrypt_agile_package_key_from_password(
-                info,
-                password_hash,
-                key_encrypt_key_len,
-                package_key_len,
-                PasswordKeyIvDerivation::Derived,
-            )
-        }
         Err(other) => Err(other),
     }
 }
