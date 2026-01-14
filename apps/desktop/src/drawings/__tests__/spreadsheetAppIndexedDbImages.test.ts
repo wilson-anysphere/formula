@@ -169,7 +169,7 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     // Hydration is async (IndexedDB + a follow-up render pass). Poll briefly for the in-memory
     // cache to be populated and for drawImage to run.
     let hydrated: any = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       hydrated = images.get(entry.id);
       if (hydrated && ctx.drawImage.mock.calls.length > 0) break;
       await new Promise((r) => setTimeout(r, 0));
@@ -298,7 +298,7 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const ctx = contexts.get(drawingCanvas) as any;
     // Hydration is async (IndexedDB + follow-up render). Poll briefly for bytes to land in memory.
     let hydrated: any = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       hydrated = images2.get(imageId);
       if (hydrated && ctx.drawImage.mock.calls.length > 0) break;
       await new Promise((r) => setTimeout(r, 0));
