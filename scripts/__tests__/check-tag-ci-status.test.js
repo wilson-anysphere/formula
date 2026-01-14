@@ -210,7 +210,39 @@ test("ignores successful runs for other commits (defensive head_sha validation)"
 
       assert.notEqual(result.code, 0, "expected non-zero exit code");
       assert.match(result.stderr, /no successful "CI" workflow run found/i);
-      assert.match(result.stderr, /shows no completed runs/i);
+      assert.match(result.stderr, /shows no workflow runs/i);
+    },
+  );
+});
+
+test("reports when CI is still running (newest run not completed)", async () => {
+  const sha = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+  await withMockGitHub(
+    {
+      workflows: [{ id: 123, name: "CI", path: ".github/workflows/ci.yml" }],
+      runsByWorkflowId: {
+        "123": [
+          {
+            id: 7,
+            head_sha: sha,
+            status: "in_progress",
+            conclusion: null,
+            html_url: "http://example.local/runs/7",
+          },
+        ],
+      },
+    },
+    async (baseUrl) => {
+      const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_API_URL: baseUrl,
+        GITHUB_SERVER_URL: "http://example.local",
+      });
+
+      assert.notEqual(result.code, 0, "expected non-zero exit code");
+      assert.match(result.stderr, /no successful "CI" workflow run found/i);
+      assert.match(result.stderr, /Newest run: status=in_progress/i);
     },
   );
 });

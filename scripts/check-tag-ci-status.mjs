@@ -200,13 +200,14 @@ async function resolveCiWorkflow({ owner, repo, workflowName, token }) {
  */
 async function findNewestSuccessfulRun({ owner, repo, workflowId, sha, token }) {
   /** @type {any | null} */
+  let newestRun = null;
+  /** @type {any | null} */
   let newestCompletedRun = null;
 
   for (let page = 1; page <= 20; page++) {
     const url =
       `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs` +
       `?head_sha=${encodeURIComponent(sha)}` +
-      `&status=completed` +
       `&per_page=${DEFAULT_PER_PAGE}` +
       `&page=${page}`;
 
@@ -219,17 +220,18 @@ async function findNewestSuccessfulRun({ owner, repo, workflowId, sha, token }) 
       // the release preflight if GitHub ignores the query parameter (or changes API behavior).
       if (run?.head_sha !== sha) continue;
 
-      if (!newestCompletedRun) newestCompletedRun = run;
+      if (!newestRun) newestRun = run;
+      if (!newestCompletedRun && run?.status === "completed") newestCompletedRun = run;
 
       if (run?.status === "completed" && run?.conclusion === "success") {
-        return { run, newestCompletedRun };
+        return { run, newestRun, newestCompletedRun };
       }
     }
 
     if (runs.length < DEFAULT_PER_PAGE) break;
   }
 
-  return { run: null, newestCompletedRun };
+  return { run: null, newestRun, newestCompletedRun };
 }
 
 async function main() {
@@ -265,7 +267,7 @@ async function main() {
 
   const workflow = await resolveCiWorkflow({ owner, repo: repoName, workflowName, token });
 
-  const { run: successfulRun, newestCompletedRun } = await findNewestSuccessfulRun({
+  const { run: successfulRun, newestRun, newestCompletedRun } = await findNewestSuccessfulRun({
     owner,
     repo: repoName,
     workflowId: workflow.id,
@@ -277,20 +279,41 @@ async function main() {
     const header = `Release preflight failed: no successful "${workflowName}" workflow run found for commit ${sha}.`;
     const workflowUrl = `${GITHUB_SERVER_BASE_URL}/${owner}/${repoName}/actions/workflows/${workflow.path}`;
 
-    if (!newestCompletedRun) {
+    if (!newestRun) {
       fatal(
         [
           header,
           ``,
-          `GitHub Actions shows no completed runs for this commit (workflow: ${workflow.path}).`,
+          `GitHub Actions shows no workflow runs for this commit (workflow: ${workflow.path}).`,
           `Make sure CI has finished successfully for the commit you tagged, then re-run the release.`,
           `Workflow: ${workflowUrl}`,
         ].join("\n"),
       );
     }
 
-    const conclusion = newestCompletedRun?.conclusion ?? "unknown";
-    const runUrl = newestCompletedRun?.html_url;
+    const runUrl = newestRun?.html_url;
+    const status = newestRun?.status ?? "unknown";
+
+    if (status !== "completed") {
+      const previousConclusion =
+        newestCompletedRun && newestCompletedRun !== newestRun
+          ? ` (previous completed run: conclusion=${newestCompletedRun?.conclusion ?? "unknown"}${
+              newestCompletedRun?.html_url ? ` (${newestCompletedRun.html_url})` : ""
+            })`
+          : "";
+
+      fatal(
+        [
+          header,
+          ``,
+          `Newest run: status=${status}${runUrl ? ` (${runUrl})` : ""}${previousConclusion}`,
+          `Fix: wait for CI to finish and pass on this commit, then re-tag / re-run the release workflow.`,
+          `Workflow: ${workflowUrl}`,
+        ].join("\n"),
+      );
+    }
+
+    const conclusion = newestRun?.conclusion ?? "unknown";
     fatal(
       [
         header,
