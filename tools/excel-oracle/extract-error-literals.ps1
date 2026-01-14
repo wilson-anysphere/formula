@@ -83,6 +83,105 @@ function Set-RangeFormula {
   }
 }
 
+function Parse-FormulaLocalErrorLiteral {
+  param([string]$FormulaLocal)
+
+  if (-not $FormulaLocal) { return $null }
+
+  $candidate = $FormulaLocal.Trim()
+  # Defensive: Excel sometimes serializes formulas with extra leading markers
+  # like `=+...` or `=@...`. Strip these before inspecting prefixes.
+  while ($candidate.Length -gt 0) {
+    $ch = $candidate.Substring(0, 1)
+    if ($ch -eq "=" -or $ch -eq "@" -or $ch -eq "+") {
+      $candidate = $candidate.Substring(1)
+      continue
+    }
+    break
+  }
+  $candidate = $candidate.Trim()
+
+  if ($candidate.StartsWith("#")) {
+    return $candidate
+  }
+  return $null
+}
+
+function Expected-SentinelErrorTranslations {
+  param([Parameter(Mandatory = $true)][string]$LocaleId)
+
+  switch ($LocaleId) {
+    "de-DE" {
+      return @{
+        "#VALUE!" = "#WERT!"
+        "#REF!" = "#BEZUG!"
+        "#SPILL!" = "#ÜBERLAUF!"
+        "#GETTING_DATA" = "#DATEN_ABRUFEN"
+      }
+    }
+    "fr-FR" {
+      return @{
+        "#VALUE!" = "#VALEUR!"
+        "#NAME?" = "#NOM?"
+        "#GETTING_DATA" = "#OBTENTION_DONNEES"
+      }
+    }
+    "es-ES" {
+      return @{
+        "#VALUE!" = "#¡VALOR!"
+        "#NAME?" = "#¿NOMBRE?"
+        "#GETTING_DATA" = "#OBTENIENDO_DATOS"
+      }
+    }
+    default { return $null }
+  }
+}
+
+function Warn-IfExcelErrorLocaleSeemsMisconfigured {
+  param(
+    [Parameter(Mandatory = $true)][object]$ExcelObj,
+    [Parameter(Mandatory = $true)][object]$RangeObj,
+    [Parameter(Mandatory = $true)][string]$LocaleId
+  )
+
+  $expected = Expected-SentinelErrorTranslations -LocaleId $LocaleId
+  if ($null -eq $expected) { return }
+
+  foreach ($kv in $expected.GetEnumerator()) {
+    $canon = [string]$kv.Key
+    $want = [string]$kv.Value
+    try {
+      $RangeObj.Clear()
+      Set-RangeFormula -RangeObj $RangeObj -Formula ("=" + $canon)
+      try { $ExcelObj.Calculate() } catch {}
+
+      $text = $null
+      try { $text = [string]$RangeObj.Text } catch { $text = $null }
+      $formulaLocal = $null
+      try { $formulaLocal = [string]$RangeObj.FormulaLocal } catch { $formulaLocal = $null }
+
+      $got = $null
+      if ($text -is [string] -and $text.StartsWith("#")) {
+        $got = $text
+      } else {
+        $got = Parse-FormulaLocalErrorLiteral -FormulaLocal $formulaLocal
+      }
+
+      if (-not $got) {
+        Write-Warning "Could not sanity-check Excel error literal translation for $canon (Text=$text, FormulaLocal=$formulaLocal)."
+        return
+      }
+      if (-not ($got -ieq $want)) {
+        Write-Warning "Excel locale may be misconfigured: expected $canon -> $want for locale '$LocaleId', got '$got'. (This script reflects the active Excel UI language.)"
+        return
+      }
+    } catch {
+      Write-Warning "Failed sanity-checking Excel error literal translation for $canon: $($_.Exception.Message)"
+      return
+    }
+  }
+}
+
 function Extract-CanonicalErrorLiterals {
   param(
     [Parameter(Mandatory = $true)]
@@ -189,6 +288,8 @@ try {
 
   $cell = $sheet.Range("A1")
 
+  Warn-IfExcelErrorLocaleSeemsMisconfigured -ExcelObj $excel -RangeObj $cell -LocaleId $Locale
+
   # Guardrail: if we ever get the same displayed error for multiple canonical codes,
   # it likely means this Excel build doesn't recognize one of the newer error kinds
   # and substituted a different error (often #NAME?). Fail rather than emitting an
@@ -207,23 +308,7 @@ try {
     $displayText = $null
     try { $displayText = [string]$cell.Text } catch { $displayText = $null }
 
-    $candidate = $formulaLocal
-    if ($candidate -is [string]) {
-      $candidate = $candidate.Trim()
-      # Defensive: Excel sometimes serializes formulas with extra leading markers
-      # like `=+...` or `=@...`. Strip these before inspecting prefixes.
-      while ($candidate.Length -gt 0) {
-        $ch = $candidate.Substring(0, 1)
-        if ($ch -eq "=" -or $ch -eq "@" -or $ch -eq "+") {
-          $candidate = $candidate.Substring(1)
-          continue
-        }
-        break
-      }
-    }
-    if ($candidate -is [string]) {
-      $candidate = $candidate.Trim()
-    }
+    $candidate = Parse-FormulaLocalErrorLiteral -FormulaLocal $formulaLocal
 
     $localized = $null
     if ($candidate -is [string] -and $candidate.StartsWith("#")) {

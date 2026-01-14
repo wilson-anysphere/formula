@@ -63,6 +63,9 @@ Notes / caveats:
 - Excel COM automation is Windows-only and requires Excel desktop installed.
 - The output reflects the **active Excel UI language**. Install the corresponding Office language
   pack and set the Excel display language before extracting.
+- The script prints the detected Excel UI locale and will warn if it does not match `-Locale`/`-LocaleId`.
+- For `de-DE`/`fr-FR`/`es-ES`, the script also does a small sanity-check on a few sentinel error
+  translations (e.g. `#VALUE!`) and warns if Excel appears misconfigured.
 - Newer error kinds (e.g. `#SPILL!`) may not exist in older Excel versions; the script will fail
   rather than emitting a misleading mapping if Excel appears not to recognize an error literal.
 - If extracting changes any localized spellings, you must also update
