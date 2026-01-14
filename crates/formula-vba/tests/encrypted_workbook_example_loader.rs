@@ -53,7 +53,8 @@ fn example_loader_handles_encrypted_ooxml_workbooks() {
         .duration_since(UNIX_EPOCH)
         .expect("clock set")
         .as_nanos();
-    path.push(format!("formula-vba-encrypted-{uniq}.xlsm"));
+    let pid = std::process::id();
+    path.push(format!("formula-vba-encrypted-{pid}-{uniq}.xlsm"));
     std::fs::write(&path, &ole_bytes).expect("write temp encrypted workbook");
 
     // Missing password should produce a clear, stable error string.
