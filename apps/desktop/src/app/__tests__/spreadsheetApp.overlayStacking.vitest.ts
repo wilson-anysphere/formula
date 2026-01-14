@@ -97,10 +97,11 @@ function zIndexNumber(value: string): number {
   const direct = Number.parseInt(trimmed, 10);
   if (Number.isFinite(direct)) return direct;
 
-  // jsdom may not resolve `var(...)` indirections; fall back to parsing the default.
-  const varMatch = /var\(\s*--[^,\s)]+\s*,\s*([0-9]+)\s*\)/.exec(trimmed);
-  if (varMatch) {
-    const parsed = Number.parseInt(varMatch[1] ?? "", 10);
+  // jsdom may not resolve `var(...)` indirections; fall back to parsing numeric
+  // fallbacks (including nested `var(..., var(..., 3))` forms).
+  const fallbackMatches = Array.from(trimmed.matchAll(/,\s*([0-9]+)\s*\)/g));
+  if (fallbackMatches.length > 0) {
+    const parsed = Number.parseInt(fallbackMatches.at(-1)?.[1] ?? "", 10);
     if (Number.isFinite(parsed)) return parsed;
   }
 
@@ -127,16 +128,21 @@ function expectOverlayZOrder(root: HTMLElement): void {
   //   - chart canvas (z=2)
   //   - drawings/images overlay (z=3)
   //   - selection + outline (z=4)
-  expect(drawingZ).toBe(3);
   expect(chartZ).toBe(2);
+  expect(drawingZ).toBe(3);
   expect(selectionZ).toBe(4);
   expect(outlineZ).toBe(4);
 
   expect(chartZ).toBeLessThan(drawingZ);
   expect(drawingZ).toBeLessThan(selectionZ);
-  // Outline sits at the same z-index as selection but is inserted later in the DOM,
-  // so it should render above selection even when z-index values match.
-  expect(selectionZ).toBeLessThanOrEqual(outlineZ);
+  expect(outlineZ).toBeGreaterThanOrEqual(selectionZ);
+
+  // Selection and outline overlays share the same z-index, so ensure outline is
+  // mounted after selection so it paints above when z-index ties.
+  if (outlineZ === selectionZ) {
+    const children = Array.from(root.children);
+    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(selectionLayer!));
+  }
 }
 
 describe("SpreadsheetApp overlay stacking", () => {
