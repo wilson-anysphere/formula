@@ -36,6 +36,40 @@ function isParquetConfigured(config) {
   });
 }
 
+function buildSharedMimeInfoXml(config) {
+  const assocs = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+  const groups = new Map();
+  for (const assoc of assocs) {
+    const mimeType = typeof assoc?.mimeType === "string" ? assoc.mimeType.trim() : "";
+    if (!mimeType) continue;
+    const raw = assoc?.ext;
+    const exts = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+    for (const extRaw of exts) {
+      if (typeof extRaw !== "string") continue;
+      const ext = extRaw.trim().replace(/^\./, "").toLowerCase();
+      if (!ext) continue;
+      if (!groups.has(mimeType)) groups.set(mimeType, new Set());
+      groups.get(mimeType).add(ext);
+    }
+  }
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+  ];
+  for (const mimeType of Array.from(groups.keys()).sort()) {
+    lines.push(`  <mime-type type="${mimeType}">`);
+    const exts = Array.from(groups.get(mimeType)).sort();
+    for (const ext of exts) {
+      lines.push(`    <glob pattern="*.${ext}" />`);
+    }
+    lines.push("  </mime-type>");
+  }
+  lines.push("</mime-info>");
+  lines.push("");
+  return lines.join("\n");
+}
+
 function runWithConfigAndPlist(config, plistContents) {
   const tmpRoot = path.join(repoRoot, ".tmp");
   mkdirSync(tmpRoot, { recursive: true });
@@ -60,16 +94,7 @@ function runWithConfigAndPlist(config, plistContents) {
     mkdirSync(mimeDir, { recursive: true });
     writeFileSync(
       path.join(mimeDir, `${identifier}.xml`),
-      overrideMimeXml ||
-        [
-          '<?xml version="1.0" encoding="UTF-8"?>',
-          '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
-          '  <mime-type type="application/vnd.apache.parquet">',
-          '    <glob pattern="*.parquet" />',
-          "  </mime-type>",
-          "</mime-info>",
-          "",
-        ].join("\n"),
+      overrideMimeXml || buildSharedMimeInfoXml(config),
       "utf8",
     );
   }
@@ -259,8 +284,9 @@ test("fails when Parquet is configured but shared-mime-info definition file lack
   ].join("\n");
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
-  assert.match(proc.stderr, /missing expected content/i);
-  assert.match(proc.stderr, /glob pattern/i);
+  assert.match(proc.stderr, /missing required glob mappings/i);
+  assert.match(proc.stderr, /parquet/i);
+  assert.match(proc.stderr, /\*\.parquet/i);
 });
 
 test("fails when bundle.fileAssociations is present but missing required extensions", () => {

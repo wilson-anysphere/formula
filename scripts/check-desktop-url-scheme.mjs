@@ -418,6 +418,44 @@ function getTauriIdentifier(config) {
 }
 
 /**
+ * Parse a shared-mime-info XML definition file into a mapping of:
+ *   mimeType -> Set(glob patterns)
+ *
+ * This parser is intentionally lightweight (regex-based) to avoid dependencies.
+ * It assumes we control the structure of the XML we ship.
+ *
+ * @param {string} xml
+ * @returns {Map<string, Set<string>>}
+ */
+function parseSharedMimeInfoXml(xml) {
+  /** @type {Map<string, Set<string>>} */
+  const out = new Map();
+  if (typeof xml !== "string" || !xml.trim()) return out;
+
+  const mimeTypeRe = /<mime-type\b[^>]*\btype\s*=\s*(['"])(.*?)\1[^>]*>([\s\S]*?)<\/mime-type>/gi;
+  while (true) {
+    const match = mimeTypeRe.exec(xml);
+    if (!match) break;
+    const type = String(match[2] ?? "").trim().toLowerCase();
+    if (!type) continue;
+    const inner = String(match[3] ?? "");
+    const patterns = out.get(type) ?? new Set();
+
+    const globRe = /<glob\b[^>]*\bpattern\s*=\s*(['"])(.*?)\1[^>]*\/?>/gi;
+    while (true) {
+      const g = globRe.exec(inner);
+      if (!g) break;
+      const pattern = String(g[2] ?? "").trim().toLowerCase();
+      if (pattern) patterns.add(pattern);
+    }
+
+    out.set(type, patterns);
+  }
+
+  return out;
+}
+
+/**
  * Parquet is not consistently defined in distros' shared-mime-info DB.
  *
  * If we advertise Parquet (`application/vnd.apache.parquet`) in `.desktop` MimeType=
@@ -496,11 +534,31 @@ function validateParquetMimeDefinition(config) {
   const parquetMimeDefinitionPath = path.join(path.dirname(tauriConfigPath), "mime", `${identifier}.xml`);
   try {
     const xml = readFileSync(parquetMimeDefinitionPath, "utf8");
-    if (!xml.includes('mime-type type="application/vnd.apache.parquet"') || !xml.includes('glob pattern="*.parquet"')) {
-      errBlock("Parquet shared-mime-info definition file is missing expected content", [
+    const sharedMime = parseSharedMimeInfoXml(xml);
+
+    const fileAssociations = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+    const mimeByExt = collectMimeTypesByExtension(fileAssociations);
+
+    /** @type {Array<{ ext: string, mimeType: string, expectedGlob: string }>} */
+    const missing = [];
+    for (const [ext, mimes] of mimeByExt.entries()) {
+      if (!mimes || mimes.size === 0) continue;
+      if (mimes.size !== 1) continue; // Shape validation reports this elsewhere.
+      const mimeType = Array.from(mimes)[0];
+      const expectedGlob = `*.${ext}`;
+      const patterns = sharedMime.get(mimeType) ?? new Set();
+      if (!patterns.has(expectedGlob)) {
+        missing.push({ ext, mimeType, expectedGlob });
+      }
+    }
+
+    if (missing.length > 0) {
+      errBlock("shared-mime-info definition file is missing required glob mappings", [
         `File: ${parquetMimeDefinitionPath}`,
-        'Expected to find: mime-type type="application/vnd.apache.parquet"',
-        'Expected to find: glob pattern="*.parquet"',
+        ...missing
+          .sort((a, b) => a.ext.localeCompare(b.ext))
+          .map(({ ext, mimeType, expectedGlob }) => `Missing: .${ext} -> ${mimeType} (expected glob ${expectedGlob})`),
+        "Fix: update apps/desktop/src-tauri/mime/<identifier>.xml to include <glob pattern=\"*.ext\" /> entries for each extension in bundle.fileAssociations.",
       ]);
     }
   } catch (e) {
