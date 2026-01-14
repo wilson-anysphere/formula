@@ -126,6 +126,47 @@ test("drawing helpers support numeric ids (overlay-compatible)", () => {
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), []);
 });
 
+test("applyState ignores drawings with excessively long string ids (defensive)", () => {
+  const longId = "x".repeat(5000);
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [
+            {
+              id: longId,
+              zOrder: 0,
+              anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+              kind: { type: "image", imageId: "img1" },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), []);
+});
+
+test("setSheetDrawings rejects excessively long string ids (defensive)", () => {
+  const doc = new DocumentController();
+  const longId = "x".repeat(5000);
+  assert.throws(() => {
+    doc.setSheetDrawings("Sheet1", [
+      { id: longId, zOrder: 0, anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 }, kind: { type: "image", imageId: "img1" } },
+    ]);
+  }, /too long/i);
+});
+
 test("applyState accepts formula-model style image + drawings payloads", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({

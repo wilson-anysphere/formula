@@ -1340,10 +1340,31 @@ function normalizeFrozenCount(value) {
  */
 function normalizeDrawings(raw) {
   if (!Array.isArray(raw)) return null;
+  // Defensive guard: drawing ids can be authored by remote collaborators (collab sheet view state),
+  // so keep validation strict to avoid unbounded memory/time costs when normalizing snapshots.
+  // Normal drawing ids are small (numeric strings like "123" or u32 numbers).
+  const MAX_DRAWING_ID_STRING_CHARS = 4096;
   /** @type {any[]} */
   const out = [];
   for (const entry of raw) {
     if (!isJsonObject(entry)) continue;
+    // Normalize ids: accept strings (trimmed) and safe integers. Preserve numeric ids as-is
+    // so formula-model snapshots can round-trip without schema transforms.
+    //
+    // Do this validation *before* cloning so maliciously-large ids don't force a full deep clone.
+    const rawId = entry.id;
+    let normalizedId;
+    if (typeof rawId === "string") {
+      if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) continue;
+      const trimmed = rawId.trim();
+      if (!trimmed) continue;
+      normalizedId = trimmed;
+    } else if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) continue;
+      normalizedId = rawId;
+    } else {
+      continue;
+    }
     let cloned;
     try {
       cloned = cloneJsonSerializable(entry);
@@ -1352,19 +1373,7 @@ function normalizeDrawings(raw) {
       continue;
     }
 
-    // Normalize ids: accept strings (trimmed) and safe integers. Preserve numeric ids as-is
-    // so formula-model snapshots can round-trip without schema transforms.
-    const rawId = cloned.id;
-    if (typeof rawId === "string") {
-      const trimmed = rawId.trim();
-      if (!trimmed) continue;
-      cloned.id = trimmed;
-    } else if (typeof rawId === "number") {
-      if (!Number.isSafeInteger(rawId)) continue;
-      cloned.id = rawId;
-    } else {
-      continue;
-    }
+    cloned.id = normalizedId;
 
     // Normalize z-order: support both `zOrder` and `z_order` (formula-model).
     const zOrderRaw = cloned.zOrder ?? cloned.z_order;
@@ -3557,6 +3566,7 @@ export class DocumentController {
     const rawList = Array.isArray(nextDrawings) ? nextDrawings : [];
     /** @type {any[]} */
     const drawings = [];
+    const MAX_DRAWING_ID_STRING_CHARS = 4096;
     for (const raw of rawList) {
       if (!isJsonObject(raw)) {
         throw new Error("Drawings must be JSON objects");
@@ -3564,6 +3574,9 @@ export class DocumentController {
       const rawId = raw.id;
       let drawingId;
       if (typeof rawId === "string") {
+        if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) {
+          throw new Error(`Drawing.id is too long (max ${MAX_DRAWING_ID_STRING_CHARS} chars)`);
+        }
         drawingId = rawId.trim();
         if (!drawingId) throw new Error("Drawing.id must be a non-empty string");
       } else if (typeof rawId === "number") {
