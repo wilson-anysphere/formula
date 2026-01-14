@@ -1,5 +1,6 @@
 use formula_engine::calc_settings::CalcSettings;
 use formula_engine::{Engine, Value};
+use formula_model::Style;
 
 #[test]
 fn precision_as_displayed_rounds_numeric_literals_fixed_decimals() {
@@ -61,3 +62,126 @@ fn full_precision_does_not_round_numeric_literals() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.239));
 }
 
+#[test]
+fn precision_as_displayed_rounds_numeric_literals_using_style_number_format() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .expect("set style");
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+}
+
+#[test]
+fn precision_as_displayed_rounds_numeric_literals_using_row_col_style_fallback() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let row_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    let col_style_id = engine.intern_style(Style {
+        number_format: Some("0.0".to_string()),
+        ..Style::default()
+    });
+
+    // Row styles take precedence over column styles when the cell has style_id 0.
+    engine.set_row_style_id("Sheet1", 0, Some(row_style_id));
+    engine.set_col_style_id("Sheet1", 0, Some(col_style_id));
+
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+
+    // For other rows, fall back to column styles.
+    engine.set_cell_value("Sheet1", "A2", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.2));
+}
+
+#[test]
+fn precision_as_displayed_cell_number_format_override_wins_over_style() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .expect("set style");
+    engine
+        .set_cell_number_format("Sheet1", "A1", Some("0.0".to_string()))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+
+    // The explicit per-cell format override should be used for rounding.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.2));
+}
+
+#[test]
+fn precision_as_displayed_rounds_scalar_formula_results_using_effective_style_format() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .expect("set style");
+    engine.set_cell_formula("Sheet1", "A1", "=1.239").unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+}
+
+#[test]
+fn precision_as_displayed_rounds_spilled_arrays_using_spill_origin_format() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let origin_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    let other_style_id = engine.intern_style(Style {
+        number_format: Some("0.0".to_string()),
+        ..Style::default()
+    });
+
+    engine
+        .set_cell_style_id("Sheet1", "A1", origin_style_id)
+        .expect("set style");
+
+    // Set a conflicting style on column B to ensure rounding uses the spill origin's format.
+    engine.set_col_style_id("Sheet1", 1, Some(other_style_id));
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(1,2,1.239,1.106)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.35));
+}

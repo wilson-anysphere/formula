@@ -3,8 +3,10 @@ use chrono::NaiveDate;
 use formula_model::Range;
 
 use crate::eval::CellAddr;
+use crate::pivot::source::{
+    coerce_pivot_value_with_number_format, resolve_number_format_from_style_id,
+};
 use crate::pivot::{PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
-use crate::pivot::source::{coerce_pivot_value_with_number_format, resolve_number_format_from_style_id};
 use crate::value::{ErrorKind, Value};
 
 use super::{CellKey, Engine, SheetId};
@@ -40,7 +42,11 @@ impl Engine {
     }
 }
 
-fn materialize_range_as_pivot_values(engine: &Engine, sheet_id: SheetId, range: Range) -> Vec<Vec<PivotValue>> {
+fn materialize_range_as_pivot_values(
+    engine: &Engine,
+    sheet_id: SheetId,
+    range: Range,
+) -> Vec<Vec<PivotValue>> {
     let width = range.width() as usize;
     let height = range.height() as usize;
 
@@ -64,53 +70,11 @@ fn materialize_range_as_pivot_values(engine: &Engine, sheet_id: SheetId, range: 
 }
 
 fn number_format_at<'a>(engine: &'a Engine, sheet_id: SheetId, addr: CellAddr) -> Option<&'a str> {
-    let style_id = effective_style_id_at(engine, sheet_id, addr);
+    let style_id = engine.effective_style_id_at(CellKey {
+        sheet: sheet_id,
+        addr,
+    });
     resolve_number_format_from_style_id(&engine.workbook.styles, style_id)
-}
-
-fn effective_style_id_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> u32 {
-    let key = CellKey { sheet: sheet_id, addr };
-
-    // If this cell is part of a spilled array, use the spill origin's formatting (Excel displays
-    // spilled outputs using the origin cell's formatting).
-    if let Some(origin) = engine.spill_origin_key(key) {
-        if origin != key {
-            return effective_style_id_at(engine, origin.sheet, origin.addr);
-        }
-    }
-
-    // Prefer an explicit cell style. Treat style_id 0 (default style) as "inherit" so row/column
-    // default styles can still apply.
-    let cell_style_id = engine
-        .workbook
-        .get_cell(key)
-        .map(|cell| cell.style_id)
-        .unwrap_or(0);
-    if cell_style_id != 0 {
-        return cell_style_id;
-    }
-
-    let Some(sheet_state) = engine.workbook.sheets.get(sheet_id) else {
-        return 0;
-    };
-
-    if let Some(style_id) = sheet_state
-        .row_properties
-        .get(&addr.row)
-        .and_then(|props| props.style_id)
-    {
-        return style_id;
-    }
-
-    if let Some(style_id) = sheet_state
-        .col_properties
-        .get(&addr.col)
-        .and_then(|props| props.style_id)
-    {
-        return style_id;
-    }
-
-    0
 }
 
 fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Value {
@@ -122,7 +86,10 @@ fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Valu
         }
     }
 
-    let key = CellKey { sheet: sheet_id, addr };
+    let key = CellKey {
+        sheet: sheet_id,
+        addr,
+    };
     if let Some(v) = engine.spilled_cell_value(key) {
         return v;
     }

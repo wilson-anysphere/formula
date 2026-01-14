@@ -1496,6 +1496,79 @@ impl Engine {
         }
     }
 
+    fn effective_style_id_at(&self, key: CellKey) -> u32 {
+        // If this cell is part of a spilled array, use the spill origin's formatting (Excel
+        // displays spilled outputs using the origin cell's formatting).
+        if let Some(origin) = self.spill_origin_key(key) {
+            if origin != key {
+                return self.effective_style_id_at(origin);
+            }
+        }
+
+        // Prefer an explicit cell style. Treat style_id 0 (default style) as "inherit" so row/column
+        // default styles can still apply.
+        let cell_style_id = self
+            .workbook
+            .get_cell(key)
+            .map(|cell| cell.style_id)
+            .unwrap_or(0);
+        if cell_style_id != 0 {
+            return cell_style_id;
+        }
+
+        let Some(sheet_state) = self.workbook.sheets.get(key.sheet) else {
+            return 0;
+        };
+
+        if let Some(style_id) = sheet_state
+            .row_properties
+            .get(&key.addr.row)
+            .and_then(|props| props.style_id)
+        {
+            return style_id;
+        }
+
+        if let Some(style_id) = sheet_state
+            .col_properties
+            .get(&key.addr.col)
+            .and_then(|props| props.style_id)
+        {
+            return style_id;
+        }
+
+        0
+    }
+
+    /// Resolve the effective number format pattern for rounding in "precision as displayed" mode.
+    ///
+    /// Resolution order:
+    /// 1. Explicit [`Cell::number_format`] override (if set).
+    /// 2. Effective style id derived from Excel precedence rules (cell -> row -> column) and
+    ///    spill-origin formatting semantics.
+    fn number_format_pattern_for_rounding(&self, key: CellKey) -> Option<&str> {
+        // Explicit per-cell override always wins.
+        if let Some(fmt) = self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.number_format.as_deref())
+        {
+            return Some(fmt);
+        }
+
+        // If this cell is a spilled output, use the spill origin's formatting.
+        if let Some(origin) = self.spill_origin_key(key) {
+            if origin != key {
+                return self.number_format_pattern_for_rounding(origin);
+            }
+        }
+
+        let style_id = self.effective_style_id_at(key);
+        self.workbook
+            .styles
+            .get(style_id)
+            .and_then(|style| style.number_format.as_deref())
+    }
+
     fn round_number_as_displayed(&self, number: f64, format_pattern: Option<&str>) -> f64 {
         if self.calc_settings.full_precision {
             return number;
@@ -1512,7 +1585,8 @@ impl Engine {
         // If the formatted string cannot be parsed back into a number (e.g. date/time formats or
         // patterns with non-numeric literal text), we fall back to storing the full-precision value.
         let options = self.fmt_options();
-        let formatted = formula_format::format_value(FmtValue::Number(number), format_pattern, &options);
+        let formatted =
+            formula_format::format_value(FmtValue::Number(number), format_pattern, &options);
         match crate::coercion::number::parse_number_strict(
             &formatted.text,
             options.locale.decimal_sep,
@@ -1963,15 +2037,13 @@ impl Engine {
             self.mark_all_compiled_cells_dirty();
         }
 
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let cell = self.workbook.get_or_create_cell_mut(key);
-        cell.number_format = format_pattern.and_then(|s| {
-            if s.trim().is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        });
+        cell.number_format =
+            format_pattern.and_then(|s| if s.trim().is_empty() { None } else { Some(s) });
         Ok(())
     }
 
@@ -1993,7 +2065,10 @@ impl Engine {
                 return Ok(None);
             }
         }
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         Ok(self
             .workbook
             .get_cell(key)
@@ -2031,15 +2106,10 @@ impl Engine {
         };
         let cell_id = cell_id_from_key(key);
 
-        let format_pattern = self
-            .workbook
-            .get_cell(key)
-            .and_then(|cell| cell.number_format.clone());
+        let format_pattern = self.number_format_pattern_for_rounding(key);
         let value: Value = value.into();
         let value = match value {
-            Value::Number(n) => {
-                Value::Number(self.round_number_as_displayed(n, format_pattern.as_deref()))
-            }
+            Value::Number(n) => Value::Number(self.round_number_as_displayed(n, format_pattern)),
             other => other,
         };
 
@@ -3289,7 +3359,11 @@ impl Engine {
     /// This is intended for performance-sensitive callers (e.g. pivot cache building) that would
     /// otherwise issue per-cell [`Engine::get_cell_value`] calls, which require repeated sheet-name
     /// lookups and A1 parsing.
-    pub fn get_range_values(&self, sheet: &str, range: Range) -> Result<Vec<Vec<Value>>, EngineError> {
+    pub fn get_range_values(
+        &self,
+        sheet: &str,
+        range: Range,
+    ) -> Result<Vec<Vec<Value>>, EngineError> {
         let width = range.width() as usize;
         let height = range.height() as usize;
 
@@ -4725,10 +4799,7 @@ impl Engine {
             other => other,
         };
 
-        let format_pattern = self
-            .workbook
-            .get_cell(key)
-            .and_then(|cell| cell.number_format.as_deref());
+        let format_pattern = self.number_format_pattern_for_rounding(key);
 
         match value {
             Value::Array(mut array) => {
@@ -4755,7 +4826,7 @@ impl Engine {
                 if !self.calc_settings.full_precision {
                     for value in &mut array.values {
                         if let Value::Number(n) = value {
-                            *n = self.round_number_as_displayed(*n, format_pattern.as_deref());
+                            *n = self.round_number_as_displayed(*n, format_pattern);
                         }
                     }
                 }
@@ -4910,7 +4981,9 @@ impl Engine {
             }
             other => {
                 let other = match other {
-                    Value::Number(n) => Value::Number(self.round_number_as_displayed(n, format_pattern.as_deref())),
+                    Value::Number(n) => {
+                        Value::Number(self.round_number_as_displayed(n, format_pattern))
+                    }
                     v => v,
                 };
 
