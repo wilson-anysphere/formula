@@ -1646,12 +1646,14 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
     // self-edge and force the cell into circular-reference handling.
     let formula = "=IF(FALSE,INDIRECT(\"A1\"),CELL(\"contents\"))";
     assert_eq!(sheet.eval(formula), Value::Text(formula.to_string()));
+    assert_eq!(sheet.circular_reference_count(), 0);
 
     // Same idea, but for CELL("type") which also consults the referenced cell.
     assert_eq!(
         sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"type\"))"),
         Value::Text("v".to_string())
     );
+    assert_eq!(sheet.circular_reference_count(), 0);
 }
 
 #[test]
