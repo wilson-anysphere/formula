@@ -1370,6 +1370,9 @@ export class SpreadsheetApp {
   private formulaRangePreviewTooltip: HTMLDivElement | null = null;
   private formulaRangePreviewTooltipVisible = false;
   private formulaRangePreviewTooltipLastKey: string | null = null;
+  private formulaRangePreviewTooltipLastRange: A1RangeAddress | null = null;
+  private formulaRangePreviewTooltipLastRefText: string | null = null;
+  private formulaRangePreviewTooltipRefreshQueued = false;
   private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
   private keyboardRangeSelectionActive = false;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
@@ -3081,6 +3084,10 @@ export class SpreadsheetApp {
         this.syncActiveSheetBackgroundImage();
       }
 
+      // Formula bar range-preview tooltip caches its rendered sample grid. When the document
+      // mutates while the user is hovering a reference (including remote/collaboration updates),
+      // refresh the tooltip so it stays accurate without requiring additional pointer events.
+      this.scheduleFormulaRangePreviewTooltipRefresh();
     });
 
     // SpreadsheetApp's legacy (non-shared) renderer only repaints when explicitly asked.
@@ -10273,6 +10280,8 @@ export class SpreadsheetApp {
     if (!tooltip) {
       this.formulaRangePreviewTooltipVisible = false;
       this.formulaRangePreviewTooltipLastKey = null;
+      this.formulaRangePreviewTooltipLastRange = null;
+      this.formulaRangePreviewTooltipLastRefText = null;
       return;
     }
     // Always clear `aria-describedby` even if the tooltip is already hidden, so any stale
@@ -10280,6 +10289,8 @@ export class SpreadsheetApp {
     this.syncFormulaRangePreviewTooltipDescribedBy(false);
     if (!this.formulaRangePreviewTooltipVisible && tooltip.hidden) return;
     this.formulaRangePreviewTooltipVisible = false;
+    this.formulaRangePreviewTooltipLastRange = null;
+    this.formulaRangePreviewTooltipLastRefText = null;
     tooltip.hidden = true;
     tooltip.setAttribute("aria-hidden", "true");
     tooltip.classList.remove("formula-range-preview-tooltip--visible");
@@ -10310,6 +10321,40 @@ export class SpreadsheetApp {
     const next = tokens.join(" ");
     if (next) textarea.setAttribute("aria-describedby", next);
     else textarea.removeAttribute("aria-describedby");
+  }
+
+  private scheduleFormulaRangePreviewTooltipRefresh(): void {
+    if (this.formulaRangePreviewTooltipRefreshQueued) return;
+    if (!this.formulaRangePreviewTooltipVisible) return;
+
+    const lastRange = this.formulaRangePreviewTooltipLastRange;
+    if (!lastRange) return;
+
+    this.formulaRangePreviewTooltipRefreshQueued = true;
+    const schedule = (cb: () => void) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => cb());
+        return;
+      }
+      if (typeof queueMicrotask === "function") {
+        queueMicrotask(cb);
+        return;
+      }
+      void Promise.resolve().then(cb);
+    };
+
+    schedule(() => {
+      this.formulaRangePreviewTooltipRefreshQueued = false;
+      if (this.disposed) return;
+      if (!this.formulaRangePreviewTooltipVisible) return;
+      const range = this.formulaRangePreviewTooltipLastRange;
+      if (!range) return;
+      try {
+        this.updateFormulaRangePreviewTooltip(range, this.formulaRangePreviewTooltipLastRefText);
+      } catch {
+        // Best-effort: tooltip refresh should never crash the app.
+      }
+    });
   }
 
   private resolveFormulaRangePreviewTargetSheet(refText: string | null): { explicit: boolean; sheetId: string | null } {
@@ -10437,6 +10482,14 @@ export class SpreadsheetApp {
       this.hideFormulaRangePreviewTooltip();
       return;
     }
+
+    // Remember the current hover target so we can refresh the tooltip sample after document
+    // changes even if the formula bar's hover event short-circuits repeated `mousemove` updates.
+    this.formulaRangePreviewTooltipLastRange = {
+      start: { row: range.start.row, col: range.start.col },
+      end: { row: range.end.row, col: range.end.col },
+    };
+    this.formulaRangePreviewTooltipLastRefText = typeof refText === "string" ? refText : null;
 
     const totalCells = rowCount * colCount;
     const tooLarge = totalCells > MAX_FORMULA_RANGE_PREVIEW_CELLS;

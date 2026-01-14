@@ -30,6 +30,10 @@ function createInMemoryLocalStorage(): Storage {
 
 type CtxCall = { method: string; args: unknown[] };
 
+function flushPromises(): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 function createMockCanvasContext(calls: CtxCall[]): CanvasRenderingContext2D {
   const noop = () => {};
   const gradient = { addColorStop: noop } as any;
@@ -169,11 +173,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const renderSpy = vi.spyOn(app as any, "renderDrawings");
 
-      // Initial render.
+      // Initial render (drawing overlay rendering is async because it may await image hydration).
       (app as any).renderDrawings();
-      // DrawingOverlay may await async image hydration (IndexedDB) before emitting placeholder
-      // stroke calls; yield to the event loop so any pending microtasks complete.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
@@ -200,9 +202,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
         zoom: renderer.getZoom(),
         source: "resize",
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(renderSpy).toHaveBeenCalled();
+      await flushPromises();
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
       expect(secondStroke).toBeTruthy();
       const x2 = Number(secondStroke!.args[0]);

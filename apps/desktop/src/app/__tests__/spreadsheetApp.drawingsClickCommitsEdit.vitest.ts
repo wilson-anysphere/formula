@@ -339,4 +339,4 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     root.remove();
     formulaBar.remove();
   });
-});
+}); 

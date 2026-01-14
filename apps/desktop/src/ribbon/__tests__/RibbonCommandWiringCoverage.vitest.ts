@@ -128,7 +128,6 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
   const mainTsSource = readFileSync(mainTsPath, "utf8");
   const ribbonHandlersSource = readFileSync(ribbonHandlersPath, "utf8");
   const combinedSource = `${mainTsSource}\n\n${ribbonHandlersSource}`;
-
   const ids = new Set<string>();
 
   const addIfSchema = (id: string) => {

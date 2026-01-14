@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runOnce } from './desktopStartupUtil.ts';
+import { repoRoot, runOnce } from './desktopStartupUtil.ts';
 
 function isPidAlive(pid: number): boolean {
   try {
@@ -30,7 +30,7 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       return;
     }
 
-    const profileDir = `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`;
+    const profileDir = resolve(repoRoot, `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`);
     const pidFile = resolve(profileDir, 'grandchild.pid');
 
     // The spawned "desktop" process (a Node script) prints `[startup] ...` and then exits quickly,
@@ -54,7 +54,7 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
         profileDir,
         argv: ['-e', code],
         envOverrides: {
-          GRANDCHILD_PID_FILE: resolve(process.cwd(), pidFile),
+          GRANDCHILD_PID_FILE: pidFile,
         },
         // Keep the afterCapture hook pending long enough that the child process exits before
         // we initiate shutdown, forcing cleanup to happen from the `close` handler.
@@ -77,7 +77,7 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       expect(metrics.windowVisibleMs).toBe(1);
       expect(metrics.ttiMs).toBe(2);
 
-      grandchildPid = Number(readFileSync(resolve(process.cwd(), pidFile), 'utf8').trim());
+      grandchildPid = Number(readFileSync(pidFile, 'utf8').trim());
       expect(Number.isFinite(grandchildPid)).toBe(true);
       expect(grandchildPid).toBeGreaterThan(0);
 

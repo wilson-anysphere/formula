@@ -292,7 +292,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   ariaLabel: "Format Cells",
                   kind: "dropdown",
                   menuItems: [
-                    { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
+                    { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
+                    { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
+                    // Exempt id: implemented directly by the desktop shell, so it must remain enabled even
+                    // when the CommandRegistry does not register it.
+                    { id: "home.cells.format.organizeSheets", label: "Organize Sheets…", ariaLabel: "Organize Sheets" },
                   ],
                 },
                 // Exempt command id to prove the exemption list keeps implemented ribbon-only
@@ -344,9 +348,20 @@ describe("CommandRegistry-backed ribbon disabling", () => {
       trigger?.click();
     });
 
-    const organize = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
-    expect(organize).toBeInstanceOf(HTMLButtonElement);
-    expect(organize?.disabled).toBe(false);
+    const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
+    const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
+    const organizeSheets = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
+    expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
+    expect(colWidth).toBeInstanceOf(HTMLButtonElement);
+    expect(organizeSheets).toBeInstanceOf(HTMLButtonElement);
+
+    // Row/column sizing menu items are backed by CommandRegistry commands, so they should be disabled
+    // when the registry does not register them.
+    expect(rowHeight?.disabled).toBe(true);
+    expect(colWidth?.disabled).toBe(true);
+
+    // Exempt menu items remain enabled even without a corresponding CommandRegistry entry.
+    expect(organizeSheets?.disabled).toBe(false);
 
     act(() => root.unmount());
   });

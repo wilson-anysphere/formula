@@ -7,6 +7,20 @@ import { openOrganizeSheetsDialog } from "../OrganizeSheetsDialog";
 import { rewriteDocumentFormulasForSheetRename } from "../sheetFormulaRewrite";
 import { WorkbookSheetStore } from "../workbookSheetStore";
 
+function setTextInputValue(input: HTMLInputElement, value: string) {
+  // React attaches internal value trackers to controlled inputs. Using the native setter
+  // (from the prototype) avoids updating React's tracker directly, so the subsequent events
+  // are observed as real user input in jsdom.
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setter) {
+    setter.call(input, value);
+  } else {
+    input.value = value;
+  }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function ensureDialogPolyfill(): void {
   // JSDOM doesn't implement <dialog>. Patch in a minimal `showModal` / `close`
   // so `openOrganizeSheetsDialog` can be exercised in unit tests.
@@ -184,8 +198,7 @@ describe("OrganizeSheetsDialog", () => {
     expect(input).toBeInstanceOf(HTMLInputElement);
 
     await act(async () => {
-      (input as HTMLInputElement).value = "Budget2024";
-      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input as HTMLInputElement, "Budget2024");
       input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
       await Promise.resolve();
     });

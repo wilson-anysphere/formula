@@ -367,6 +367,13 @@ export class SecondaryGridView {
     const unsubscribeImages = this.document.on("change", (payload: any) => {
       if (this.disposed) return;
       const source = typeof payload?.source === "string" ? payload.source : "";
+      // Axis resize updates originating from this pane already update the CanvasGridRenderer
+      // interactively and explicitly trigger a drawings re-render via `onAxisSizeChange`.
+      // Avoid double-rendering here (the first render can run before the spatial index is
+      // invalidated, producing stale geometry).
+      if (source === "secondaryGridAxis") {
+        return;
+      }
       if (source === "applyState") {
         this.grid.renderer.clearImageCache?.();
         this.drawingsOverlay.clearImageCache();
@@ -678,6 +685,11 @@ export class SecondaryGridView {
     // anchors against the updated axis sizes.
     this.drawingsOverlay.invalidateSpatialIndex();
 
+    // Row/col size overrides change the underlying grid geometry used by DrawingOverlay's spatial
+    // index. Invalidate so the next render recomputes bounds even if the object list reference is
+    // unchanged (e.g. drawings stored in DocumentController).
+    this.drawingsOverlay.invalidateSpatialIndex();
+
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();
     this.container.dataset.scrollX = String(scroll.x);
@@ -705,12 +717,11 @@ export class SecondaryGridView {
       } else {
         this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
-      // Invalidate cached drawing bounds so the overlay repositions correctly after resize.
-      this.drawingsOverlay.invalidateSpatialIndex();
       // Similar to SpreadsheetApp: the CanvasGridRenderer updates sizes interactively during the
       // drag, and we skip re-syncing sheet view deltas back into the same pane (source-tagged).
       // Ensure the drawings overlay re-renders at the end of the interaction so pictures/shapes
       // stay aligned with the updated grid geometry.
+      this.drawingsOverlay.invalidateSpatialIndex();
       void this.renderDrawings();
       return;
     }
@@ -986,7 +997,16 @@ export class SecondaryGridView {
     }
 
     // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
-    if (Array.isArray(payload?.imagesDeltas) || Array.isArray(payload?.imageDeltas)) return true;
+    //
+    // Note: DocumentController change payloads frequently include `imageDeltas: []` even when
+    // nothing changed (e.g. plain cell edits). Guard against empty arrays so we don't re-render
+    // the drawings overlay on every document change.
+    const imagesDeltas = Array.isArray(payload?.imagesDeltas)
+      ? payload.imagesDeltas
+      : Array.isArray(payload?.imageDeltas)
+        ? payload.imageDeltas
+        : null;
+    if (imagesDeltas && imagesDeltas.length > 0) return true;
 
     if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
 
