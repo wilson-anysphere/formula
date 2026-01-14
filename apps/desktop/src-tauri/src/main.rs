@@ -2703,12 +2703,7 @@ fn main() {
                     }
 
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
-                    let pending = {
-                        let mut guard = state.lock().unwrap();
-                        // Source-level guardrails test asserts that we only mark the oauth redirect
-                        // queue as ready after verifying the window origin is trusted.
-                        guard.mark_ready_and_drain()
-                    };
+                    let pending = state.lock().unwrap().mark_ready_and_drain();
 
                     let pending = normalize_oauth_redirect_request_urls(pending);
                     for url in pending {
