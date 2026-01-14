@@ -1083,6 +1083,20 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "3", displayText: "3 (two-sample unequal variance)", confidence: 0.65 },
     ],
   },
+  POISSON: {
+    // cumulative
+    2: [
+      { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
+    ],
+  },
+  WEIBULL: {
+    // cumulative
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
+    ],
+  },
   "RANK.EQ": {
     // order
     2: [

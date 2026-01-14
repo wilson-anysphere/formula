@@ -2784,6 +2784,48 @@ test("NORM.S.DIST cumulative suggests TRUE/FALSE", async () => {
   );
 });
 
+test("POISSON cumulative suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=POISSON(1, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=POISSON(1, 2, TRUE"),
+    `Expected POISSON to suggest TRUE (cumulative), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=POISSON(1, 2, FALSE"),
+    `Expected POISSON to suggest FALSE (probability), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("WEIBULL cumulative suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=WEIBULL(1, 2, 3, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEIBULL(1, 2, 3, TRUE"),
+    `Expected WEIBULL to suggest TRUE (cumulative), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEIBULL(1, 2, 3, FALSE"),
+    `Expected WEIBULL to suggest FALSE (probability), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
