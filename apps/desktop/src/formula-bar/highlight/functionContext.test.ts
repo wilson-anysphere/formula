@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { getFunctionCallContext, getFunctionHint } from "./functionContext.js";
+import { getFunctionCallContext } from "./functionContext.js";
+import { getFunctionSignature, signatureParts } from "./functionSignatures.js";
 
 describe("function context", () => {
   it("getFunctionCallContext returns innermost function + arg index", () => {
@@ -40,33 +41,39 @@ describe("function context", () => {
     expect(falseContext).toEqual({ name: "IF", argIndex: 2 });
   });
 
-  it("getFunctionHint uses signature mapping and marks active parameter", () => {
+  it("signatureParts marks the active parameter (via getFunctionCallContext)", () => {
     const formula = "=IF(A1, B1, C1)";
     const cursor = formula.indexOf("B1") + 1;
-    const hint = getFunctionHint(formula, cursor);
-    expect(hint).toBeTruthy();
-    expect(hint?.signature.name).toBe("IF");
-    expect(hint?.context.argIndex).toBe(1);
-    expect(hint?.parts.some((p) => p.kind === "paramActive")).toBe(true);
+    const ctx = getFunctionCallContext(formula, cursor);
+    expect(ctx).toEqual({ name: "IF", argIndex: 1 });
+    const sig = getFunctionSignature(ctx?.name ?? "");
+    expect(sig).toBeTruthy();
+    const parts = sig ? signatureParts(sig, ctx?.argIndex ?? 0) : [];
+    expect(sig?.name).toBe("IF");
+    expect(parts.some((p) => p.kind === "paramActive")).toBe(true);
   });
 
-  it("getFunctionHint prefers curated signatures when available (XLOOKUP)", () => {
+  it("getFunctionSignature prefers curated signatures when available (XLOOKUP)", () => {
     const formula = "=XLOOKUP(A1, B1, C1)";
     const cursor = formula.indexOf("B1") + 1;
-    const hint = getFunctionHint(formula, cursor);
-    expect(hint).toBeTruthy();
-    expect(hint?.signature.name).toBe("XLOOKUP");
-    expect(hint?.signature.params[0]?.name).toBe("lookup_value");
-    expect(hint?.signature.summary).toContain("Looks up");
+    const ctx = getFunctionCallContext(formula, cursor);
+    expect(ctx).toEqual({ name: "XLOOKUP", argIndex: 1 });
+    const sig = getFunctionSignature(ctx?.name ?? "");
+    expect(sig).toBeTruthy();
+    expect(sig?.name).toBe("XLOOKUP");
+    expect(sig?.params[0]?.name).toBe("lookup_value");
+    expect(sig?.summary).toContain("Looks up");
   });
 
-  it("getFunctionHint prefers curated signatures when available (SEQUENCE)", () => {
+  it("getFunctionSignature prefers curated signatures when available (SEQUENCE)", () => {
     const formula = "=SEQUENCE(10, 2)";
     const cursor = formula.indexOf("2") + 1;
-    const hint = getFunctionHint(formula, cursor);
-    expect(hint).toBeTruthy();
-    expect(hint?.signature.name).toBe("SEQUENCE");
-    expect(hint?.signature.params[0]?.name).toBe("rows");
-    expect(hint?.signature.params[1]?.name).toBe("columns");
+    const ctx = getFunctionCallContext(formula, cursor);
+    expect(ctx).toEqual({ name: "SEQUENCE", argIndex: 1 });
+    const sig = getFunctionSignature(ctx?.name ?? "");
+    expect(sig).toBeTruthy();
+    expect(sig?.name).toBe("SEQUENCE");
+    expect(sig?.params[0]?.name).toBe("rows");
+    expect(sig?.params[1]?.name).toBe("columns");
   });
 });
