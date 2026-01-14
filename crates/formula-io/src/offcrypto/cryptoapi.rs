@@ -154,19 +154,14 @@ pub fn final_hash(h: &[u8], block: u32, hash_alg: HashAlg) -> Vec<u8> {
 
 /// CryptoAPI `CryptDeriveKey` byte expansion used by MS-OFFCRYPTO Standard encryption.
 ///
-/// CryptoAPI does **not** use the digest bytes directly as the key. For MD5/SHA-1 it expands the
-/// digest using an ipad/opad construction (HMAC-like) and then truncates to the desired key length.
-///
-/// Important nuance (Standard AES): this expansion step is performed **even when the desired key
-/// length is shorter than the digest length** (e.g. AES-128 derived from a 20-byte SHA-1 digest).
-/// See `docs/offcrypto-standard-cryptoapi.md` (§8.2).
+/// CryptoAPI `CryptDeriveKey` is **not** PBKDF2 and does **not** use the digest bytes directly as
+/// the key. For MD5/SHA-1 it expands the digest using an ipad/opad construction (HMAC-like) and
+/// then truncates to the desired key length.
 ///
 /// ```text
-/// buf = hash_value || 0x00*(64 - hash_len)
-/// ipad = buf XOR 0x36
-/// opad = buf XOR 0x5C
-/// key = Hash(ipad) || Hash(opad)
-/// return key[..key_len_bytes]
+/// D = hash_value || 0x00*(64 - hash_len)
+/// key = Hash(D XOR 0x36...) || Hash(D XOR 0x5C...)
+/// return key[0..key_len_bytes]
 /// ```
 ///
 /// Note: For MS-OFFCRYPTO Standard AES encryption, Office/CryptoAPI use this derivation even when
@@ -229,6 +224,9 @@ mod tests {
             0x8D, 0x20, 0x1D, 0x14, 0x53, 0x1F, 0xF3,
         ];
 
+        // Expected bytes computed independently with Python:
+        //   buf = hash_value || 0x00*(64-hash_len)
+        //   key = sha1(buf^0x36) || sha1(buf^0x5c)
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Sha1);
         let expected: [u8; 16] = [
             0x40, 0xB1, 0x3A, 0x71, 0xF9, 0x0B, 0x96, 0x6E, 0x37, 0x54, 0x08, 0xF2, 0xD1,
@@ -266,6 +264,9 @@ mod tests {
             0x17, 0xC5, 0x92,
         ];
 
+        // Expected bytes computed independently with Python:
+        //   buf = hash_value || 0x00*(64-hash_len)
+        //   key = md5(buf^0x36) || md5(buf^0x5c)
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Md5);
         // Expected bytes computed independently with Python:
         //   buf = hash_value || 0x00*(64-hash_len)

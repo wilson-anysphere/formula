@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use formula_io::{open_workbook_model_with_password, open_workbook_with_password, Error, Workbook};
-use formula_model::{CellRef, CellValue};
+use formula_model::CellValue;
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -85,12 +85,17 @@ fn opens_encrypted_xlsb_fixture() {
     let workbook = open_workbook_model_with_password(&path, Some(pw)).expect("decrypt + open");
 
     let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert!(
+        matches!(sheet.value_a1("A1").unwrap(), CellValue::String(_)),
+        "expected string in A1, got {:?}",
+        sheet.value_a1("A1").unwrap()
+    );
 
     assert_eq!(
-        sheet.value(CellRef::from_a1("A1").unwrap()),
+        sheet.value_a1("A1").unwrap(),
         CellValue::String("You can't see me".to_string())
     );
-    assert_eq!(sheet.value(CellRef::from_a1("B1").unwrap()), CellValue::Empty);
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Empty);
 }
 
 #[test]

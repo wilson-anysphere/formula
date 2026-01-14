@@ -2973,10 +2973,30 @@ fn decrypt_encrypted_ooxml_package(
         );
         normalized_info.extend_from_slice(xml.as_bytes());
 
-        formula_xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password)
-            .map_err(|_err| Error::InvalidPassword {
-                path: path.to_path_buf(),
-            })?
+        match xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password) {
+            Ok(bytes) => bytes,
+            Err(err) => match err {
+                xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
+                    return Err(Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    });
+                }
+                xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                    return Err(Error::UnsupportedOoxmlEncryption {
+                        path: path.to_path_buf(),
+                        version_major: major,
+                        version_minor: minor,
+                    });
+                }
+                _ => {
+                    return Err(Error::UnsupportedOoxmlEncryption {
+                        path: path.to_path_buf(),
+                        version_major,
+                        version_minor,
+                    });
+                }
+            },
+        }
     } else {
         // Standard/CryptoAPI encryption has multiple variants in the wild.
         //
