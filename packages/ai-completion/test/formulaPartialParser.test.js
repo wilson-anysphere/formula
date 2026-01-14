@@ -206,3 +206,25 @@ test("parsePartialFormula allows function-name completion after '>' (comparison 
   assert.equal(parsed.inFunctionCall, false);
   assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 4, end: 7 });
 });
+
+test("parsePartialFormula treats LOG10 as a function prefix (even though it looks like an A1 cell ref)", () => {
+  const registry = new FunctionRegistry();
+  const input = "=LOG1";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.deepEqual(parsed.functionNamePrefix, { text: "LOG1", start: 1, end: 5 });
+});
+
+test("parsePartialFormula recognizes LOG10 as a function call", () => {
+  const registry = new FunctionRegistry();
+  const input = "=LOG10(1";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "LOG10");
+  assert.equal(parsed.argIndex, 0);
+  assert.equal(parsed.currentArg?.text, "1");
+});

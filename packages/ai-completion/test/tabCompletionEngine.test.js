@@ -566,6 +566,23 @@ test("Function name completion works after '>' (comparison operator)", async () 
   );
 });
 
+test("Typing =LOG1 suggests LOG10( (function name looks like A1 cell ref)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LOG1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=LOG10("),
+    `Expected LOG10 suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

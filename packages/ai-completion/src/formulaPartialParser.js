@@ -113,7 +113,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent) });
+      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent, functionRegistry) });
       pendingIdent = null;
     } else if (ch === ")") {
       openParens.pop();
@@ -133,7 +133,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       return { isFormula: true, inFunctionCall: false };
     }
     // Not in a function call; still might be typing a function name.
-    const functionPrefix = findTokenAtCursor(prefix, safeCursor);
+    const functionPrefix = findTokenAtCursor(prefix, safeCursor, functionRegistry);
     if (functionPrefix && functionPrefix.text.length > 0) {
       return {
         isFormula: true,
@@ -224,16 +224,39 @@ function clampCursor(input, cursorPosition) {
 }
 
 /**
+ * Best-effort check: does the host function registry contain any functions that start with
+ * the given prefix?
+ *
+ * This is used to disambiguate a small set of Excel functions that look like A1 cell references
+ * (e.g. `LOG10` looks like column `LOG`, row `10`). When the prefix matches a known function,
+ * treat it as a function token so completion can still suggest it.
+ *
+ * @param {unknown} functionRegistry
+ * @param {string} prefix
+ */
+function hasFunctionPrefix(functionRegistry, prefix) {
+  const search = functionRegistry && typeof functionRegistry.search === "function" ? functionRegistry.search : null;
+  if (!search) return false;
+  try {
+    const matches = search.call(functionRegistry, prefix, { limit: 1 });
+    return Array.isArray(matches) && matches.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Normalize a previously-parsed identifier token into a function name candidate.
  *
  * @param {string | null} identToken
+ * @param {unknown} functionRegistry
  * @returns {string | null}
  */
-function functionNameFromIdent(identToken) {
+function functionNameFromIdent(identToken, functionRegistry) {
   const token = typeof identToken === "string" ? identToken : "";
   if (!token) return null;
   // Avoid returning something that is obviously a cell ref like "A1".
-  if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;
+  if (/^[A-Za-z]{1,3}\d+$/.test(token) && !hasFunctionPrefix(functionRegistry, token)) return null;
   return token.toUpperCase();
 }
 
@@ -340,7 +363,7 @@ function getArgContext(input, openParenIndex, cursorPosition) {
  * @param {number} cursorPosition
  * @returns {{text:string,start:number,end:number} | null}
  */
-function findTokenAtCursor(inputPrefix, cursorPosition) {
+function findTokenAtCursor(inputPrefix, cursorPosition, functionRegistry) {
   // When completing function names we look at the token at cursor in the formula.
   // Example: "=VLO" => token "VLO" spanning [1, 4).
   let i = cursorPosition - 1;
@@ -356,6 +379,6 @@ function findTokenAtCursor(inputPrefix, cursorPosition) {
   if (!text) return null;
   if (/^\d+$/.test(text)) return null;
   // Avoid treating cell references (A1, BC23, etc.) as function name prefixes.
-  if (/^\$?[A-Za-z]{1,3}\$?\d+$/.test(text)) return null;
+  if (/^[A-Za-z]{1,3}\d+$/.test(text) && !hasFunctionPrefix(functionRegistry, text)) return null;
   return { text, start, end };
 }
