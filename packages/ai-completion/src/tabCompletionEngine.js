@@ -1462,6 +1462,14 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // basis
     4: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
+  AMORDEGRC: {
+    // basis
+    6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  AMORLINC: {
+    // basis
+    6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
   PRICE: {
     // frequency
     5: BOND_FREQUENCY_ENUM_1_2_4,
@@ -1486,6 +1494,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // basis
     5: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
+  INTRATE: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
   PRICEDISC: {
     // basis
     4: DAY_COUNT_BASIS_ENUM_0_TO_4,
@@ -1509,6 +1521,30 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   RECEIVED: {
     // basis
     4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  ODDFPRICE: {
+    // frequency
+    7: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    8: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  ODDFYIELD: {
+    // frequency
+    7: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    8: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  ODDLPRICE: {
+    // frequency
+    6: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    7: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  ODDLYIELD: {
+    // frequency
+    6: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    7: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
   COUPDAYBS: {
     // frequency

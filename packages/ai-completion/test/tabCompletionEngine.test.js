@@ -2678,6 +2678,44 @@ test("PRICEDISC basis suggests 0, 1, 2, 3, 4", async () => {
   }
 });
 
+test("ODDFPRICE frequency suggests 2, 1, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ODDFPRICE(A1, B1, C1, D1, 0.05, 0.04, 100, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const f of ["2", "1", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=ODDFPRICE(A1, B1, C1, D1, 0.05, 0.04, 100, ${f}`),
+      `Expected ODDFPRICE to suggest frequency=${f}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("INTRATE basis suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=INTRATE(A1, B1, 100, 110, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const basis of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=INTRATE(A1, B1, 100, 110, ${basis}`),
+      `Expected INTRATE to suggest basis=${basis}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("COUPDAYBS frequency suggests 2, 1, 4", async () => {
   const engine = new TabCompletionEngine();
 
