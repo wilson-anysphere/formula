@@ -140,7 +140,7 @@ test("binder hydrates legacy top-level view fields when sheet.view is partially 
   doc.destroy();
 });
 
-test("binder deletes legacy top-level sheet view keys when writing view updates (prevents stale fallback)", async () => {
+test("binder converges legacy top-level sheet view keys when writing view updates (prevents stale fallback)", async () => {
   const doc = new Y.Doc();
   const { sheets } = getWorkbookRoots(doc);
 
@@ -191,10 +191,11 @@ test("binder deletes legacy top-level sheet view keys when writing view updates 
   assert.deepEqual(view.get("colWidths"), { "0": 100 });
   assert.deepEqual(view.get("rowHeights"), { "1": 20 });
 
-  // Top-level legacy keys should be removed.
-  assert.equal(sheet.get("frozenRows"), undefined);
-  assert.equal(sheet.get("frozenCols"), undefined);
-  assert.equal(sheet.get("backgroundImageId"), undefined);
+  // Frozen panes + background image are mirrored to the sheet root for back-compat.
+  assert.equal(sheet.get("frozenRows"), 3);
+  assert.equal(sheet.get("frozenCols"), 4);
+  assert.equal(sheet.get("backgroundImageId"), "bg3.png");
+  // Legacy aliases should be removed.
   assert.equal(sheet.get("background_image_id"), undefined);
   assert.equal(sheet.get("backgroundImage"), undefined);
   assert.equal(sheet.get("background_image"), undefined);
@@ -204,4 +205,3 @@ test("binder deletes legacy top-level sheet view keys when writing view updates 
   binder.destroy();
   doc.destroy();
 });
-

@@ -2283,10 +2283,14 @@ export function bindYjsToDocumentController(options) {
             // This keeps the Yjs document schema stable (BranchService compatible) and avoids stale
             // legacy fields "resurrecting" when other parts of the stack fall back to top-level
             // keys during partial migrations.
-            sheetMap.delete("frozenRows");
-            sheetMap.delete("frozenCols");
+            //
+            // Note: we intentionally *mirror* frozen panes + backgroundImageId to the sheet root for
+            // backwards compatibility with older clients, but we converge away legacy alias keys.
+            if (sheetMap.get("frozenRows") !== view.frozenRows) sheetMap.set("frozenRows", view.frozenRows);
+            if (sheetMap.get("frozenCols") !== view.frozenCols) sheetMap.set("frozenCols", view.frozenCols);
             if (view.backgroundImageId != null || before.backgroundImageId != null) {
-              sheetMap.delete("backgroundImageId");
+              if (nextBg) sheetMap.set("backgroundImageId", nextBg);
+              else sheetMap.delete("backgroundImageId");
               sheetMap.delete("background_image_id");
               sheetMap.delete("backgroundImage");
               sheetMap.delete("background_image");
@@ -2336,10 +2340,12 @@ export function bindYjsToDocumentController(options) {
           sheetMap.set("view", nextView);
 
           // See comment above: converge legacy top-level keys.
-          sheetMap.delete("frozenRows");
-          sheetMap.delete("frozenCols");
+          if (sheetMap.get("frozenRows") !== view.frozenRows) sheetMap.set("frozenRows", view.frozenRows);
+          if (sheetMap.get("frozenCols") !== view.frozenCols) sheetMap.set("frozenCols", view.frozenCols);
           if (view.backgroundImageId != null || before.backgroundImageId != null) {
-            sheetMap.delete("backgroundImageId");
+            const nextBg = normalizeOptionalId(view.backgroundImageId);
+            if (nextBg) sheetMap.set("backgroundImageId", nextBg);
+            else sheetMap.delete("backgroundImageId");
             sheetMap.delete("background_image_id");
             sheetMap.delete("backgroundImage");
             sheetMap.delete("background_image");
