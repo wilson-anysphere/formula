@@ -26,7 +26,13 @@ class DashboardIndexMetadataTests(unittest.TestCase):
             )
 
             (triage_dir / "index.json").write_text(
-                json.dumps({"commit": "deadbeef", "run_url": "https://example.invalid/run/1"}),
+                json.dumps(
+                    {
+                        "timestamp": "2026-01-01T00:00:00+00:00",
+                        "commit": "deadbeef",
+                        "run_url": "https://example.invalid/run/1",
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -50,6 +56,7 @@ class DashboardIndexMetadataTests(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary.get("timestamp"), "2026-01-01T00:00:00+00:00")
             self.assertEqual(summary.get("commit"), "deadbeef")
             self.assertEqual(summary.get("run_url"), "https://example.invalid/run/1")
 

@@ -1253,6 +1253,9 @@ def main() -> int:
             # Prefer the triage run's metadata over local fallbacks (e.g. util.github_commit_sha()
             # may fall back to `git rev-parse HEAD` on local machines, which can be misleading when
             # analyzing an artifact from a different revision).
+            ts = index.get("timestamp")
+            if isinstance(ts, str) and ts:
+                summary["timestamp"] = ts
             commit = index.get("commit")
             if isinstance(commit, str) and commit:
                 summary["commit"] = commit
