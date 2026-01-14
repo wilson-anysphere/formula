@@ -4542,6 +4542,15 @@ impl WasmWorkbook {
             }
         }
 
+        // Map workbook model style ids through the engine's style interner so row/column/cell
+        // formatting layers reference the engine's canonical style ids. This keeps style ids
+        // consistent even when the incoming style table contains duplicate entries.
+        let mut style_id_map: Vec<u32> = Vec::with_capacity(model.styles.styles.len());
+        style_id_map.push(0);
+        for style in model.styles.styles.iter().skip(1) {
+            style_id_map.push(wb.engine.intern_style(style.clone()));
+        }
+
         // Best-effort: import the persisted worksheet view origin (`pane/@topLeftCell`) so
         // `INFO("origin")` returns an Excel-like value immediately after XLSX import.
         //
@@ -4581,7 +4590,12 @@ impl WasmWorkbook {
                     wb.set_col_width_chars_internal(&sheet_name, col, Some(width))?;
                 }
                 wb.engine.set_col_hidden(&sheet_name, col, props.hidden);
-                wb.engine.set_col_style_id(&sheet_name, col, props.style_id);
+                let mapped_style_id = props
+                    .style_id
+                    .and_then(|id| style_id_map.get(id as usize).copied())
+                    .filter(|id| *id != 0);
+                wb.engine
+                    .set_col_style_id(&sheet_name, col, mapped_style_id);
             }
 
             // Outline indices are 1-based (Excel / OOXML).
@@ -4599,8 +4613,15 @@ impl WasmWorkbook {
             }
 
             for (&row, props) in &sheet.row_properties {
-                if let Some(style_id) = props.style_id {
-                    wb.engine.set_row_style_id(&sheet_name, row, Some(style_id));
+                let Some(style_id) = props.style_id else {
+                    continue;
+                };
+                let mapped = style_id_map
+                    .get(style_id as usize)
+                    .copied()
+                    .unwrap_or(0);
+                if mapped != 0 {
+                    wb.engine.set_row_style_id(&sheet_name, row, Some(mapped));
                 }
             }
         }
@@ -4666,23 +4687,28 @@ impl WasmWorkbook {
                 let address = cell_ref.to_a1();
                 let phonetic = cell.phonetic.as_deref().map(|s| s.to_string());
 
-                // Apply formatting, including style-only cells.
-                let style_id = cell.style_id;
-                if style_id != 0 {
-                    wb.engine
-                        .set_cell_style_id(&sheet_name, &address, style_id)
-                        .map_err(|err| js_err(err.to_string()))?;
+                // Apply formatting metadata first (including style-only cells) so cached values can
+                // be rounded correctly when the workbook uses "precision as displayed".
+                if cell.style_id != 0 {
+                    let mapped = style_id_map
+                        .get(cell.style_id as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    if mapped != 0 {
+                        wb.engine
+                            .set_cell_style_id(&sheet_name, &address, mapped)
+                            .map_err(|err| js_err(err.to_string()))?;
+                    }
                 }
 
-                // Skip style-only cells (not representable in this WASM DTO surface).
+                // Skip style-only cells (no value/formula/phonetic). These are not represented in
+                // the sparse JS input map (`toJson()`), but their formatting must still be present
+                // in the calc engine so worksheet information functions like `CELL("format")` /
+                // `CELL("protect")` observe the correct metadata.
                 let has_formula = cell.formula.is_some();
                 let has_value = !cell.value.is_empty();
                 let has_phonetic = cell.phonetic.is_some();
                 if !has_formula && !has_value && !has_phonetic {
-                    // Style-only cells are not represented in the sparse JS input map (`toJson`),
-                    // but still need to be present in the calc engine so worksheet info functions
-                    // like `CELL("format")` / `CELL("protect")` can observe their formatting
-                    // metadata. The style id has already been applied above via `set_cell_style_id`.
                     continue;
                 }
 

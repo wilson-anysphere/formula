@@ -20,9 +20,9 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
 
     let sheet_id = workbook.add_sheet(DEFAULT_SHEET).unwrap();
     let sheet = workbook.sheet_mut(sheet_id).unwrap();
+
     // Style-only formatted-but-empty cell.
     sheet.set_style_id_a1("A1", style_id).unwrap();
-
     sheet
         .set_formula_a1("B1", Some(r#"CELL("format",A1)"#.to_string()))
         .unwrap();
@@ -49,13 +49,14 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
     // Keep `toJson` sparse: style-only cells should not appear in the input map.
     let json = wb.to_json().unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let cells = parsed
+        .get("sheets")
+        .and_then(|sheets| sheets.get(DEFAULT_SHEET))
+        .and_then(|sheet| sheet.get("cells"))
+        .and_then(|cells| cells.as_object())
+        .expect("toJson output should include a sheet cell map");
     assert!(
-        parsed
-            .get("sheets")
-            .and_then(|sheets| sheets.get(DEFAULT_SHEET))
-            .and_then(|sheet| sheet.get("cells"))
-            .and_then(|cells| cells.get("A1"))
-            .is_none(),
+        !cells.contains_key("A1"),
         "toJson should not include an explicit A1 entry: {json}"
     );
 }
