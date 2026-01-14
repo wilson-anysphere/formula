@@ -359,6 +359,23 @@ describe("drawings/modelAdapters", () => {
     expect(ui[0]?.preserved).toEqual({ "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>" });
   });
 
+  it("ignores malformed DocumentController preserved payloads (best-effort)", () => {
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 10, height: 10 },
+        preserved: "<not-a-map>",
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.preserved).toBeUndefined();
+  });
+
   it("preserves transform metadata even when falling back to the formula-model adapter", () => {
     // This object is in the formula-model/Rust JSON shape (externally-tagged enums),
     // but includes UI-authored `transform` metadata at the top-level. The DocumentController
