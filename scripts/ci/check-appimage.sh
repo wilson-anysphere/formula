@@ -222,6 +222,61 @@ find_appimages() {
     | sort
 }
 
+discover_appimages_in_dir() {
+  local root="$1"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+
+  # Treat the repo root as a special case: we already have a dedicated `find_appimages`
+  # helper that searches the known Cargo/Tauri output directories quickly. Running a
+  # recursive scan from the repo root is both slow (large `target/`) and unnecessary.
+  local abs_root
+  abs_root="$(cd "$root" && pwd -P)"
+  if [[ "$abs_root" == "$repo_root" ]]; then
+    while IFS= read -r appimage; do
+      [[ -n "$appimage" ]] || continue
+      printf '%s\0' "$appimage"
+    done < <(find_appimages)
+    return 0
+  fi
+
+  # Prefer predictable bundle globs (fast). This avoids an expensive recursive `find`
+  # over large Cargo target directories when callers pass `target/` (or a repo root)
+  # explicitly for debugging.
+  local nullglob_was_set=0
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+
+  local -a matches=(
+    "$root"/*.AppImage
+    "$root"/appimage/*.AppImage
+    "$root"/bundle/appimage/*.AppImage
+    "$root"/release/bundle/appimage/*.AppImage
+    "$root"/*/release/bundle/appimage/*.AppImage
+    "$root"/*/*/release/bundle/appimage/*.AppImage
+  )
+
+  if [[ "$nullglob_was_set" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+
+  if [[ "${#matches[@]}" -gt 0 ]]; then
+    printf '%s\0' "${matches[@]}"
+    return 0
+  fi
+
+  # Fallback: bounded traversal for odd layouts. Keep this shallow so we don't end up
+  # traversing massive build trees in CI when the script is called with a directory arg.
+  find "$root" \
+    -maxdepth 8 \
+    -type f \
+    -name '*.AppImage' \
+    -print0 2>/dev/null || true
+}
+
 find_main_binary() {
   # Best-effort heuristic to locate the application's main ELF binary inside
   # an extracted AppImage squashfs-root directory.
@@ -366,7 +421,7 @@ main() {
       if [[ -d "$arg" ]]; then
         while IFS= read -r -d '' f; do
           appimages+=("$f")
-        done < <(find "$arg" -type f -name '*.AppImage' -print0)
+        done < <(discover_appimages_in_dir "$arg")
       else
         appimages+=("$arg")
       fi
