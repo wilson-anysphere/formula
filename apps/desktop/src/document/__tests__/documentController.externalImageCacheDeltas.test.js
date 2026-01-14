@@ -62,6 +62,26 @@ test("applyExternalImageCacheDeltas accepts singleton-wrapped image ids (interop
   assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
 });
 
+test("applyExternalImageCacheDeltas accepts singleton-wrapped image entry records (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { 0: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" } },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
 test("applyExternalImageCacheDeltas respects markDirty=true", () => {
   const doc = new DocumentController();
   doc.markSaved();

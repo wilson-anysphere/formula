@@ -1369,6 +1369,42 @@ function unwrapSingletonId(value) {
 }
 
 /**
+ * Unwrap singleton wrapper objects/arrays only when the wrapped payload is itself an object.
+ *
+ * This is intentionally stricter than {@link unwrapSingletonId}: it avoids unwrapping bytes-like
+ * objects where `"0"` is a legitimate numeric key (e.g. `{0: 255}`), while still handling
+ * interop wrappers like `{0: {...}}` or `[{...}]`.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function unwrapSingletonObjectWrapper(value) {
+  let current = value;
+  for (let depth = 0; depth < 4; depth++) {
+    if (Array.isArray(current) && current.length === 1 && current[0] && typeof current[0] === "object") {
+      current = current[0];
+      continue;
+    }
+    if (
+      current &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
+      Object.keys(current).length === 1 &&
+      Object.prototype.hasOwnProperty.call(current, "0") &&
+      current[0] &&
+      typeof current[0] === "object"
+    ) {
+      // Using numeric property access (`current[0]`) is intentional: JS coerces it to `"0"`, which
+      // matches JSON-parsed keys and wasm-bindgen tuple objects.
+      current = current[0];
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
+/**
  * @param {any} raw
  * @returns {any[] | null}
  */
@@ -6556,14 +6592,15 @@ export class DocumentController {
     const addImageEntry = (imageId, rawEntry) => {
       const id = String(imageId ?? "").trim();
       if (!id) return;
-      const record = rawEntry && typeof rawEntry === "object" ? rawEntry : {};
+      const unwrappedEntry = unwrapSingletonObjectWrapper(rawEntry);
+      const record = unwrappedEntry && typeof unwrappedEntry === "object" ? unwrappedEntry : {};
       const bytesBase64 =
         typeof record.bytesBase64 === "string"
           ? record.bytesBase64
           : typeof record.bytes_base64 === "string"
             ? record.bytes_base64
             : null;
-      const bytesValue = bytesBase64 ?? ("bytes" in record ? record.bytes : rawEntry);
+      const bytesValue = bytesBase64 ?? ("bytes" in record ? record.bytes : unwrappedEntry);
       const bytes = parseBytes(bytesValue);
       if (!bytes || bytes.length === 0) return;
 
@@ -6606,7 +6643,8 @@ export class DocumentController {
     }
     if (Array.isArray(rawImagesField)) {
       for (const image of rawImagesField) {
-        const rawId = unwrapSingletonId(image?.id);
+        const unwrappedImage = unwrapSingletonId(image);
+        const rawId = unwrapSingletonId(unwrappedImage?.id);
         const id =
           typeof rawId === "string"
             ? rawId.trim()
@@ -6614,7 +6652,7 @@ export class DocumentController {
               ? String(rawId)
               : "";
         if (!id) continue;
-        addImageEntry(id, image);
+        addImageEntry(id, unwrappedImage);
       }
     } else if (rawImagesField && typeof rawImagesField === "object") {
       const imagesMap =
@@ -7217,12 +7255,15 @@ export class DocumentController {
 
     const normalizeImageEntryInput = (raw) => {
       if (raw == null) return { ok: true, value: null };
-      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return { ok: false, value: null };
-      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
+      const record = unwrapSingletonObjectWrapper(raw);
+      if (!record || typeof record !== "object") return { ok: false, value: null };
+      const bytes = unwrapSingletonObjectWrapper(record.bytes);
+      if (!bytes || !(bytes instanceof Uint8Array)) return { ok: false, value: null };
+      if (bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
       /** @type {ImageEntry} */
-      const out = { bytes: raw.bytes };
-      if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType") && raw.mimeType !== undefined) {
-        out.mimeType = normalizeMimeType(raw.mimeType);
+      const out = { bytes };
+      if (record && Object.prototype.hasOwnProperty.call(record, "mimeType") && record.mimeType !== undefined) {
+        out.mimeType = normalizeMimeType(record.mimeType);
       }
       return { ok: true, value: out };
     };
@@ -7296,12 +7337,15 @@ export class DocumentController {
 
     const normalizeImageEntryInput = (raw) => {
       if (raw == null) return { ok: true, value: null };
-      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return { ok: false, value: null };
-      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
+      const record = unwrapSingletonObjectWrapper(raw);
+      if (!record || typeof record !== "object") return { ok: false, value: null };
+      const bytes = unwrapSingletonObjectWrapper(record.bytes);
+      if (!bytes || !(bytes instanceof Uint8Array)) return { ok: false, value: null };
+      if (bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
       /** @type {ImageEntry} */
-      const out = { bytes: raw.bytes };
-      if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType") && raw.mimeType !== undefined) {
-        out.mimeType = normalizeMimeType(raw.mimeType);
+      const out = { bytes };
+      if (record && Object.prototype.hasOwnProperty.call(record, "mimeType") && record.mimeType !== undefined) {
+        out.mimeType = normalizeMimeType(record.mimeType);
       }
       return { ok: true, value: out };
     };

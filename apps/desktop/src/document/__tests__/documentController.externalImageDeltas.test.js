@@ -48,6 +48,23 @@ test("applyExternalImageDeltas accepts singleton-wrapped mimeType strings (inter
   assert.equal(image?.mimeType, "image/png");
 });
 
+test("applyExternalImageDeltas accepts singleton-wrapped image entry records (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageDeltas([
+    {
+      imageId: "img1",
+      before: null,
+      after: { 0: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" } },
+    },
+  ]);
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
 test("applyExternalImageDeltas respects markDirty=false", () => {
   const doc = new DocumentController();
   doc.markSaved();

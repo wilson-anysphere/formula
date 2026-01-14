@@ -462,6 +462,62 @@ test("applyState accepts singleton object-wrapped images arrays (interop)", () =
   assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
 });
 
+test("applyState accepts images array entries wrapped as singleton objects (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+      images: [{ 0: { id: "img1", bytes: [1, 2, 3], mimeType: "image/png" } }],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
+test("applyState accepts images map entries wrapped as singleton objects (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+      images: {
+        img1: { 0: { bytes: [1, 2, 3], mimeType: "image/png" } },
+      },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
 test("setSheetDrawings accepts singleton-wrapped numeric ids (interop)", () => {
   const doc = new DocumentController();
   doc.setSheetDrawings("Sheet1", [
