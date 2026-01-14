@@ -3164,6 +3164,10 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
+    this.formulaRangePreviewTooltip?.remove();
+    this.formulaRangePreviewTooltip = null;
+    this.formulaRangePreviewTooltipVisible = false;
+    this.formulaRangePreviewTooltipLastKey = null;
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
     this.sharedProvider = null;
