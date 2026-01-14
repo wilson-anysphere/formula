@@ -442,9 +442,11 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/tauri
-          # Include the Rust toolchain pin so Rust upgrades force rebuilding cached tooling.
-          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
+            # Backwards-compat: allow restoring caches created before we aligned the key format
+            # with release/dry-run workflows (which did not include the extra toolchain hash segment).
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Cache Tauri permission list (cargo tauri permission ls)
         id: tauri-permission-list-cache
