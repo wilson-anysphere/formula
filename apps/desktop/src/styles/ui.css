@@ -645,6 +645,7 @@ a:visited {
 
 .formula-bar-error-button:focus-visible {
   outline: none;
+  border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
@@ -1246,8 +1247,8 @@ a:visited {
 #sheet-tabs.sheet-bar .sheet-nav-btn:focus-visible,
 #sheet-tabs.sheet-bar .sheet-add:focus-visible,
 #sheet-tabs.sheet-bar .sheet-overflow:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
 }
 
 #sheet-tabs.sheet-bar .sheet-nav-btn:disabled {

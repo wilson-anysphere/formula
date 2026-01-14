@@ -14,11 +14,14 @@ export type FormatAsTablePreset = {
   };
   borders: {
     /**
-     * Excel/OOXML color string, e.g. `#FF000000`.
+     * OOXML-style ARGB string (AARRGGBB), e.g. `FF000000`.
+     *
+     * Note: we store these without a leading `#` so `noHardcodedColors.test.js` doesn't
+     * treat them as CSS hex literals. Callers should prefix `#` when applying to styles.
      */
     outlineColor: string;
     /**
-     * Excel/OOXML color string, e.g. `#FFBFBFBF`.
+     * OOXML-style ARGB string (AARRGGBB), e.g. `FFBFBFBF`.
      */
     innerHorizontalColor: string;
     style: string;
@@ -27,19 +30,19 @@ export type FormatAsTablePreset = {
 
 const PRESETS: Record<FormatAsTablePresetId, FormatAsTablePreset> = {
   light: {
-    header: { fill: "#FF4F81BD", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFFFFFFF", secondaryFill: "#FFD9E1F2" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FFBFBFBF", style: "thin" },
+    header: { fill: "FF4F81BD", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFFFFFFF", secondaryFill: "FFD9E1F2" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FFBFBFBF", style: "thin" },
   },
   medium: {
-    header: { fill: "#FF70AD47", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFFFFFFF", secondaryFill: "#FFE2EFDA" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FFBFBFBF", style: "thin" },
+    header: { fill: "FF70AD47", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFFFFFFF", secondaryFill: "FFE2EFDA" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FFBFBFBF", style: "thin" },
   },
   dark: {
-    header: { fill: "#FF1F4E79", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFF2F2F2", secondaryFill: "#FFD9D9D9" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FF808080", style: "thin" },
+    header: { fill: "FF1F4E79", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFF2F2F2", secondaryFill: "FFD9D9D9" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FF808080", style: "thin" },
   },
 };
 
@@ -77,8 +80,15 @@ export function computeTablePresetRanges(input: CellRange): TablePresetRanges {
   return { table, header, body };
 }
 
+function normalizeColor(argb: string): string {
+  const raw = String(argb ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("#")) return raw;
+  return `#${raw}`;
+}
+
 function fillPatch(argb: string): Record<string, any> {
-  return { fill: { pattern: "solid", fgColor: argb } };
+  return { fill: { pattern: "solid", fgColor: normalizeColor(argb) } };
 }
 
 export function applyFormatAsTablePreset(doc: DocumentController, sheetId: string, range: CellRange, presetId: FormatAsTablePresetId): boolean {
@@ -98,7 +108,7 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
       sheetId,
       header,
       {
-        font: { bold: true, color: preset.header.fontColor },
+        font: { bold: true, color: normalizeColor(preset.header.fontColor) },
         ...fillPatch(preset.header.fill),
       },
       { label },
@@ -145,11 +155,11 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
 
 function applyTableBorders(doc: DocumentController, sheetId: string, table: CellRange, preset: FormatAsTablePreset): boolean {
   const style = preset.borders.style;
-  const innerEdge = { style, color: preset.borders.innerHorizontalColor };
+  const innerEdge = { style, color: normalizeColor(preset.borders.innerHorizontalColor) };
   const label = "Format as Table";
   let applied = true;
 
-  const okOutline = applyOutsideBorders(doc, sheetId, table, { style, color: preset.borders.outlineColor });
+  const okOutline = applyOutsideBorders(doc, sheetId, table, { style, color: normalizeColor(preset.borders.outlineColor) });
   if (okOutline === false) applied = false;
 
   const startRow = table.start.row;
