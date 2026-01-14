@@ -5375,8 +5375,7 @@ mod tests {
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
     use crate::resource_limits::{MAX_ORIGIN_XLSX_BYTES, MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef,
-        SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, SubtotalPosition, ValueField,
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
