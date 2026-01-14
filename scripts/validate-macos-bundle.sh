@@ -220,7 +220,9 @@ schemes = []
 for url_type in data.get("CFBundleURLTypes", []) or []:
     for s in url_type.get("CFBundleURLSchemes", []) or []:
         if isinstance(s, str) and s:
-            schemes.append(s)
+            val = s.strip().lower()
+            if val:
+                schemes.append(val)
 
 for s in schemes:
     print(s)
@@ -275,7 +277,9 @@ schemes = []
 for url_type in data.get("CFBundleURLTypes", []) or []:
     for s in (url_type.get("CFBundleURLSchemes", []) or []):
         if isinstance(s, str) and s:
-            schemes.append(s)
+            val = s.strip().lower()
+            if val:
+                schemes.append(val)
 
 for s in schemes:
     print(s)
