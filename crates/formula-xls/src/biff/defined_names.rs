@@ -639,6 +639,12 @@ impl<'a> FragmentCursor<'a> {
 
                         let take_chars = remaining_chars.min(available_chars);
                         let take_bytes = take_chars * bytes_per_char;
+                        if out.len() + take_bytes > cce {
+                            return Err(
+                                "PtgStr character payload exceeds declared rgce length"
+                                    .to_string(),
+                            );
+                        }
                         let bytes = self.read_exact_from_current(take_bytes)?;
                         out.extend_from_slice(bytes);
                         remaining_chars -= take_chars;
@@ -647,9 +653,17 @@ impl<'a> FragmentCursor<'a> {
                     let richtext_bytes = richtext_runs
                         .checked_mul(4)
                         .ok_or_else(|| "rich text run count overflow".to_string())?;
-                    if richtext_bytes + ext_size > 0 {
-                        let extra =
-                            self.read_biff8_string_bytes(richtext_bytes + ext_size, &mut is_unicode)?;
+                    let extra_len = richtext_bytes
+                        .checked_add(ext_size)
+                        .ok_or_else(|| "PtgStr extra payload length overflow".to_string())?;
+                    if extra_len > 0 {
+                        let remaining = cce.saturating_sub(out.len());
+                        if extra_len > remaining {
+                            return Err(
+                                "PtgStr extra payload exceeds declared rgce length".to_string(),
+                            );
+                        }
+                        let extra = self.read_biff8_string_bytes(extra_len, &mut is_unicode)?;
                         out.extend_from_slice(&extra);
                     }
                 }
@@ -1377,7 +1391,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1431,7 +1448,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1484,7 +1504,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1541,7 +1564,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1556,6 +1582,42 @@ mod tests {
         let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
         assert_eq!(raw.name, name);
         assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn ptgstr_ext_size_out_of_bounds_errors_without_allocating_unbounded() {
+        // Crafted PtgStr that sets fExtSt with a huge cbExtRst. The parser should not try to
+        // allocate cbExtRst bytes; it should fail fast and return an error.
+        let name = "BigExt";
+        let rgce = vec![0x17, 0u8, STR_FLAG_EXT, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, rgce].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+
+        let err = parse_biff8_name_record(&record, 1252, &[]).unwrap_err();
+        assert!(err.contains("PtgStr"), "err={err}");
     }
 
     #[test]

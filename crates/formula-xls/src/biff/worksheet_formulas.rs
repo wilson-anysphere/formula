@@ -291,7 +291,9 @@ const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
 
 fn warn(warnings: &mut Vec<crate::ImportWarning>, msg: impl Into<String>) {
     if warnings.len() < MAX_WARNINGS_PER_SHEET {
-        warnings.push(crate::ImportWarning { message: msg.into() });
+        warnings.push(crate::ImportWarning {
+            message: msg.into(),
+        });
         return;
     }
     // Add a single terminal warning so callers have a hint that the import was noisy.
@@ -716,9 +718,7 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
     }
 }
 
-fn parse_shrfmla_with_refu(
-    cursor: &mut FragmentCursor<'_>,
-) -> Result<(Vec<u8>, Vec<u8>), String> {
+fn parse_shrfmla_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
     // cUse
@@ -741,9 +741,7 @@ fn parse_shrfmla_with_refu_no_cuse(
     Ok((rgce, rgcb))
 }
 
-fn parse_shrfmla_with_ref8(
-    cursor: &mut FragmentCursor<'_>,
-) -> Result<(Vec<u8>, Vec<u8>), String> {
+fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
     // cUse
@@ -1022,6 +1020,12 @@ impl<'a> FragmentCursor<'a> {
 
                         let take_chars = remaining_chars.min(available_chars);
                         let take_bytes = take_chars * bytes_per_char;
+                        if out.len() + take_bytes > cce {
+                            return Err(
+                                "PtgStr character payload exceeds declared rgce length"
+                                    .to_string(),
+                            );
+                        }
                         let bytes = self.read_exact_from_current(take_bytes)?;
                         out.extend_from_slice(bytes);
                         remaining_chars -= take_chars;
@@ -1030,9 +1034,17 @@ impl<'a> FragmentCursor<'a> {
                     let richtext_bytes = richtext_runs
                         .checked_mul(4)
                         .ok_or_else(|| "rich text run count overflow".to_string())?;
-                    if richtext_bytes + ext_size > 0 {
-                        let extra =
-                            self.read_biff8_string_bytes(richtext_bytes + ext_size, &mut is_unicode)?;
+                    let extra_len = richtext_bytes
+                        .checked_add(ext_size)
+                        .ok_or_else(|| "PtgStr extra payload length overflow".to_string())?;
+                    if extra_len > 0 {
+                        let remaining = cce.saturating_sub(out.len());
+                        if extra_len > remaining {
+                            return Err(
+                                "PtgStr extra payload exceeds declared rgce length".to_string(),
+                            );
+                        }
+                        let extra = self.read_biff8_string_bytes(extra_len, &mut is_unicode)?;
                         out.extend_from_slice(&extra);
                     }
                 }
@@ -2167,6 +2179,22 @@ mod tests {
 
         let err = parse_biff8_formula_record(&record).unwrap_err();
         assert_eq!(err, "string continuation split mid-character");
+    }
+
+    #[test]
+    fn ptgstr_ext_size_out_of_bounds_errors_without_allocating_unbounded() {
+        // Crafted PtgStr that sets fExtSt with a huge cbExtRst. The parser should not try to
+        // allocate cbExtRst bytes; it should fail fast and return an error.
+        let rgce = vec![0x17, 0u8, STR_FLAG_EXT, 0xFF, 0xFF, 0xFF, 0xFF];
+        let payload = formula_payload(0, 0, 0, &rgce);
+        let stream = record(RECORD_FORMULA, &payload);
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+
+        let err = parse_biff8_formula_record(&record).unwrap_err();
+        assert!(err.contains("PtgStr"), "err={err}");
     }
 
     #[test]
