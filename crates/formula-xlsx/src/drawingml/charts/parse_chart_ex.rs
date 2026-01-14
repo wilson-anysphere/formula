@@ -213,7 +213,11 @@ fn parse_legend(
         layout,
     })
 }
-fn detect_chart_kind(doc: &Document<'_>, root_ns: &str, diagnostics: &mut Vec<ChartDiagnostic>) -> String {
+fn detect_chart_kind(
+    doc: &Document<'_>,
+    _root_ns: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
     if let Some(node) = find_chart_type_node(doc) {
         let raw = node.tag_name().name();
@@ -248,7 +252,6 @@ fn detect_chart_kind(doc: &Document<'_>, root_ns: &str, diagnostics: &mut Vec<Ch
         return chart_type;
     }
 
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
     let hints = collect_chart_ex_kind_hints(doc);
     let hint_list = if hints.is_empty() {
         "<none>".to_string()
@@ -259,9 +262,7 @@ fn detect_chart_kind(doc: &Document<'_>, root_ns: &str, diagnostics: &mut Vec<Ch
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!(
-            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
-        ),
+        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
     });
 
     "unknown".to_string()
