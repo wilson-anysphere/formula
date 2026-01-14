@@ -314,4 +314,57 @@ describe("what-if UI components", () => {
     expect(host.querySelectorAll("[style]").length).toBe(0);
     expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
+
+  it("MonteCarloWizard marks invalid distribution JSON only after run and clears when fixed", async () => {
+    const runMonteCarlo = vi.fn(async () => {
+      throw new Error("Should not run when distribution JSON is invalid");
+    });
+
+    const api = createStubApi({ runMonteCarlo });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(MonteCarloWizard, { api }));
+    });
+
+    const jsonInput = host.querySelector('input[aria-label="Distribution JSON"]') as HTMLInputElement | null;
+    expect(jsonInput).toBeTruthy();
+
+    await act(async () => {
+      setTextInputValue(jsonInput!, "{");
+    });
+
+    // Still editable (no red invalid state) until the user tries to run.
+    expect(jsonInput?.getAttribute("aria-invalid")).toBe(null);
+
+    const runBtn = Array.from(host.querySelectorAll("button")).find((btn) => btn.textContent === "Run simulation") as
+      | HTMLButtonElement
+      | undefined;
+    expect(runBtn).toBeTruthy();
+
+    await act(async () => {
+      runBtn!.click();
+      await flushPromises();
+    });
+
+    expect(runMonteCarlo).not.toHaveBeenCalled();
+
+    const alert = host.querySelector('[role="alert"]') as HTMLElement | null;
+    expect(alert).toBeTruthy();
+    expect(alert?.textContent).toContain("Fix invalid distribution JSON before running.");
+    expect(jsonInput?.getAttribute("aria-invalid")).toBe("true");
+    expect(jsonInput?.getAttribute("aria-describedby")).toBe(alert?.id ?? null);
+
+    await act(async () => {
+      setTextInputValue(jsonInput!, '{"type":"normal","mean":0,"stdDev":1}');
+      await flushPromises();
+    });
+
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(jsonInput?.getAttribute("aria-invalid")).toBe(null);
+    expect(jsonInput?.getAttribute("aria-describedby")).toBe(null);
+  });
 });
