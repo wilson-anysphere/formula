@@ -372,3 +372,33 @@ fn xlsx_document_roundtrip_preserves_drawing_mapping_after_drawing_edit() {
     let out_parts = drawing_part_names(&saved);
     assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
 }
+
+#[test]
+fn xlsx_document_roundtrip_preserves_drawing_mapping_after_sheet_delete() {
+    let input = build_two_sheet_drawing_workbook();
+    let mut doc = load_from_bytes(&input).expect("load synthetic workbook");
+
+    let sheet1_id = doc
+        .workbook
+        .sheets
+        .iter()
+        .find(|s| s.name == "Sheet1")
+        .expect("Sheet1")
+        .id;
+    doc.workbook.sheets.retain(|s| s.id != sheet1_id);
+
+    let saved = doc.save_to_vec().expect("save");
+    let _doc2 = load_from_bytes(&saved).expect("reload");
+
+    let sheet2_rels = zip_part_string(&saved, "xl/worksheets/_rels/sheet2.xml.rels")
+        .expect("output sheet2 rels");
+    let (sheet2_out_id, sheet2_out_target) =
+        sheet_drawing_relationship(&sheet2_rels).expect("output sheet2 drawing rel");
+
+    assert_eq!(sheet2_out_id, "rId1");
+    assert_eq!(sheet2_out_target, "../drawings/drawing2.xml");
+    assert!(
+        zip_part_bytes(&saved, "xl/drawings/drawing2.xml").is_some(),
+        "expected drawing2.xml to remain present after deleting Sheet1"
+    );
+}
