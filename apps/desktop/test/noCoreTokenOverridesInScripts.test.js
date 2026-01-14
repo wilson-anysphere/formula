@@ -53,12 +53,19 @@ test("desktop UI scripts should not override core design tokens", () => {
     /\.style\??\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
   const tokenOpBracket =
     /\.style(?:\?\.)?\s*\[\s*(?:["'`])(?<op>setProperty|removeProperty)(?:["'`])\s*]\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
+  const tokenOpStyleBracket =
+    /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
+  const tokenOpStyleBracketBracket =
+    /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])(?<op>setProperty|removeProperty)(?:["'`])\s*]\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
   // Also guard against scripts overriding core tokens via style strings (cssText / setAttribute("style")).
   // These APIs are less common, but they can still override CSS variables at runtime.
   const tokenAssignmentInStyleString =
     /(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*:/gi;
   const cssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
   const cssTextBracketAssignment = /\.style\s*\[\s*(?:["'`])cssText(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
+  const cssTextStyleBracketAssignment = /\[\s*(?:["'`])style(?:["'`])\s*]\.cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
+  const cssTextStyleBracketBracketAssignment =
+    /\[\s*(?:["'`])style(?:["'`])\s*]\s*\[\s*(?:["'`])cssText(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
   const setAttributeStyle = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
 
   for (const file of files) {
@@ -67,7 +74,7 @@ test("desktop UI scripts should not override core design tokens", () => {
     const rel = path.relative(desktopRoot, file).replace(/\\\\/g, "/");
 
     let match;
-    for (const re of [tokenOp, tokenOpBracket]) {
+    for (const re of [tokenOp, tokenOpBracket, tokenOpStyleBracket, tokenOpStyleBracketBracket]) {
       re.lastIndex = 0;
       while ((match = re.exec(stripped))) {
         const prop = match.groups?.prop ?? "";
@@ -85,6 +92,8 @@ test("desktop UI scripts should not override core design tokens", () => {
     for (const { re, kind } of [
       { re: cssTextAssignment, kind: "style.cssText" },
       { re: cssTextBracketAssignment, kind: "style[cssText]" },
+      { re: cssTextStyleBracketAssignment, kind: "style['style'].cssText" },
+      { re: cssTextStyleBracketBracketAssignment, kind: "style['style'][cssText]" },
       { re: setAttributeStyle, kind: "setAttribute(style)" },
     ]) {
       re.lastIndex = 0;
