@@ -2937,17 +2937,14 @@ export class SpreadsheetApp {
             target === this.auditingCanvas ||
             target === this.presenceCanvas;
           if (!isGridSurface) return false;
-
-          // In non-canvas charts mode, chart selection handles are rendered above workbook drawings.
-          // When a chart is selected, allow resize-handle interactions to win so drawings do not steal
-          // pointerdowns from the chart handles underneath.
-          if (!this.useCanvasCharts && this.selectedChartId != null) {
-            const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
-            if (chartHit && chartHit.chart.id === this.selectedChartId) {
-              const handle = this.chartResizeHandleAtPoint(chartHit);
-              if (handle) return false;
-            }
-          }
+ 
+           // In non-canvas charts mode, chart selection handles are rendered above workbook drawings.
+           // When a chart is selected, allow resize-handle interactions to win so drawings do not steal
+           // pointerdowns from the chart handles underneath.
+           if (!this.useCanvasCharts && this.selectedChartId != null) {
+             const handleHit = this.hitTestSelectedChartResizeHandleAtClientPoint(e.clientX, e.clientY);
+             if (handleHit) return false;
+           }
 
           // In canvas-charts mode, charts are rendered above workbook drawings. If a chart is under the pointer,
           // let chart interactions win so drawings don't steal clicks from charts underneath.
@@ -14689,6 +14686,52 @@ export class SpreadsheetApp {
     return null;
   }
 
+  private hitTestSelectedChartResizeHandleAtClientPoint(clientX: number, clientY: number): {
+    chart: ChartRecord;
+    rect: { left: number; top: number; width: number; height: number };
+    pane: { key: "topLeft" | "topRight" | "bottomLeft" | "bottomRight"; rect: { x: number; y: number; width: number; height: number } };
+    pointInCellArea: { x: number; y: number };
+    resizeHandle: ResizeHandle;
+  } | null {
+    const selectedId = this.selectedChartId;
+    if (!selectedId) return null;
+    const chart = this.getChartRecordById(selectedId);
+    if (!chart || chart.sheetId !== this.sheetId) return null;
+    const rect = this.chartAnchorToViewportRect(chart.anchor);
+    if (!rect) return null;
+    this.maybeRefreshRootPosition({ force: true });
+    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    const x = clientX - this.rootLeft - layout.originX;
+    const y = clientY - this.rootTop - layout.originY;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const resizeHandle = hitTestResizeHandle({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }, x, y);
+    if (!resizeHandle) return null;
+
+    const { frozenRows, frozenCols } = this.getFrozen();
+    const fromRow =
+      chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+    const fromCol =
+      chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+    const inFrozenRows = fromRow < frozenRows;
+    const inFrozenCols = fromCol < frozenCols;
+    const paneKey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" =
+      inFrozenRows && inFrozenCols
+        ? "topLeft"
+        : inFrozenRows && !inFrozenCols
+          ? "topRight"
+          : !inFrozenRows && inFrozenCols
+            ? "bottomLeft"
+            : "bottomRight";
+    const paneRect = layout.paneRects[paneKey];
+    return {
+      chart,
+      rect,
+      pane: { key: paneKey, rect: paneRect },
+      pointInCellArea: { x, y },
+      resizeHandle,
+    };
+  }
+
   private chartResizeHandleAtPoint(hit: {
     rect: { left: number; top: number; width: number; height: number };
     pointInCellArea: { x: number; y: number };
@@ -14742,7 +14785,18 @@ export class SpreadsheetApp {
       target === this.presenceCanvas;
     if (!isGridSurface) return;
 
-    const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+    // Prefer selected-chart resize handle hits even when the handle extends outside the clipped
+    // chart bounds. The handle chrome is rendered above drawings, so it should be interactive
+    // anywhere within the handle square (including the portion that sits outside the chart rect).
+    const selectedHandleHit = this.hitTestSelectedChartResizeHandleAtClientPoint(e.clientX, e.clientY);
+    const hit = selectedHandleHit
+      ? {
+          chart: selectedHandleHit.chart,
+          rect: selectedHandleHit.rect,
+          pane: selectedHandleHit.pane,
+          pointInCellArea: selectedHandleHit.pointInCellArea,
+        }
+      : this.hitTestChartAtClientPoint(e.clientX, e.clientY);
     // Chart selection handles are rendered above drawings, so allow handle interactions even when a drawing overlaps.
     const wasSelected = hit ? this.selectedChartId === hit.chart.id : false;
     const resizeHandle = wasSelected && hit ? this.chartResizeHandleAtPoint(hit) : null;

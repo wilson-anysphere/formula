@@ -826,6 +826,7 @@ export class DrawingOverlay {
 
       for (const obj of ordered) {
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
+        if (rect.width <= 0 || rect.height <= 0) continue;
         const anchor = obj.anchor;
         let scrollX = scrollXBase;
         let scrollY = scrollYBase;
