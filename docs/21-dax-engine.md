@@ -777,7 +777,9 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `MINX(tableExpr, valueExpr)`
 - `COUNTX(tableExpr, valueExpr)`
 - `CONCATENATEX(tableExpr, textExpr, [delimiter], [orderByExpr], [order])`  
-  (limited: `order` must be `ASC` or `DESC`; `orderByExpr` must produce consistently numeric or text values)
+  (limited: `order` must be `ASC` or `DESC`; if any `orderByExpr` key evaluates to `Text`, sorting is text-based
+  with Excel-like case-insensitive ordering; otherwise sorting is numeric. Mixed text+numeric keys are allowed and
+  will sort as text.)
 - `HASONEVALUE(Table[Column])`
 - `SELECTEDVALUE(Table[Column], [alternateResult])`
 - `LOOKUPVALUE(ResultTable[ResultCol], SearchTable[SearchCol1], SearchValue1, ..., [alternateResult])`  
