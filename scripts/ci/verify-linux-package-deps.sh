@@ -271,13 +271,17 @@ shopt -u nullglob
 if [[ "${#debs[@]}" -eq 0 ]]; then
   while IFS= read -r -d '' f; do
     debs+=("$f")
-  done < <(find "${bundle_dirs[@]}" -type f -name "*.deb" -print0)
+  # Keep fallback discovery bounded: bundle dirs should be shallow and scanning deeply can be
+  # surprisingly expensive if unexpected extracted artifacts exist.
+  done < <(find "${bundle_dirs[@]}" -maxdepth 6 -type f -name "*.deb" -print0)
 fi
 
 if [[ "${#rpms[@]}" -eq 0 ]]; then
   while IFS= read -r -d '' f; do
     rpms+=("$f")
-  done < <(find "${bundle_dirs[@]}" -type f -name "*.rpm" -print0)
+  # Keep fallback discovery bounded: bundle dirs should be shallow and scanning deeply can be
+  # surprisingly expensive if unexpected extracted artifacts exist.
+  done < <(find "${bundle_dirs[@]}" -maxdepth 6 -type f -name "*.rpm" -print0)
 fi
 
 # Sort/de-dupe for determinism.

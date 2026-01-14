@@ -21,6 +21,23 @@ const hasBash = (() => {
   return probe.status === 0;
 })();
 
+test("verify-linux-package-deps bounds fallback package discovery scans (perf guardrail)", () => {
+  const script = readFileSync(path.join(repoRoot, "scripts", "ci", "verify-linux-package-deps.sh"), "utf8");
+  for (const needle of ['find "${bundle_dirs[@]}"', 'find \"${bundle_dirs[@]}\"']) {
+    // There should be at least one find invocation using the bundle_dirs array.
+    if (!script.includes(needle)) continue;
+    const idx = script.indexOf(needle);
+    const snippet = script.slice(idx, idx + 200);
+    assert.ok(
+      snippet.includes("-maxdepth"),
+      `Expected verify-linux-package-deps.sh to bound fallback find scans over bundle dirs with -maxdepth.\nSaw snippet:\n${snippet}`,
+    );
+  }
+  // Ensure we don't regress to the previous unbounded form.
+  assert.doesNotMatch(script, /find \"\\$\\{bundle_dirs\\[@\\]\\}\" -type f -name \"\\*\\.deb\"/);
+  assert.doesNotMatch(script, /find \"\\$\\{bundle_dirs\\[@\\]\\}\" -type f -name \"\\*\\.rpm\"/);
+});
+
 function writeFakeTool(binDir, name, contents) {
   const p = path.join(binDir, name);
   writeFileSync(p, contents, "utf8");
