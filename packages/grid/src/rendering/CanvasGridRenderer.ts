@@ -522,6 +522,11 @@ export class CanvasGridRenderer {
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
   private fillHandleEnabled = true;
+  private fillHandleRectMemoRange: CellRange | null = null;
+  private fillHandleRectMemoViewport: GridViewportState | null = null;
+  private fillHandleRectMemoZoom = -1;
+  private fillHandleRectMemoVisible = false;
+  private readonly fillHandleRectMemoRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private referenceHighlights: Array<{ range: CellRange; color: string; active: boolean }> = [];
 
   private remotePresences: GridPresence[] = [];
@@ -1461,7 +1466,20 @@ export class CanvasGridRenderer {
     if (this.selectionRanges.length === 0) return null;
     const range = this.selectionRanges[this.activeSelectionIndex];
     const viewport = this.scroll.getViewportState();
-    return this.fillHandleRectInViewport(range, viewport);
+    if (
+      range === this.fillHandleRectMemoRange &&
+      viewport === this.fillHandleRectMemoViewport &&
+      this.zoom === this.fillHandleRectMemoZoom
+    ) {
+      return this.fillHandleRectMemoVisible ? this.fillHandleRectMemoRect : null;
+    }
+
+    this.fillHandleRectMemoRange = range;
+    this.fillHandleRectMemoViewport = viewport;
+    this.fillHandleRectMemoZoom = this.zoom;
+    this.fillHandleRectMemoVisible = this.fillHandleRectInViewport(range, viewport, this.fillHandleRectMemoRect);
+
+    return this.fillHandleRectMemoVisible ? this.fillHandleRectMemoRect : null;
   }
 
   setFillHandleEnabled(enabled: boolean): void {
@@ -6045,21 +6063,17 @@ export class CanvasGridRenderer {
       drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
 
       if (this.fillHandleEnabled) {
-        const handleSize = 8 * this.zoom;
-        const handleRow = activeRange.endRow - 1;
-        const handleCol = activeRange.endCol - 1;
-        const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
-        if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
-          const handleRect: Rect = {
-            x: handleCellRect.x + handleCellRect.width - handleSize / 2,
-            y: handleCellRect.y + handleCellRect.height - handleSize / 2,
-            width: handleSize,
-            height: handleSize
-          };
-          const handleClipped = intersectRect(handleRect, intersection);
-          if (handleClipped) {
+        const handleRect = this.getFillHandleRect();
+        if (handleRect) {
+          const x1 = Math.max(handleRect.x, intersection.x);
+          const y1 = Math.max(handleRect.y, intersection.y);
+          const x2 = Math.min(handleRect.x + handleRect.width, intersection.x + intersection.width);
+          const y2 = Math.min(handleRect.y + handleRect.height, intersection.y + intersection.height);
+          const width = x2 - x1;
+          const height = y2 - y1;
+          if (width > 0 && height > 0) {
             ctx.fillStyle = this.theme.selectionHandle;
-            ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
+            ctx.fillRect(x1, y1, width, height);
           }
         }
       }
@@ -6333,33 +6347,49 @@ export class CanvasGridRenderer {
     return this.rangeToViewportRects(range, viewport);
   }
 
-  private fillHandleRectInViewport(range: CellRange, viewport: GridViewportState): Rect | null {
+  private fillHandleRectInViewport(range: CellRange, viewport: GridViewportState, out: Rect): boolean {
     const handleSize = DEFAULT_FILL_HANDLE_SIZE_PX * this.zoom;
     const handleRow = range.endRow - 1;
     const handleCol = range.endCol - 1;
-    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
-    if (!handleCellRect) return null;
-    if (handleCellRect.width < handleSize || handleCellRect.height < handleSize) return null;
 
-    const handleRect: Rect = {
-      x: handleCellRect.x + handleCellRect.width - handleSize / 2,
-      y: handleCellRect.y + handleCellRect.height - handleSize / 2,
-      width: handleSize,
-      height: handleSize
-    };
+    const rowAxis = this.scroll.rows;
+    const colAxis = this.scroll.cols;
+
+    const colX = colAxis.positionOf(handleCol);
+    const rowY = rowAxis.positionOf(handleRow);
+    const cellWidth = colAxis.getSize(handleCol);
+    const cellHeight = rowAxis.getSize(handleRow);
+    if (cellWidth < handleSize || cellHeight < handleSize) return false;
+
+    const scrollCols = handleCol >= viewport.frozenCols;
+    const scrollRows = handleRow >= viewport.frozenRows;
+    const cellX = scrollCols ? colX - viewport.scrollX : colX;
+    const cellY = scrollRows ? rowY - viewport.scrollY : rowY;
+
+    const handleX = cellX + cellWidth - handleSize / 2;
+    const handleY = cellY + cellHeight - handleSize / 2;
 
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
-    const quadrantRect: Rect = {
-      x: handleCol >= viewport.frozenCols ? frozenWidthClamped : 0,
-      y: handleRow >= viewport.frozenRows ? frozenHeightClamped : 0,
-      width:
-        handleCol >= viewport.frozenCols ? Math.max(0, viewport.width - frozenWidthClamped) : frozenWidthClamped,
-      height:
-        handleRow >= viewport.frozenRows ? Math.max(0, viewport.height - frozenHeightClamped) : frozenHeightClamped
-    };
 
-    return intersectRect(handleRect, quadrantRect);
+    const quadrantX = scrollCols ? frozenWidthClamped : 0;
+    const quadrantY = scrollRows ? frozenHeightClamped : 0;
+    const quadrantWidth = scrollCols ? Math.max(0, viewport.width - frozenWidthClamped) : frozenWidthClamped;
+    const quadrantHeight = scrollRows ? Math.max(0, viewport.height - frozenHeightClamped) : frozenHeightClamped;
+
+    const x1 = Math.max(handleX, quadrantX);
+    const y1 = Math.max(handleY, quadrantY);
+    const x2 = Math.min(handleX + handleSize, quadrantX + quadrantWidth);
+    const y2 = Math.min(handleY + handleSize, quadrantY + quadrantHeight);
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (width <= 0 || height <= 0) return false;
+
+    out.x = x1;
+    out.y = y1;
+    out.width = width;
+    out.height = height;
+    return true;
   }
 
   private markAllDirtyForThemeChange(): void {
