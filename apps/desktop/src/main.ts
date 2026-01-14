@@ -8992,6 +8992,9 @@ function handleRibbonCommand(commandId: string): void {
       // This command is a dropdown with menu items; the top-level command is not expected
       // to fire when the menu is present. Keep this as a fallback.
       return;
+    case "home.cells.format.organizeSheets":
+      openOrganizeSheets();
+      return;
     default:
       if (commandId.startsWith("file.")) {
         showToast(`File command not implemented: ${commandId}`);
