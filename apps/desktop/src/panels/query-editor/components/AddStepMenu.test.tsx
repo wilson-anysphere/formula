@@ -171,6 +171,46 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("generates unique unpivot output column names when the defaults already exist", async () => {
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const query: Query = {
+      ...baseQuery(),
+      steps: [
+        {
+          id: "s1",
+          name: "Unpivoted",
+          operation: { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+        },
+      ],
+    };
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query, preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Unpivot Columns").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({
+      type: "unpivot",
+      columns: ["Region"],
+      nameColumn: "Attribute 1",
+      valueColumn: "Value 1",
+    });
+  });
+
   it("generates a unique Rename Column newName when a conflicting name already exists", async () => {
     const preview = new DataTable(
       [
