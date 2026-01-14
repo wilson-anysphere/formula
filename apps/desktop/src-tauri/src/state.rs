@@ -10,6 +10,7 @@ use crate::persistence::{
 use chrono::Datelike;
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
+use formula_engine::FormatRun;
 use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotTable as EnginePivotTable, PivotValue};
 use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
 use formula_engine::style_bridge::ui_style_to_model_style;
@@ -1763,7 +1764,8 @@ impl AppState {
         payload: &crate::commands::ApplySheetFormattingDeltasRequest,
     ) -> Result<(), AppStateError> {
         use crate::commands::{
-            LimitedSheetCellFormatDeltas, LimitedSheetColFormatDeltas, LimitedSheetRowFormatDeltas,
+            LimitedSheetCellFormatDeltas, LimitedSheetColFormatDeltas,
+            LimitedSheetFormatRunsByColDeltas, LimitedSheetRowFormatDeltas,
         };
 
         let workbook = self.get_workbook()?;
@@ -1771,8 +1773,22 @@ impl AppState {
             .ok_or_else(|| AppStateError::UnknownSheet(payload.sheet_id.clone()))?;
         let sheet_name = sheet.name.clone();
 
-        // Default format is currently ignored: the engine does not yet track a per-sheet default
-        // style id, and style-aware worksheet information functions only need row/col/cell scopes.
+        // Sheet default formatting.
+        //
+        // UI formatting payloads can include camelCase keys (e.g. `numberFormat`) and "explicit
+        // clear" semantics (e.g. `numberFormat: null` overriding an imported `number_format`).
+        // Use `ui_style_to_model_style` so `CELL()` formatting queries match the UI interpretation.
+        if let Some(default_format) = payload.default_format.as_ref() {
+            let style_id = match default_format {
+                None => None,
+                Some(format) if format.is_null() => None,
+                Some(format) => {
+                    let id = self.engine.intern_style(ui_style_to_model_style(format));
+                    (id != 0).then_some(id)
+                }
+            };
+            self.engine.set_sheet_default_style_id(&sheet_name, style_id);
+        }
 
         if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats.as_ref() {
             for delta in deltas {
@@ -1782,18 +1798,13 @@ impl AppState {
                 let Ok(row) = u32::try_from(delta.row) else {
                     continue;
                 };
-                if delta.format.is_null() {
-                    let _ = self.engine.set_row_style_id(&sheet_name, row, None);
-                    continue;
-                }
-
-                let Ok(style) = serde_json::from_value::<Style>(delta.format.clone()) else {
-                    continue;
+                let style_id = if delta.format.is_null() {
+                    None
+                } else {
+                    let id = self.engine.intern_style(ui_style_to_model_style(&delta.format));
+                    (id != 0).then_some(id)
                 };
-                let style_id = self.engine.intern_style(style);
-                let _ = self
-                    .engine
-                    .set_row_style_id(&sheet_name, row, Some(style_id));
+                self.engine.set_row_style_id(&sheet_name, row, style_id);
             }
         }
 
@@ -1805,18 +1816,55 @@ impl AppState {
                 let Ok(col) = u32::try_from(delta.col) else {
                     continue;
                 };
-                if delta.format.is_null() {
-                    let _ = self.engine.set_col_style_id(&sheet_name, col, None);
+                let style_id = if delta.format.is_null() {
+                    None
+                } else {
+                    let id = self.engine.intern_style(ui_style_to_model_style(&delta.format));
+                    (id != 0).then_some(id)
+                };
+                self.engine.set_col_style_id(&sheet_name, col, style_id);
+            }
+        }
+
+        if let Some(LimitedSheetFormatRunsByColDeltas(deltas)) = payload.format_runs_by_col.as_ref()
+        {
+            for delta in deltas {
+                if delta.col < 0 {
+                    continue;
+                }
+                let Ok(col) = u32::try_from(delta.col) else {
+                    continue;
+                };
+                if col >= formula_model::EXCEL_MAX_COLS {
                     continue;
                 }
 
-                let Ok(style) = serde_json::from_value::<Style>(delta.format.clone()) else {
-                    continue;
-                };
-                let style_id = self.engine.intern_style(style);
-                let _ = self
-                    .engine
-                    .set_col_style_id(&sheet_name, col, Some(style_id));
+                let mut runs: Vec<FormatRun> = Vec::new();
+                for run in delta.runs.0.iter() {
+                    if run.start_row < 0 || run.end_row_exclusive <= run.start_row {
+                        continue;
+                    }
+                    let Ok(start_row) = u32::try_from(run.start_row) else {
+                        continue;
+                    };
+                    let Ok(end_row_exclusive) = u32::try_from(run.end_row_exclusive) else {
+                        continue;
+                    };
+                    if end_row_exclusive <= start_row {
+                        continue;
+                    }
+                    let style_id = if run.format.is_null() {
+                        0
+                    } else {
+                        self.engine.intern_style(ui_style_to_model_style(&run.format))
+                    };
+                    runs.push(FormatRun {
+                        start_row,
+                        end_row_exclusive,
+                        style_id,
+                    });
+                }
+                let _ = self.engine.set_format_runs_by_col(&sheet_name, col, runs);
             }
         }
 
@@ -1837,18 +1885,12 @@ impl AppState {
                     continue;
                 }
 
-                let Ok(style) = serde_json::from_value::<Style>(delta.format.clone()) else {
-                    continue;
-                };
-                let style_id = self.engine.intern_style(style);
-                let _ = self
+                let style_id = self
                     .engine
-                    .set_cell_style_id(&sheet_name, &addr, style_id);
+                    .intern_style(ui_style_to_model_style(&delta.format));
+                let _ = self.engine.set_cell_style_id(&sheet_name, &addr, style_id);
             }
         }
-
-        // `formatRunsByCol` is currently ignored: the UI sends explicit deltas for point/row/col
-        // formatting, which is sufficient for style-aware formula queries like `CELL("protect")`.
 
         Ok(())
     }
@@ -2155,6 +2197,17 @@ impl AppState {
 
         let mut changed = false;
         for sheet_id in sheet_ids {
+            let sheet_name = match self.get_workbook() {
+                Ok(workbook) => workbook
+                    .sheet(&sheet_id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default(),
+                Err(_) => String::new(),
+            };
+            if sheet_name.is_empty() {
+                continue;
+            }
+
             let sheet_uuid = match self.persistent_sheet_uuid(&sheet_id) {
                 Ok(v) => v,
                 Err(_) => continue,
@@ -2170,6 +2223,113 @@ impl AppState {
             let Some(obj) = raw.and_then(|v| v.as_object()) else {
                 continue;
             };
+
+            // Sheet default format.
+            //
+            // `defaultFormat` is always present in persisted UI metadata, but is often `null`.
+            // Avoid flagging a change (and triggering a redundant recalc) unless we actually apply
+            // a non-default style.
+            if let Some(default_format) = obj
+                .get("defaultFormat")
+                .or_else(|| obj.get("default_format"))
+            {
+                if default_format.is_null() {
+                    self.engine.set_sheet_default_style_id(&sheet_name, None);
+                } else {
+                    let id = self
+                        .engine
+                        .intern_style(ui_style_to_model_style(default_format));
+                    let style_id = (id != 0).then_some(id);
+                    self.engine
+                        .set_sheet_default_style_id(&sheet_name, style_id);
+                    if style_id.is_some() {
+                        changed = true;
+                    }
+                }
+            }
+
+            // Range-run formats.
+            if let Some(cols) = obj
+                .get("formatRunsByCol")
+                .or_else(|| obj.get("format_runs_by_col"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in cols {
+                    let Some(col) =
+                        parse_non_negative_i64(entry.get("col").or_else(|| entry.get("index")))
+                    else {
+                        continue;
+                    };
+                    let Ok(col_0based) = u32::try_from(col) else {
+                        continue;
+                    };
+                    if col_0based >= formula_model::EXCEL_MAX_COLS {
+                        continue;
+                    }
+
+                    let Some(runs_array) = entry.get("runs").and_then(|v| v.as_array()) else {
+                        continue;
+                    };
+
+                    let mut runs: Vec<FormatRun> = Vec::new();
+                    let mut any_non_default = false;
+                    for run in runs_array {
+                        let Some(start_row) = parse_non_negative_i64(
+                            run.get("startRow").or_else(|| run.get("start_row")),
+                        ) else {
+                            continue;
+                        };
+                        let Some(end_row_exclusive) = parse_non_negative_i64(
+                            run.get("endRowExclusive")
+                                .or_else(|| run.get("end_row_exclusive")),
+                        )
+                        .or_else(|| {
+                            parse_non_negative_i64(run.get("endRow").or_else(|| run.get("end_row")))
+                                .map(|end| end.saturating_add(1))
+                        }) else {
+                            continue;
+                        };
+                        if end_row_exclusive <= start_row {
+                            continue;
+                        }
+
+                        let Ok(start_row) = u32::try_from(start_row) else {
+                            continue;
+                        };
+                        let Ok(end_row_exclusive) = u32::try_from(end_row_exclusive) else {
+                            continue;
+                        };
+                        if start_row >= i32::MAX as u32 || end_row_exclusive > i32::MAX as u32 {
+                            continue;
+                        }
+
+                        let style_id = match run.get("format") {
+                            Some(format) if !format.is_null() => {
+                                let id = self
+                                    .engine
+                                    .intern_style(ui_style_to_model_style(format));
+                                if id != 0 {
+                                    any_non_default = true;
+                                }
+                                id
+                            }
+                            _ => 0,
+                        };
+                        runs.push(FormatRun {
+                            start_row,
+                            end_row_exclusive,
+                            style_id,
+                        });
+                    }
+
+                    if any_non_default {
+                        let _ = self
+                            .engine
+                            .set_format_runs_by_col(&sheet_name, col_0based, runs);
+                        changed = true;
+                    }
+                }
+            }
 
             // Row formats.
             if let Some(rows) = obj
@@ -4347,253 +4507,151 @@ impl AppState {
     }
 
     fn rebuild_engine_from_workbook(&mut self) -> Result<(), AppStateError> {
-        let workbook = self
-            .workbook
-            .as_ref()
-            .ok_or(AppStateError::NoWorkbookLoaded)?;
-        self.engine = FormulaEngine::new();
-        let (directory, filename) = workbook_file_metadata(workbook);
-        self.engine
-            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
-        self.engine.set_date_system(match workbook.date_system {
-            formula_model::DateSystem::Excel1900 => {
-                formula_engine::date::ExcelDateSystem::EXCEL_1900
-            }
-            formula_model::DateSystem::Excel1904 => {
-                formula_engine::date::ExcelDateSystem::Excel1904
-            }
-        });
-        for sheet in &workbook.sheets {
-            self.engine.ensure_sheet(&sheet.name);
-        }
-        self.engine.set_external_value_provider(
-            ColumnarExternalValueProvider::from_workbook(workbook)
-                .map(|p| -> Arc<dyn ExternalValueProvider> { Arc::new(p) }),
-        );
-
-        // Create all sheets up-front so cross-sheet formula references resolve
-        // regardless of workbook sheet ordering.
-        for sheet in &workbook.sheets {
-            self.engine.ensure_sheet(&sheet.name);
-        }
-
-        // Load workbook-level defined names into the calculation engine so formulas referencing
-        // them evaluate correctly.
-        //
-        // This is best-effort: invalid/unsupported definitions are ignored rather than aborting
-        // workbook load.
-        for defined in &workbook.defined_names {
-            let name = defined.name.trim();
-            let refers_to = defined.refers_to.trim();
-            if name.is_empty() || refers_to.is_empty() {
-                continue;
-            }
-
-            let scope = match defined.sheet_id.as_deref() {
-                None => NameScope::Workbook,
-                Some(sheet_key) => resolve_sheet_case_insensitive(workbook, sheet_key)
-                    .map(|sheet| NameScope::Sheet(sheet.name.as_str()))
-                    .unwrap_or(NameScope::Workbook),
-            };
-
-            // Preserve the "refers_to" text without forcing an '=' prefix; the formula engine
-            // parser accepts either form.
-            let _ = self.engine.define_name(
-                name,
-                scope,
-                NameDefinition::Formula(refers_to.to_string()),
-            );
-        }
-
-        // Apply imported worksheet column metadata (width/hidden flags) so worksheet information
-        // functions like `CELL("width")` can observe Excel column properties on desktop.
-        for sheet in &workbook.sheets {
-            let sheet_name = sheet.name.as_str();
-            if sheet.default_col_width.is_some() {
-                let _ =
-                    self.engine
-                        .set_sheet_default_col_width(sheet_name, sheet.default_col_width);
-            }
-            for (col_0based, props) in &sheet.col_properties {
-                if let Some(width) = props.width {
-                    let _ = self.engine.set_col_width(sheet_name, *col_0based, Some(width));
+        {
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
+            self.engine = FormulaEngine::new();
+            let (directory, filename) = workbook_file_metadata(workbook);
+            self.engine
+                .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+            self.engine.set_date_system(match workbook.date_system {
+                formula_model::DateSystem::Excel1900 => {
+                    formula_engine::date::ExcelDateSystem::EXCEL_1900
                 }
-                if props.hidden {
-                    let _ = self
-                        .engine
-                        .set_col_hidden(sheet_name, *col_0based, props.hidden);
+                formula_model::DateSystem::Excel1904 => {
+                    formula_engine::date::ExcelDateSystem::Excel1904
                 }
-                if let Some(style_id) = props.style_id {
-                    let _ = self
-                        .engine
-                        .set_col_style_id(sheet_name, *col_0based, Some(style_id));
-                }
-            }
-        }
-
-        let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
-        for sheet in &workbook.sheets {
-            let sheet_name = &sheet.name;
-            for ((row, col), cell) in sheet.cells_iter() {
-                let addr = coord_to_a1(row, col);
-                if let Some(fmt) = cell
-                    .number_format
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    let style_id = if let Some(existing) = style_ids_by_format.get(fmt) {
-                        *existing
-                    } else {
-                        let fmt = fmt.to_string();
-                        let style_id = self.engine.intern_style(formula_model::Style {
-                            number_format: Some(fmt.clone()),
-                            ..Default::default()
-                        });
-                        style_ids_by_format.insert(fmt, style_id);
-                        style_id
-                    };
-                    let _ = self.engine.set_cell_style_id(sheet_name, &addr, style_id);
-                }
-                if let Some(formula) = &cell.formula {
-                    if cell.computed_value != CellScalar::Empty {
-                        let _ = self.engine.set_cell_value(
-                            sheet_name,
-                            &addr,
-                            scalar_to_engine_value(&cell.computed_value),
-                        );
-                    }
-                    if self
-                        .engine
-                        .set_cell_formula(sheet_name, &addr, formula)
-                        .is_err()
-                    {
-                        let _ = self.engine.set_cell_value(
-                            sheet_name,
-                            &addr,
-                            EngineValue::Error(ErrorKind::Name),
-                        );
-                    }
-                    continue;
-                }
-                if let Some(value) = &cell.input_value {
-                    let _ = self.engine.set_cell_value(
-                        sheet_name,
-                        &addr,
-                        scalar_to_engine_value(value),
-                    );
-                }
-            }
-        }
-
-        // Apply persisted UI formatting metadata (font/fill/alignment/protection/number_format)
-        // to the calculation engine so style-aware worksheet information functions (e.g.
-        // `CELL("protect")`, `CELL("prefix")`) observe the same formatting state as the UI.
-        //
-        // This metadata only exists for persistent workbooks (autosave DB); non-persistent loads
-        // do not have access to per-sheet metadata.
-        //
-        // Note: `formatRunsByCol` (range-run formatting) is currently ignored. The desktop UI uses
-        // explicit `cellFormats` for point overrides and `rowFormats`/`colFormats` for larger
-        // scopes, which covers the common cases needed for `CELL()` formatting queries.
-        if let Some(persistent) = self.persistent.as_ref() {
-            let storage = persistent.storage.clone();
-
-            fn parse_non_negative_i64(raw: Option<&JsonValue>) -> Option<i64> {
-                let v = raw?;
-                let n = v
-                    .as_i64()
-                    .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))?;
-                (n >= 0).then_some(n)
-            }
-
+            });
             for sheet in &workbook.sheets {
-                let Some(sheet_uuid) = persistent.sheet_uuid(&sheet.id) else {
-                    continue;
-                };
-                let sheet_meta = storage
-                    .get_sheet_meta(sheet_uuid)
-                    .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-                let Some(metadata) = sheet_meta.metadata else {
-                    continue;
-                };
-                let Some(formatting) = metadata.get(FORMULA_UI_FORMATTING_METADATA_KEY) else {
-                    continue;
-                };
-                let Some(formatting_obj) = formatting.as_object() else {
-                    continue;
-                };
+                self.engine.ensure_sheet(&sheet.name);
+            }
+            self.engine.set_external_value_provider(
+                ColumnarExternalValueProvider::from_workbook(workbook)
+                    .map(|p| -> Arc<dyn ExternalValueProvider> { Arc::new(p) }),
+            );
 
-                // Row formats.
-                if let Some(rows) = formatting_obj.get("rowFormats").and_then(|v| v.as_array()) {
-                    for entry in rows {
-                        let Some(row) =
-                            parse_non_negative_i64(entry.get("row").or_else(|| entry.get("index")))
-                        else {
-                            continue;
-                        };
-                        let Some(row_u32) = u32::try_from(row).ok() else {
-                            continue;
-                        };
-                        let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
-                        let Ok(style) = serde_json::from_value::<Style>(format) else {
-                            continue;
-                        };
-                        let style_id = self.engine.intern_style(style);
-                        let _ = self
-                            .engine
-                            .set_row_style_id(&sheet.name, row_u32, Some(style_id));
-                    }
+            // Create all sheets up-front so cross-sheet formula references resolve
+            // regardless of workbook sheet ordering.
+            for sheet in &workbook.sheets {
+                self.engine.ensure_sheet(&sheet.name);
+            }
+
+            // Load workbook-level defined names into the calculation engine so formulas referencing
+            // them evaluate correctly.
+            //
+            // This is best-effort: invalid/unsupported definitions are ignored rather than aborting
+            // workbook load.
+            for defined in &workbook.defined_names {
+                let name = defined.name.trim();
+                let refers_to = defined.refers_to.trim();
+                if name.is_empty() || refers_to.is_empty() {
+                    continue;
                 }
 
-                // Col formats.
-                if let Some(cols) = formatting_obj.get("colFormats").and_then(|v| v.as_array()) {
-                    for entry in cols {
-                        let Some(col) =
-                            parse_non_negative_i64(entry.get("col").or_else(|| entry.get("index")))
-                        else {
-                            continue;
-                        };
-                        let Some(col_u32) = u32::try_from(col).ok() else {
-                            continue;
-                        };
-                        let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
-                        let Ok(style) = serde_json::from_value::<Style>(format) else {
-                            continue;
-                        };
-                        let style_id = self.engine.intern_style(style);
+                let scope = match defined.sheet_id.as_deref() {
+                    None => NameScope::Workbook,
+                    Some(sheet_key) => resolve_sheet_case_insensitive(workbook, sheet_key)
+                        .map(|sheet| NameScope::Sheet(sheet.name.as_str()))
+                        .unwrap_or(NameScope::Workbook),
+                };
+
+                // Preserve the "refers_to" text without forcing an '=' prefix; the formula engine
+                // parser accepts either form.
+                let _ = self.engine.define_name(
+                    name,
+                    scope,
+                    NameDefinition::Formula(refers_to.to_string()),
+                );
+            }
+
+            // Apply imported worksheet column metadata (width/hidden flags) so worksheet information
+            // functions like `CELL("width")` can observe Excel column properties on desktop.
+            for sheet in &workbook.sheets {
+                let sheet_name = sheet.name.as_str();
+                if sheet.default_col_width.is_some() {
+                    let _ = self
+                        .engine
+                        .set_sheet_default_col_width(sheet_name, sheet.default_col_width);
+                }
+                for (col_0based, props) in &sheet.col_properties {
+                    if let Some(width) = props.width {
+                        let _ = self.engine.set_col_width(sheet_name, *col_0based, Some(width));
+                    }
+                    if props.hidden {
                         let _ = self
                             .engine
-                            .set_col_style_id(&sheet.name, col_u32, Some(style_id));
+                            .set_col_hidden(sheet_name, *col_0based, props.hidden);
+                    }
+                    if let Some(style_id) = props.style_id {
+                        let _ = self
+                            .engine
+                            .set_col_style_id(sheet_name, *col_0based, Some(style_id));
                     }
                 }
+            }
 
-                // Cell formats.
-                if let Some(cells) = formatting_obj.get("cellFormats").and_then(|v| v.as_array()) {
-                    for entry in cells {
-                        let Some(row) = parse_non_negative_i64(entry.get("row")) else {
-                            continue;
+            let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
+            for sheet in &workbook.sheets {
+                let sheet_name = &sheet.name;
+                for ((row, col), cell) in sheet.cells_iter() {
+                    let addr = coord_to_a1(row, col);
+                    if let Some(fmt) = cell
+                        .number_format
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let style_id = if let Some(existing) = style_ids_by_format.get(fmt) {
+                            *existing
+                        } else {
+                            let fmt = fmt.to_string();
+                            let style_id = self.engine.intern_style(formula_model::Style {
+                                number_format: Some(fmt.clone()),
+                                ..Default::default()
+                            });
+                            style_ids_by_format.insert(fmt, style_id);
+                            style_id
                         };
-                        let Some(col) = parse_non_negative_i64(entry.get("col")) else {
-                            continue;
-                        };
-                        let Some(row_usize) = usize::try_from(row).ok() else {
-                            continue;
-                        };
-                        let Some(col_usize) = usize::try_from(col).ok() else {
-                            continue;
-                        };
-                        let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
-                        let Ok(style) = serde_json::from_value::<Style>(format) else {
-                            continue;
-                        };
-                        let style_id = self.engine.intern_style(style);
-                        let addr = coord_to_a1(row_usize, col_usize);
-                        let _ = self.engine.set_cell_style_id(&sheet.name, &addr, style_id);
+                        let _ = self.engine.set_cell_style_id(sheet_name, &addr, style_id);
+                    }
+                    if let Some(formula) = &cell.formula {
+                        if cell.computed_value != CellScalar::Empty {
+                            let _ = self.engine.set_cell_value(
+                                sheet_name,
+                                &addr,
+                                scalar_to_engine_value(&cell.computed_value),
+                            );
+                        }
+                        if self
+                            .engine
+                            .set_cell_formula(sheet_name, &addr, formula)
+                            .is_err()
+                        {
+                            let _ = self.engine.set_cell_value(
+                                sheet_name,
+                                &addr,
+                                EngineValue::Error(ErrorKind::Name),
+                            );
+                        }
+                        continue;
+                    }
+                    if let Some(value) = &cell.input_value {
+                        let _ = self.engine.set_cell_value(
+                            sheet_name,
+                            &addr,
+                            scalar_to_engine_value(value),
+                        );
                     }
                 }
             }
         }
+
+        // Apply persisted UI formatting metadata (sheet/col/row/run/cell layers) to the engine so
+        // style-aware worksheet information functions (e.g. `CELL("protect")`, `CELL("prefix")`)
+        // observe the same formatting state as the UI after engine rebuilds.
+        let _ = self.apply_persistent_ui_formatting_metadata_to_engine();
 
         Ok(())
     }
@@ -7324,6 +7382,220 @@ mod tests {
             .get_cell("Sheet1", 0, 1)
             .expect("get B1 after reload");
         assert_eq!(recovered.value, CellScalar::Number(0.0));
+    }
+
+    #[test]
+    fn sheet_default_formatting_survives_engine_rebuild_and_persistent_reload_for_cell_protect() {
+        use crate::commands::{apply_sheet_formatting_deltas_inner, ApplySheetFormattingDeltasRequest};
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let mut workbook = Workbook::new_empty(None);
+            workbook.add_sheet("Sheet1".to_string());
+
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+
+            // B1 = CELL("protect", A1) should report the default locked state.
+            state
+                .set_cell("Sheet1", 0, 1, None, Some("=CELL(\"protect\",A1)".to_string()))
+                .expect("set formula");
+            let before = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(before.value, CellScalar::Number(1.0));
+
+            // Set the sheet default format to unlocked (protection.locked=false).
+            let default_format = serde_json::json!({ "protection": { "locked": false } });
+            apply_sheet_formatting_deltas_inner(
+                &mut state,
+                ApplySheetFormattingDeltasRequest {
+                    sheet_id: "Sheet1".to_string(),
+                    default_format: Some(Some(default_format)),
+                    row_formats: None,
+                    col_formats: None,
+                    format_runs_by_col: None,
+                    cell_formats: None,
+                },
+            )
+            .expect("apply formatting delta");
+
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(after.value, CellScalar::Number(0.0));
+
+            // Rebuild the engine and ensure the default format is re-applied from persistence
+            // metadata.
+            state
+                .rebuild_engine_from_workbook()
+                .expect("rebuild engine from workbook");
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after_rebuild = state.get_cell("Sheet1", 0, 1).expect("get B1 after rebuild");
+            assert_eq!(after_rebuild.value, CellScalar::Number(0.0));
+        }
+
+        // Re-open from persistent storage; the unlocked default format should be loaded into the engine.
+        let mut recovered_state = AppState::new();
+        recovered_state
+            .load_workbook_persistent(Workbook::new_empty(None), location)
+            .expect("recover workbook from storage");
+        let recovered = recovered_state
+            .get_cell("Sheet1", 0, 1)
+            .expect("get B1 after reload");
+        assert_eq!(recovered.value, CellScalar::Number(0.0));
+    }
+
+    #[test]
+    fn sheet_format_runs_by_col_survive_engine_rebuild_and_persistent_reload_for_cell_protect() {
+        use crate::commands::{
+            apply_sheet_formatting_deltas_inner, ApplySheetFormattingDeltasRequest,
+            LimitedSheetFormatRunDeltas, LimitedSheetFormatRunsByColDeltas, SheetFormatRunDelta,
+            SheetFormatRunsByColDelta,
+        };
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let mut workbook = Workbook::new_empty(None);
+            workbook.add_sheet("Sheet1".to_string());
+
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+
+            state
+                .set_cell("Sheet1", 0, 1, None, Some("=CELL(\"protect\",A1)".to_string()))
+                .expect("set formula");
+            let before = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(before.value, CellScalar::Number(1.0));
+
+            // Apply a run format that unlocks A1 (column A rows [0,1)).
+            let run_format = serde_json::json!({ "protection": { "locked": false } });
+            apply_sheet_formatting_deltas_inner(
+                &mut state,
+                ApplySheetFormattingDeltasRequest {
+                    sheet_id: "Sheet1".to_string(),
+                    default_format: None,
+                    row_formats: None,
+                    col_formats: None,
+                    format_runs_by_col: Some(LimitedSheetFormatRunsByColDeltas(vec![
+                        SheetFormatRunsByColDelta {
+                            col: 0,
+                            runs: LimitedSheetFormatRunDeltas(vec![SheetFormatRunDelta {
+                                start_row: 0,
+                                end_row_exclusive: 1,
+                                format: run_format,
+                            }]),
+                        },
+                    ])),
+                    cell_formats: None,
+                },
+            )
+            .expect("apply formatting delta");
+
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(after.value, CellScalar::Number(0.0));
+
+            // Rebuild and ensure format runs are re-applied from persistence metadata.
+            state
+                .rebuild_engine_from_workbook()
+                .expect("rebuild engine from workbook");
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after_rebuild = state.get_cell("Sheet1", 0, 1).expect("get B1 after rebuild");
+            assert_eq!(after_rebuild.value, CellScalar::Number(0.0));
+        }
+
+        let mut recovered_state = AppState::new();
+        recovered_state
+            .load_workbook_persistent(Workbook::new_empty(None), location)
+            .expect("recover workbook from storage");
+        let recovered = recovered_state
+            .get_cell("Sheet1", 0, 1)
+            .expect("get B1 after reload");
+        assert_eq!(recovered.value, CellScalar::Number(0.0));
+    }
+
+    #[test]
+    fn ui_style_number_format_clear_semantics_survive_engine_rebuild_and_persistent_reload() {
+        use crate::commands::{
+            apply_sheet_formatting_deltas_inner, ApplySheetFormattingDeltasRequest,
+            LimitedSheetCellFormatDeltas, SheetCellFormatDelta,
+        };
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let mut workbook = Workbook::new_empty(None);
+            workbook.add_sheet("Sheet1".to_string());
+
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+
+            // B1 = CELL("format", A1) should report General by default.
+            state
+                .set_cell("Sheet1", 0, 1, None, Some("=CELL(\"format\",A1)".to_string()))
+                .expect("set formula");
+            let before = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(before.value, CellScalar::Text("G".to_string()));
+
+            // Apply a format payload that contains both:
+            // - an imported `number_format` string, and
+            // - a UI "clear" override (`numberFormat: null`).
+            //
+            // The UI semantics should treat this as clearing the number format back to General.
+            let format = serde_json::json!({
+                "number_format": "0.00",
+                "numberFormat": null,
+            });
+            apply_sheet_formatting_deltas_inner(
+                &mut state,
+                ApplySheetFormattingDeltasRequest {
+                    sheet_id: "Sheet1".to_string(),
+                    default_format: None,
+                    row_formats: None,
+                    col_formats: None,
+                    format_runs_by_col: None,
+                    cell_formats: Some(LimitedSheetCellFormatDeltas(vec![SheetCellFormatDelta {
+                        row: 0,
+                        col: 0,
+                        format,
+                    }])),
+                },
+            )
+            .expect("apply formatting delta");
+
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after = state.get_cell("Sheet1", 0, 1).expect("get B1");
+            assert_eq!(after.value, CellScalar::Text("G".to_string()));
+
+            // Rebuild and ensure the clear semantics are re-applied from persistence metadata.
+            state
+                .rebuild_engine_from_workbook()
+                .expect("rebuild engine from workbook");
+            state.engine.recalculate_with_value_changes_multi_threaded();
+            let after_rebuild = state.get_cell("Sheet1", 0, 1).expect("get B1 after rebuild");
+            assert_eq!(after_rebuild.value, CellScalar::Text("G".to_string()));
+        }
+
+        let mut recovered_state = AppState::new();
+        recovered_state
+            .load_workbook_persistent(Workbook::new_empty(None), location)
+            .expect("recover workbook from storage");
+        let recovered = recovered_state
+            .get_cell("Sheet1", 0, 1)
+            .expect("get B1 after reload");
+        assert_eq!(recovered.value, CellScalar::Text("G".to_string()));
     }
 
     #[test]
