@@ -37,10 +37,36 @@ fn build_star_schema_model(rows: usize) -> DataModel {
 
     let mut model = DataModel::new();
 
+    // Regions (snowflake dimension used via Customers -> Regions).
+    let regions_schema = vec![
+        ColumnSchema {
+            name: "RegionId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Name".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut regions_builder = ColumnarTableBuilder::new(regions_schema, options);
+    for region_id in 0..regions {
+        regions_builder.append_row(&[
+            formula_columnar::Value::Number(region_id as f64),
+            formula_columnar::Value::String(region_values[region_id].clone()),
+        ]);
+    }
+    model
+        .add_table(Table::from_columnar("Regions", regions_builder.finalize()))
+        .unwrap();
+
     // Customers dimension.
     let customers_schema = vec![
         ColumnSchema {
             name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "RegionId".to_string(),
             column_type: ColumnType::Number,
         },
         ColumnSchema {
@@ -50,9 +76,11 @@ fn build_star_schema_model(rows: usize) -> DataModel {
     ];
     let mut customers_builder = ColumnarTableBuilder::new(customers_schema, options);
     for customer_id in 0..customers {
-        let region = region_values[customer_id % regions].clone();
+        let region_id = customer_id % regions;
+        let region = region_values[region_id].clone();
         customers_builder.append_row(&[
             formula_columnar::Value::Number(customer_id as f64),
+            formula_columnar::Value::Number(region_id as f64),
             formula_columnar::Value::String(region),
         ]);
     }
@@ -157,6 +185,20 @@ fn build_star_schema_model(rows: usize) -> DataModel {
 
     model
         .add_relationship(Relationship {
+            name: "Customers_Regions".into(),
+            from_table: "Customers".into(),
+            from_column: "RegionId".into(),
+            to_table: "Regions".into(),
+            to_column: "RegionId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
             name: "Sales_Products".into(),
             from_table: "Sales".into(),
             from_column: "ProductId".into(),
@@ -219,6 +261,10 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
         GroupByColumn::new("Customers", "Region"),
         GroupByColumn::new("Products", "Category"),
     ];
+    let snowflake_group_by = vec![
+        GroupByColumn::new("Regions", "Name"),
+        GroupByColumn::new("Products", "Category"),
+    ];
     let base_region_group_by = vec![GroupByColumn::new("Sales", "Region")];
     let star_region_group_by = vec![GroupByColumn::new("Customers", "Region")];
 
@@ -235,6 +281,15 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     assert_eq!(
         &base_result.columns[base_group_by.len()..],
         &star_result.columns[star_group_by.len()..]
+    );
+
+    let snowflake_result =
+        pivot(&model, "Sales", &snowflake_group_by, &measures, &FilterContext::empty()).unwrap();
+    assert_eq!(base_result.rows, snowflake_result.rows);
+    assert_eq!(base_result.columns.len(), snowflake_result.columns.len());
+    assert_eq!(
+        &base_result.columns[base_group_by.len()..],
+        &snowflake_result.columns[snowflake_group_by.len()..]
     );
 
     // Sanity check: a star-schema pivot that falls back to row-scan should still match the
@@ -289,6 +344,24 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
             black_box(result);
         })
     });
+
+    group.bench_with_input(
+        BenchmarkId::new("snowflake_dimension_group_by", rows),
+        &rows,
+        |b, _| {
+            b.iter(|| {
+                let result = pivot(
+                    &model,
+                    "Sales",
+                    &snowflake_group_by,
+                    &measures,
+                    &FilterContext::empty(),
+                )
+                .unwrap();
+                black_box(result);
+            })
+        },
+    );
 
     std::env::set_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA", "1");
     group.bench_with_input(
