@@ -157,4 +157,51 @@ describe("custom sort command wiring", () => {
     // Clear the toast timeout so the test environment can tear down cleanly.
     toast?.click();
   });
+
+  it("blocks custom sort when the selection contains a non-writable cell (encryption-aware toast)", async () => {
+    const doc = new DocumentController();
+    doc.setRangeValues("Sheet1", "A1:B2", [
+      ["Name", "Age"],
+      ["Alice", 30],
+    ]);
+
+    // Simulate a collab/protected/encrypted workbook where writes are blocked.
+    (doc as any).canEditCell = () => false;
+
+    const applySpy = vi.spyOn(sortSelection, "applySortSpecToSelection").mockReturnValue(true);
+
+    await act(async () => {
+      handleCustomSortCommand("data.sortFilter.sort.customSort", {
+        isEditing: () => false,
+        getDocument: () => doc,
+        getSheetId: () => "Sheet1",
+        getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }],
+        getCellValue: (sheetId, cell) => {
+          const state = doc.getCell(sheetId, cell) as { value: any };
+          return (state?.value ?? null) as any;
+        },
+        inferCollabEditRejection: () => ({ rejectionReason: "encryption" }),
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.custom-sort-dialog");
+    expect(dialog).not.toBeNull();
+
+    const okBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="sort-dialog-ok"]');
+    expect(okBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      okBtn!.click();
+    });
+
+    // Should not attempt to apply the sort at all.
+    expect(applySpy).not.toHaveBeenCalled();
+    // Dialog remains open so the user can adjust selection/spec.
+    expect(document.querySelector("dialog.custom-sort-dialog")).not.toBeNull();
+
+    const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
+    expect(toast?.textContent).toMatch(/Missing encryption key/i);
+    toast?.click();
+  });
 });
