@@ -6284,8 +6284,12 @@ fn render_sheet_data(
                 out.push_str(r#" hidden="1""#);
             }
             if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
-                if let Some(style_xf) = style_to_xf.get(&style_id).copied().filter(|xf| *xf != 0)
-                {
+                // Preserve `s="0"` when the workbook's xf index 0 maps to a non-default style
+                // (some producers place custom xfs at index 0).
+                //
+                // When xf 0 truly represents the default style, the style_id will be 0 and filtered
+                // out above, so we won't emit a redundant `s="0"` in that case.
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
                     out.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
                 }
             }
@@ -6446,8 +6450,12 @@ fn render_sheet_data_columnar(
                 row_attrs.push_str(r#" hidden="1""#);
             }
             if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
-                if let Some(style_xf) = style_to_xf.get(&style_id).copied().filter(|xf| *xf != 0)
-                {
+                // Preserve `s="0"` when the workbook's xf index 0 maps to a non-default style
+                // (some producers place custom xfs at index 0).
+                //
+                // When xf 0 truly represents the default style, the style_id will be 0 and filtered
+                // out above, so we won't emit a redundant `s="0"` in that case.
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
                     row_attrs.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
                 }
             }
