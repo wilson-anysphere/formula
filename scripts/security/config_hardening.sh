@@ -20,7 +20,16 @@ echo >>"$OUT_FILE"
 tauri_files=()
 while IFS= read -r -d '' f; do
   tauri_files+=("$f")
-done < <(find . -type f -name "tauri.conf.json" -print0 2>/dev/null)
+done < <(
+  # Avoid traversing `target/` and `node_modules/` trees, which can be huge in CI (this script is
+  # invoked from scripts/security/ci.sh after Rust clippy + Node installs).
+  find . -type f -name "tauri.conf.json" \
+    -not -path "./.git/*" \
+    -not -path "*/node_modules/*" \
+    -not -path "*/target/*" \
+    -not -path "./${REPORT_DIR}/*" \
+    -print0 2>/dev/null
+)
 
 if [ ${#tauri_files[@]} -eq 0 ]; then
   echo "Tauri: skipped (no tauri.conf.json found)" >>"$OUT_FILE"
