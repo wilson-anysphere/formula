@@ -101,6 +101,7 @@ jobs:
             scripts/ci/check-wasm-pack-version-pins.test.js \
             scripts/ci/check-tauri-cli-version-pins.test.js \
             scripts/ci/check-merge-conflict-markers.test.js \
+            scripts/ci/check-desktop-pyodide-bundling.test.js \
             scripts/ci/check-pyodide-cache.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive.test.js \
