@@ -1122,6 +1122,8 @@ export class FormulaBarView {
   #lastErrorExplanation: ReturnType<FormulaBarModel["errorExplanation"]> | null = null;
   // Use a non-null sentinel so the first render always syncs the error panel state.
   #lastErrorExplanationAddress: string | null = "__init__";
+  #lastRootIsEditingClass: boolean | null = null;
+  #lastHintHasSyntaxErrorClass: boolean | null = null;
   #lastShowEditingActions: boolean | null = null;
   #lastErrorFixAiDisabled: boolean | null = null;
   #lastErrorShowRangesDisabled: boolean | null = null;
@@ -2185,7 +2187,7 @@ export class FormulaBarView {
 
     // Keep the Name Box display in sync with selection changes even while editing
     // (but never clobber the user's in-progress typing in the Name Box itself).
-    if (document.activeElement !== this.#addressEl) {
+    if (document.activeElement !== this.#addressEl && this.#addressEl.value !== this.#nameBoxValue) {
       this.#addressEl.value = this.#nameBoxValue;
     }
 
@@ -3141,11 +3143,18 @@ export class FormulaBarView {
     }
 
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
-    this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
+    const isEditing = this.model.isEditing;
+    if (this.#lastRootIsEditingClass !== isEditing) {
+      this.#lastRootIsEditingClass = isEditing;
+      this.root.classList.toggle("formula-bar--editing", isEditing);
+    }
 
     const syntaxError = isFormulaEditing ? this.model.syntaxError() : null;
     const hasSyntaxError = Boolean(syntaxError);
-    this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", hasSyntaxError);
+    if (this.#lastHintHasSyntaxErrorClass !== hasSyntaxError) {
+      this.#lastHintHasSyntaxErrorClass = hasSyntaxError;
+      this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", hasSyntaxError);
+    }
     const hint = isFormulaEditing ? this.model.functionHint() : null;
 
     // Keep argument preview state up to date, but avoid re-rendering the entire hint panel unless
