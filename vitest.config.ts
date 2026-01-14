@@ -26,6 +26,8 @@ const collabEncryptionEntry = resolve(repoRoot, "packages/collab/encryption/src/
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
 const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
+const engineEntry = resolve(repoRoot, "packages/engine/src/index.ts");
+const engineBackendFormulaEntry = resolve(repoRoot, "packages/engine/src/backend/formula.ts");
 
 function resolveJsToTs() {
   return {
@@ -62,6 +64,12 @@ export default defineConfig({
   plugins: [resolveJsToTs()],
   resolve: {
     alias: [
+      // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
+      // runs stay resilient in cached/stale `node_modules` environments that may be missing the
+      // pnpm workspace link.
+      { find: /^@formula\/engine$/, replacement: engineEntry },
+      // Also alias the `backend/formula` subpath export which is used by some desktop tooling.
+      { find: /^@formula\/engine\/backend\/formula$/, replacement: engineBackendFormulaEntry },
       { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
