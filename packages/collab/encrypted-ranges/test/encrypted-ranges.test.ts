@@ -27,6 +27,25 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(mgr.list().map((r) => r.id)).toEqual([id]);
   });
 
+  it("manager add refuses to overwrite unknown/corrupt encryptedRanges schemas", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const bogus: any = { foo: "bar" };
+    doc.transact(() => {
+      metadata.set("encryptedRanges", bogus);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    expect(() =>
+      mgr.add({ sheetId: "s1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" })
+    ).toThrow(/Unsupported metadata\.encryptedRanges schema/);
+
+    // Should not clobber the original value.
+    expect(metadata.get("encryptedRanges")).toEqual(bogus);
+  });
+
   it("manager add/list/remove is deterministic and dedupes identical ranges", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });

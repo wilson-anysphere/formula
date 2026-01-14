@@ -639,6 +639,13 @@ export class EncryptedRangeManager {
     // Already the canonical schema. Prefer keeping it.
     if (arr && arr instanceof Y.Array) return arr as Y.Array<Y.Map<unknown>>;
 
+    // If the key is unset, initialize it to the canonical schema.
+    if (existing == null) {
+      const next = new Y.Array<Y.Map<unknown>>();
+      this.metadata.set(METADATA_KEY, next);
+      return next;
+    }
+
     // If the doc is hydrated by a different Yjs build (ESM vs CJS), nested arrays
     // can fail `instanceof` checks. Rather than mixing constructors (which can
     // throw inside Yjs), migrate the array to local types.
@@ -668,6 +675,13 @@ export class EncryptedRangeManager {
         map.forEach((value, key) => cloneEntry(value, String(key)));
       } else if (Array.isArray(existing)) {
         for (const item of existing) cloneEntry(item);
+      } else {
+        // Defensive: avoid clobbering unknown/corrupt schemas (could contain
+        // data from a newer client we don't know how to parse).
+        const kind = (existing as any)?.constructor?.name ?? typeof existing;
+        throw new Error(
+          `Unsupported metadata.${METADATA_KEY} schema: expected Y.Array, Y.Map, or Array but found ${kind}`
+        );
       }
     }
 

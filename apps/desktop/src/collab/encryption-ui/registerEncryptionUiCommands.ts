@@ -126,7 +126,13 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       }
 
       const createdBy = session.getPermissions()?.userId ?? undefined;
-      manager.add({ sheetId, ...range, keyId: storedKeyId, createdAt: Date.now(), ...(createdBy ? { createdBy } : {}) });
+      try {
+        manager.add({ sheetId, ...range, keyId: storedKeyId, createdAt: Date.now(), ...(createdBy ? { createdBy } : {}) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to encrypt range: ${message}`, "error");
+        return;
+      }
 
       const exportString = serializeEncryptionKeyExportString({ docId, keyId: storedKeyId, keyBytes });
       void tryCopyToClipboard(exportString);
