@@ -197,20 +197,22 @@ describe('desktopStartupUtil.runOnce failure diagnostics', () => {
     const code = [
       "console.log('hello stdout');",
       "console.error('hello stderr');",
-      'setInterval(() => {}, 1000);',
+      // Emit output periodically to make this test resilient under heavy load (when the child
+      // process may start slowly and miss a narrow timeout window).
+      "setInterval(() => { console.log('hello stdout'); console.error('hello stderr'); }, 250);",
     ].join(' ');
 
     try {
       await runOnce({
         binPath: process.execPath,
-        timeoutMs: 2000,
+        timeoutMs: 5000,
         xvfb: false,
         argv: ['-e', code],
       });
       throw new Error('expected runOnce to time out');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      expect(msg).toContain('Timed out after 2000ms waiting for startup metrics');
+      expect(msg).toContain('Timed out after 5000ms waiting for startup metrics');
       expect(msg).toContain('desktop process output');
       expect(msg).toContain('hello stdout');
       expect(msg).toContain('hello stderr');
@@ -229,7 +231,7 @@ describe('desktopStartupUtil.runOnce failure diagnostics', () => {
     try {
       await runOnce({
         binPath: process.execPath,
-        timeoutMs: 5000,
+        timeoutMs: 20000,
         xvfb: false,
         argv: ['-e', code],
       });

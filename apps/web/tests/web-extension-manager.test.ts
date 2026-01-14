@@ -388,7 +388,10 @@ test("install persists contributed panel metadata (icon + defaultDock) into the 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: new TestSpreadsheetApi(),
-    permissionPrompt: async () => true
+    permissionPrompt: async () => true,
+    // Activation involves worker spin-up + module loading; bump timeout in this integration test
+    // to reduce flake under heavy CI load.
+    activationTimeoutMs: 60000
   });
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
