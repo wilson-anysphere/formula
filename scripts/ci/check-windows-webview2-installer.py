@@ -90,7 +90,22 @@ def _find_src_tauri_dirs(repo_root: Path) -> Iterable[Path]:
     Mirrors the skip list used by scripts/desktop_bundle_size_report.py.
     """
 
-    skip_dirnames = {"node_modules", ".git", ".cargo", ".pnpm-store", "dist", "build", "target"}
+    skip_dirnames = {
+        "node_modules",
+        ".git",
+        ".cargo",
+        ".pnpm-store",
+        ".turbo",
+        ".cache",
+        ".vite",
+        "dist",
+        "build",
+        "coverage",
+        "target",
+        "security-report",
+        "test-results",
+        "playwright-report",
+    }
     for root, dirs, files in os.walk(repo_root):
         dirs[:] = [d for d in dirs if d not in skip_dirnames]
         if "tauri.conf.json" in files:

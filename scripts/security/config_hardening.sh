@@ -202,7 +202,23 @@ else
     local needle="$2"
 
     local matches
-    matches="$(grep -RInF --exclude-dir=node_modules --exclude-dir=target --exclude-dir=dist --exclude-dir=build --exclude-dir=.git "$needle" "${scan_roots[@]}" 2>/dev/null || true)"
+    matches="$(
+      grep -RInF \
+        --exclude-dir=node_modules \
+        --exclude-dir=target \
+        --exclude-dir=dist \
+        --exclude-dir=build \
+        --exclude-dir=coverage \
+        --exclude-dir=.pnpm-store \
+        --exclude-dir=.turbo \
+        --exclude-dir=.cache \
+        --exclude-dir=.vite \
+        --exclude-dir=security-report \
+        --exclude-dir=test-results \
+        --exclude-dir=playwright-report \
+        --exclude-dir=.git \
+        "$needle" "${scan_roots[@]}" 2>/dev/null || true
+    )"
     if [ -n "$matches" ]; then
       echo "  - ❌ ${label} (disallowed pattern: ${needle})" >>"$OUT_FILE"
       echo "$matches" | sed 's/^/    /' >>"$OUT_FILE"
