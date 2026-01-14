@@ -682,6 +682,11 @@ try {
     $dotExt = "." + $ExtensionNoDot
     $needle = $dotExt
     $needleAlt = $ExtensionNoDot
+    $extraNeedles = @()
+    # Common ProgIds used when `.xlsx` is associated via registry keys rather than the MSI Extension table.
+    if ($ExtensionNoDot -ieq "xlsx") {
+      $extraNeedles += @("Excel.Sheet.12")
+    }
 
     try {
       $rows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `Key`, `Name`, `Value` FROM `Registry`' -ColumnCount 3
@@ -696,6 +701,9 @@ try {
         $s = $col.ToString()
         if ($s.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
         if ($s.IndexOf($needleAlt, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+        foreach ($n in $extraNeedles) {
+          if ($s.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+        }
       }
     }
     return $false
@@ -1232,10 +1240,6 @@ try {
         $msg = $_.Exception.Message
         if ($msg -match 'Failed to open MSI for inspection') {
           Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for file association metadata. Details: $msg"
-          # Best-effort fallback: scan for registry-related strings in the MSI binary.
-          $bytes = [System.IO.File]::ReadAllBytes($msi.FullName)
-          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-          $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
           $dotExt = "." + $requiredExtensionNoDot
           $needles = @(
             "Software\\Classes\\$dotExt",
@@ -1247,15 +1251,15 @@ try {
             $dotExt,
             $requiredExtensionNoDot
           )
-          $found = $false
-          foreach ($n in $needles) {
-            if ($ascii.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
-            if ($unicode.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+          if ($requiredExtensionNoDot -ieq "xlsx") {
+            # Common ProgId used by Excel for `.xlsx` file associations.
+            $needles += "Excel.Sheet.12"
           }
-          if (-not $found) {
+          $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
+          if ([string]::IsNullOrWhiteSpace($marker)) {
             throw "Unable to inspect MSI tables AND did not find file-association-related strings for '.$requiredExtensionNoDot' in the MSI binary: $($msi.FullName)"
           }
-          Write-Warning "MSI table inspection failed, but the MSI contained strings related to '.$requiredExtensionNoDot'. Assuming file association metadata is present (best-effort)."
+          Write-Warning "MSI table inspection failed, but the MSI contained marker '$marker' related to '.$requiredExtensionNoDot'. Assuming file association metadata is present (best-effort)."
         } else {
           throw
         }
@@ -1267,10 +1271,6 @@ try {
         $msg = $_.Exception.Message
         if ($msg -match 'Failed to open MSI for inspection') {
           Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
-          # Best-effort fallback: scan for protocol-related strings in the MSI binary.
-          $bytes = [System.IO.File]::ReadAllBytes($msi.FullName)
-          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-          $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
           $needles = @(
             "URL Protocol",
             "URL protocol",
@@ -1278,15 +1278,11 @@ try {
             "\$requiredScheme\shell\open\command",
             "$requiredScheme\shell\open\command"
           )
-          $found = $false
-          foreach ($n in $needles) {
-            if ($ascii.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
-            if ($unicode.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
-          }
-          if (-not $found) {
+          $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
+          if ([string]::IsNullOrWhiteSpace($marker)) {
             throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$requiredScheme://' in the MSI binary: $($msi.FullName)"
           }
-          Write-Warning "MSI table inspection failed, but the MSI contained strings related to '$requiredScheme://'. Assuming URL protocol metadata is present (best-effort)."
+          Write-Warning "MSI table inspection failed, but the MSI contained marker '$marker' related to '$requiredScheme://'. Assuming URL protocol metadata is present (best-effort)."
         } else {
           throw
         }
