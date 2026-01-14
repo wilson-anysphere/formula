@@ -56,12 +56,12 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   for (const id of autoFilterOverrideIds) {
     assert.doesNotMatch(
       router,
-      new RegExp(`\\btoggleOverrides\\s*[:=]\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      new RegExp(`\\btoggleOverrides\\s*(?:(?::\\s*[^=]+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
       `Expected ribbonCommandRouter.ts to not special-case ${id} via toggleOverrides (should dispatch via CommandRegistry)`,
     );
     assert.doesNotMatch(
       router,
-      new RegExp(`\\bcommandOverrides\\s*[:=]\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      new RegExp(`\\bcommandOverrides\\s*(?:(?::\\s*[^=]+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
       `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
     );
     assert.doesNotMatch(
