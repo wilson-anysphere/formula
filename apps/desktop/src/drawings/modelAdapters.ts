@@ -187,7 +187,10 @@ function stableStringify(value: unknown): string {
 
 function parseDrawingObjectId(value: unknown): number {
   const parsed = parseIdNumber(value);
-  if (parsed != null) return parsed;
+  // Drawing object ids must fit in JS's safe integer range since the overlay/hit-test layers treat
+  // them as stable numeric keys. If an upstream snapshot stores ids as strings, guard against
+  // parsing an unsafe integer (e.g. "9007199254740993") by falling back to a stable hash.
+  if (parsed != null && Number.isSafeInteger(parsed)) return parsed;
   return stableHash32(stableStringify(value));
 }
 

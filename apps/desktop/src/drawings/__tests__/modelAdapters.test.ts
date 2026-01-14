@@ -123,6 +123,31 @@ describe("drawings/modelAdapters", () => {
     expect(ui.kind.label).toContain("rId5");
   });
 
+  it("hashes unsafe drawing object ids (beyond MAX_SAFE_INTEGER) into stable safe integers", () => {
+    const unsafeId = "9007199254740993";
+    const model = {
+      id: unsafeId,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    };
+
+    const ui1 = convertModelDrawingObjectToUiDrawingObject(model);
+    const ui2 = convertModelDrawingObjectToUiDrawingObject(model);
+
+    expect(Number.isSafeInteger(ui1.id)).toBe(true);
+    expect(ui1.id).toBe(ui2.id);
+
+    const parsed = Number(unsafeId);
+    expect(Number.isSafeInteger(parsed)).toBe(false);
+    expect(ui1.id).not.toBe(parsed);
+  });
+
   it("extracts DrawingML transform metadata from preserved pic_xml for images", () => {
     const model = {
       id: 1,
