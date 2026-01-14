@@ -203,6 +203,16 @@ impl PivotRegistry {
         &self.entries
     }
 
+    /// Remove any registry entries that belong to `sheet_id`.
+    ///
+    /// Sheet ids are stable for the lifetime of a workbook. When a worksheet is deleted, the
+    /// engine keeps the deleted id reserved but marks the sheet as missing; registry entries must
+    /// be pruned explicitly to avoid leaking stale metadata and accidentally resolving deleted
+    /// destinations in `GETPIVOTDATA`.
+    pub fn prune_sheet(&mut self, sheet_id: usize) {
+        self.entries.retain(|e| e.sheet_id != sheet_id);
+    }
+
     pub fn register(&mut self, entry: PivotRegistryEntry) {
         // A pivot can be refreshed with a different destination footprint (e.g. the output grows or
         // shrinks). Ensure we don't keep stale metadata around for the old destination range.

@@ -20,7 +20,7 @@ use crate::locale::{
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
 use crate::pivot::{
-    refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput,
+    refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput, PivotSource,
     PivotTableDefinition, PivotTableId,
 };
 use crate::value::{Array, ErrorKind, Value};
@@ -1021,6 +1021,22 @@ impl Engine {
             }
         }
 
+        let old_sheet_key = Workbook::sheet_key(&old_name);
+        let new_sheet_name = new_name.to_string();
+
+        // Pivot definitions store sheet names as raw strings. Keep them in sync with worksheet
+        // renames so pivot refreshes cannot resurrect a stale sheet name via `ensure_sheet`.
+        for def in self.workbook.pivots.values_mut() {
+            if Workbook::sheet_key(&def.destination.sheet) == old_sheet_key {
+                def.destination.sheet = new_sheet_name.clone();
+            }
+            if let PivotSource::Range { sheet, .. } = &mut def.source {
+                if Workbook::sheet_key(sheet) == old_sheet_key {
+                    *sheet = new_sheet_name.clone();
+                }
+            }
+        }
+
         let Some(slot) = self.workbook.sheet_names.get_mut(id) else {
             return Err(SheetLifecycleError::Internal(format!(
                 "sheet id {id} missing from workbook sheet_names"
@@ -1440,6 +1456,26 @@ impl Engine {
             .sheet_name(deleted_sheet_id)
             .unwrap_or(sheet)
             .to_string();
+
+        let deleted_sheet_key = Workbook::sheet_key(&deleted_sheet_name);
+
+        // Pivot definitions store sheet names as strings. If we leave stale references behind,
+        // refreshing a pivot can silently resurrect the deleted sheet via `ensure_sheet`.
+        self.workbook.pivots.retain(|_, def| {
+            let destination_matches =
+                Workbook::sheet_key(&def.destination.sheet) == deleted_sheet_key;
+            let source_matches = match &def.source {
+                PivotSource::Range { sheet, .. } => Workbook::sheet_key(sheet) == deleted_sheet_key,
+                PivotSource::Table { .. } => false,
+            };
+            !(destination_matches || source_matches)
+        });
+
+        // Drop any registered pivot metadata associated with the deleted sheet.
+        self.pivot_registry.prune_sheet(deleted_sheet_id);
+
+        // Drop any per-sheet engine metadata keyed by the deleted sheet id.
+        self.info.origin_by_sheet.remove(&deleted_sheet_id);
 
         // Keep the pre-delete sheet tab order so 3D span boundary shift logic can resolve adjacent
         // sheets (Excel shifts a deleted 3D boundary one sheet inward).
@@ -3310,6 +3346,14 @@ impl Engine {
     /// Clears all registered pivots.
     pub fn clear_pivot_registry(&mut self) {
         self.pivot_registry.clear();
+    }
+
+    /// Returns the currently registered pivot table metadata entries.
+    ///
+    /// These entries are used by `GETPIVOTDATA` to resolve references within rendered pivot output
+    /// grids back to their pivot caches/configuration.
+    pub fn pivot_registry_entries(&self) -> &[crate::pivot_registry::PivotRegistryEntry] {
+        self.pivot_registry.entries()
     }
 
     /// Replace the set of tables for a given worksheet.
