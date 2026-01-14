@@ -379,7 +379,7 @@ for deb in "${debs[@]}"; do
   tmpdir="$(mktemp -d)"
   tmpdirs+=("$tmpdir")
   dpkg-deb -x "$deb" "$tmpdir"
-  assert_stripped_elf "$tmpdir/usr/bin/formula-desktop" "$(basename "$deb")"
+  assert_stripped_elf "$tmpdir/usr/bin/${EXPECTED_PACKAGE_NAME}" "$(basename "$deb")"
   rm -rf "$tmpdir"
   echo "::endgroup::"
 done
@@ -441,7 +441,7 @@ for rpm_path in "${rpms[@]}"; do
     cd "$tmpdir"
     rpm2cpio "$rpm_path" | cpio -idm --quiet --no-absolute-filenames
   )
-  assert_stripped_elf "$tmpdir/usr/bin/formula-desktop" "$(basename "$rpm_path")"
+  assert_stripped_elf "$tmpdir/usr/bin/${EXPECTED_PACKAGE_NAME}" "$(basename "$rpm_path")"
   rm -rf "$tmpdir"
   echo "::endgroup::"
 done
