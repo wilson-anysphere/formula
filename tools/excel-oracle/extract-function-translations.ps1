@@ -11,6 +11,13 @@
 
     node scripts/generate-locale-function-tsv.js
 
+  For committed locale data, the repo typically normalizes the extracted JSON
+  (omitting identity mappings + enforcing stable casing) before regenerating TSVs:
+
+    node scripts/normalize-locale-function-sources.js
+    node scripts/generate-locale-function-tsv.js
+    node scripts/generate-locale-function-tsv.js --check
+
   NOTE: Excel's displayed function names depend on the Office language packs /
   editing language configuration of the installed Excel. This script does not
   (and cannot reliably) switch Excel's UI language; `-LocaleId` is used only
@@ -30,6 +37,9 @@
 
 .PARAMETER MaxFunctions
   Optional cap for debugging (extract only the first N catalog functions).
+
+  Note: this is intended for debugging only; do not commit partial locale sources
+  generated with `-MaxFunctions`.
 
 .EXAMPLE
   # Generate the de-DE source JSON from a German Excel install (from repo root)
