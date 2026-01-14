@@ -2772,7 +2772,6 @@ export class SpreadsheetApp {
             this.updateStatus();
           },
           onRequestCellEdit: (request) => {
-            if (this.isReadOnly()) return;
             this.openEditorFromSharedGrid(request);
           },
           onAxisSizeChange: (change) => {

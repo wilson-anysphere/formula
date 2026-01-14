@@ -1,5 +1,6 @@
 import type { DocumentController } from "../document/documentController.js";
 import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/mergedCells.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -763,6 +764,17 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "home.alignment.mergeCenter.mergeAcross": {
       if (ctx.isEditing?.()) return true;
 
+      // These commands mutate sheet-level merge metadata and must not run in collab read-only roles.
+      if (typeof (ctx.app as any)?.isReadOnly === "function" && (ctx.app as any).isReadOnly() === true) {
+        try {
+          ctx.showToast?.("Read-only: cannot merge cells.", "warning");
+        } catch {
+          // ignore
+        }
+        ctx.app.focus();
+        return true;
+      }
+
       const selection = ctx.app.getSelectionRanges?.() ?? [];
       if (selection.length > 1) {
         ctx.showToast?.("Merge commands only support a single selection range.", "warning");
@@ -813,12 +825,23 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       doc.beginBatch({ label });
       let committed = false;
       try {
-        if (commandId === "home.alignment.mergeCenter.mergeCenter") {
-          mergeCenter(doc, sheetId, normalized, { label });
-        } else if (commandId === "home.alignment.mergeCenter.mergeAcross") {
-          mergeAcross(doc, sheetId, normalized, { label });
-        } else {
-          mergeCells(doc, sheetId, normalized, { label });
+        const applied = (() => {
+          if (commandId === "home.alignment.mergeCenter.mergeCenter") {
+            return mergeCenter(doc, sheetId, normalized, { label });
+          }
+          if (commandId === "home.alignment.mergeCenter.mergeAcross") {
+            return mergeAcross(doc, sheetId, normalized, { label });
+          }
+          return mergeCells(doc, sheetId, normalized, { label });
+        })();
+
+        // `merge*` helpers return `false` when blocked by `DocumentController.canEditCell`.
+        // Without feedback this looks like a silent no-op.
+        if (!applied && (rows > 1 || cols > 1)) {
+          showCollabEditRejectedToast([
+            { sheetId, row: normalized.startRow, col: normalized.startCol, rejectionKind: "cell", rejectionReason: "permission" },
+          ]);
+          return true;
         }
         committed = true;
       } finally {
@@ -832,6 +855,16 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
 
     case "home.alignment.mergeCenter.unmergeCells": {
       if (ctx.isEditing?.()) return true;
+
+      if (typeof (ctx.app as any)?.isReadOnly === "function" && (ctx.app as any).isReadOnly() === true) {
+        try {
+          ctx.showToast?.("Read-only: cannot merge cells.", "warning");
+        } catch {
+          // ignore
+        }
+        ctx.app.focus();
+        return true;
+      }
 
       const selection = ctx.app.getSelectionRanges?.() ?? [];
       if (selection.length > 1) {
