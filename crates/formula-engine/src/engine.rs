@@ -752,6 +752,10 @@ impl Engine {
             return false;
         }
 
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
         true
     }
 

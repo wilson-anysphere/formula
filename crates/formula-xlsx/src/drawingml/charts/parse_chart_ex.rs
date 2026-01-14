@@ -263,47 +263,26 @@ fn detect_chart_kind(
     "unknown".to_string()
 }
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    // This helper only feeds diagnostics when ChartEx kind detection fails.
+    // Keep output small + stable, but include enough context to extend detection later.
     const MAX_HINTS: usize = 12;
 
-    // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
-    //
-    // This is diagnostic-only; keep output stable for fixture tests by:
-    // - de-duplicating
-    // - capping the total output size (so diagnostics remain readable)
-    let mut out = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
     for node in doc.descendants().filter(|n| n.is_element()) {
-        if let Some(layout_id) = attribute_case_insensitive(node, "layoutId")
-            .and_then(normalize_chart_ex_kind_hint)
-        {
-            let hint = format!("layoutId={layout_id}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    return out;
-                }
+        for attr in ["layoutId", "chartType"] {
+            let Some(raw) = attribute_case_insensitive(node, attr) else {
+                continue;
+            };
+            let raw = raw.trim();
+            if raw.is_empty() {
+                continue;
             }
-        }
 
-        if let Some(chart_type) = attribute_case_insensitive(node, "chartType")
-            .and_then(normalize_chart_ex_kind_hint)
-        {
-            let hint = format!("chartType={chart_type}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    return out;
-                }
-            }
-        }
-
-    // Collect element names that look like chart type containers. This helps debug cases where
-    // producers omit explicit attributes but still include type-like nodes.
-        let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
-            let hint = format!("node={name}");
+            let hint = normalize_chart_ex_kind_hint(raw)
+                .map(|normalized| format!("{attr}={normalized}"))
+                .unwrap_or_else(|| format!("{attr}={raw}"));
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
