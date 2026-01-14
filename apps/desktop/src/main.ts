@@ -36,6 +36,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import { SheetTabStrip } from "./sheets/SheetTabStrip";
+import { openOrganizeSheetsDialog } from "./sheets/OrganizeSheetsDialog";
 
 import { ThemeController } from "./theme/themeController.js";
 
@@ -1736,6 +1737,21 @@ const openFormatCells = createOpenFormatCells({
   getGridLimits: () => getGridLimitsForFormatting(),
   focusGrid: () => app.focus(),
 });
+
+function openOrganizeSheets(): void {
+  openOrganizeSheetsDialog({
+    store: createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null),
+    getActiveSheetId: () => app.getCurrentSheetId(),
+    activateSheet: (sheetId) => {
+      app.activateSheet(sheetId);
+    },
+    renameSheetById: (sheetId, newName) => renameSheetById(sheetId, newName),
+    getDocument: () => app.getDocument(),
+    isEditing: () => isSpreadsheetEditing(),
+    focusGrid: () => app.focus(),
+    onError: (message) => showToast(message, "error"),
+  });
+}
 
 const onUndo = () => {
   app.undo();
@@ -8507,6 +8523,9 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "home.cells.format.columnWidth":
         void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
+        return;
+      case "home.cells.format.organizeSheets":
+        openOrganizeSheets();
         return;
       case "home.number.moreFormats.custom":
         void promptAndApplyCustomNumberFormat({
