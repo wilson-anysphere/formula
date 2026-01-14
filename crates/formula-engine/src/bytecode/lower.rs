@@ -8,6 +8,33 @@ use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+fn expr_contains_external_workbook_ref(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::NameRef(r) => r.workbook.is_some(),
+        crate::Expr::CellRef(r) => r.workbook.is_some(),
+        crate::Expr::ColRef(r) => r.workbook.is_some(),
+        crate::Expr::RowRef(r) => r.workbook.is_some(),
+        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
+        crate::Expr::FieldAccess(access) => expr_contains_external_workbook_ref(&access.base),
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .any(|row| row.iter().any(expr_contains_external_workbook_ref)),
+        crate::Expr::FunctionCall(call) => call.args.iter().any(expr_contains_external_workbook_ref),
+        crate::Expr::Call(call) => {
+            expr_contains_external_workbook_ref(&call.callee)
+                || call.args.iter().any(expr_contains_external_workbook_ref)
+        }
+        crate::Expr::Unary(u) => expr_contains_external_workbook_ref(&u.expr),
+        crate::Expr::Postfix(p) => expr_contains_external_workbook_ref(&p.expr),
+        crate::Expr::Binary(b) => {
+            expr_contains_external_workbook_ref(&b.left)
+                || expr_contains_external_workbook_ref(&b.right)
+        }
+        _ => false,
+    }
+}
+
 /// Excel's maximum row index (0-indexed).
 ///
 /// The engine expands whole-row/whole-column references (`A:A`, `1:1`, etc.) against the current
@@ -859,6 +886,28 @@ fn lower_canonical_expr_inner(
             "ISOMITTED" => lower_isomitted(call),
             name_upper => {
                 let func = Function::from_name(name_upper);
+                if matches!(func, Function::Indirect) {
+                    // Excel's INDIRECT rejects external workbook references. Avoid compiling
+                    // formulas that contain constant external-workbook ref strings to bytecode so
+                    // compile diagnostics correctly report `ExternalReference`.
+                    if let Some(crate::Expr::String(s)) = call.args.first() {
+                        let ref_text = s.trim();
+                        if ref_text.contains('[') {
+                            if let Ok(ast) = crate::parse_formula(
+                                ref_text,
+                                crate::ParseOptions {
+                                    locale: crate::LocaleConfig::en_us(),
+                                    reference_style: crate::ReferenceStyle::A1,
+                                    normalize_relative_to: None,
+                                },
+                            ) {
+                                if expr_contains_external_workbook_ref(&ast.expr) {
+                                    return Err(LowerError::ExternalReference);
+                                }
+                            }
+                        }
+                    }
+                }
                 match func {
                     Function::Unknown(name) => {
                         let args = call

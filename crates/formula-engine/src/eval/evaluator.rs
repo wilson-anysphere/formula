@@ -431,6 +431,7 @@ pub struct Evaluator<'a, R: ValueResolver> {
     value_locale: ValueLocaleConfig,
     rng_counter: Rc<Cell<u64>>,
     locale: LocaleConfig,
+    text_codepage: u16,
 }
 
 struct LexicalScopeGuard {
@@ -532,7 +533,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             value_locale,
             rng_counter: Rc::new(Cell::new(0)),
             locale,
+            // Default to the engine's historical en-US assumptions (Windows-1252).
+            text_codepage: 1252,
         }
+    }
+
+    pub fn with_text_codepage(mut self, text_codepage: u16) -> Self {
+        self.text_codepage = text_codepage;
+        self
     }
 
     fn with_ctx(&self, ctx: EvalContext) -> Self {
@@ -548,6 +556,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
             locale: self.locale.clone(),
+            text_codepage: self.text_codepage,
         }
     }
 
@@ -564,6 +573,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
             locale: self.locale.clone(),
+            text_codepage: self.text_codepage,
         }
     }
 
@@ -2054,6 +2064,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn value_locale(&self) -> ValueLocaleConfig {
         self.value_locale
+    }
+
+    fn text_codepage(&self) -> u16 {
+        self.text_codepage
     }
 }
 

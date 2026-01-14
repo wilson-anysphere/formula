@@ -70,11 +70,12 @@ fn bytecode_indirect_external_cell_ref_is_ref_error() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
         .unwrap();
 
-    // Ensure we compile to bytecode (no AST fallback).
+    // INDIRECT rejects external workbook references; ensure bytecode compilation falls back so
+    // diagnostics are consistent.
     assert_eq!(
         engine.bytecode_program_count(),
-        1,
-        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        0,
+        "expected INDIRECT external workbook refs to fall back from bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );

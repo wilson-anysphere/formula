@@ -66,7 +66,7 @@ fn findb_searchb_replaceb_match_find_search_replace_in_en_us() {
 }
 
 #[test]
-fn asc_and_dbcs_are_identity_transforms_for_now() {
+fn asc_and_dbcs_are_identity_transforms_by_default_codepage() {
     let mut sheet = TestSheet::new();
 
     assert_eq!(sheet.eval(r#"=ASC("ABC")"#), Value::Text("ABC".to_string()));
@@ -76,9 +76,45 @@ fn asc_and_dbcs_are_identity_transforms_for_now() {
     );
 
     // Non-ASCII smoke test: the engine currently does not implement the locale-specific
-    // half-width/full-width conversions that Excel performs in some DBCS locales.
+    // half-width/full-width conversions that Excel performs in some DBCS locales unless
+    // the workbook text codepage is explicitly set to the appropriate DBCS codepage.
     assert_eq!(sheet.eval(r#"=ASC("漢")"#), Value::Text("漢".to_string()));
     assert_eq!(sheet.eval(r#"=DBCS("漢")"#), Value::Text("漢".to_string()));
+
+    // Fullwidth/halfwidth transforms should be gated on the active text codepage.
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ABC 123")"#),
+        Value::Text("ABC 123".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=ASC("ＡＢＣ　１２３")"#),
+        Value::Text("ＡＢＣ　１２３".to_string())
+    );
+    assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ガ".to_string()));
+}
+
+#[test]
+fn asc_and_dbcs_convert_under_cp932() {
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(932);
+
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ABC 123")"#),
+        Value::Text("ＡＢＣ　１２３".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=ASC("ＡＢＣ　１２３")"#),
+        Value::Text("ABC 123".to_string())
+    );
+
+    // Katakana + dakuten/handakuten composition.
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ｶﾞｯﾁｮｲ")"#),
+        Value::Text("ガッチョイ".to_string())
+    );
+    assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ｶﾞ".to_string()));
+    assert_eq!(sheet.eval(r#"=ASC("パ")"#), Value::Text("ﾊﾟ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ｳﾞ")"#), Value::Text("ヴ".to_string()));
 }
 
 #[test]

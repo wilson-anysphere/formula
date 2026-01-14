@@ -29,6 +29,10 @@ impl TestSheet {
         self.engine.set_value_locale(locale);
     }
 
+    pub fn set_text_codepage(&mut self, codepage: u16) {
+        self.engine.set_text_codepage(codepage);
+    }
+
     pub fn set(&mut self, addr: &str, value: impl Into<Value>) {
         self.engine
             .set_cell_value(self.sheet, addr, value)

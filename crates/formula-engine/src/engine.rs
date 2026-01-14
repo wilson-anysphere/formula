@@ -646,6 +646,7 @@ pub struct Engine {
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
     locale_config: crate::LocaleConfig,
+    text_codepage: u16,
     circular_references: HashSet<CellKey>,
     spills: SpillState,
     next_recalc_id: u64,
@@ -744,6 +745,7 @@ impl Engine {
             date_system: ExcelDateSystem::EXCEL_1900,
             value_locale: ValueLocaleConfig::default(),
             locale_config: crate::LocaleConfig::en_us(),
+            text_codepage: 1252,
             circular_references: HashSet::new(),
             spills: SpillState::default(),
             next_recalc_id: 0,
@@ -2223,6 +2225,24 @@ impl Engine {
 
     pub fn value_locale(&self) -> ValueLocaleConfig {
         self.value_locale
+    }
+
+    /// Workbook text codepage (Windows code page number).
+    ///
+    /// This is used for legacy DBCS behaviors like `ASC` / `DBCS`.
+    pub fn text_codepage(&self) -> u16 {
+        self.text_codepage
+    }
+
+    pub fn set_text_codepage(&mut self, text_codepage: u16) {
+        if self.text_codepage == text_codepage {
+            return;
+        }
+        self.text_codepage = text_codepage;
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     fn mark_all_compiled_cells_dirty(&mut self) {
@@ -4450,6 +4470,7 @@ impl Engine {
         let sheet_dims_generation = self.sheet_dims_generation;
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
+        let text_codepage = self.text_codepage;
 
         for level in levels {
             let mut keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
@@ -4515,15 +4536,15 @@ impl Engine {
                     };
                     let value = match compiled {
                         CompiledFormula::Ast(expr) => {
-                            let evaluator =
-                                crate::eval::Evaluator::new_with_date_system_and_locales(
-                                    &snapshot,
-                                    ctx,
-                                    recalc_ctx,
-                                    date_system,
-                                    value_locale,
-                                    locale_config.clone(),
-                                );
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                &snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            )
+                            .with_text_codepage(text_codepage);
                             evaluator.eval_formula(expr)
                         }
                         CompiledFormula::Bytecode(bc) => {
@@ -4587,7 +4608,8 @@ impl Engine {
                                                         date_system,
                                                         value_locale,
                                                         locale_config.clone(),
-                                                    );
+                                                    )
+                                                    .with_text_codepage(text_codepage);
                                                 (*k, evaluator.eval_formula(expr))
                                             }
                                             CompiledFormula::Bytecode(bc) => {
@@ -4666,7 +4688,8 @@ impl Engine {
                             date_system,
                             value_locale,
                             locale_config.clone(),
-                        );
+                        )
+                        .with_text_codepage(text_codepage);
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
@@ -4729,6 +4752,7 @@ impl Engine {
                             value_locale,
                             locale_config.clone(),
                         )
+                        .with_text_codepage(text_codepage)
                         .with_dependency_trace(&trace);
                         evaluator.eval_formula(expr)
                     }
@@ -4936,6 +4960,7 @@ impl Engine {
         let date_system = self.date_system;
         let value_locale = self.value_locale;
         let locale_config = self.locale_config.clone();
+        let text_codepage = self.text_codepage;
 
         for scc_idx in order {
             let mut scc = sccs[scc_idx].clone();
@@ -4970,7 +4995,8 @@ impl Engine {
                     date_system,
                     value_locale,
                     locale_config.clone(),
-                );
+                )
+                .with_text_codepage(text_codepage);
                 let v = evaluator.eval_formula(&expr);
                 self.apply_eval_result(
                     k,
@@ -5025,7 +5051,8 @@ impl Engine {
                         date_system,
                         value_locale,
                         locale_config.clone(),
-                    );
+                    )
+                    .with_text_codepage(text_codepage);
                     let new_val = evaluator.eval_formula(&expr);
                     max_delta = max_delta.max(value_delta(&old, &new_val));
                     self.apply_eval_result(

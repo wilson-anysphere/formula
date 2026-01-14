@@ -410,6 +410,16 @@ pub trait FunctionContext {
         ValueLocaleConfig::default()
     }
 
+    /// Workbook text codepage (Windows code page number).
+    ///
+    /// This is used for legacy DBCS semantics (e.g. `ASC` / `DBCS`, and eventually `*B`
+    /// byte-count functions) which depend on the active workbook locale / codepage.
+    ///
+    /// The engine defaults to an en-US workbook locale, which corresponds to Windows-1252.
+    fn text_codepage(&self) -> u16 {
+        1252
+    }
+
     fn push_local_scope(&self);
     fn pop_local_scope(&self);
     fn set_local(&self, name: &str, value: ArgValue);
