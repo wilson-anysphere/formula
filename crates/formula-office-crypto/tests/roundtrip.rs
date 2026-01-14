@@ -57,6 +57,49 @@ fn roundtrip_standard_rc4_md5_encryption() {
 }
 
 #[test]
+fn roundtrip_standard_rc4_md5_40bit_encryption() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes = encrypt_standard_rc4_ooxml_ole_with_key_bits(
+        plaintext,
+        password,
+        Rc4HashAlgorithm::Md5,
+        40,
+    );
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
+fn roundtrip_standard_rc4_md5_keysize_zero_encryption() {
+    // MS-OFFCRYPTO specifies that a `keySize` of 0 must be interpreted as 40-bit RC4.
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole_with_key_bits(plaintext, password, Rc4HashAlgorithm::Md5, 0);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
 fn roundtrip_standard_rc4_40bit_encryption() {
     let password = "password";
     let plaintext = include_bytes!(concat!(
