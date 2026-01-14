@@ -254,3 +254,46 @@ test("binder filters oversized drawing ids when upgrading plain-object sheets du
     doc.destroy();
   }
 });
+
+test("binder does not materialize oversized drawing ids when reading sheet.view from Y.Maps", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Y.Map();
+    view.set("frozenRows", 2);
+    view.set("frozenCols", 1);
+
+    const drawings = new Y.Array();
+    const drawing = new Y.Map();
+    const idText = new Y.Text();
+    idText.insert(0, "x".repeat(5000));
+    // If the binder calls `toString()` on this id (via yjsValueToJson(rawView)), this test should fail.
+    idText.toString = () => {
+      throw new Error("unexpected Y.Text.toString() on oversized drawing id");
+    };
+    drawing.set("id", idText);
+    drawings.push([drawing]);
+    view.set("drawings", drawings);
+
+    sheet.set("view", view);
+    sheets.push([sheet]);
+  });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({ ydoc: doc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await flushAsync(5);
+    const view = documentController.getSheetView("Sheet1");
+    assert.equal(view.frozenRows, 2);
+    assert.equal(view.frozenCols, 1);
+  } finally {
+    binder.destroy();
+    doc.destroy();
+  }
+});

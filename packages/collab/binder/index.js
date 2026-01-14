@@ -900,13 +900,98 @@ export function bindYjsToDocumentController(options) {
    * @returns {any | null}
    */
   function readSheetViewJsonFromYjsSheetEntry(sheetEntry) {
+    /**
+     * Extract only the view keys this binder actually cares about.
+     *
+     * Important: do not call `yjsValueToJson(rawView)` on the full object. The view
+     * payload can contain large unrelated metadata (e.g. drawings, merged ranges),
+     * and `view.drawings[*].id` may be an arbitrarily large Y.Text. Materializing
+     * those ids can cause large allocations or DoS the binder.
+     *
+     * @param {any} rawView
+     * @returns {any | null}
+     */
+    function sheetViewJsonFromRawView(rawView) {
+      const viewMap = getYMap(rawView);
+      if (viewMap) {
+        const frozenRows = viewMap.get("frozenRows");
+        const frozenCols = viewMap.get("frozenCols");
+        const backgroundImageId = viewMap.get("backgroundImageId") ?? viewMap.get("background_image_id");
+        const colWidths = viewMap.get("colWidths");
+        const rowHeights = viewMap.get("rowHeights");
+        const defaultFormat = viewMap.get("defaultFormat");
+        const rowFormats = viewMap.get("rowFormats");
+        const colFormats = viewMap.get("colFormats");
+
+        if (
+          frozenRows !== undefined ||
+          frozenCols !== undefined ||
+          backgroundImageId !== undefined ||
+          colWidths !== undefined ||
+          rowHeights !== undefined ||
+          defaultFormat !== undefined ||
+          rowFormats !== undefined ||
+          colFormats !== undefined
+        ) {
+          return {
+            frozenRows: yjsValueToJson(frozenRows) ?? 0,
+            frozenCols: yjsValueToJson(frozenCols) ?? 0,
+            backgroundImageId: yjsValueToJson(backgroundImageId),
+            colWidths: yjsValueToJson(colWidths),
+            rowHeights: yjsValueToJson(rowHeights),
+            defaultFormat: yjsValueToJson(defaultFormat),
+            rowFormats: yjsValueToJson(rowFormats),
+            colFormats: yjsValueToJson(colFormats),
+          };
+        }
+        return {};
+      }
+
+      if (isRecord(rawView)) {
+        const frozenRows = rawView.frozenRows;
+        const frozenCols = rawView.frozenCols;
+        const backgroundImageId = rawView.backgroundImageId ?? rawView.background_image_id;
+        const colWidths = rawView.colWidths;
+        const rowHeights = rawView.rowHeights;
+        const defaultFormat = rawView.defaultFormat;
+        const rowFormats = rawView.rowFormats;
+        const colFormats = rawView.colFormats;
+
+        if (
+          frozenRows !== undefined ||
+          frozenCols !== undefined ||
+          backgroundImageId !== undefined ||
+          colWidths !== undefined ||
+          rowHeights !== undefined ||
+          defaultFormat !== undefined ||
+          rowFormats !== undefined ||
+          colFormats !== undefined
+        ) {
+          return {
+            frozenRows: yjsValueToJson(frozenRows) ?? 0,
+            frozenCols: yjsValueToJson(frozenCols) ?? 0,
+            backgroundImageId: yjsValueToJson(backgroundImageId),
+            colWidths: yjsValueToJson(colWidths),
+            rowHeights: yjsValueToJson(rowHeights),
+            defaultFormat: yjsValueToJson(defaultFormat),
+            rowFormats: yjsValueToJson(rowFormats),
+            colFormats: yjsValueToJson(colFormats),
+          };
+        }
+        return {};
+      }
+
+      // Unknown view type (best-effort; should be rare).
+      return yjsValueToJson(rawView);
+    }
+
     const sheetMap = getYMap(sheetEntry);
     if (sheetMap) {
       // Canonical format (BranchService):
       //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
       const rawView = sheetMap.get("view");
       if (rawView !== undefined) {
-        return yjsValueToJson(rawView);
+        return sheetViewJsonFromRawView(rawView);
       }
 
       // Back-compat: legacy top-level sheet view fields.
@@ -952,7 +1037,7 @@ export function bindYjsToDocumentController(options) {
     if (isRecord(sheetEntry)) {
       const rawView = sheetEntry.view;
       if (rawView !== undefined) {
-        return yjsValueToJson(rawView);
+        return sheetViewJsonFromRawView(rawView);
       }
 
       const frozenRows = sheetEntry.frozenRows;
@@ -1341,8 +1426,15 @@ export function bindYjsToDocumentController(options) {
       const beforeRunsByCol = sheetModel?.formatRunsByCol instanceof Map ? sheetModel.formatRunsByCol : new Map();
       const rawRunsByCol = readSheetEntryField(sheetEntry, "formatRunsByCol");
       const viewRaw = readSheetEntryField(sheetEntry, "view");
-      const viewJson = viewRaw !== undefined ? yjsValueToJson(viewRaw) : null;
-      const viewRunsByCol = isRecord(viewJson) ? viewJson.formatRunsByCol : null;
+      // Avoid `yjsValueToJson(viewRaw)`: the view object can contain large unrelated metadata
+      // (e.g. drawings) and we only need `formatRunsByCol` here.
+      const viewRunsByCol = (() => {
+        if (viewRaw === undefined) return null;
+        const viewMap = getYMap(viewRaw);
+        if (viewMap) return viewMap.get("formatRunsByCol");
+        if (isRecord(viewRaw)) return viewRaw.formatRunsByCol ?? null;
+        return null;
+      })();
       const afterRunsByCol = readSparseFormatRunsByCol(rawRunsByCol !== undefined ? rawRunsByCol : viewRunsByCol);
 
       const runCols = new Set([...beforeRunsByCol.keys(), ...afterRunsByCol.keys()]);
