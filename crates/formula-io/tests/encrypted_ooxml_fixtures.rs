@@ -8,7 +8,7 @@ fn assert_encrypted_ooxml_bytes_detected(bytes: &[u8], stem: &str) {
 
     // Test both correct and incorrect extensions to ensure content sniffing detects encryption
     // before attempting to open as legacy BIFF.
-    for ext in ["xlsx", "xls", "xlsb"] {
+    for ext in ["xlsx", "xlsm", "xls", "xlsb"] {
         let path = tmp.path().join(format!("{stem}.{ext}"));
         std::fs::write(&path, bytes).expect("write encrypted fixture");
 
