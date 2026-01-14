@@ -118,3 +118,21 @@ fn set_value_locale_id_accepts_common_en_dmy_locales_and_uses_dmy_date_order() {
         );
     }
 }
+
+#[test]
+fn en_us_value_locale_uses_mdy_date_order_for_ambiguous_numeric_dates() {
+    let mut engine = engine_manual();
+    assert!(
+        engine.set_value_locale_id("en-US"),
+        "expected en-US to be accepted as a value locale id"
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=DATEVALUE("1/2/2020")"#)
+        .unwrap();
+    engine.recalculate();
+
+    let system = ExcelDateSystem::EXCEL_1900;
+    let expected_serial = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap() as f64;
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_serial));
+}
