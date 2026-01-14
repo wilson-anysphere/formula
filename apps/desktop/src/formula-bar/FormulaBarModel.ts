@@ -421,7 +421,7 @@ export class FormulaBarModel {
     if (!highlightStable) {
       // Reuse the already-computed reference extraction metadata so applying engine results
       // does not re-tokenize the full formula string on the main thread.
-      const referenceTokens = this.#coloredReferences.map((ref) => ({ start: ref.start, end: ref.end }));
+      const referenceTokens = this.#coloredReferences;
       const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
       const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
       const withError = applyErrorSpan(args.formula, withRefs, errorSpan && errorSpan.end > errorSpan.start ? errorSpan : null);
