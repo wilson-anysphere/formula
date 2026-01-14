@@ -6,6 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as Y from "yjs";
 
+vi.mock("../../extensions/ui.js", () => ({
+  showToast: vi.fn(),
+  showQuickPick: vi.fn(),
+}));
+
+import { showToast } from "../../extensions/ui.js";
+
 const mocks = vi.hoisted(() => {
   class IndexedDbCollabPersistence {}
 
@@ -259,6 +266,46 @@ describe("SpreadsheetApp read-only collab UX", () => {
 
     // Ensure the earlier seeded value is still present (no accidental clear/undo).
     expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows an error toast when encryptedRanges metadata schema is unsupported (fail-closed policy)", () => {
+    const root = createRoot();
+    const readOnlyIndicator = document.createElement("div");
+    readOnlyIndicator.hidden = true;
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+      readOnlyIndicator,
+    };
+
+    mocks.createCollabSession.mockImplementation(() => {
+      const session = createMockCollabSession();
+      session.doc.transact(() => {
+        session.metadata.set("encryptedRanges", { foo: "bar" });
+      });
+      return session;
+    });
+
+    vi.mocked(showToast).mockClear();
+
+    const app = new SpreadsheetApp(root, status, {
+      collab: {
+        wsUrl: "ws://example.invalid",
+        docId: "doc-1",
+        persistenceEnabled: false,
+        user: { id: "u1", name: "User 1", color: "#ff0000" },
+      },
+    });
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/Encrypted range metadata is in an unsupported format/i),
+      "error",
+      expect.anything(),
+    );
 
     app.destroy();
     root.remove();
