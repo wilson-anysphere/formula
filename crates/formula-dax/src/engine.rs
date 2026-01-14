@@ -22,6 +22,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 pub type DaxResult<T> = Result<T, DaxError>;
@@ -686,6 +687,33 @@ impl DaxEngine {
                             }
                             let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
                             for row in 0..row_count {
+                                let value =
+                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
+                                    return Ok(Value::Boolean(true));
+                                }
+                            }
+                            Ok(Value::Boolean(false))
+                        }
+                        TableResult::PhysicalMask {
+                            table,
+                            mask,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let (col_count, col_idx) = match visible_cols.as_deref() {
+                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                None => (table_ref.columns().len(), 0),
+                            };
+                            if col_count != 1 {
+                                return Err(DaxError::Eval(
+                                    "IN currently only supports one-column tables".into(),
+                                ));
+                            }
+                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                            for row in mask.iter_ones() {
                                 let value =
                                     table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
                                 if compare_values(&BinaryOp::Equals, &lhs, &value)? {
@@ -1608,6 +1636,43 @@ impl DaxEngine {
                             }
                         }
 
+                        Ok(Value::Boolean(false))
+                    }
+                    TableResult::PhysicalMask {
+                        table,
+                        mask,
+                        visible_cols,
+                    } => {
+                        let table_ref = model
+                            .table(&table)
+                            .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+
+                        let (col_count, col_idx) = match visible_cols.as_deref() {
+                            Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                            None => (table_ref.columns().len(), 0),
+                        };
+
+                        if col_count != value_exprs.len() {
+                            return Err(DaxError::Eval(format!(
+                                "CONTAINSROW expected {} value arguments, got {}",
+                                col_count,
+                                value_exprs.len()
+                            )));
+                        }
+                        if col_count != 1 {
+                            return Err(DaxError::Eval(
+                                "CONTAINSROW currently only supports one-column tables".into(),
+                            ));
+                        }
+
+                        let needle = self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
+                        for row in mask.iter_ones() {
+                            let value =
+                                table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                            if compare_values(&BinaryOp::Equals, &value, &needle)? {
+                                return Ok(Value::Boolean(true));
+                            }
+                        }
                         Ok(Value::Boolean(false))
                     }
                     TableResult::Virtual { columns, rows } => {
@@ -3264,6 +3329,56 @@ impl DaxEngine {
                                 Ok(())
                             }
                         }
+                        TableResult::PhysicalMask {
+                            table,
+                            mask,
+                            visible_cols,
+                        } => {
+                            // See `TableResult::Physical` above for semantics.
+                            let table_key = normalize_ident(&table);
+                            if let Some(visible_cols) = visible_cols {
+                                if visible_cols.len() != 1 {
+                                    return Err(DaxError::Eval(
+                                        "CALCULATE table filters for projected physical tables currently only support one column"
+                                            .into(),
+                                    ));
+                                }
+                                let col_idx = visible_cols[0];
+                                let table_ref = model
+                                    .table(&table)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                let Some(column) = table_ref.columns().get(col_idx) else {
+                                    return Err(DaxError::Eval(format!(
+                                        "row context refers to out-of-bounds column index {col_idx} for table {table}"
+                                    )));
+                                };
+
+                                let mut values = HashSet::new();
+                                for row in mask.iter_ones() {
+                                    let v = table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank);
+                                    values.insert(v);
+                                }
+
+                                let key = (table_key.clone(), normalize_ident(column));
+                                if !keep_filters {
+                                    clear_columns.insert(key.clone());
+                                }
+                                column_filters.push((key, values));
+                                Ok(())
+                            } else {
+                                if !keep_filters {
+                                    clear_tables.insert(table_key.clone());
+                                }
+                                if mask.all_true() {
+                                    row_filters.push((table_key, RowFilter::All));
+                                } else {
+                                    row_filters.push((table_key, RowFilter::Rows(mask.iter_ones().collect())));
+                                }
+                                Ok(())
+                            }
+                        }
                         TableResult::Virtual { .. } => Err(DaxError::Eval(
                             "CALCULATE table filter must be a physical table expression".into(),
                         )),
@@ -3688,11 +3803,22 @@ impl DaxEngine {
                                 visible_cols: None,
                             })
                         } else {
-                            Ok(TableResult::Physical {
-                                table: table_key,
-                                rows: allowed.iter_ones().collect(),
-                                visible_cols: None,
-                            })
+                            let visible = allowed.count_ones();
+                            let row_count = table_ref.row_count();
+                            let sparse_to_dense_threshold = row_count / 64;
+                            if visible <= sparse_to_dense_threshold {
+                                Ok(TableResult::Physical {
+                                    table: table_key,
+                                    rows: allowed.iter_ones().collect(),
+                                    visible_cols: None,
+                                })
+                            } else {
+                                Ok(TableResult::PhysicalMask {
+                                    table: table_key,
+                                    mask: Arc::new(allowed.clone()),
+                                    visible_cols: None,
+                                })
+                            }
                         }
                     }
                 }
@@ -3749,48 +3875,201 @@ impl DaxEngine {
                     };
                     let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
 
+                    struct FilterRowsBuilder {
+                        row_count: usize,
+                        threshold: usize,
+                        sparse: Vec<usize>,
+                        dense: Option<BitVec>,
+                    }
+
+                    impl FilterRowsBuilder {
+                        fn new(row_count: usize) -> Self {
+                            Self {
+                                row_count,
+                                threshold: row_count / 64,
+                                sparse: Vec::new(),
+                                dense: None,
+                            }
+                        }
+
+                        fn push(&mut self, row: usize) {
+                            match &mut self.dense {
+                                Some(mask) => mask.set(row, true),
+                                None => {
+                                    self.sparse.push(row);
+                                    if self.sparse.len() > self.threshold {
+                                        let mut mask = BitVec::with_len_all_false(self.row_count);
+                                        for &row in &self.sparse {
+                                            mask.set(row, true);
+                                        }
+                                        self.sparse.clear();
+                                        self.dense = Some(mask);
+                                    }
+                                }
+                            }
+                        }
+
+                        fn finish(
+                            self,
+                            table: String,
+                            visible_cols: Option<Vec<usize>>,
+                        ) -> TableResult {
+                            match self.dense {
+                                Some(mask) => TableResult::PhysicalMask {
+                                    table,
+                                    mask: Arc::new(mask),
+                                    visible_cols,
+                                },
+                                None => TableResult::Physical {
+                                    table,
+                                    rows: self.sparse,
+                                    visible_cols,
+                                },
+                            }
+                        }
+                    }
+
                     match base {
                         TableResult::Physical {
                             table,
                             rows,
                             visible_cols,
                         } => {
-                            let mut out_rows = Vec::new();
-                            for row in rows.iter().copied() {
-                                let mut inner_ctx = row_ctx.clone();
-                                inner_ctx.push_physical(&table, row, visible_cols.clone());
-                                let pred =
-                                    self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
-                                if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
-                                    out_rows.push(row);
+                            if visible_cols.is_some() {
+                                let mut out_rows = Vec::new();
+                                for row in rows.iter().copied() {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, visible_cols.clone());
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        out_rows.push(row);
+                                    }
                                 }
+                                Ok(TableResult::Physical {
+                                    table,
+                                    rows: out_rows,
+                                    visible_cols,
+                                })
+                            } else {
+                                let row_count = model
+                                    .table(&table)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?
+                                    .row_count();
+
+                                // Some physical table expressions (e.g. RELATEDTABLE) can include a
+                                // relationship-generated virtual blank row at `row_count`. That
+                                // row cannot be represented in `PhysicalMask` (which is sized to
+                                // physical rows only), so fall back to the sparse representation.
+                                if rows.iter().any(|&row| row >= row_count) {
+                                    let mut out_rows = Vec::new();
+                                    for row in rows.iter().copied() {
+                                        let mut inner_ctx = row_ctx.clone();
+                                        inner_ctx.push_physical(&table, row, None);
+                                        let pred = self.eval_scalar(
+                                            model, predicate, filter, &inner_ctx, env,
+                                        )?;
+                                        if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))?
+                                        {
+                                            out_rows.push(row);
+                                        }
+                                    }
+                                    return Ok(TableResult::Physical {
+                                        table,
+                                        rows: out_rows,
+                                        visible_cols: None,
+                                    });
+                                }
+
+                                let mut builder = FilterRowsBuilder::new(row_count);
+                                for row in rows.iter().copied() {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, None);
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        builder.push(row);
+                                    }
+                                }
+                                Ok(builder.finish(table, None))
                             }
-                            Ok(TableResult::Physical {
-                                table,
-                                rows: out_rows,
-                                visible_cols,
-                            })
                         }
                         TableResult::PhysicalAll {
                             table,
                             row_count,
                             visible_cols,
                         } => {
-                            let mut out_rows = Vec::new();
-                            for row in 0..row_count {
-                                let mut inner_ctx = row_ctx.clone();
-                                inner_ctx.push_physical(&table, row, visible_cols.clone());
-                                let pred =
-                                    self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
-                                if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
-                                    out_rows.push(row);
+                            if visible_cols.is_some() {
+                                let mut out_rows = Vec::new();
+                                for row in 0..row_count {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, visible_cols.clone());
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        out_rows.push(row);
+                                    }
                                 }
+                                Ok(TableResult::Physical {
+                                    table,
+                                    rows: out_rows,
+                                    visible_cols,
+                                })
+                            } else {
+                                let mut builder = FilterRowsBuilder::new(row_count);
+                                for row in 0..row_count {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, None);
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        builder.push(row);
+                                    }
+                                }
+                                Ok(builder.finish(table, None))
                             }
-                            Ok(TableResult::Physical {
-                                table,
-                                rows: out_rows,
-                                visible_cols,
-                            })
+                        }
+                        TableResult::PhysicalMask {
+                            table,
+                            mask,
+                            visible_cols,
+                        } => {
+                            if visible_cols.is_some() {
+                                let mut out_rows = Vec::new();
+                                for row in mask.iter_ones() {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, visible_cols.clone());
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        out_rows.push(row);
+                                    }
+                                }
+                                Ok(TableResult::Physical {
+                                    table,
+                                    rows: out_rows,
+                                    visible_cols,
+                                })
+                            } else {
+                                let row_count = mask.len();
+                                let mut builder = FilterRowsBuilder::new(row_count);
+                                for row in mask.iter_ones() {
+                                    let mut inner_ctx = row_ctx.clone();
+                                    inner_ctx.push_physical(&table, row, None);
+                                    let pred = self.eval_scalar(
+                                        model, predicate, filter, &inner_ctx, env,
+                                    )?;
+                                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                        builder.push(row);
+                                    }
+                                }
+                                Ok(builder.finish(table, None))
+                            }
                         }
                         TableResult::Virtual { columns, rows } => {
                             let mut out_rows = Vec::new();
@@ -4130,11 +4409,22 @@ impl DaxEngine {
                             visible_cols: None,
                         })
                     } else {
-                        Ok(TableResult::Physical {
-                            table: table_key,
-                            rows: allowed.iter_ones().collect(),
-                            visible_cols: None,
-                        })
+                        let visible = allowed.count_ones();
+                        let row_count = table_ref.row_count();
+                        let sparse_to_dense_threshold = row_count / 64;
+                        if visible <= sparse_to_dense_threshold {
+                            Ok(TableResult::Physical {
+                                table: table_key,
+                                rows: allowed.iter_ones().collect(),
+                                visible_cols: None,
+                            })
+                        } else {
+                            Ok(TableResult::PhysicalMask {
+                                table: table_key,
+                                mask: Arc::new(allowed.clone()),
+                                visible_cols: None,
+                            })
+                        }
                     }
                 }
                 "CALCULATETABLE" => {
@@ -4163,7 +4453,8 @@ impl DaxEngine {
                     let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                     let base_table = match &base {
                         TableResult::Physical { table, .. }
-                        | TableResult::PhysicalAll { table, .. } => table.clone(),
+                        | TableResult::PhysicalAll { table, .. }
+                        | TableResult::PhysicalMask { table, .. } => table.clone(),
                         TableResult::Virtual { .. } => {
                             return Err(DaxError::Type(
                                 "SUMMARIZE currently only supports a physical base table".into(),
@@ -5263,6 +5554,16 @@ enum TableResult {
         /// Restrict row context visibility and context transition to only these column indices.
         visible_cols: Option<Vec<usize>>,
     },
+    /// A physical table expression represented as a bitmap of allowed physical rows.
+    ///
+    /// This avoids materializing a potentially huge `Vec<usize>` row index list for large filtered
+    /// row sets (e.g. iterators like `SUMX(FILTER(...), ...)` over dense filters).
+    PhysicalMask {
+        table: String,
+        mask: Arc<BitVec>,
+        /// Restrict row context visibility and context transition to only these column indices.
+        visible_cols: Option<Vec<usize>>,
+    },
     Virtual {
         /// Columns (with lineage) present in the virtual table, in order.
         columns: Vec<(String, String)>,
@@ -5281,9 +5582,57 @@ struct TableRowIter<'a> {
     inner: TableRowIterInner<'a>,
 }
 
+struct BitVecOnesIter<'a> {
+    words: &'a [u64],
+    len: usize,
+    word_idx: usize,
+    current_word: u64,
+    base: usize,
+}
+
+impl<'a> BitVecOnesIter<'a> {
+    fn new(bits: &'a BitVec) -> Self {
+        Self {
+            words: bits.as_words(),
+            len: bits.len(),
+            word_idx: 0,
+            current_word: 0,
+            base: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for BitVecOnesIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.current_word != 0 {
+                let bit = self.current_word.trailing_zeros() as usize;
+                // Clear lowest set bit.
+                self.current_word &= self.current_word - 1;
+                let idx = self.base + bit;
+                if idx < self.len {
+                    return Some(idx);
+                }
+                continue;
+            }
+
+            if self.word_idx >= self.words.len() {
+                return None;
+            }
+
+            self.current_word = self.words[self.word_idx];
+            self.base = self.word_idx * 64;
+            self.word_idx += 1;
+        }
+    }
+}
+
 enum TableRowIterInner<'a> {
     Physical(std::slice::Iter<'a, usize>),
     PhysicalRange(std::ops::Range<usize>),
+    PhysicalMask(BitVecOnesIter<'a>),
     Virtual(std::ops::Range<usize>),
 }
 
@@ -5294,6 +5643,7 @@ impl<'a> Iterator for TableRowIter<'a> {
         match &mut self.inner {
             TableRowIterInner::Physical(iter) => iter.next().copied().map(RowHandle::Physical),
             TableRowIterInner::PhysicalRange(iter) => iter.next().map(RowHandle::Physical),
+            TableRowIterInner::PhysicalMask(iter) => iter.next().map(RowHandle::Physical),
             TableRowIterInner::Virtual(iter) => iter.next().map(RowHandle::Virtual),
         }
     }
@@ -5304,6 +5654,7 @@ impl TableResult {
         match self {
             TableResult::Physical { rows, .. } => rows.len(),
             TableResult::PhysicalAll { row_count, .. } => *row_count,
+            TableResult::PhysicalMask { mask, .. } => mask.count_ones(),
             TableResult::Virtual { rows, .. } => rows.len(),
         }
     }
@@ -5315,6 +5666,9 @@ impl TableResult {
             },
             TableResult::PhysicalAll { row_count, .. } => TableRowIter {
                 inner: TableRowIterInner::PhysicalRange(0..*row_count),
+            },
+            TableResult::PhysicalMask { mask, .. } => TableRowIter {
+                inner: TableRowIterInner::PhysicalMask(BitVecOnesIter::new(mask)),
             },
             TableResult::Virtual { rows, .. } => TableRowIter {
                 inner: TableRowIterInner::Virtual(0..rows.len()),
@@ -5337,6 +5691,14 @@ impl TableResult {
             }
             (
                 TableResult::PhysicalAll {
+                    table, visible_cols, ..
+                },
+                RowHandle::Physical(row),
+            ) => {
+                out.push_physical(table, row, visible_cols.clone());
+            }
+            (
+                TableResult::PhysicalMask {
                     table, visible_cols, ..
                 },
                 RowHandle::Physical(row),
@@ -6330,6 +6692,36 @@ fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxRes
             let mut seen: HashSet<Vec<Value>> = HashSet::new();
             let mut out_rows = Vec::new();
             for row in 0..*row_count {
+                let indices: Box<dyn Iterator<Item = usize>> = match visible_cols {
+                    Some(cols) => Box::new(cols.iter().copied()),
+                    None => Box::new(0..table_ref.columns().len()),
+                };
+                let key: Vec<Value> = indices
+                    .map(|idx| table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+                    .collect();
+                if seen.insert(key) {
+                    out_rows.push(row);
+                }
+            }
+
+            Ok(TableResult::Physical {
+                table: table.clone(),
+                rows: out_rows,
+                visible_cols: visible_cols.clone(),
+            })
+        }
+        TableResult::PhysicalMask {
+            table,
+            mask,
+            visible_cols,
+        } => {
+            let table_ref = model
+                .table(table)
+                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+
+            let mut seen: HashSet<Vec<Value>> = HashSet::new();
+            let mut out_rows = Vec::new();
+            for row in mask.iter_ones() {
                 let indices: Box<dyn Iterator<Item = usize>> = match visible_cols {
                     Some(cols) => Box::new(cols.iter().copied()),
                     None => Box::new(0..table_ref.columns().len()),
