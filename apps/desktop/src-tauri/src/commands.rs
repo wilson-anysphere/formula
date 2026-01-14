@@ -308,7 +308,7 @@ fn sheet_background_image_payloads_from_preserved_parts(
     workbook: &crate::file_io::Workbook,
 ) -> Vec<ImportedSheetBackgroundImagePayload> {
     use crate::resource_limits::{
-        MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+        MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES,
     };
 
     let Some(preserved) = workbook.preserved_drawing_parts.as_ref() else {
@@ -1186,7 +1186,10 @@ impl<'de> Deserialize<'de> for LimitedCellFormula {
             type Value = LimitedCellFormula;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "a cell formula string (max {MAX_CELL_FORMULA_BYTES} bytes)")
+                write!(
+                    formatter,
+                    "a cell formula string (max {MAX_CELL_FORMULA_BYTES} bytes)"
+                )
             }
 
             fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
@@ -2195,6 +2198,36 @@ fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {
 }
 
 #[cfg(any(feature = "desktop", test))]
+fn looks_like_utf16(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return true;
+    }
+    if bytes.len() >= 2
+        && ((bytes[0] == b'<' && bytes[1] == 0) || (bytes[0] == 0 && bytes[1] == b'<'))
+    {
+        return true;
+    }
+    if !is_nul_heavy(bytes) {
+        return false;
+    }
+    // NUL-heavy payloads are only treated as UTF-16 if the NUL bytes are biased toward a single
+    // byte position (as you'd see in UTF-16LE/BE ASCII text).
+    let mut zeros_even = 0usize;
+    let mut zeros_odd = 0usize;
+    for (idx, &b) in bytes.iter().enumerate().take(4096) {
+        if b != 0 {
+            continue;
+        }
+        if idx % 2 == 0 {
+            zeros_even += 1;
+        } else {
+            zeros_odd += 1;
+        }
+    }
+    (zeros_even > zeros_odd * 3) || (zeros_odd > zeros_even * 3)
+}
+
+#[cfg(any(feature = "desktop", test))]
 fn decode_utf16_xml(mut bytes: &[u8]) -> Result<String, String> {
     // Trim trailing UTF-16 NUL terminators / padding.
     while bytes.len() >= 2 {
@@ -2206,13 +2239,37 @@ fn decode_utf16_xml(mut bytes: &[u8]) -> Result<String, String> {
         }
     }
 
-    let mut big_endian = false;
+    // Determine endianness:
+    // - Prefer BOM if present.
+    // - Otherwise, guess based on which byte position has more NUL bytes.
+    //   For UTF-16 ASCII text, LE encodes NULs in odd bytes and BE in even bytes.
+    let mut big_endian = None;
     if bytes.starts_with(&[0xFF, 0xFE]) {
         bytes = &bytes[2..];
+        big_endian = Some(false);
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
         bytes = &bytes[2..];
-        big_endian = true;
+        big_endian = Some(true);
+    } else {
+        let mut zeros_even = 0usize;
+        let mut zeros_odd = 0usize;
+        for (idx, &b) in bytes.iter().enumerate().take(4096) {
+            if b != 0 {
+                continue;
+            }
+            if idx % 2 == 0 {
+                zeros_even += 1;
+            } else {
+                zeros_odd += 1;
+            }
+        }
+        if zeros_even > zeros_odd {
+            big_endian = Some(true);
+        } else if zeros_odd > zeros_even {
+            big_endian = Some(false);
+        }
     }
+    let big_endian = big_endian.unwrap_or(false);
 
     bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
     let mut units = Vec::with_capacity(bytes.len() / 2);
@@ -2237,23 +2294,19 @@ fn decode_utf16_xml(mut bytes: &[u8]) -> Result<String, String> {
 
 #[cfg(any(feature = "desktop", test))]
 fn decode_agile_encryption_xml(xml_bytes: &[u8]) -> Result<String, String> {
+    // Some producers store the EncryptionInfo XML as UTF-16 (sometimes with a BOM).
+    //
+    // Important: do **not** trim single trailing NUL bytes before UTF-16 decoding; ASCII UTF-16
+    // encodings end in `0x00` for the final code unit.
+    if looks_like_utf16(xml_bytes) {
+        return decode_utf16_xml(xml_bytes);
+    }
+
     // Primary: treat the remainder as UTF-8 XML (trim UTF-8 BOM, trim trailing NUL padding).
     let utf8_bytes = trim_trailing_nul_bytes(xml_bytes);
     let utf8_bytes = strip_utf8_bom(utf8_bytes);
     if let Ok(xml) = std::str::from_utf8(utf8_bytes) {
         return Ok(xml.strip_prefix('\u{FEFF}').unwrap_or(xml).to_string());
-    }
-
-    // Some producers store the EncryptionInfo XML as UTF-16LE (sometimes with a BOM).
-    //
-    // Important: do **not** trim single trailing NUL bytes before UTF-16 decoding; ASCII UTF-16LE
-    // encodings end in `0x00` for the final code unit.
-    if xml_bytes.starts_with(&[0xFF, 0xFE])
-        || xml_bytes.starts_with(&[0xFE, 0xFF])
-        || (xml_bytes.len() >= 2 && xml_bytes[0] == b'<' && xml_bytes[1] == 0)
-        || is_nul_heavy(xml_bytes)
-    {
-        return decode_utf16_xml(xml_bytes);
     }
 
     Err("agile EncryptionInfo descriptor is not valid UTF-8".to_string())
@@ -2381,11 +2434,9 @@ pub fn inspect_workbook_encryption(
 
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
-    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
-        std::path::Path::new(&path),
-        &allowed_roots,
-    )
-    .map_err(|e| e.to_string())?;
+    let resolved =
+        crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
+            .map_err(|e| e.to_string())?;
 
     let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
     let mut header = [0u8; 8];
@@ -2396,7 +2447,9 @@ pub fn inspect_workbook_encryption(
     file.rewind().map_err(|e| e.to_string())?;
 
     let mut ole = cfb::CompoundFile::open(file).map_err(|e| e.to_string())?;
-    if !(ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")) {
+    if !(ole_stream_exists(&mut ole, "EncryptionInfo")
+        && ole_stream_exists(&mut ole, "EncryptedPackage"))
+    {
         return Ok(None);
     }
 
@@ -2432,11 +2485,9 @@ pub async fn open_workbook(
 
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
-    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
-        std::path::Path::new(&path),
-        &allowed_roots,
-    )
-    .map_err(|e| e.to_string())?;
+    let resolved =
+        crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
+            .map_err(|e| e.to_string())?;
     let resolved_str = resolved.to_string_lossy().to_string();
 
     let workbook = read_workbook(resolved, password)
@@ -4985,7 +5036,9 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
                 continue;
             }
             if delta.format.is_null() {
-                formatting_state.cell_formats.remove(&(delta.row, delta.col));
+                formatting_state
+                    .cell_formats
+                    .remove(&(delta.row, delta.col));
             } else {
                 formatting_state
                     .cell_formats
@@ -5330,7 +5383,9 @@ pub async fn refresh_pivot_table(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn refresh_all_pivots(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, String> {
+pub async fn refresh_all_pivots(
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -5902,7 +5957,9 @@ impl<'de> Deserialize<'de> for LimitedPythonNetworkAllowlist {
                 use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES;
 
                 let mut out = match seq.size_hint() {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES)),
+                    Some(hint) => {
+                        Vec::with_capacity(hint.min(MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES))
+                    }
                     None => Vec::new(),
                 };
 
@@ -8223,7 +8280,10 @@ pub async fn pyodide_index_url(
     let download = download.unwrap_or(false);
 
     crate::pyodide_assets::pyodide_index_url_from_cache(download, |progress| {
-        let _ = window.emit(crate::pyodide_assets::PYODIDE_DOWNLOAD_PROGRESS_EVENT, progress);
+        let _ = window.emit(
+            crate::pyodide_assets::PYODIDE_DOWNLOAD_PROGRESS_EVENT,
+            progress,
+        );
     })
     .await
     .map_err(|err| {
@@ -8629,7 +8689,9 @@ mod tests {
     use crate::file_io::read_xlsx_blocking;
     use crate::resource_limits::{MAX_MARKETPLACE_HEADER_BYTES, MAX_MARKETPLACE_PACKAGE_BYTES};
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use formula_xlsx::drawingml::{PreservedDrawingParts, PreservedSheetPicture, SheetRelationshipStub};
+    use formula_xlsx::drawingml::{
+        PreservedDrawingParts, PreservedSheetPicture, SheetRelationshipStub,
+    };
     use std::io::Write;
     use std::path::Path;
     use tempfile::TempDir;
@@ -8696,10 +8758,7 @@ mod tests {
 
         workbook.preserved_drawing_parts = Some(PreservedDrawingParts {
             content_types_xml: b"<Types/>".to_vec(),
-            parts: BTreeMap::from([(
-                "xl/media/bg.png".to_string(),
-                vec![0x01, 0x02, 0x03],
-            )]),
+            parts: BTreeMap::from([("xl/media/bg.png".to_string(), vec![0x01, 0x02, 0x03])]),
             sheet_drawings: BTreeMap::new(),
             sheet_pictures: BTreeMap::from([(
                 "Sheet1".to_string(),
@@ -8852,10 +8911,11 @@ mod tests {
         });
 
         let url = reqwest::Url::parse(&format!("http://{addr}/download")).expect("parse url");
-        let payload = marketplace_fetch_optional_download_payload(url, "Marketplace download failed")
-            .await
-            .expect("expected download payload")
-            .expect("expected payload");
+        let payload =
+            marketplace_fetch_optional_download_payload(url, "Marketplace download failed")
+                .await
+                .expect("expected download payload")
+                .expect("expected payload");
         assert_eq!(payload.signature_base64, Some("sig".to_string()));
 
         let decoded = STANDARD
@@ -10091,8 +10151,8 @@ mod tests {
         let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
             path.to_string_lossy().to_string(),
         ))
-            .expect("inspect_workbook_encryption should succeed")
-            .expect("expected encryption summary");
+        .expect("inspect_workbook_encryption should succeed")
+        .expect("expected encryption summary");
 
         assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
@@ -10144,8 +10204,59 @@ mod tests {
         let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
             path.to_string_lossy().to_string(),
         ))
-            .expect("inspect_workbook_encryption should succeed")
-            .expect("expected encryption summary");
+        .expect("inspect_workbook_encryption should succeed")
+        .expect("expected encryption summary");
+
+        assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
+        assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
+        assert_eq!(summary.spin_count, Some(100000));
+        assert_eq!(summary.key_bits, Some(256));
+    }
+
+    #[test]
+    fn inspect_workbook_encryption_returns_summary_for_encrypted_ooxml_utf16be_no_bom() {
+        use std::io::{Cursor, Write as _};
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-encrypted-ooxml-utf16be")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+
+        let mut xml_utf16 = Vec::new();
+        for unit in xml.encode_utf16() {
+            xml_utf16.extend_from_slice(&unit.to_be_bytes());
+        }
+        // A trailing UTF-16 NUL terminator.
+        xml_utf16.extend_from_slice(&[0, 0]);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor (agile)
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMinor (agile)
+            bytes.extend_from_slice(&0x40u32.to_le_bytes()); // Flags
+            bytes.extend_from_slice(&xml_utf16);
+            stream.write_all(&bytes).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
+        .expect("inspect_workbook_encryption should succeed")
+        .expect("expected encryption summary");
 
         assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
@@ -10197,8 +10308,8 @@ mod tests {
         let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
             path.to_string_lossy().to_string(),
         ))
-            .expect("inspect_workbook_encryption should succeed")
-            .expect("expected encryption summary");
+        .expect("inspect_workbook_encryption should succeed")
+        .expect("expected encryption summary");
 
         assert_eq!(summary.encryption_type, EncryptionTypeDto::Standard);
         assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
