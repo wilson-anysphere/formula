@@ -756,7 +756,7 @@ jobs:
       actions: read
       contents: write
     # Only scheduled runs on main should update gh-pages history.
-    if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' && needs.desktop-perf.result == 'success' && needs.merge.result == 'success'
+    if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' && needs.merge.result == 'success'
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -767,7 +767,27 @@ jobs:
           name: desktop-perf-platform-matrix
           path: artifacts/desktop-perf-platform-matrix
 
+      - name: Check benchmark results (skip publish when empty)
+        id: bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="artifacts/desktop-perf-platform-matrix/merged/benchmark-results.desktop-perf-platform-matrix.json"
+          if [ ! -f "$path" ]; then
+            echo "::notice::Missing ${path}; skipping gh-pages publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count="$(node -e 'const fs=require(\"fs\");const p=process.argv[1];const v=JSON.parse(fs.readFileSync(p,\"utf8\"));console.log(Array.isArray(v)?v.length:0);' "$path")"
+          if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then
+            echo "::notice::Benchmark results file is empty; skipping gh-pages publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
       - name: Publish benchmark results (non-gating)
+        if: steps.bench.outputs.publish == 'true'
         continue-on-error: true
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
