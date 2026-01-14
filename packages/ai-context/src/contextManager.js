@@ -347,6 +347,39 @@ function normalizeWorkbookRect(rect) {
 }
 
 /**
+ * Filter vector-store chunk metadata before returning it to callers under structured DLP redaction.
+ *
+ * Vector stores (especially third-party ones) may persist additional metadata fields. Those fields can
+ * contain arbitrary, user-controlled identifiers (e.g. workbook ids, file paths) that are not reliably
+ * detectable by heuristic redaction. When structured DLP requires redaction anywhere in the workbook,
+ * conservatively drop unknown metadata keys so non-heuristic secrets cannot leak even if the configured
+ * redactor is a no-op.
+ *
+ * @param {any} metadata
+ * @returns {any}
+ */
+function filterWorkbookChunkMetadataForOutput(metadata) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return metadata;
+  const allowedKeys = [
+    "workbookId",
+    "sheetName",
+    "kind",
+    "title",
+    "rect",
+    "embedder",
+    "contentHash",
+    "metadataHash",
+    "tokenCount",
+  ];
+  /** @type {any} */
+  const out = {};
+  for (const key of allowedKeys) {
+    if (Object.prototype.hasOwnProperty.call(metadata, key)) out[key] = metadata[key];
+  }
+  return out;
+}
+
+/**
  * Prompt-sanitize attachment objects.
  *
  * Some callers (e.g. UI layers) may attach rich `data` payloads for selections or tables
@@ -2392,11 +2425,14 @@ export class ContextManager {
         if (normalizedRect) safeMetaOut.rect = normalizedRect;
         else delete safeMetaOut.rect;
       }
+      // Under structured DLP redaction, treat any unknown metadata keys as prompt-unsafe (they can
+      // contain non-heuristic identifiers). Drop them deterministically so a no-op redactor cannot leak.
+      const finalMetaOut = dlp && workbookIdTokenDisallowed ? filterWorkbookChunkMetadataForOutput(safeMetaOut) : safeMetaOut;
 
       return {
         id: shouldRedactChunkId ? `redacted:${idx + 1}` : hit.id,
         score: hit.score,
-        metadata: safeMetaOut,
+        metadata: finalMetaOut,
         text: outText,
         dlp: mergeHeuristics(heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic, classifyTextForDlp(outText)),
       };
