@@ -111,6 +111,13 @@ fn padded_aes_len(len: usize) -> usize {
 
 /// Decrypt a Standard (CryptoAPI) AES `EncryptedPackage` stream to an arbitrary writer.
 ///
+/// Note: Standard/CryptoAPI AES `EncryptedPackage` decryption is not entirely uniform in the wild.
+/// The baseline MS-OFFCRYPTO/ECMA-376 scheme uses **AES-ECB** (no IV), but some producers use a
+/// CBC-segmented variant. This helper implements the CBC-segmented variant (IV derived as
+/// `SHA1(salt || LE32(segmentIndex))[0..16]`).
+///
+/// For baseline AES-ECB framing + truncation rules, see `docs/offcrypto-standard-encryptedpackage.md`.
+///
 /// This API is **sequential**:
 /// - It does **not** require `Seek`.
 /// - It never allocates a buffer proportional to the package size.
