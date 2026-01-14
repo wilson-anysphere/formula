@@ -1423,6 +1423,15 @@ jobs:
               find "${tmpdir}" -maxdepth 5 -type f -print | head -n 200
               exit 1
             fi
+            if [[ ! -x "${bin}" ]]; then
+              echo "::error::Expected installed binary is not executable: ${bin}"
+              ls -lah "${bin}" || true
+              exit 1
+            fi
+
+            echo "::group::file ${bin}"
+            file "${bin}" || true
+            echo "::endgroup::"
 
             echo "::group::ldd ${bin}"
             set +e
