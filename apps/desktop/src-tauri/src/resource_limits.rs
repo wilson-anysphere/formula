@@ -264,6 +264,19 @@ pub const MAX_SHEET_FORMATTING_ROW_DELTAS: usize = 50_000;
 /// single IPC call.
 pub const MAX_SHEET_FORMATTING_COL_DELTAS: usize = 20_000;
 
+/// Maximum number of column-width deltas accepted by `apply_sheet_view_deltas` in a single IPC call.
+///
+/// This is distinct from formatting deltas but has a similar risk profile: a compromised webview
+/// could send an arbitrarily large array and force the backend to allocate unbounded memory during
+/// JSON deserialization.
+pub const MAX_SHEET_VIEW_COL_WIDTH_DELTAS: usize = 20_000;
+
+/// Maximum number of row-height deltas accepted by `apply_sheet_view_deltas` in a single IPC call.
+///
+/// Row height edits can be applied to large ranges; this cap prevents a compromised webview from
+/// sending pathologically large payloads that would allocate huge vectors during deserialization.
+pub const MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS: usize = 50_000;
+
 /// Maximum number of cell-formatting deltas accepted by `apply_sheet_formatting_deltas` in a
 /// single IPC call.
 pub const MAX_SHEET_FORMATTING_CELL_DELTAS: usize = 200_000;

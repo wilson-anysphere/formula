@@ -892,16 +892,126 @@ pub struct SheetRowHeightDelta {
     pub height: Option<f64>,
 }
 
+/// IPC-deserialized list of `SheetColWidthDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetColWidthDeltas(pub Vec<SheetColWidthDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetColWidthDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetColWidthDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of column width deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_VIEW_COL_WIDTH_DELTAS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_VIEW_COL_WIDTH_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "colWidths is too large (max {MAX_SHEET_VIEW_COL_WIDTH_DELTAS} deltas)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                for _ in 0..MAX_SHEET_VIEW_COL_WIDTH_DELTAS {
+                    match seq.next_element::<SheetColWidthDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetColWidthDeltas(out)),
+                    }
+                }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "colWidths is too large (max {MAX_SHEET_VIEW_COL_WIDTH_DELTAS} deltas)"
+                    )));
+                }
+
+                Ok(LimitedSheetColWidthDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
+/// IPC-deserialized list of `SheetRowHeightDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetRowHeightDeltas(pub Vec<SheetRowHeightDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetRowHeightDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetRowHeightDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of row height deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "rowHeights is too large (max {MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS} deltas)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                for _ in 0..MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS {
+                    match seq.next_element::<SheetRowHeightDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetRowHeightDeltas(out)),
+                    }
+                }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "rowHeights is too large (max {MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS} deltas)"
+                    )));
+                }
+
+                Ok(LimitedSheetRowHeightDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplySheetViewDeltasRequest {
     pub sheet_id: String,
     /// Column width deltas; `width: null` clears the override for that col.
     #[serde(default)]
-    pub col_widths: Option<Vec<SheetColWidthDelta>>,
+    pub col_widths: Option<LimitedSheetColWidthDeltas>,
     /// Row height deltas; `height: null` clears the override for that row.
     #[serde(default)]
-    pub row_heights: Option<Vec<SheetRowHeightDelta>>,
+    pub row_heights: Option<LimitedSheetRowHeightDeltas>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -5258,7 +5368,7 @@ pub fn apply_sheet_view_deltas(
 
     let mut view_state = parse_view_state(metadata_root.get(SHEET_VIEW_METADATA_KEY));
 
-    if let Some(deltas) = payload.col_widths {
+    if let Some(LimitedSheetColWidthDeltas(deltas)) = payload.col_widths {
         for delta in deltas {
             if delta.col < 0 {
                 continue;
@@ -5274,7 +5384,7 @@ pub fn apply_sheet_view_deltas(
         }
     }
 
-    if let Some(deltas) = payload.row_heights {
+    if let Some(LimitedSheetRowHeightDeltas(deltas)) = payload.row_heights {
         for delta in deltas {
             if delta.row < 0 {
                 continue;
@@ -9647,6 +9757,36 @@ mod tests {
         .to_string();
         assert!(
             err.contains("formatRunsByCol") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_sheet_view_deltas_request_rejects_too_many_col_width_deltas() {
+        let max = crate::resource_limits::MAX_SHEET_VIEW_COL_WIDTH_DELTAS;
+        let err =
+            <LimitedSheetColWidthDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized col width deltas")
+            .to_string();
+        assert!(
+            err.contains("colWidths") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_sheet_view_deltas_request_rejects_too_many_row_height_deltas() {
+        let max = crate::resource_limits::MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS;
+        let err =
+            <LimitedSheetRowHeightDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized row height deltas")
+            .to_string();
+        assert!(
+            err.contains("rowHeights") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
         );
     }
