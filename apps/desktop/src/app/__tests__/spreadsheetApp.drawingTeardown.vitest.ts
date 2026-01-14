@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageBitmapCache } from "../../drawings/imageBitmapCache";
-import { pxToEmu } from "../../drawings/overlay";
+import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -147,6 +147,7 @@ describe("SpreadsheetApp drawings teardown", () => {
     };
 
     const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
+    const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
 
     // Seed a single drawing object so pointer interactions have something to hit.
@@ -167,9 +168,12 @@ describe("SpreadsheetApp drawings teardown", () => {
     const callbacks = (app as any).drawingInteractionCallbacks;
     expect(callbacks).toBeTruthy();
     const setObjectsSpy = vi.spyOn(callbacks, "setObjects");
+    selectSpy.mockClear();
 
     // Drag the object slightly: should call `setObjects`.
     dispatchPointerEvent(root, "pointerdown", { clientX: 60, clientY: 40, pointerId: 1, button: 0 });
+    // The pointerdown should also select the drawing (and not be immediately cleared by a redraw).
+    expect(selectSpy.mock.calls.at(-1)?.[0]).toBe(1);
     dispatchPointerEvent(root, "pointermove", { clientX: 80, clientY: 55, pointerId: 1 });
     expect(setObjectsSpy).toHaveBeenCalled();
 
@@ -189,4 +193,3 @@ describe("SpreadsheetApp drawings teardown", () => {
     root.remove();
   });
 });
-

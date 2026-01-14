@@ -2065,7 +2065,7 @@ export class SpreadsheetApp {
           this.renderDrawings();
         },
         onSelectionChange: (selectedId) => {
-          this.drawingOverlay.setSelectedId(selectedId);
+          this.selectedDrawingId = selectedId;
           this.renderDrawings();
         },
       };
@@ -8670,6 +8670,10 @@ export class SpreadsheetApp {
   private onDrawingPointerDownCapture(e: PointerEvent): void {
     if (this.disposed) return;
     if (e.button !== 0) return;
+    // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
+    // Avoid competing with its pointer listeners (especially in legacy mode where it uses
+    // bubbling listeners and relies on pointer events not being cancelled in capture phase).
+    if (this.drawingInteractionController) return;
     // If another capture listener already claimed the event (e.g. chart interactions),
     // do not compete.
     if (e.cancelBubble) return;
