@@ -17394,6 +17394,50 @@ fn walk_calc_expr(
                     );
                 }
             }
+            Expr::FunctionCall { name, args, .. } if name == "LET" => {
+                if args.len() < 3 || args.len() % 2 == 0 {
+                    return;
+                }
+
+                // LET binding values are evaluated in "argument mode" (reference context), meaning
+                // they may preserve references (e.g. binding `x` to `A1` stores a single-cell
+                // reference, not the value of `A1`). When LET itself appears in a reference
+                // context (e.g. `ROW(LET(x, A1, x))`), walking bindings in value context can create
+                // spurious calc-graph cycles for self-referential formulas.
+                lexical_scopes.push(HashSet::new());
+                for pair in args[..args.len() - 1].chunks_exact(2) {
+                    let Some(name_key) = bare_identifier(&pair[0]) else {
+                        lexical_scopes.pop();
+                        return;
+                    };
+                    walk_calc_expr_reference_context(
+                        &pair[1],
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name_key);
+                }
+
+                walk_calc_expr_reference_context(
+                    &args[args.len() - 1],
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
+                lexical_scopes.pop();
+            }
             Expr::FunctionCall { name, args, .. } if name == "INDEX" => {
                 if args.is_empty() {
                     return;
@@ -19726,6 +19770,18 @@ mod tests {
         let mut engine = Engine::new();
         engine
             .set_cell_formula("Sheet1", "A1", "=ROW(CHOOSE(1, A1, B1))")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn row_let_reference_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ROW(LET(x, A1, x))")
             .unwrap();
         engine.recalculate_single_threaded();
 
