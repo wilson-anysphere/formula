@@ -799,14 +799,25 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
 
   // Prefix handlers in `handleRibbonCommand`.
   const cellStylesPrefix = "home.styles.cellStyles.";
-  if (combinedSource.includes(cellStylesPrefix)) {
+  // Only treat these ids as implemented when the desktop shell uses actual prefix parsing
+  // (e.g. `commandId.startsWith(cellStylesPrefix)`), not merely because the string appears
+  // elsewhere (like in `disabledById` UI-state overrides).
+  const usesCellStylesPrefixParsing =
+    combinedSource.includes(`startsWith("${cellStylesPrefix}")`) ||
+    combinedSource.includes(`startsWith('${cellStylesPrefix}')`) ||
+    /startsWith\(\s*cellStylesPrefix\s*\)/.test(combinedSource);
+  if (usesCellStylesPrefixParsing) {
     for (const id of schemaCommandIdSet) {
       if (id.startsWith(cellStylesPrefix)) implemented.add(id);
     }
   }
 
   const formatAsTablePrefix = "home.styles.formatAsTable.";
-  if (combinedSource.includes(formatAsTablePrefix)) {
+  const usesFormatAsTablePrefixParsing =
+    combinedSource.includes(`startsWith("${formatAsTablePrefix}")`) ||
+    combinedSource.includes(`startsWith('${formatAsTablePrefix}')`) ||
+    /startsWith\(\s*formatAsTablePrefix\s*\)/.test(combinedSource);
+  if (usesFormatAsTablePrefixParsing) {
     for (const id of schemaCommandIdSet) {
       if (!id.startsWith(formatAsTablePrefix)) continue;
       const presetId = id.slice(formatAsTablePrefix.length);
