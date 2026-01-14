@@ -2507,6 +2507,14 @@ mod tests {
         // clone-fallback path when appending another column.
         let shared_before_b = table.columnar_table().unwrap().clone();
         assert_eq!(shared_before_b.column_count(), 2);
+        let x_chunks_ptr = shared_before_b
+            .encoded_chunks(0)
+            .expect("X chunks")
+            .as_ptr();
+        let y_chunks_ptr = shared_before_b
+            .encoded_chunks(1)
+            .expect("Y chunks")
+            .as_ptr();
 
         table
             .add_column("B", vec![Value::Boolean(true), Value::Blank])
@@ -2515,6 +2523,16 @@ mod tests {
         assert_eq!(col_table.column_count(), 3);
         assert_eq!(shared_before_b.column_count(), 2);
         assert!(shared_before_b.schema().iter().all(|c| c.name != "B"));
+        // Appending a column when the underlying `Arc<ColumnarTable>` is shared should not require
+        // deep-cloning the existing encoded chunks.
+        assert_eq!(
+            col_table.encoded_chunks(0).expect("X chunks").as_ptr(),
+            x_chunks_ptr
+        );
+        assert_eq!(
+            col_table.encoded_chunks(1).expect("Y chunks").as_ptr(),
+            y_chunks_ptr
+        );
 
         let b_schema = col_table.schema().iter().find(|c| c.name == "B").unwrap();
         assert_eq!(b_schema.column_type, ColumnType::Boolean);
