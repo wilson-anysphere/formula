@@ -1,6 +1,6 @@
 import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
 import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
-import type { CellRange, GridAxisSizeChange } from "@formula/grid";
+import type { CellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import {
   assignFormulaReferenceColors,
@@ -15,7 +15,7 @@ import {
   type Range0
 } from "@formula/spreadsheet-frontend";
 import { formatA1Range, parseGoTo, type GoToWorkbookLookup } from "../../../packages/search/index.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
 import { CellEditorOverlay } from "./CellEditorOverlay";
 import { EngineCellProvider } from "./EngineCellProvider";
@@ -56,6 +56,7 @@ function EngineDemoApp() {
       }
     >()
   );
+  const originA1BySheetRef = useRef(new Map<string, string>());
 
   const HEADER_ROWS = 1;
   const HEADER_COLS = 1;
@@ -599,6 +600,28 @@ function EngineDemoApp() {
     };
   }, []);
 
+  const syncEngineOriginFromViewport = useCallback(
+    (viewport: GridViewportState | null | undefined, sheet: string) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      if (!viewport) return;
+
+      const row0 = Math.max(0, viewport.main.rows.start - headerRowOffset);
+      const col0 = Math.max(0, viewport.main.cols.start - headerColOffset);
+      const originA1 = toA1(row0, col0);
+
+      const prev = originA1BySheetRef.current.get(sheet);
+      if (prev === originA1) return;
+      originA1BySheetRef.current.set(sheet, originA1);
+
+      // Fire-and-forget; scroll can produce high-frequency events.
+      if (typeof (engine as any).setSheetOrigin === "function") {
+        void (engine as any).setSheetOrigin(sheet, originA1);
+      }
+    },
+    [headerColOffset, headerRowOffset],
+  );
+
   useEffect(() => {
     if (!provider) return;
 
@@ -640,6 +663,16 @@ function EngineDemoApp() {
 
     api.applyAxisSizeOverrides({ rows, cols }, { resetUnspecified: true });
   }, [provider, activeSheet]);
+
+  // CanvasGrid's `onScroll` callback intentionally doesn't fire for the initial
+  // scroll baseline. Sync the starting origin so `INFO("origin")` is correct
+  // immediately after the sheet/view mounts or frozen panes change.
+  useEffect(() => {
+    if (!provider) return;
+    const api = gridApiRef.current;
+    if (!api) return;
+    syncEngineOriginFromViewport(api.getViewportState(), activeSheet);
+  }, [provider, activeSheet, frozenRows, frozenCols, syncEngineOriginFromViewport]);
 
   useEffect(() => {
     if (!provider) return;
@@ -1625,6 +1658,9 @@ function EngineDemoApp() {
                 enableResize
                 onAxisSizeChange={onAxisSizeChange}
                 onZoomChange={setZoom}
+                onScroll={(_scroll, viewport) => {
+                  syncEngineOriginFromViewport(viewport, activeSheetRef.current);
+                }}
                 apiRef={(api) => {
                   gridApiRef.current = api;
                   if (api) api.setZoom(zoomRef.current);

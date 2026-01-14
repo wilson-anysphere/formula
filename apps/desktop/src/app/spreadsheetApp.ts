@@ -6007,6 +6007,27 @@ export class SpreadsheetApp {
       const row = Math.max(0, resolvedViewport.main.rows.start - headerRows);
       const col = Math.max(0, resolvedViewport.main.cols.start - headerCols);
       originA1 = cellToA1({ row, col });
+    } else if (this.gridMode === "legacy") {
+      // Legacy renderer: infer the top-left visible data cell from our scroll offsets + frozen panes.
+      //
+      // `scrollX`/`scrollY` are measured in CSS pixels relative to the scrollable pane origin (i.e.
+      // below/right of frozen panes). Hidden rows/cols collapse out of the pixel space, so use the
+      // precomputed `rowIndexByVisual`/`colIndexByVisual` mappings to convert the scroll position
+      // into a sheet row/col index.
+      try {
+        this.ensureViewportMappingCurrent();
+        if (this.rowIndexByVisual.length > 0 && this.colIndexByVisual.length > 0) {
+          const frozenRowCount = this.frozenVisibleRows.length;
+          const frozenColCount = this.frozenVisibleCols.length;
+          const rowVisual = frozenRowCount + Math.floor(this.scrollY / this.cellHeight);
+          const colVisual = frozenColCount + Math.floor(this.scrollX / this.cellWidth);
+          const rowIndex = this.rowIndexByVisual[Math.min(Math.max(0, rowVisual), Math.max(0, this.rowIndexByVisual.length - 1))] ?? 0;
+          const colIndex = this.colIndexByVisual[Math.min(Math.max(0, colVisual), Math.max(0, this.colIndexByVisual.length - 1))] ?? 0;
+          originA1 = cellToA1({ row: rowIndex, col: colIndex });
+        }
+      } catch {
+        // fall back to A1
+      }
     }
 
     if (this.wasmSheetOriginA1BySheetId.get(sheetId) === originA1) return;
@@ -18258,6 +18279,7 @@ export class SpreadsheetApp {
       this.hideCommentTooltip();
       this.syncScrollbars();
       this.notifyScrollListeners();
+      this.syncWasmSheetOrigin();
     }
     return changed;
   }
