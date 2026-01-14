@@ -2967,7 +2967,23 @@ pub fn decrypt_ooxml_standard(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let parsed = parse_encryption_info(encryption_info)?;
+    let parsed = match parse_encryption_info(encryption_info) {
+        Ok(parsed) => parsed,
+        Err(err @ OffcryptoError::UnsupportedNonCryptoApiStandardEncryption)
+        | Err(err @ OffcryptoError::InvalidFlags { .. }) => {
+            // Some real-world producers omit `EncryptionHeader.flags` bits such as `fCryptoAPI` and/or
+            // `fAES` even though the rest of the header follows the Standard CryptoAPI schema.
+            //
+            // Keep `parse_encryption_info` strict (so callers can rely on its invariants and tests
+            // can catch fixture drift), but be more tolerant when decrypting: patch the header flags
+            // based on the declared algorithm (`algId`) and retry parsing.
+            let Some(patched) = patch_standard_encryption_header_flags(encryption_info) else {
+                return Err(err);
+            };
+            parse_encryption_info(&patched)?
+        }
+        Err(err) => return Err(err),
+    };
     let (header, verifier) = match parsed {
         EncryptionInfo::Standard { header, verifier, .. } => (header, verifier),
         EncryptionInfo::Agile { .. } => {
@@ -2992,6 +3008,52 @@ pub fn decrypt_ooxml_standard(
 
     let info = StandardEncryptionInfo { header, verifier };
     decrypt_standard_encrypted_package_with_password(&info, encrypted_package, password)
+}
+
+fn patch_standard_encryption_header_flags(encryption_info: &[u8]) -> Option<Vec<u8>> {
+    // Offsets within the Standard `EncryptionInfo` stream:
+    // [0..8)   EncryptionVersionInfo (major/minor/flags)
+    // [8..12)  EncryptionHeaderSize (u32 LE)
+    // [12..]   EncryptionHeader (header_size bytes)
+    //          - [0..4)  EncryptionHeader.flags
+    //          - [4..8)  EncryptionHeader.sizeExtra
+    //          - [8..12) EncryptionHeader.algId
+    //
+    // See MS-OFFCRYPTO §2.3.4.1 / `EncryptionInfo` (Standard).
+    if encryption_info.len() < 24 {
+        return None;
+    }
+
+    let header_size =
+        u32::from_le_bytes(encryption_info.get(8..12)?.try_into().ok()?) as usize;
+    if header_size < 12 {
+        return None;
+    }
+    if encryption_info.len() < 12usize.saturating_add(header_size) {
+        return None;
+    }
+
+    let raw_flags = u32::from_le_bytes(encryption_info.get(12..16)?.try_into().ok()?);
+    let alg_id = u32::from_le_bytes(encryption_info.get(20..24)?.try_into().ok()?);
+
+    let mut patched_flags = raw_flags;
+    let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
+    if alg_is_aes {
+        patched_flags |= StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES;
+    } else if alg_id == CALG_RC4 {
+        patched_flags |= StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+        patched_flags &= !StandardEncryptionHeaderFlags::F_AES;
+    } else {
+        return None;
+    }
+
+    if patched_flags == raw_flags {
+        return None;
+    }
+
+    let mut patched = encryption_info.to_vec();
+    patched[12..16].copy_from_slice(&patched_flags.to_le_bytes());
+    Some(patched)
 }
 
 fn hash_output_len(algo: HashAlgorithm) -> usize {
