@@ -795,17 +795,27 @@ jobs:
           version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\s+PYODIDE_VERSION\s*=\s*["\x27]([^"\x27]+)["\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Pyodide assets
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - name: Restore Pyodide asset cache
+        id: pyodide-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: apps/desktop/public/pyodide/
           enableCrossOsArchive: true
-          # Pyodide assets are platform-independent; use a cross-OS cache key so the
-          # release matrix only downloads them once (macOS → Linux → Windows, max-parallel=1).
-          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
           restore-keys: |
             pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
             pyodide-v${{ steps.pyodide.outputs.version }}-
+
+      - name: Ensure Pyodide assets are present (populate cache on miss)
+        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
+
+      - name: Save Pyodide asset cache
+        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: apps/desktop/public/pyodide/
+          enableCrossOsArchive: true
+          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         env:
