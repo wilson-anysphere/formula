@@ -139,6 +139,18 @@ function createHarness(
 
   const app = {
     focus: () => {
+      // Mirror `main.ts` split-view focus restoration: when split view is active and the
+      // secondary pane is active, focus calls should land on the secondary grid root.
+      const split = layoutController.layout?.splitView;
+      if (
+        split &&
+        split.direction !== "none" &&
+        (split.activePane ?? "primary") === "secondary" &&
+        gridSecondaryEl
+      ) {
+        gridSecondaryEl.focus();
+        return;
+      }
       grid.focus();
     },
   } as any;
@@ -157,6 +169,7 @@ function createHarness(
 
   return {
     service,
+    layoutController,
     elements: {
       ribbonTab,
       formulaAddress,
@@ -377,6 +390,31 @@ describe("F6 focus cycling keybinding dispatch", () => {
     expect(res.event.defaultPrevented).toBe(true);
     // Focus restoration for the grid uses the primary `app.focus()` hook.
     expect(document.activeElement).toBe(elements.grid);
+  });
+
+  it("restores focus back to the active split-view pane when returning to the grid region", async () => {
+    const { service, elements, layoutController } = createHarness({ withSecondaryGrid: true });
+    const secondary = elements.gridSecondary;
+    expect(secondary).not.toBeNull();
+
+    // Simulate split-view mode being enabled with the secondary pane active (mirrors main.ts).
+    layoutController.layout.splitView.direction = "vertical";
+    layoutController.layout.splitView.activePane = "secondary";
+
+    secondary!.focus();
+    expect(document.activeElement).toBe(secondary);
+
+    // Forward out of the grid region -> sheet tabs.
+    let res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.sheetTab);
+
+    // Reverse back into the grid region -> should land on the secondary grid root (active pane).
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(secondary);
   });
 
   it("treats focus within nested grid elements as part of the grid region", async () => {
