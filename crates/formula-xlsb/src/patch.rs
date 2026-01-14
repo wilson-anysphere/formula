@@ -86,7 +86,10 @@ pub struct CellEdit {
     /// yield `cell.formula == None`.
     ///
     /// When false (the default), formula cells keep their formula unless [`Self::new_formula`] is
-    /// set to replace it. Non-formula cells ignore this flag.
+    /// set to replace it. (Historical behavior: setting `new_value=Blank` with no formula payload
+    /// also clears the formula by rewriting the record to `BrtBlank`.)
+    ///
+    /// Non-formula cells ignore this flag.
     ///
     /// When `clear_formula` is true, [`Self::new_formula`], [`Self::new_rgcb`], and
     /// [`Self::new_formula_flags`] must all be `None`.
