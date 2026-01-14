@@ -6562,4 +6562,57 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn get_pivot_schema_reports_field_types_and_limits_samples() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        // Source data (headers + records).
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Category"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Amount"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("A"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("A"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(5.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A4", json!("B"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B4", json!(7.0))
+            .unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+
+        // Only sample the first two records.
+        let schema = wb
+            .get_pivot_schema_internal(DEFAULT_SHEET, "A1:B4", 2)
+            .unwrap();
+
+        assert_eq!(schema.record_count, 3);
+        assert_eq!(schema.fields.len(), 2);
+
+        assert_eq!(schema.fields[0].name, "Category");
+        assert_eq!(schema.fields[0].field_type, pivot_engine::PivotFieldType::Text);
+        assert_eq!(
+            schema.fields[0].sample_values,
+            vec![
+                pivot_engine::PivotValue::Text("A".to_string()),
+                pivot_engine::PivotValue::Text("A".to_string()),
+            ]
+        );
+
+        assert_eq!(schema.fields[1].name, "Amount");
+        assert_eq!(schema.fields[1].field_type, pivot_engine::PivotFieldType::Number);
+        assert_eq!(
+            schema.fields[1].sample_values,
+            vec![
+                pivot_engine::PivotValue::Number(10.0),
+                pivot_engine::PivotValue::Number(5.0),
+            ]
+        );
+    }
 }
