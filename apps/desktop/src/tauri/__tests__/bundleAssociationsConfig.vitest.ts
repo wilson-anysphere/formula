@@ -6,6 +6,17 @@ function loadTauriConfig(): any {
   return JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
 }
 
+function hasExtension(config: any, ext: string): boolean {
+  const associations = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+  const needle = ext.trim().replace(/^\./, "").toLowerCase();
+  if (!needle) return false;
+  return associations.some((assoc: any) =>
+    Array.isArray(assoc?.ext)
+      ? assoc.ext.some((v: any) => typeof v === "string" && v.trim().replace(/^\./, "").toLowerCase() === needle)
+      : false,
+  );
+}
+
 function collectDeepLinkSchemes(config: any): string[] {
   const deepLink = config?.plugins?.["deep-link"];
   const desktop = deepLink?.desktop;
@@ -83,5 +94,43 @@ describe("tauri.conf.json bundle association guardrails", () => {
     const schemes = collectDeepLinkSchemes(config);
     expect(schemes.length, "expected plugins[\"deep-link\"].desktop.schemes to be configured").toBeGreaterThan(0);
     expect(schemes).toContain("formula");
+  });
+
+  it("ships a shared-mime-info Parquet definition when .parquet file association is configured", () => {
+    const config = loadTauriConfig();
+    if (!hasExtension(config, "parquet")) {
+      // If Parquet support is removed, this check is irrelevant.
+      return;
+    }
+
+    const linux = config?.bundle?.linux;
+    expect(linux && typeof linux === "object", "expected bundle.linux to be configured").toBeTruthy();
+
+    const expectedDest = "usr/share/mime/packages/app.formula.desktop.xml";
+    const expectedSrc = "mime/app.formula.desktop.xml";
+
+    for (const target of ["deb", "rpm", "appimage"] as const) {
+      const files = linux?.[target]?.files;
+      expect(files && typeof files === "object", `expected bundle.linux.${target}.files to be configured`).toBeTruthy();
+      expect(files[expectedDest]).toBe(expectedSrc);
+    }
+
+    // Ensure `update-mime-database` triggers exist at install time.
+    expect(Array.isArray(linux?.deb?.depends), "expected bundle.linux.deb.depends to be an array").toBe(true);
+    expect(linux.deb.depends).toContain("shared-mime-info");
+    expect(Array.isArray(linux?.rpm?.depends), "expected bundle.linux.rpm.depends to be an array").toBe(true);
+    expect(linux.rpm.depends).toContain("shared-mime-info");
+  });
+
+  it("includes a Parquet glob in the shared-mime-info definition file", () => {
+    const config = loadTauriConfig();
+    if (!hasExtension(config, "parquet")) {
+      return;
+    }
+
+    const xmlUrl = new URL("../../../src-tauri/mime/app.formula.desktop.xml", import.meta.url);
+    const xml = readFileSync(xmlUrl, "utf8");
+    expect(xml).toContain('mime-type type="application/vnd.apache.parquet"');
+    expect(xml).toContain('glob pattern="*.parquet"');
   });
 });
