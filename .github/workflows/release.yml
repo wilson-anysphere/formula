@@ -79,6 +79,8 @@ jobs:
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: release workflow runner images are pinned (no *-latest)"
         run: bash scripts/ci/check-gha-runner-pins.sh
+      - name: "Guard: release workflow actions are pinned to commit SHAs"
+        run: bash scripts/ci/check-gha-action-sha-pins.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
       - name: "Guard: Node version pins match CI workflow"
