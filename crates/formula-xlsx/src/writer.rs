@@ -729,6 +729,18 @@ mod sheet_format_pr_tests {
     }
 
     #[test]
+    fn preserves_non_integer_default_row_height() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.default_row_height = Some(15.25);
+
+        let xml = sheet_format_pr_xml(&sheet);
+        let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
+        let node = doc.root_element();
+        assert_eq!(node.tag_name().name(), "sheetFormatPr");
+        assert_eq!(node.attribute("defaultRowHeight"), Some("15.25"));
+    }
+
+    #[test]
     fn renders_non_binary_friendly_widths_without_float_noise() {
         // 8.43 is Excel's default column width and is not exactly representable as an f32.
         // Ensure we still serialize a human-friendly value (not a long binary rounding artifact).
