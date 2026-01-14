@@ -56,6 +56,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.isRangeArg("TEXTJOIN", 1), false, "Expected TEXTJOIN ignore_empty not to be a range");
   assert.ok(registry.isRangeArg("TEXTJOIN", 2), "Expected TEXTJOIN text1 to be a range");
   assert.ok(registry.isRangeArg("TEXTJOIN", 3), "Expected TEXTJOIN text2 to be a range (varargs)");
+  assert.ok(registry.isRangeArg("CONCAT", 0), "Expected CONCAT text1 to be a range");
+  assert.ok(registry.isRangeArg("CONCATENATE", 0), "Expected CONCATENATE text1 to be a range");
 
   // TEXTAFTER/TEXTBEFORE are curated (not present in the Rust catalog yet).
   assert.ok(registry.getFunction("TEXTAFTER"), "Expected TEXTAFTER to be present");
@@ -276,7 +278,9 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ADDRESS", 4), "string", "Expected ADDRESS sheet_text to be a string");
   assert.equal(registry.getArgType("NUMBERVALUE", 1), "string", "Expected NUMBERVALUE decimal_separator to be a string");
   assert.equal(registry.getArgType("NUMBERVALUE", 2), "string", "Expected NUMBERVALUE group_separator to be a string");
+  assert.ok(registry.isRangeArg("NUMBERVALUE", 0), "Expected NUMBERVALUE text to be a range");
   assert.equal(registry.getArgType("IMAGE", 0), "string", "Expected IMAGE source to be a string");
+  assert.ok(registry.isRangeArg("TEXT", 0), "Expected TEXT value to be a range");
 
   // Date/time helpers with more descriptive arg naming
   assert.equal(registry.getFunction("DATE")?.args?.[0]?.name, "year", "Expected DATE arg1 to be year");
@@ -295,6 +299,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     "date_text",
     "Expected DATEVALUE arg1 to be date_text"
   );
+  assert.ok(registry.isRangeArg("DATEVALUE", 0), "Expected DATEVALUE date_text to be a range");
+  assert.ok(registry.isRangeArg("TIMEVALUE", 0), "Expected TIMEVALUE time_text to be a range");
 
   // Core time value of money functions (catalog arg_types are too coarse; curated names improve hinting).
   const pv = registry.getFunction("PV");

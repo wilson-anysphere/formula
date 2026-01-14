@@ -365,14 +365,14 @@ const CURATED_FUNCTIONS = [
     name: "DATEVALUE",
     description: "Converts a date in the form of text to a serial number.",
     args: [
-      { name: "date_text", type: "value" },
+      { name: "date_text", type: "range" },
     ],
   },
   {
     name: "TIMEVALUE",
     description: "Converts a time in the form of text to a serial number.",
     args: [
-      { name: "time_text", type: "value" },
+      { name: "time_text", type: "range" },
     ],
   },
   {
@@ -2678,14 +2678,14 @@ const CURATED_FUNCTIONS = [
     name: "CONCAT",
     description: "Combines the text from multiple ranges and/or strings.",
     args: [
-      { name: "text1", type: "value", repeating: true },
+      { name: "text1", type: "range", repeating: true },
     ],
   },
   {
     name: "CONCATENATE",
     description: "Combines several text strings into one text string.",
     args: [
-      { name: "text1", type: "value", repeating: true },
+      { name: "text1", type: "range", repeating: true },
     ],
   },
   {
@@ -2991,7 +2991,7 @@ const CURATED_FUNCTIONS = [
     name: "NUMBERVALUE",
     description: "Converts text to a number in a locale-independent way, using custom separators.",
     args: [
-      { name: "text", type: "value" },
+      { name: "text", type: "range" },
       { name: "decimal_separator", type: "string", optional: true },
       { name: "group_separator", type: "string", optional: true },
     ],
@@ -3050,7 +3050,7 @@ const CURATED_FUNCTIONS = [
     name: "TEXT",
     description: "Formats a number and converts it to text.",
     args: [
-      { name: "value", type: "value" },
+      { name: "value", type: "range" },
       { name: "format_text", type: "string" },
     ],
   },
