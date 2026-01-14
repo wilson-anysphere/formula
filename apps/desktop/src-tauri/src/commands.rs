@@ -1677,33 +1677,49 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
-                        "table" => table = Some(map.next_value::<PivotText>()?),
-                        "column" => column = Some(map.next_value::<PivotText>()?),
-                        "measure" => measure = Some(map.next_value::<PivotText>()?),
-                        "name" => name = Some(map.next_value::<PivotText>()?),
-                        _ => {
-                            let _ = map.next_value::<de::IgnoredAny>()?;
+                        "table" => {
+                            if table.is_some() {
+                                return Err(de::Error::duplicate_field("table"));
+                            }
+                            table = Some(map.next_value()?);
+                        }
+                        "column" => {
+                            if column.is_some() {
+                                return Err(de::Error::duplicate_field("column"));
+                            }
+                            column = Some(map.next_value()?);
+                        }
+                        "measure" => {
+                            if measure.is_some() {
+                                return Err(de::Error::duplicate_field("measure"));
+                            }
+                            measure = Some(map.next_value()?);
+                        }
+                        "name" => {
+                            if name.is_some() {
+                                return Err(de::Error::duplicate_field("name"));
+                            }
+                            name = Some(map.next_value()?);
+                        }
+                        other => {
+                            return Err(de::Error::unknown_field(
+                                other,
+                                &["table", "column", "measure", "name"],
+                            ));
                         }
                     }
                 }
 
-                if table.is_some() || column.is_some() {
-                    let table = table.ok_or_else(|| de::Error::missing_field("table"))?;
-                    let column = column.ok_or_else(|| de::Error::missing_field("column"))?;
-                    return Ok(IpcPivotFieldRef::Column { table, column });
+                match (table, column, measure, name) {
+                    (Some(table), Some(column), None, None) => {
+                        Ok(IpcPivotFieldRef::Column { table, column })
+                    }
+                    (None, None, Some(measure), None) => Ok(IpcPivotFieldRef::Measure { measure }),
+                    (None, None, None, Some(name)) => Ok(IpcPivotFieldRef::MeasureName { name }),
+                    _ => Err(de::Error::custom(
+                        "expected {table,column}, {measure}, or {name} object for pivot field ref",
+                    )),
                 }
-
-                if let Some(measure) = measure {
-                    return Ok(IpcPivotFieldRef::Measure { measure });
-                }
-
-                if let Some(name) = name {
-                    return Ok(IpcPivotFieldRef::MeasureName { name });
-                }
-
-                Err(de::Error::custom(
-                    "pivot field ref object must specify either {table,column}, {measure}, or {name}",
-                ))
             }
         }
 
@@ -5889,7 +5905,7 @@ pub async fn run_macro(
 pub async fn run_python_script(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
-    code: LimitedScriptCode<crate::ipc_limits::MAX_SCRIPT_CODE_BYTES>,
+    code: IpcScriptCode,
     permissions: Option<PythonPermissions>,
     timeout_ms: Option<u64>,
     max_memory_bytes: Option<u64>,
@@ -6941,7 +6957,7 @@ pub async fn validate_vba_migration(
     workbook_id: Option<String>,
     macro_id: String,
     target: MigrationTarget,
-    code: LimitedScriptCode<crate::ipc_limits::MAX_SCRIPT_CODE_BYTES>,
+    code: IpcScriptCode,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
