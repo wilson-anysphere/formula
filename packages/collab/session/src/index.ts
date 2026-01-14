@@ -2,14 +2,14 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
-import { migrateCommentsArrayToMap } from "@formula/collab-comments";
+import { getCommentsRoot, migrateCommentsArrayToMap } from "@formula/collab-comments";
 import {
+  getArrayRoot,
   getMapRoot,
   getYArray,
   getYMap,
   getYText,
   isYAbstractType,
-  replaceForeignRootType,
 } from "@formula/collab-yjs-utils";
 import {
   CellConflictMonitor,
@@ -57,60 +57,15 @@ import {
 function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // Yjs root types are schema-defined: you must know whether a key is a Map or
   // Array. When applying updates into a fresh Doc, root types can temporarily
-  // appear as a generic `AbstractType` until a constructor is chosen.
+  // appear as a generic `AbstractType` placeholder until a constructor is chosen.
   //
-  // Importantly, calling `doc.getMap("comments")` on an Array-backed root can
-  // define it as a Map and make the array content inaccessible. To support both
-  // historical schemas (Map or Array) we peek at the underlying state before
-  // choosing a constructor.
+  // Importantly, calling `doc.getMap("comments")` on an Array-backed doc can
+  // permanently define it as a Map and make legacy array content inaccessible.
+  // Use the shared comment-root detection logic to determine whether "comments"
+  // is a Map or legacy Array before instantiating it.
   const existing = doc.share.get("comments");
-  let root: Y.AbstractType<any>;
-
-  if (!existing) {
-    root = doc.getMap("comments");
-  } else {
-    const existingMap = getYMap(existing);
-    if (existingMap) {
-      root =
-        existingMap instanceof Y.Map
-          ? existingMap
-          : replaceForeignRootType({ doc, name: "comments", existing: existingMap, create: () => new Y.Map() });
-    } else {
-      const existingArray = getYArray(existing);
-      if (existingArray) {
-        root =
-          existingArray instanceof Y.Array
-            ? existingArray
-            : replaceForeignRootType({
-                doc,
-                name: "comments",
-                existing: existingArray,
-                create: () => new Y.Array(),
-              });
-      } else {
-        const placeholder = existing as any;
-        const hasStart = placeholder?._start != null; // sequence item => likely array
-        const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-        const kind = hasStart && mapSize === 0 ? "array" : "map";
-        // If another Yjs module instance called `Doc.prototype.get(name)` on this
-        // doc (defaulting to `AbstractType`), the placeholder constructor can be
-        // foreign. Calling `doc.getMap/getArray` from this module would then throw
-        // "different constructor". Normalize the placeholder into this module's
-        // constructors directly.
-        // A foreign `AbstractType` placeholder can be patched to pass
-        // `instanceof Y.AbstractType` checks, so we must detect foreign placeholders
-        // by constructor identity (doc.getMap/getArray would otherwise throw).
-        if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
-          root =
-            kind === "array"
-              ? replaceForeignRootType({ doc, name: "comments", existing, create: () => new Y.Array() })
-              : replaceForeignRootType({ doc, name: "comments", existing, create: () => new Y.Map() });
-        } else {
-          root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
-        }
-      }
-    }
-  }
+  const kind = existing ? getCommentsRoot(doc).kind : "map";
+  const root = kind === "array" ? getArrayRoot(doc, "comments") : getMapRoot(doc, "comments");
 
   // If updates were applied using a different Yjs module instance (e.g. y-websocket
   // applying updates via CommonJS `require("yjs")` while the app uses ESM imports),
