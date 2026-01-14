@@ -56,8 +56,8 @@ export class WasmWorkbook {
     recordCall("setWorkbookFileMetadata", directory, filename);
   }
 
-  setCellStyleId(address, styleId, sheet) {
-    recordCall("setCellStyleId", address, styleId, sheet);
+  setCellStyleId(sheet, address, styleId) {
+    recordCall("setCellStyleId", sheet, address, styleId);
   }
 
   setRowStyleId(sheet, row, styleId) {

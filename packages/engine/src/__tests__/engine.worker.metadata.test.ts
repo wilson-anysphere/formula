@@ -225,7 +225,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
         ["setWorkbookFileMetadata", "/tmp", "book.xlsx"],
-        ["setCellStyleId", "A1", 7, "Sheet1"],
+        ["setCellStyleId", "Sheet1", "A1", 7],
         ["setRowStyleId", "Sheet1", 5, 9],
         ["setRowStyleId", "Sheet1", 6, 0],
         ["setColStyleId", "Sheet1", 2, 11],
@@ -346,7 +346,7 @@ describe("engine.worker workbook metadata RPCs", () => {
       expect((resp as RpcResponseOk).result).toEqual({ rows: 100, cols: 200 });
 
       expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
-        ["setCellStyleId", "A1", 7, "Sheet1"],
+        ["setCellStyleId", "Sheet1", "A1", 7],
         ["setRowStyleId", "Sheet1", 5, 9],
         ["setColStyleId", "Sheet1", 2, 11],
         ["setSheetDefaultStyleId", "Sheet1", 13],
