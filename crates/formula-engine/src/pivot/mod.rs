@@ -263,17 +263,22 @@ impl PivotCache {
     }
 
     pub fn field_index_ref(&self, field: &PivotFieldRef) -> Option<usize> {
-        match field {
-            PivotFieldRef::CacheFieldName(name) => self.field_index(name),
-            // Best-effort: fall back to matching the field label against cache field names.
-            //
-            // `PivotCache` field names are always strings, so for Data Model pivots we rely on
-            // the cache generator to use the same display label as `PivotFieldRef`'s `Display`.
-            _ => {
-                let label = field.to_string();
-                self.field_index(&label)
-            }
+        if let Some(name) = field.as_cache_field_name() {
+            return self.field_index(name);
         }
+
+        // Best-effort: match Data Model refs against cache field captions. Caches may store
+        // measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`), and may
+        // store column refs with or without quoted table names.
+        let label = pivot_field_ref_name(field);
+        if let Some(idx) = self.field_index(label.as_ref()) {
+            return Some(idx);
+        }
+        let canonical = field.canonical_name();
+        if let Some(idx) = self.field_index(canonical.as_ref()) {
+            return Some(idx);
+        }
+        self.field_index(&field.to_string())
     }
 
     pub fn refresh_from_range(&mut self, range: &[Vec<PivotValue>]) -> Result<(), PivotError> {

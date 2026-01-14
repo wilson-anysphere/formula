@@ -523,7 +523,6 @@ impl Workbook {
             Some(out)
         }
     }
-
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
         if !self.sheet_exists(key.sheet) {
             return None;

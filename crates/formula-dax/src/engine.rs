@@ -202,6 +202,10 @@ impl FilterContext {
         self.clear_column_filter(table, column);
     }
 
+    pub fn clear_table_filters_public(&mut self, table: &str) {
+        self.clear_table_filters(table);
+    }
+
     pub(crate) fn relationship_overrides(&self) -> &HashSet<usize> {
         &self.active_relationship_overrides
     }

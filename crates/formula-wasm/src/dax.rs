@@ -387,6 +387,25 @@ impl DaxModel {
             Some(DaxFilterContext { ctx: filter }),
         )
     }
+
+    /// Apply `CALCULATE`-style filter arguments to an existing filter context, returning the
+    /// resulting [`DaxFilterContext`].
+    ///
+    /// This enables expressing filters that can't be represented as simple column equals/in sets
+    /// (for example: `Customers[Region] <> BLANK()`).
+    #[wasm_bindgen(js_name = "applyCalculateFilters")]
+    pub fn apply_calculate_filters(
+        &self,
+        base: Option<DaxFilterContext>,
+        filter_args: Vec<String>,
+    ) -> Result<DaxFilterContext, JsValue> {
+        let base_filter = base.map(|ctx| ctx.ctx).unwrap_or_else(FilterContext::empty);
+        let args: Vec<&str> = filter_args.iter().map(|s| s.as_str()).collect();
+        let filter = DaxEngine::new()
+            .apply_calculate_filters(&self.model, &base_filter, &args)
+            .map_err(dax_error_to_js)?;
+        Ok(DaxFilterContext { ctx: filter })
+    }
 }
 
 /// JS wrapper around [`formula_dax::FilterContext`].
@@ -424,6 +443,31 @@ impl DaxFilterContext {
         DaxFilterContext {
             ctx: self.ctx.clone(),
         }
+    }
+
+    #[wasm_bindgen(js_name = "setColumnIn")]
+    pub fn set_column_in(
+        &mut self,
+        table: &str,
+        column: &str,
+        values: Vec<JsValue>,
+    ) -> Result<(), JsValue> {
+        let mut out = Vec::with_capacity(values.len());
+        for value in values {
+            out.push(js_value_to_dax_value(value)?);
+        }
+        self.ctx.set_column_in(table, column, out);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "clearColumnFilter")]
+    pub fn clear_column_filter(&mut self, table: &str, column: &str) {
+        self.ctx.clear_column_filter_public(table, column);
+    }
+
+    #[wasm_bindgen(js_name = "clearTableFilters")]
+    pub fn clear_table_filters(&mut self, table: &str) {
+        self.ctx.clear_table_filters_public(table);
     }
 }
 
