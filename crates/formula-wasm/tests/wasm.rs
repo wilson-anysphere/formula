@@ -2857,6 +2857,47 @@ fn from_encrypted_xlsx_bytes_rejects_invalid_password() {
 }
 
 #[wasm_bindgen_test]
+fn from_encrypted_xlsx_bytes_rejects_xlsb_payload() {
+    use std::io::Write as _;
+
+    // Construct a minimal OPC-like ZIP that looks like an XLSB workbook by including
+    // `xl/workbook.bin` (but *not* `xl/workbook.xml`).
+    let cursor = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default();
+    zip.start_file("xl/workbook.bin", options)
+        .expect("start workbook.bin");
+    zip.write_all(b"not a real xlsb").expect("write");
+    let cursor = zip.finish().expect("finish zip");
+    let xlsb_like_zip = cursor.into_inner();
+
+    let password = "secret-password";
+    let encrypted = formula_office_crypto::encrypt_package_to_ole(
+        &xlsb_like_zip,
+        password,
+        formula_office_crypto::EncryptOptions {
+            key_bits: 128,
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha256,
+            spin_count: 1_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    let err = match WasmWorkbook::from_encrypted_xlsx_bytes(&encrypted, password.to_string()) {
+        Ok(_) => panic!("expected xlsb payload error"),
+        Err(err) => err,
+    };
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert!(
+        message.to_lowercase().contains("xlsb"),
+        "expected xlsb error message, got {message:?}"
+    );
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_reports_password_required_for_encrypted_inputs() {
     let plaintext: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
