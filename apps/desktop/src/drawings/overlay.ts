@@ -465,6 +465,7 @@ export class DrawingOverlay {
   }
 
   async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
+    if (this.destroyed) return;
     this.renderSeq += 1;
     const seq = this.renderSeq;
     let completed = false;
