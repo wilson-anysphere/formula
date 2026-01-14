@@ -611,6 +611,9 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     encrypted_package.extend_from_slice(&ciphertext);
+    // Mimic OLE sector slack / producer quirks: `EncryptedPackage` can have trailing bytes beyond
+    // the declared plaintext size. The decryptor must ignore them.
+    encrypted_package.extend(std::iter::repeat(0xDDu8).take(17));
 
     // Write the OLE/CFB wrapper.
     let cursor = Cursor::new(Vec::new());
