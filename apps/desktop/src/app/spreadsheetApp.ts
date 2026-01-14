@@ -17960,9 +17960,11 @@ export class SpreadsheetApp {
             this.limits
           );
           this.ensureActiveCellVisible();
-          this.scrollCellIntoView(this.selection.active);
+          const didScroll = this.scrollCellIntoView(this.selection.active);
           if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
-          this.refresh();
+          else if (didScroll) this.ensureViewportMappingCurrent();
+          this.renderSelection();
+          this.updateStatus();
           this.focus();
         } else {
           this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
