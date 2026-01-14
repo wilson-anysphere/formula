@@ -1026,6 +1026,117 @@ export class ContextManager {
           queryForRag = "[REDACTED]";
         }
       }
+
+      // Structured DLP can require redaction for non-heuristic metadata tokens (e.g. sheet/table/namedRange
+      // names) that a no-op redactor cannot detect. If those disallowed identifiers appear in the
+      // user's query, strip them before embedding to keep future cloud embedders safe.
+      if (
+        dlpStructuredDecision?.decision === DLP_DECISION.REDACT &&
+        dlpClassificationRecords.length > 0 &&
+        typeof queryForRag === "string"
+      ) {
+        let nextQuery = queryForRag;
+
+        /**
+         * @param {string} haystack
+         * @param {string} needle
+         * @param {string} replacement
+         */
+        const replaceAll = (haystack, needle, replacement) => {
+          if (!needle) return haystack;
+          if (!haystack.includes(needle)) return haystack;
+          return haystack.split(needle).join(replacement);
+        };
+
+        /**
+         * Replace a disallowed token and common encodings/quoting forms.
+         * @param {string} token
+         */
+        const redactQueryToken = (token) => {
+          const raw = String(token ?? "");
+          if (!raw) return;
+          nextQuery = replaceAll(nextQuery, raw, "[REDACTED]");
+          const encoded = encodeURIComponent(raw);
+          if (encoded && encoded !== raw) nextQuery = replaceAll(nextQuery, encoded, "[REDACTED]");
+          // Excel-style quoted sheet names.
+          const quoted = `'${raw.replace(/'/g, "''")}'`;
+          if (quoted !== raw) nextQuery = replaceAll(nextQuery, quoted, "'[REDACTED]'");
+        };
+
+        // Treat the sheet name as a disallowed metadata token under structured DLP redaction.
+        // (Note: this does not affect the returned A1 range strings; it only keeps embedding inputs safe.)
+        const sheetNameToken = String(rawSheet?.name ?? "");
+        if (
+          sheetNameToken &&
+          (nextQuery.includes(sheetNameToken) ||
+            nextQuery.includes(encodeURIComponent(sheetNameToken)) ||
+            nextQuery.includes(`'${sheetNameToken.replace(/'/g, "''")}'`))
+        ) {
+          redactQueryToken(sheetNameToken);
+        }
+
+        const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
+
+        /**
+         * Structured DLP decision helper for an A1 range string (table/namedRange).
+         * @param {unknown} rangeA1
+         */
+        const recordDecisionForA1Range = (rangeA1) => {
+          const raw = String(rangeA1 ?? "");
+          if (!raw) return null;
+          let parsed;
+          try {
+            parsed = parseA1Range(raw);
+          } catch {
+            // If we cannot parse the range, be conservative and treat it as disallowed.
+            return { decision: DLP_DECISION.REDACT };
+          }
+          const rangeRef = {
+            documentId: dlpAuditDocumentId ?? dlp.documentId,
+            sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
+            range: {
+              start: { row: parsed.startRow, col: parsed.startCol },
+              end: { row: parsed.endRow, col: parsed.endCol },
+            },
+          };
+          const classification = effectiveRangeClassification(rangeRef, dlpClassificationRecords);
+          return evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+        };
+
+        // Table/namedRange names can also contain non-heuristic sensitive identifiers.
+        // When the underlying range is disallowed, redact the name token before embedding.
+        if (Array.isArray(rawSheet?.tables)) {
+          for (const t of rawSheet.tables) {
+            throwIfAborted(signal);
+            const name = String(t?.name ?? "");
+            if (!name) continue;
+            if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
+            const decision = recordDecisionForA1Range(t?.range);
+            if (decision && decision.decision !== DLP_DECISION.ALLOW) {
+              redactQueryToken(name);
+            }
+          }
+        }
+        if (Array.isArray(rawSheet?.namedRanges)) {
+          for (const r of rawSheet.namedRanges) {
+            throwIfAborted(signal);
+            const name = String(r?.name ?? "");
+            if (!name) continue;
+            if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
+            const decision = recordDecisionForA1Range(r?.range);
+            if (decision && decision.decision !== DLP_DECISION.ALLOW) {
+              redactQueryToken(name);
+            }
+          }
+        }
+
+        queryForRag = nextQuery;
+      }
     }
 
     // Index sheet into the in-memory RAG store (cached by content signature) and retrieve

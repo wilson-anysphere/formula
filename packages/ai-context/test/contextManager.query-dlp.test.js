@@ -57,6 +57,97 @@ test("buildContext: redacts sensitive query before sheet-level RAG embedding whe
   assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
 });
 
+test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  await cm.buildContext({
+    sheet: {
+      name: "TopSecretSheet",
+      values: [["Hello"]],
+    },
+    query: "Search TopSecretSheet",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "TopSecretSheet",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "TopSecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.at(-1), /TopSecretSheet/);
+  assert.match(embedder.seen.at(-1), /\[REDACTED\]/);
+});
+
+test("buildContext: structured DLP also redacts non-heuristic table/namedRange tokens in queries before embedding (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Hello"]],
+      tables: [{ name: "TopSecretTable", range: "Sheet1!A1:A1" }],
+      namedRanges: [{ name: "TopSecretRange", range: "Sheet1!A1:A1" }],
+    },
+    query: "Describe TopSecretTable and TopSecretRange",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.at(-1), /TopSecretTable/);
+  assert.doesNotMatch(embedder.seen.at(-1), /TopSecretRange/);
+  assert.match(embedder.seen.at(-1), /\[REDACTED\]/);
+});
+
 test("buildContext: heuristic Restricted findings can block when policy requires", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000, redactor: (text) => text });
 
