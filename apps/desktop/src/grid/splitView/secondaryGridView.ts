@@ -339,6 +339,7 @@ export class SecondaryGridView {
     // Additionally, re-render the drawings overlay when drawings/images change so pictures
     // inserted into the sheet show up in the secondary pane without requiring a scroll.
     const unsubscribeImages = this.document.on("change", (payload: any) => {
+      if (this.disposed) return;
       const source = typeof payload?.source === "string" ? payload.source : "";
       if (source === "applyState") {
         this.grid.renderer.clearImageCache?.();
@@ -366,6 +367,7 @@ export class SecondaryGridView {
 
     // Optional dedicated event streams (if/when DocumentController adds them).
     const unsubscribeDrawings = this.document.on("drawings", (payload: any) => {
+      if (this.disposed) return;
       const sheetId = typeof payload?.sheetId === "string" ? payload.sheetId : null;
       if (sheetId && sheetId !== this.getSheetId()) return;
       void this.renderDrawings();
@@ -373,6 +375,7 @@ export class SecondaryGridView {
     this.disposeFns.push(() => unsubscribeDrawings());
 
     const unsubscribeImagesEvent = this.document.on("images", () => {
+      if (this.disposed) return;
       this.drawingsOverlay.clearImageCache();
       void this.renderDrawings();
     });
@@ -935,10 +938,12 @@ export class SecondaryGridView {
     const dpr = override?.dpr ?? (window.devicePixelRatio || 1);
     const zoom = this.grid.renderer.getZoom();
     const viewport = this.grid.renderer.scroll.getViewportState();
-    const headerOffsetX =
-      this.headerCols > 0 ? this.grid.renderer.scroll.cols.totalSize(this.headerCols) : 0;
-    const headerOffsetY =
-      this.headerRows > 0 ? this.grid.renderer.scroll.rows.totalSize(this.headerRows) : 0;
+    const headerWidth = this.headerCols > 0 ? this.grid.renderer.scroll.cols.totalSize(this.headerCols) : 0;
+    const headerHeight = this.headerRows > 0 ? this.grid.renderer.scroll.rows.totalSize(this.headerRows) : 0;
+    // Clamp offsets to the visible viewport so extreme split ratios (very narrow panes) don't
+    // produce header offsets larger than the canvas size.
+    const headerOffsetX = Math.min(headerWidth, width);
+    const headerOffsetY = Math.min(headerHeight, height);
     return {
       scrollX: scroll.x,
       scrollY: scroll.y,
