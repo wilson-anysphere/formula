@@ -6082,61 +6082,37 @@ fn propagate_filter(
             // can use it for the visible key set. For large columnar `to_table`s, we may store only
             // a key set (to avoid allocating per-key row vectors); in that case, extract the
             // distinct visible values directly from the backend.
-            let mut allowed_keys: Vec<Value> = match (&relationship.to_index, relationship.from_index.as_ref()) {
-                (ToIndex::RowSets { map, .. }, Some(_)) => map
-                    .iter()
-                    // Fact rows whose FK is BLANK always belong to the relationship-generated blank
-                    // member, even if a physical BLANK key exists on the dimension side. Therefore,
-                    // do not treat BLANK as a matchable key during propagation.
-                    .filter(|(key, _)| !key.is_blank())
-                    .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
+            let mut allowed_keys: Vec<Value> = match &relationship.to_index {
+                // If all physical rows on the `to_table` side are visible, we can reuse the
+                // relationship's precomputed distinct key set rather than scanning the table.
+                ToIndex::RowSets { map, .. } if to_set.all_true() => map
+                    .keys()
+                    .filter(|key| !key.is_blank())
+                    .cloned()
                     .collect(),
-                _ => {
-                    let to_table = model
-                        .table(to_table_name)
-                        .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
-                    let to_idx = relationship.to_idx;
-                    let all_visible = to_set.all_true();
-                    if all_visible {
-                        to_table
-                            .distinct_values_filtered(to_idx, None)
-                            .unwrap_or_else(|| {
-                                let mut seen = HashSet::new();
-                                let mut out = Vec::new();
-                                for row in 0..to_table.row_count() {
-                                    let v =
-                                        to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-                                    if seen.insert(v.clone()) {
-                                        out.push(v);
-                                    }
-                                }
-                                out
-                            })
-                    } else {
-                        let physical_rows = to_table.row_count();
-                        let mut visible_count = to_set.count_ones();
-                        if to_set.len() > physical_rows {
-                            // Exclude any "virtual blank member" rows that live beyond the physical
-                            // table length.
-                            for idx in physical_rows..to_set.len() {
-                                if to_set.get(idx) {
-                                    visible_count = visible_count.saturating_sub(1);
-                                }
-                            }
-                        }
-
-                        if visible_count == 0 {
-                            Vec::new()
-                        } else if visible_count == physical_rows {
-                            // All physical rows are visible (but the relationship's virtual blank
-                            // member may be filtered out). Extract keys from the full physical
-                            // table without materializing row indices.
+                ToIndex::KeySet { keys, .. } if to_set.all_true() => keys.iter().cloned().collect(),
+                _ => match (&relationship.to_index, relationship.from_index.as_ref()) {
+                    (ToIndex::RowSets { map, .. }, Some(_)) => map
+                        .iter()
+                        // Fact rows whose FK is BLANK always belong to the relationship-generated
+                        // blank member, even if a physical BLANK key exists on the dimension side.
+                        // Therefore, do not treat BLANK as a matchable key during propagation.
+                        .filter(|(key, _)| !key.is_blank())
+                        .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
+                        .collect(),
+                    _ => {
+                        let to_table = model
+                            .table(to_table_name)
+                            .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+                        let to_idx = relationship.to_idx;
+                        let all_visible = to_set.all_true();
+                        if all_visible {
                             to_table
                                 .distinct_values_filtered(to_idx, None)
                                 .unwrap_or_else(|| {
                                     let mut seen = HashSet::new();
                                     let mut out = Vec::new();
-                                    for row in 0..physical_rows {
+                                    for row in 0..to_table.row_count() {
                                         let v = to_table
                                             .value_by_idx(row, to_idx)
                                             .unwrap_or(Value::Blank);
@@ -6146,78 +6122,31 @@ fn propagate_filter(
                                     }
                                     out
                                 })
-                        } else if to_set.len() == physical_rows {
-                            // Prefer backends that can compute distinct values directly from a
-                            // bitmap mask (avoids allocating a potentially huge `Vec<usize>`).
-                            to_table
-                                .distinct_values_filtered_mask(to_idx, Some(to_set))
-                                .unwrap_or_else(|| {
-                                    // Fall back to the generic implementation below.
-                                    let sparse_to_dense_threshold = physical_rows / 64;
-                                    if visible_count > sparse_to_dense_threshold {
-                                        let mut seen = HashSet::new();
-                                        let mut out = Vec::new();
-                                        for row in to_set.iter_ones() {
-                                            let v = to_table
-                                                .value_by_idx(row, to_idx)
-                                                .unwrap_or(Value::Blank);
-                                            if seen.insert(v.clone()) {
-                                                out.push(v);
-                                            }
-                                        }
-                                        out
-                                    } else {
-                                        let visible_rows: Vec<usize> = to_set.iter_ones().collect();
-                                        to_table
-                                            .distinct_values_filtered(
-                                                to_idx,
-                                                Some(visible_rows.as_slice()),
-                                            )
-                                            .unwrap_or_else(|| {
-                                                let mut seen = HashSet::new();
-                                                let mut out = Vec::new();
-                                                for &row in &visible_rows {
-                                                    let v = to_table
-                                                        .value_by_idx(row, to_idx)
-                                                        .unwrap_or(Value::Blank);
-                                                    if seen.insert(v.clone()) {
-                                                        out.push(v);
-                                                    }
-                                                }
-                                                out
-                                            })
-                                    }
-                                })
                         } else {
-                            // `distinct_values_filtered` takes a row index list. For large row
-                            // sets, that list can be prohibitively expensive (8 bytes/row). Prefer
-                            // scanning the allowed `BitVec` directly once it would be cheaper than
-                            // materializing row indices (same heuristic as
-                            // `UnmatchedFactRowsBuilder`).
-                            let sparse_to_dense_threshold = physical_rows / 64;
-                            if visible_count > sparse_to_dense_threshold {
-                                let mut seen = HashSet::new();
-                                let mut out = Vec::new();
-                                for row in to_set.iter_ones().filter(|&idx| idx < physical_rows) {
-                                    let v = to_table
-                                        .value_by_idx(row, to_idx)
-                                        .unwrap_or(Value::Blank);
-                                    if seen.insert(v.clone()) {
-                                        out.push(v);
+                            let physical_rows = to_table.row_count();
+                            let mut visible_count = to_set.count_ones();
+                            if to_set.len() > physical_rows {
+                                // Exclude any "virtual blank member" rows that live beyond the
+                                // physical table length.
+                                for idx in physical_rows..to_set.len() {
+                                    if to_set.get(idx) {
+                                        visible_count = visible_count.saturating_sub(1);
                                     }
                                 }
-                                out
-                            } else {
-                                let visible_rows: Vec<usize> = to_set
-                                    .iter_ones()
-                                    .filter(|&idx| idx < physical_rows)
-                                    .collect();
+                            }
+
+                            if visible_count == 0 {
+                                Vec::new()
+                            } else if visible_count == physical_rows {
+                                // All physical rows are visible (but the relationship's virtual
+                                // blank member may be filtered out). Extract keys from the full
+                                // physical table without materializing row indices.
                                 to_table
-                                    .distinct_values_filtered(to_idx, Some(visible_rows.as_slice()))
+                                    .distinct_values_filtered(to_idx, None)
                                     .unwrap_or_else(|| {
                                         let mut seen = HashSet::new();
                                         let mut out = Vec::new();
-                                        for &row in &visible_rows {
+                                        for row in 0..physical_rows {
                                             let v = to_table
                                                 .value_by_idx(row, to_idx)
                                                 .unwrap_or(Value::Blank);
@@ -6227,10 +6156,98 @@ fn propagate_filter(
                                         }
                                         out
                                     })
+                            } else if to_set.len() == physical_rows {
+                                // Prefer backends that can compute distinct values directly from a
+                                // bitmap mask (avoids allocating a potentially huge `Vec<usize>`).
+                                to_table
+                                    .distinct_values_filtered_mask(to_idx, Some(to_set))
+                                    .unwrap_or_else(|| {
+                                        // Fall back to the generic implementation below.
+                                        let sparse_to_dense_threshold = physical_rows / 64;
+                                        if visible_count > sparse_to_dense_threshold {
+                                            let mut seen = HashSet::new();
+                                            let mut out = Vec::new();
+                                            for row in to_set.iter_ones() {
+                                                let v = to_table
+                                                    .value_by_idx(row, to_idx)
+                                                    .unwrap_or(Value::Blank);
+                                                if seen.insert(v.clone()) {
+                                                    out.push(v);
+                                                }
+                                            }
+                                            out
+                                        } else {
+                                            let visible_rows: Vec<usize> =
+                                                to_set.iter_ones().collect();
+                                            to_table
+                                                .distinct_values_filtered(
+                                                    to_idx,
+                                                    Some(visible_rows.as_slice()),
+                                                )
+                                                .unwrap_or_else(|| {
+                                                    let mut seen = HashSet::new();
+                                                    let mut out = Vec::new();
+                                                    for &row in &visible_rows {
+                                                        let v = to_table
+                                                            .value_by_idx(row, to_idx)
+                                                            .unwrap_or(Value::Blank);
+                                                        if seen.insert(v.clone()) {
+                                                            out.push(v);
+                                                        }
+                                                    }
+                                                    out
+                                                })
+                                        }
+                                    })
+                            } else {
+                                // `distinct_values_filtered` takes a row index list. For large row
+                                // sets, that list can be prohibitively expensive (8 bytes/row).
+                                // Prefer scanning the allowed `BitVec` directly once it would be
+                                // cheaper than materializing row indices (same heuristic as
+                                // `UnmatchedFactRowsBuilder`).
+                                let sparse_to_dense_threshold = physical_rows / 64;
+                                if visible_count > sparse_to_dense_threshold {
+                                    let mut seen = HashSet::new();
+                                    let mut out = Vec::new();
+                                    for row in
+                                        to_set.iter_ones().filter(|&idx| idx < physical_rows)
+                                    {
+                                        let v = to_table
+                                            .value_by_idx(row, to_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if seen.insert(v.clone()) {
+                                            out.push(v);
+                                        }
+                                    }
+                                    out
+                                } else {
+                                    let visible_rows: Vec<usize> = to_set
+                                        .iter_ones()
+                                        .filter(|&idx| idx < physical_rows)
+                                        .collect();
+                                    to_table
+                                        .distinct_values_filtered(
+                                            to_idx,
+                                            Some(visible_rows.as_slice()),
+                                        )
+                                        .unwrap_or_else(|| {
+                                            let mut seen = HashSet::new();
+                                            let mut out = Vec::new();
+                                            for &row in &visible_rows {
+                                                let v = to_table
+                                                    .value_by_idx(row, to_idx)
+                                                    .unwrap_or(Value::Blank);
+                                                if seen.insert(v.clone()) {
+                                                    out.push(v);
+                                                }
+                                            }
+                                            out
+                                        })
+                                }
                             }
                         }
                     }
-                }
+                },
             };
             allowed_keys.retain(|v| !v.is_blank());
             let from_set = sets
