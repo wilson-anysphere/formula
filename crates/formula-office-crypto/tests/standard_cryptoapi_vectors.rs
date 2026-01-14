@@ -295,6 +295,33 @@ fn standard_cryptoapi_rc4_sha1_vector_decrypts_package() {
         let key = standard_rc4_derive_block_key_sha1(h, block_index as u32, 16);
         rc4_apply(&key, chunk);
     }
+
+    // Guard: ensure Standard/CryptoAPI uses 0x200-byte re-keying and not the BIFF8 0x400 interval.
+    //
+    // This avoids a potential "encrypt+decrypt with the same bug" false positive if this test
+    // accidentally used a 0x400-byte interval while the decryptor also used 0x400.
+    if plaintext.len() >= 0x400 && ciphertext.len() >= 0x400 {
+        let key0 = standard_rc4_derive_block_key_sha1(h, 0, 16);
+        let key1 = standard_rc4_derive_block_key_sha1(h, 1, 16);
+
+        let mut block0_400 = plaintext[..0x400].to_vec();
+        rc4_apply(&key0, &mut block0_400);
+
+        let mut expected_block1 = plaintext[0x200..0x400].to_vec();
+        rc4_apply(&key1, &mut expected_block1);
+
+        assert_eq!(
+            &ciphertext[0x200..0x400],
+            expected_block1.as_slice(),
+            "expected Standard RC4 to re-key at 0x200-byte boundary"
+        );
+        assert_ne!(
+            &ciphertext[0x200..0x400],
+            &block0_400[0x200..0x400],
+            "ciphertext suggests incorrect 0x400-byte RC4 re-key interval"
+        );
+    }
+
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     encrypted_package.extend_from_slice(&ciphertext);
