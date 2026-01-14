@@ -622,46 +622,6 @@ impl UnmatchedFactRows {
             }
         }
     }
-
-    pub(crate) fn retain(&mut self, mut pred: impl FnMut(&usize) -> bool) {
-        match self {
-            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| pred(row)),
-            UnmatchedFactRows::Dense { bits, len, count } => {
-                let mut new_count = 0usize;
-                for (word_idx, word) in bits.iter_mut().enumerate() {
-                    let mut w = *word;
-                    let mut new_word = *word;
-                    while w != 0 {
-                        let tz = w.trailing_zeros() as usize;
-                        let row = word_idx * 64 + tz;
-                        if row >= *len {
-                            // Rows beyond `len` are out-of-bounds; ensure those bits are cleared.
-                            new_word &= !(1u64 << tz);
-                        } else if pred(&row) {
-                            new_count += 1;
-                        } else {
-                            new_word &= !(1u64 << tz);
-                        }
-                        w &= w - 1;
-                    }
-
-                    // Mask off any unused bits in the final word to keep invariants tidy.
-                    let remaining = len.saturating_sub(word_idx * 64);
-                    if remaining < 64 {
-                        let mask = if remaining == 0 {
-                            0
-                        } else {
-                            (1u64 << remaining) - 1
-                        };
-                        new_word &= mask;
-                    }
-
-                    *word = new_word;
-                }
-                *count = new_count;
-            }
-        }
-    }
 }
 
 struct UnmatchedFactRowsBuilder {

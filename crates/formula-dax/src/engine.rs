@@ -4649,9 +4649,7 @@ fn maybe_trace_resolve_row_sets(
 
     let mut table_counts: Vec<(&str, usize, usize)> = sets
         .iter()
-        .map(|(name, allowed)| {
-            (name.as_str(), allowed.count_ones(), allowed.len())
-        })
+        .map(|(name, allowed)| (name.as_str(), allowed.count_ones(), allowed.len()))
         .collect();
     table_counts.sort_by_key(|(name, _, _)| *name);
     let table_counts = table_counts
