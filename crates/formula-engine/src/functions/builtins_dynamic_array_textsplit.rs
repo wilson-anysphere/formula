@@ -28,7 +28,7 @@ inventory::submit! {
 #[derive(Debug, Clone, Copy)]
 enum MatchMode {
     CaseSensitive,
-    CaseInsensitiveAscii,
+    CaseInsensitive,
 }
 
 fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -66,7 +66,7 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let match_mode = if args.len() >= 5 {
         match eval_scalar_arg(ctx, &args[4]).coerce_to_i64_with_ctx(ctx) {
             Ok(0) => MatchMode::CaseSensitive,
-            Ok(1) => MatchMode::CaseInsensitiveAscii,
+            Ok(1) => MatchMode::CaseInsensitive,
             Ok(_) => return Value::Error(ErrorKind::Value),
             Err(e) => return Value::Error(e),
         }
@@ -176,11 +176,16 @@ fn split_on_any(text: &str, delimiters: &[String], ignore_empty: bool, match_mod
             let delims: Vec<&str> = delimiters.iter().map(|d| d.as_str()).collect();
             split_on_any_impl(text, text, &delims, ignore_empty)
         }
-        MatchMode::CaseInsensitiveAscii => {
-            let haystack = text.to_ascii_lowercase();
-            let lowered: Vec<String> = delimiters.iter().map(|s| s.to_ascii_lowercase()).collect();
-            let delims: Vec<&str> = lowered.iter().map(|d| d.as_str()).collect();
-            split_on_any_impl(text, haystack.as_str(), &delims, ignore_empty)
+        MatchMode::CaseInsensitive => {
+            // ASCII fast path: preserve existing TEXTSPLIT behavior and avoid Unicode case-fold allocations.
+            if text.is_ascii() && delimiters.iter().all(|d| d.is_ascii()) {
+                let haystack = text.to_ascii_lowercase();
+                let lowered: Vec<String> = delimiters.iter().map(|s| s.to_ascii_lowercase()).collect();
+                let delims: Vec<&str> = lowered.iter().map(|d| d.as_str()).collect();
+                return split_on_any_impl(text, haystack.as_str(), &delims, ignore_empty);
+            }
+
+            split_on_any_unicode_case_insensitive(text, delimiters, ignore_empty)
         }
     }
 }
@@ -229,6 +234,117 @@ fn find_next_delim(haystack: &str, from: usize, delimiters: &[&str]) -> Option<(
         };
     }
     best
+}
+
+fn fold_char_uppercase(c: char, out: &mut Vec<char>) {
+    if c.is_ascii() {
+        out.push(c.to_ascii_uppercase());
+    } else {
+        out.extend(c.to_uppercase());
+    }
+}
+
+fn fold_str_uppercase(s: &str) -> Vec<char> {
+    let mut out = Vec::new();
+    for c in s.chars() {
+        fold_char_uppercase(c, &mut out);
+    }
+    out
+}
+
+fn match_delim_at_unicode_case_insensitive(
+    haystack_chars: &[char],
+    start: usize,
+    delim_folded: &[char],
+) -> Option<usize> {
+    if delim_folded.is_empty() {
+        return None;
+    }
+
+    let mut di = 0usize;
+    let mut hi = start;
+    while di < delim_folded.len() {
+        let ch = *haystack_chars.get(hi)?;
+        if ch.is_ascii() {
+            let fc = ch.to_ascii_uppercase();
+            if di >= delim_folded.len() || fc != delim_folded[di] {
+                return None;
+            }
+            di += 1;
+        } else {
+            for fc in ch.to_uppercase() {
+                // If the delimiter would end "mid-character" after case folding (e.g. trying to match
+                // "S" against "ß" which folds to "SS"), treat it as not a match. This keeps delimiter
+                // matches aligned to original character boundaries.
+                if di >= delim_folded.len() {
+                    return None;
+                }
+                if fc != delim_folded[di] {
+                    return None;
+                }
+                di += 1;
+            }
+        }
+        hi += 1;
+    }
+
+    Some(hi)
+}
+
+fn split_on_any_unicode_case_insensitive(
+    text: &str,
+    delimiters: &[String],
+    ignore_empty: bool,
+) -> Vec<String> {
+    let hay_chars: Vec<char> = text.chars().collect();
+    let mut char_starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    char_starts.push(text.len());
+
+    let folded_delimiters: Vec<Vec<char>> = delimiters.iter().map(|d| fold_str_uppercase(d)).collect();
+
+    let mut segments = Vec::new();
+    let mut cursor = 0usize;
+    let mut segment_start = 0usize;
+
+    while cursor < hay_chars.len() {
+        // Find the next delimiter match by scanning forward. This is O(n * delimiters) but keeps
+        // indices aligned to original text character boundaries even when Unicode case folding
+        // changes length (e.g. ß -> SS).
+        let mut found: Option<(usize, usize)> = None;
+        for i in cursor..hay_chars.len() {
+            let mut best_end: Option<usize> = None;
+            for delim in &folded_delimiters {
+                if let Some(end) = match_delim_at_unicode_case_insensitive(&hay_chars, i, delim) {
+                    best_end = match best_end {
+                        None => Some(end),
+                        Some(prev) if end > prev => Some(end),
+                        Some(prev) => Some(prev),
+                    };
+                }
+            }
+            if let Some(end) = best_end {
+                found = Some((i, end - i));
+                break;
+            }
+        }
+
+        let Some((match_pos, match_len)) = found else {
+            break;
+        };
+
+        let piece = text[char_starts[segment_start]..char_starts[match_pos]].to_string();
+        segments.push(piece);
+        cursor = match_pos + match_len;
+        segment_start = cursor;
+    }
+
+    segments.push(text[char_starts[segment_start]..].to_string());
+
+    if ignore_empty {
+        segments.retain(|s| !s.is_empty());
+    }
+
+    segments
 }
 
 // On wasm targets, `inventory` registrations can be dropped by the linker if the object file
