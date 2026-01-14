@@ -53,6 +53,7 @@ import {
   MoreFormatsIcon,
   NumberFormatIcon,
   OrientationIcon,
+  OrganizeSheetsIcon,
   PageBreakIcon,
   PageLandscapeIcon,
   PagePortraitIcon,
@@ -271,6 +272,9 @@ const ribbonIcons = {
   filter: FilterIcon,
   goTo: GoToIcon,
   autoSum: AutoSumIcon,
+
+  // Sheet structure
+  organizeSheets: OrganizeSheetsIcon,
 } as const;
 
 export type RibbonIconId = keyof typeof ribbonIcons;

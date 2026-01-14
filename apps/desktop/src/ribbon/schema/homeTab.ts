@@ -424,7 +424,7 @@ export const homeTab: RibbonTabDefinition = {
             { id: "format.openFormatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings" },
             { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height", iconId: "arrowUpDown" },
             { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width", iconId: "arrowLeftRight" },
-            { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets", iconId: "folderOpen" },
+            { id: "home.cells.format.organizeSheets", label: "Organize Sheets…", ariaLabel: "Organize Sheets", iconId: "organizeSheets" },
           ],
         },
       ],
