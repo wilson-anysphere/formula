@@ -33,7 +33,7 @@ info() {
 
 usage() {
   cat <<EOF
-Usage: ${SCRIPT_NAME} [--appimage <path>] [--help]
+Usage: ${SCRIPT_NAME} [--appimage <path>] [--all] [--exec-check] [--exec-timeout <secs>] [--help]
 
 Validates a Tauri-produced Linux .AppImage for Formula Desktop.
 
@@ -49,20 +49,30 @@ Environment:
   FORMULA_APPIMAGE_MAIN_BINARY
     Override the expected main binary name inside the AppImage AppDir (defaults to
     tauri.conf.json mainBinaryName when available).
+  FORMULA_VALIDATE_ALL_APPIMAGES=1
+    When auto-discovering, validate all matching AppImages instead of selecting
+    the most recently modified one.
   FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK=1
     Additionally run a lightweight "can execute" check by invoking the extracted
     AppRun with --startup-bench (headless-friendly, exits quickly).
   FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS
     Timeout (seconds) for the exec check (default: 20). Requires the timeout
     command to enforce.
-  FORMULA_VALIDATE_ALL_APPIMAGES=1
-    When auto-discovering, validate all matching AppImages instead of selecting
-    the most recently modified one.
 EOF
 }
 
 APPIMAGE_PATH=""
 AUTO_DISCOVERED=1
+VALIDATE_ALL=0
+EXEC_CHECK_ENABLED=0
+EXEC_CHECK_TIMEOUT_SECS="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
+
+if [ -n "${FORMULA_VALIDATE_ALL_APPIMAGES:-}" ]; then
+  VALIDATE_ALL=1
+fi
+if [ -n "${FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK:-}" ]; then
+  EXEC_CHECK_ENABLED=1
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,6 +83,22 @@ while [[ $# -gt 0 ]]; do
         die "--appimage requires a path"
       fi
       AUTO_DISCOVERED=0
+      shift
+      ;;
+    --all)
+      VALIDATE_ALL=1
+      shift
+      ;;
+    --exec-check)
+      EXEC_CHECK_ENABLED=1
+      shift
+      ;;
+    --exec-timeout)
+      shift
+      EXEC_CHECK_TIMEOUT_SECS="${1:-}"
+      if [ -z "$EXEC_CHECK_TIMEOUT_SECS" ]; then
+        die "--exec-timeout requires a value (seconds)"
+      fi
       shift
       ;;
     -h|--help)
@@ -259,8 +285,8 @@ fi
 # If multiple AppImages remain, default to validating the most recently modified
 # (usually the one produced by the current build). Allow opting into validating
 # all discovered AppImages via FORMULA_VALIDATE_ALL_APPIMAGES=1.
-if [ "$AUTO_DISCOVERED" -eq 1 ] && [ "${#APPIMAGES[@]}" -gt 1 ] && [ -z "${FORMULA_VALIDATE_ALL_APPIMAGES:-}" ]; then
-  info "Multiple AppImages found; selecting the most recently modified. Set FORMULA_VALIDATE_ALL_APPIMAGES=1 to validate all."
+if [ "$AUTO_DISCOVERED" -eq 1 ] && [ "${#APPIMAGES[@]}" -gt 1 ] && [ "$VALIDATE_ALL" -eq 0 ]; then
+  info "Multiple AppImages found; selecting the most recently modified. Use --all or set FORMULA_VALIDATE_ALL_APPIMAGES=1 to validate all."
   newest="$(
     for f in "${APPIMAGES[@]}"; do
       ts="$(stat -c '%Y' "$f" 2>/dev/null || stat -f '%m' "$f" 2>/dev/null || echo 0)"
@@ -518,10 +544,10 @@ validate_appimage() {
   # Optional (recommended): ensure the extracted AppRun can execute without FUSE by
   # running in a mode that exits quickly. This is disabled by default because it
   # may require a working display (Xvfb) and WebKit/GTK runtime dependencies.
-  if [ -n "${FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK:-}" ]; then
-    local timeout_secs="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
+  if [ "$EXEC_CHECK_ENABLED" -ne 0 ]; then
+    local timeout_secs="${EXEC_CHECK_TIMEOUT_SECS}"
     if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || [ "$timeout_secs" -lt 1 ]; then
-      die "Invalid FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS=${timeout_secs} (expected integer >= 1)"
+      die "Invalid exec timeout: ${timeout_secs} (expected integer >= 1)"
     fi
 
     info "Exec check: running extracted AppRun --startup-bench (timeout ${timeout_secs}s)"
