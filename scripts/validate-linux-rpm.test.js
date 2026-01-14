@@ -587,7 +587,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks URL scheme handler 
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
