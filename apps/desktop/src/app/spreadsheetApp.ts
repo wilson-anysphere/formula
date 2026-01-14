@@ -9662,21 +9662,45 @@ export class SpreadsheetApp {
       return { x, y, width, height };
     })();
 
-    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-    const frozenWidth = layout.paneRects.topLeft.width;
-    const frozenHeight = layout.paneRects.topLeft.height;
+    const { frozenRows, frozenCols } = this.getFrozen();
+
+    const computeAnchor = (scrollBaseX: number, scrollBaseY: number): ChartRecord["anchor"] =>
+      this.computeChartAnchorFromRectPx(state.startAnchor.kind, {
+        x: nextRect.x + scrollBaseX,
+        y: nextRect.y + scrollBaseY,
+        width: nextRect.width,
+        height: nextRect.height,
+      });
 
     // Convert from screen-space (viewport/cell-area) back to sheet-space coordinates for anchor updates.
-    // Frozen quadrants do not scroll; scrollable quadrants do.
-    const scrollBaseX = state.startAnchor.kind === "absolute" ? this.scrollX : nextRect.x < frozenWidth ? 0 : this.scrollX;
-    const scrollBaseY = state.startAnchor.kind === "absolute" ? this.scrollY : nextRect.y < frozenHeight ? 0 : this.scrollY;
+    //
+    // The effective scroll offsets are determined by the *resulting* anchor cell quadrant, not by the
+    // raw screen-space X/Y values (a chart anchored in the scrollable pane can have a negative `left`
+    // when it extends offscreen).
+    let scrollBaseX =
+      state.startAnchor.kind === "absolute"
+        ? this.scrollX
+        : state.startAnchor.fromCol < frozenCols
+          ? 0
+          : this.scrollX;
+    let scrollBaseY =
+      state.startAnchor.kind === "absolute"
+        ? this.scrollY
+        : state.startAnchor.fromRow < frozenRows
+          ? 0
+          : this.scrollY;
 
-    const nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, {
-      x: nextRect.x + scrollBaseX,
-      y: nextRect.y + scrollBaseY,
-      width: nextRect.width,
-      height: nextRect.height,
-    });
+    let nextAnchor = computeAnchor(scrollBaseX, scrollBaseY);
+
+    if (nextAnchor.kind !== "absolute") {
+      const desiredScrollX = nextAnchor.fromCol < frozenCols ? 0 : this.scrollX;
+      const desiredScrollY = nextAnchor.fromRow < frozenRows ? 0 : this.scrollY;
+      if (desiredScrollX !== scrollBaseX || desiredScrollY !== scrollBaseY) {
+        scrollBaseX = desiredScrollX;
+        scrollBaseY = desiredScrollY;
+        nextAnchor = computeAnchor(scrollBaseX, scrollBaseY);
+      }
+    }
     this.chartStore.updateChartAnchor(state.chartId, nextAnchor);
   }
 

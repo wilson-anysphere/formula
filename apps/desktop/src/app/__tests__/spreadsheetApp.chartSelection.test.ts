@@ -355,6 +355,65 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("dragging a scrollable chart whose top-left is offscreen does not snap to frozen pane", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    doc.setFrozen(app.getCurrentSheetId(), 0, 1, { label: "Freeze Col" });
+    app.setScroll(400, 0);
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Offscreen Scrollable",
+      position: "D1:H10",
+    });
+
+    const before = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(before).toBeTruthy();
+    expect(before!.anchor.kind).toBe("twoCell");
+    const beforeAnchor = before!.anchor as any;
+    expect(beforeAnchor.fromCol).toBe(3);
+    expect(beforeAnchor.toCol).toBe(8);
+
+    const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+    expect(rect).not.toBeNull();
+    // The chart's top-left is offscreen to the left (negative) due to scroll, but it is still
+    // partially visible in the scrollable pane due to clipping.
+    expect(rect.left).toBeLessThan(0);
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    const startX = originX + 150;
+    const startY = originY + rect.top + 10;
+    const endX = startX + 100;
+    const endY = startY;
+
+    dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 56 });
+    dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 56 });
+    dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 56 });
+
+    const after = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(after).toBeTruthy();
+    expect(after!.anchor.kind).toBe("twoCell");
+    const afterAnchor = after!.anchor as any;
+
+    // Dragging right by one column should shift the anchor by one column, not snap to frozen col 0.
+    expect(afterAnchor.fromCol).toBe(4);
+    expect(afterAnchor.toCol).toBe(9);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("resizing a selected chart updates its twoCell anchor", () => {
     const root = createRoot();
     const status = {
