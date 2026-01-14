@@ -1240,6 +1240,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_standard_rejects_keysize_zero_for_aes() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
+        let mut bytes = minimal_encryption_info_header(flags, CALG_AES_128);
+        // keySize is the 5th DWORD of the EncryptionHeader fixed portion.
+        let key_size_offset = 12 + (4 * 4);
+        bytes[key_size_offset..key_size_offset + 4].copy_from_slice(&(0u32).to_le_bytes());
+
+        let err = parse_encryption_info_standard(&bytes).expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidKeySize { key_size_bits: 0 }),
+            "expected InvalidKeySize for AES keySize=0, got {err:?}"
+        );
+    }
+
+    #[test]
     fn parse_standard_rejects_verifier_hash_size_larger_than_digest_len() {
         let mut bytes = build_minimal_valid_encryption_info();
         let header_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
