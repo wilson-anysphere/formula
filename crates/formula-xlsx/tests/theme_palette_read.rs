@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Cursor, Write};
 
 use formula_model::ArgbColor;
 use zip::write::FileOptions;
@@ -159,6 +159,18 @@ fn reads_theme_palette_from_workbook_relationship() {
 
     let doc = formula_xlsx::load_from_bytes(&bytes).expect("load workbook");
     assert_eq!(doc.workbook.theme.accent1, ArgbColor(0xFF112233));
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse package");
+    let pkg_theme = pkg
+        .theme_palette()
+        .expect("theme palette")
+        .expect("theme palette present");
+    assert_eq!(pkg_theme.accent1, 0xFF112233);
+
+    let theme = formula_xlsx::theme_palette_from_reader(Cursor::new(bytes))
+        .expect("read theme palette")
+        .expect("theme palette present");
+    assert_eq!(theme.accent1, 0xFF112233);
 }
 
 #[test]
@@ -171,4 +183,16 @@ fn reads_theme_palette_without_workbook_relationship() {
 
     let doc = formula_xlsx::load_from_bytes(&bytes).expect("load workbook");
     assert_eq!(doc.workbook.theme.accent1, ArgbColor(0xFF112233));
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse package");
+    let pkg_theme = pkg
+        .theme_palette()
+        .expect("theme palette")
+        .expect("theme palette present");
+    assert_eq!(pkg_theme.accent1, 0xFF112233);
+
+    let theme = formula_xlsx::theme_palette_from_reader(Cursor::new(bytes))
+        .expect("read theme palette")
+        .expect("theme palette present");
+    assert_eq!(theme.accent1, 0xFF112233);
 }

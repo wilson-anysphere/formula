@@ -20,6 +20,9 @@ use crate::zip_util::open_zip_part;
 use crate::{DateSystem, RecalcPolicy};
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
+const REL_TYPE_THEME: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
+
 /// Maximum allowed *inflated* bytes for a single ZIP entry in an XLSX package.
 ///
 /// This is a safety limit to prevent loading ZIP bombs into memory when callers need to
@@ -561,9 +564,7 @@ pub fn read_part_from_reader_limited<R: Read + Seek>(
                 return Ok(None);
             }
             Ok(Some(crate::zip_util::read_zip_file_bytes_with_limit(
-                &mut file,
-                part_name,
-                max_bytes,
+                &mut file, part_name, max_bytes,
             )?))
         }
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
@@ -576,23 +577,48 @@ pub fn read_part_from_reader_limited<R: Read + Seek>(
 pub fn theme_palette_from_reader<R: Read + Seek>(
     reader: R,
 ) -> Result<Option<ThemePalette>, XlsxError> {
-    let Some(theme_xml) = read_part_from_reader(reader, "xl/theme/theme1.xml")? else {
-        return Ok(None);
-    };
-    Ok(Some(parse_theme_palette(&theme_xml)?))
+    theme_palette_from_reader_limited(reader, MAX_XLSX_PACKAGE_PART_BYTES)
 }
 
 /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
 /// entire package, enforcing a maximum part size.
 pub fn theme_palette_from_reader_limited<R: Read + Seek>(
-    reader: R,
+    mut reader: R,
     max_bytes: u64,
 ) -> Result<Option<ThemePalette>, XlsxError> {
-    let Some(theme_xml) = read_part_from_reader_limited(reader, "xl/theme/theme1.xml", max_bytes)?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(parse_theme_palette(&theme_xml)?))
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = zip::ZipArchive::new(reader)?;
+
+    let rels_bytes = crate::zip_util::read_zip_part_optional_with_limit(
+        &mut zip,
+        "xl/_rels/workbook.xml.rels",
+        max_bytes,
+    )?;
+    let theme_candidates: Vec<String> = rels_bytes
+        .as_deref()
+        .and_then(|bytes| crate::openxml::parse_relationships(bytes).ok())
+        .and_then(|rels| {
+            rels.into_iter().find(|rel| {
+                rel.type_uri == REL_TYPE_THEME
+                    && !rel
+                        .target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            })
+        })
+        .map(|rel| crate::path::resolve_target_candidates("xl/workbook.xml", &rel.target))
+        .unwrap_or_else(|| vec!["xl/theme/theme1.xml".to_string()]);
+
+    for candidate in theme_candidates {
+        let Some(theme_xml) =
+            crate::zip_util::read_zip_part_optional_with_limit(&mut zip, &candidate, max_bytes)?
+        else {
+            continue;
+        };
+        return Ok(Some(parse_theme_palette(&theme_xml)?));
+    }
+
+    Ok(None)
 }
 
 /// Resolve ordered workbook sheets to worksheet part names without inflating the entire package.
@@ -630,13 +656,11 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     }
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
-        Ok(mut file) => {
-            crate::zip_util::read_zip_file_bytes_with_limit(
-                &mut file,
-                "xl/workbook.xml",
-                MAX_XLSX_PACKAGE_PART_BYTES,
-            )?
-        }
+        Ok(mut file) => crate::zip_util::read_zip_file_bytes_with_limit(
+            &mut file,
+            "xl/workbook.xml",
+            MAX_XLSX_PACKAGE_PART_BYTES,
+        )?,
         Err(zip::result::ZipError::FileNotFound) => {
             return Err(XlsxError::MissingPart("xl/workbook.xml".to_string()))
         }
@@ -646,14 +670,12 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let sheets = parse_workbook_sheets(&workbook_xml)?;
 
     let rels_bytes = match open_zip_part(&mut zip, "xl/_rels/workbook.xml.rels") {
-        Ok(mut file) => {
-            crate::zip_util::read_zip_file_bytes_with_limit(
-                &mut file,
-                "xl/_rels/workbook.xml.rels",
-                MAX_XLSX_PACKAGE_PART_BYTES,
-            )
-            .map(Some)?
-        }
+        Ok(mut file) => crate::zip_util::read_zip_file_bytes_with_limit(
+            &mut file,
+            "xl/_rels/workbook.xml.rels",
+            MAX_XLSX_PACKAGE_PART_BYTES,
+        )
+        .map(Some)?,
         Err(zip::result::ZipError::FileNotFound) => None,
         Err(err) => return Err(err.into()),
     };
@@ -773,11 +795,8 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     let workbook_xml = String::from_utf8(workbook_xml)?;
     let sheets = parse_workbook_sheets(&workbook_xml)?;
 
-    let rels_bytes = read_zip_part_optional(
-        &mut zip,
-        "xl/_rels/workbook.xml.rels",
-        max_part_bytes,
-    )?;
+    let rels_bytes =
+        read_zip_part_optional(&mut zip, "xl/_rels/workbook.xml.rels", max_part_bytes)?;
 
     let relationships = match rels_bytes.as_deref() {
         Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),
@@ -986,12 +1005,35 @@ impl XlsxPackage {
         presence
     }
 
-    /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present).
+    /// Parse the workbook theme palette from the workbook theme part (if present).
+    ///
+    /// Prefer the theme part referenced from `xl/_rels/workbook.xml.rels` via relationship type
+    /// `.../relationships/theme`, falling back to `xl/theme/theme1.xml` when the relationship is
+    /// missing.
     pub fn theme_palette(&self) -> Result<Option<ThemePalette>, XlsxError> {
-        let Some(theme_xml) = self.part("xl/theme/theme1.xml") else {
-            return Ok(None);
-        };
-        Ok(Some(parse_theme_palette(theme_xml)?))
+        let theme_candidates: Vec<String> = self
+            .part("xl/_rels/workbook.xml.rels")
+            .and_then(|bytes| crate::openxml::parse_relationships(bytes).ok())
+            .and_then(|rels| {
+                rels.into_iter().find(|rel| {
+                    rel.type_uri == REL_TYPE_THEME
+                        && !rel
+                            .target_mode
+                            .as_deref()
+                            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                })
+            })
+            .map(|rel| crate::path::resolve_target_candidates("xl/workbook.xml", &rel.target))
+            .unwrap_or_else(|| vec!["xl/theme/theme1.xml".to_string()]);
+
+        for candidate in theme_candidates {
+            let Some(theme_xml) = self.part(&candidate) else {
+                continue;
+            };
+            return Ok(Some(parse_theme_palette(theme_xml)?));
+        }
+
+        Ok(None)
     }
 
     /// Extract in-cell images from `xl/cellImages.xml` (if present).
@@ -1986,8 +2028,8 @@ mod tests {
         let workbook = b"workbook-bytes";
         let bytes = build_package(&[("xl\\workbook.xml", workbook.as_slice())]);
 
-        let extracted =
-            read_part_from_reader(Cursor::new(bytes), "xl/workbook.xml").expect("read workbook.xml");
+        let extracted = read_part_from_reader(Cursor::new(bytes), "xl/workbook.xml")
+            .expect("read workbook.xml");
 
         assert_eq!(extracted, Some(workbook.to_vec()));
     }
@@ -2026,11 +2068,14 @@ mod tests {
         );
 
         let mut doc = crate::XlsxDocument::new(formula_model::Workbook::new());
-        doc.parts.insert("XL\\vbaProject.bin".to_string(), b"vba".to_vec());
+        doc.parts
+            .insert("XL\\vbaProject.bin".to_string(), b"vba".to_vec());
         doc.parts
             .insert("XL\\macrosheets\\sheet1.xml".to_string(), b"macro".to_vec());
-        doc.parts
-            .insert("XL\\dialogsheets\\sheet1.xml".to_string(), b"dialog".to_vec());
+        doc.parts.insert(
+            "XL\\dialogsheets\\sheet1.xml".to_string(),
+            b"dialog".to_vec(),
+        );
         assert_eq!(
             doc.macro_presence(),
             MacroPresence {
@@ -2380,7 +2425,8 @@ mod tests {
             "expected ensure_content_types_default to not create a new canonical content types key"
         );
 
-        let updated = std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
+        let updated =
+            std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
         let doc = Document::parse(updated).expect("parse content types");
         assert!(
             doc.descendants().any(|n| {
@@ -2421,7 +2467,8 @@ mod tests {
             "expected ensure_workbook_content_type to not create a new canonical content types key"
         );
 
-        let updated = std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
+        let updated =
+            std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
         assert!(
             updated.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"),
             "expected workbook content type to be updated, got:\n{updated}"
