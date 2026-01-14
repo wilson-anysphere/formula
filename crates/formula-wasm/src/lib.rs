@@ -7,7 +7,6 @@ use formula_engine::{
     NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
     Value as EngineValue,
 };
-use formula_engine::FormatRun as EngineFormatRun;
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
