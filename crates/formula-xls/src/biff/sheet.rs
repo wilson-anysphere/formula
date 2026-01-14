@@ -108,14 +108,35 @@ const RECORD_TABLE: u16 = 0x0236;
 pub(crate) fn parse_biff_sheet_labelsst_indices(
     workbook_stream: &[u8],
     start: usize,
-) -> Result<HashMap<CellRef, u32>, String> {
-    let mut out: HashMap<CellRef, u32> = HashMap::new();
+    sst_phonetics: Option<&[Option<String>]>,
+) -> Result<SheetLabelSstIndices, String> {
+    let mut out = SheetLabelSstIndices::default();
 
+    let mut scanned = 0usize;
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
+        scanned = scanned.saturating_add(1);
+        if scanned > MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN {
+            push_warning_bounded_force(
+                &mut out.warnings,
+                format!(
+                    "too many BIFF records while scanning LABELSST indices (cap={MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN}); stopping early"
+                ),
+            );
+            break;
+        }
+
         match record.record_id {
             RECORD_LABELSST => {
                 let data = record.data;
                 if data.len() < 10 {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "malformed LABELSST record at offset {}: expected >=10 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
                     continue;
                 }
 
@@ -127,7 +148,27 @@ pub(crate) fn parse_biff_sheet_labelsst_indices(
                     continue;
                 }
 
-                out.insert(CellRef::new(row, col), isst);
+                if let Some(phonetics) = sst_phonetics {
+                    let idx = isst as usize;
+                    if phonetics.get(idx).and_then(|p| p.as_ref()).is_none() {
+                        continue;
+                    }
+                }
+
+                let cell = CellRef::new(row, col);
+                if out.indices.len() >= MAX_LABELSST_ENTRIES_PER_SHEET
+                    && !out.indices.contains_key(&cell)
+                {
+                    push_warning_bounded_force(
+                        &mut out.warnings,
+                        format!(
+                            "too many LABELSST indices (cap={MAX_LABELSST_ENTRIES_PER_SHEET}); stopping early"
+                        ),
+                    );
+                    break;
+                }
+
+                out.indices.insert(cell, isst);
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -136,6 +177,30 @@ pub(crate) fn parse_biff_sheet_labelsst_indices(
 
     Ok(out)
 }
+
+#[derive(Debug, Default)]
+pub(crate) struct SheetLabelSstIndices {
+    pub(crate) indices: HashMap<CellRef, u32>,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Hard cap on the number of `LABELSST` cell records retained per sheet.
+///
+/// This bounds memory usage for `.xls` files with extremely large numbers of string cells.
+#[cfg(not(test))]
+const MAX_LABELSST_ENTRIES_PER_SHEET: usize = 1_000_000;
+#[cfg(test)]
+const MAX_LABELSST_ENTRIES_PER_SHEET: usize = 256;
+
+/// Hard cap on the number of BIFF records scanned while searching for `LABELSST` records.
+///
+/// The `.xls` importer may run multiple best-effort passes over a sheet stream. Without a cap, a
+/// crafted workbook can force excessive work by making these scans traverse huge substreams.
+#[cfg(not(test))]
+const MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN: usize = 500_000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN: usize = 1_000;
 
 // Sheet protection records (worksheet substream).
 // See [MS-XLS] sections:
@@ -5261,6 +5326,119 @@ mod tests {
                 .warnings
                 .iter()
                 .any(|w| w.contains("too many BIFF records") && w.contains("manual page breaks")),
+            "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_labelsst_scan_stops_after_record_cap() {
+        let cap = MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN;
+        assert!(cap >= 10, "test requires cap >= 10");
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // row
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col
+        payload.extend_from_slice(&0u16.to_le_bytes()); // xf
+        payload.extend_from_slice(&0u32.to_le_bytes()); // isst
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..(cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        // This record should be ignored because the scan stops at the record cap.
+        stream.extend_from_slice(&record(RECORD_LABELSST, &payload));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let sst_phonetics = vec![Some("phonetic".to_string())];
+        let parsed =
+            parse_biff_sheet_labelsst_indices(&stream, 0, Some(sst_phonetics.as_slice()))
+                .expect("parse");
+        assert!(parsed.indices.is_empty());
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("LABELSST")),
+            "expected record-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_labelsst_entries_are_capped() {
+        let cap = MAX_LABELSST_ENTRIES_PER_SHEET;
+        assert!(cap >= 2, "test requires cap >= 2");
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        for row in 0u16..u16::try_from(cap + 10).unwrap() {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&row.to_le_bytes());
+            payload.extend_from_slice(&0u16.to_le_bytes()); // col
+            payload.extend_from_slice(&0u16.to_le_bytes()); // xf
+            payload.extend_from_slice(&0u32.to_le_bytes()); // isst
+            stream.extend_from_slice(&record(RECORD_LABELSST, &payload));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let sst_phonetics = vec![Some("phonetic".to_string())];
+        let parsed =
+            parse_biff_sheet_labelsst_indices(&stream, 0, Some(sst_phonetics.as_slice()))
+                .expect("parse");
+        assert_eq!(parsed.indices.len(), cap);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many LABELSST indices") && w.contains("cap=")),
+            "expected entry-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_labelsst_record_cap_warning_is_emitted_even_when_warnings_are_suppressed() {
+        let record_cap = MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN;
+        assert!(
+            record_cap > MAX_WARNINGS_PER_SHEET + 10,
+            "test requires record cap to exceed warning cap"
+        );
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill warnings with malformed LABELSST records.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 10) {
+            stream.extend_from_slice(&record(RECORD_LABELSST, &[0u8; 1]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_labelsst_indices(&stream, 0, None).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("LABELSST")),
             "expected forced record-cap warning, got {:?}",
             parsed.warnings
         );

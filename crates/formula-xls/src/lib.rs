@@ -1452,11 +1452,24 @@ fn import_xls_with_biff_reader(
                         &mut warnings_suppressed,
                     );
                 } else {
-                    match biff::parse_biff_sheet_labelsst_indices(workbook_stream, sheet_info.offset)
-                    {
-                        Ok(map) => {
+                    match biff::parse_biff_sheet_labelsst_indices(
+                        workbook_stream,
+                        sheet_info.offset,
+                        Some(sst_phonetics.as_slice()),
+                    ) {
+                        Ok(mut parsed) => {
+                            for warning in parsed.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to fully import `.xls` phonetic guides for sheet `{sheet_name}`: {warning}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
                             // Deterministic merge/anchor preference: apply anchor cells first.
-                            let mut entries: Vec<(CellRef, u32)> = map.into_iter().collect();
+                            let mut entries: Vec<(CellRef, u32)> =
+                                parsed.indices.into_iter().collect();
                             entries.sort_by_key(|(cell, _)| {
                                 let anchor = sheet.merged_regions.resolve_cell(*cell);
                                 // (is_non_anchor, row, col)
