@@ -479,12 +479,15 @@ follow a consistent flow:
 3. **Compare Formula’s decryptors**
    - `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` both implement Agile
      decryption + `dataIntegrity` validation.
-   - `crates/formula-offcrypto` provides parsing and low-level building blocks, but is intentionally
-     not yet a full end-to-end Agile decryptor.
+   - `crates/formula-offcrypto` provides MS-OFFCRYPTO parsing plus end-to-end decrypt helpers (e.g.
+     `decrypt_encrypted_package`, `decrypt_ooxml_from_ole_bytes`).
+     - Integrity verification is optional there (`DecryptOptions.verify_integrity`).
+     - It does not include the more permissive HMAC-target fallbacks found in the higher-level
+       decryptors.
 
 4. **Interpret errors**
    - `WrongPassword` / `InvalidPassword`: verifier mismatch ⇒ password wrong (or normalization
-     mismatch).
+      mismatch).
    - `IntegrityMismatch` / `IntegrityCheckFailed`: HMAC mismatch ⇒ tampering/corruption, or (if the
      password is known correct) an implementation bug. Re-check:
      - HMAC target bytes are the **raw `EncryptedPackage` stream bytes** (including the 8-byte
