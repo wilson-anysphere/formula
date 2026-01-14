@@ -277,7 +277,9 @@ export class FormulaBarModel {
     }
     this.#cursorStart = nextCursorStart;
     this.#cursorEnd = nextCursorEnd;
-    this.#rangeInsertion = null;
+    if (this.#rangeInsertion != null) {
+      this.#rangeInsertion = null;
+    }
     if (draftChanged) {
       // Draft text changed; any cached engine tokens/spans are now stale.
       this.#clearEditorTooling();
@@ -289,8 +291,12 @@ export class FormulaBarModel {
       // clear cursor-dependent parse context so hint rendering can refresh.
       this.#engineFunctionContext = null;
     }
-    this.#aiSuggestion = null;
-    this.#aiSuggestionPreview = null;
+    if (this.#aiSuggestion != null) {
+      this.#aiSuggestion = null;
+    }
+    if (this.#aiSuggestionPreview != null) {
+      this.#aiSuggestionPreview = null;
+    }
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
