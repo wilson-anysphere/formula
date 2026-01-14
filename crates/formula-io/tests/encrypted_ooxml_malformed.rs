@@ -1,8 +1,9 @@
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use formula_io::{
-    open_workbook, open_workbook_model, open_workbook_model_with_password, open_workbook_with_password,
+    open_workbook, open_workbook_model, open_workbook_model_with_password, open_workbook_with_options,
+    open_workbook_with_password, OpenOptions,
 };
 
 fn build_encrypted_ooxml_container(
@@ -38,6 +39,52 @@ fn encrypted_package_with_size_prefix(decrypted_size: u64, payload: &[u8]) -> Ve
     out.extend_from_slice(&decrypted_size.to_le_bytes());
     out.extend_from_slice(payload);
     out
+}
+
+#[test]
+fn standard_streaming_open_rejects_invalid_encrypted_package_size_prefix() {
+    // `open_workbook_with_options` prefers the Standard AES streaming open path for Standard-encrypted
+    // workbooks. If the EncryptedPackage size prefix is inconsistent with the ciphertext length,
+    // treat it as an unsupported/malformed encryption container (not a generic `.xlsx` open error).
+    let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join("standard.xlsx");
+    let fixture_bytes = std::fs::read(&fixture_path).expect("read standard.xlsx fixture");
+    let mut ole = cfb::CompoundFile::open(Cursor::new(fixture_bytes)).expect("open fixture cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("EncryptedPackage stream")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    assert!(encrypted_package.len() > 8, "fixture EncryptedPackage too small");
+    let ciphertext_len = encrypted_package.len() - 8;
+    let bogus_plaintext_len = ciphertext_len as u64 + 1;
+    encrypted_package[..8].copy_from_slice(&bogus_plaintext_len.to_le_bytes());
+
+    let bytes = build_encrypted_ooxml_container(&encryption_info, Some(&encrypted_package));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("corrupt-standard.xlsx");
+    std::fs::write(&path, bytes).expect("write corrupt fixture");
+
+    let err = open_workbook_with_options(
+        &path,
+        OpenOptions {
+            password: Some("password".to_string()),
+        },
+    )
+    .expect_err("expected corrupt encrypted workbook to error");
+    assert!(
+        matches!(err, formula_io::Error::UnsupportedOoxmlEncryption { .. }),
+        "expected UnsupportedOoxmlEncryption, got {err:?}"
+    );
 }
 
 fn assert_err_no_panic<T: std::fmt::Debug>(

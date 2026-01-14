@@ -284,10 +284,29 @@ pub struct OpenOptions {
 /// should be close to the ciphertext size. We allow some slack and also apply an absolute cap.
 const DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE: u64 = 1024 * 1024 * 1024; // 1GiB
 
-fn default_offcrypto_max_output_size(encrypted_package_len: usize) -> u64 {
-    let len = encrypted_package_len as u64;
-    let scaled = len.saturating_mul(4);
+fn default_offcrypto_max_output_size_u64(encrypted_package_len: u64) -> u64 {
+    let scaled = encrypted_package_len.saturating_mul(4);
     scaled.min(DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE)
+}
+
+fn default_offcrypto_max_output_size(encrypted_package_len: usize) -> u64 {
+    default_offcrypto_max_output_size_u64(encrypted_package_len as u64)
+}
+
+fn encrypted_package_plaintext_len_is_plausible(plaintext_len: u64, ciphertext_len: u64) -> bool {
+    // The `EncryptedPackage` ciphertext should be >= plaintext length (encryption does not compress
+    // and typically adds padding/metadata). Reject obviously inconsistent or pathological headers up
+    // front so we can surface a stable "unsupported encryption" error instead of attempting a ZIP
+    // parse over a truncated reader (and potentially allocating attacker-controlled buffers).
+    if plaintext_len > ciphertext_len {
+        return false;
+    }
+
+    // Also apply a conservative absolute cap so we don't attempt to open extremely large encrypted
+    // packages (which would require holding decrypted ZIP bytes in memory in some paths, or at
+    // least incur very expensive IO).
+    let encrypted_package_len = ciphertext_len.saturating_add(8);
+    plaintext_len <= default_offcrypto_max_output_size_u64(encrypted_package_len)
 }
 
 /// Decrypt an ECMA-376 Standard-encrypted `EncryptedPackage` stream with a derived AES key.
@@ -1929,6 +1948,13 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
                     let plaintext_len =
                         parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
+                    if !encrypted_package_plaintext_len_is_plausible(plaintext_len, ciphertext_len) {
+                        return Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major,
+                            version_minor,
+                        });
+                    }
                     let ciphertext = &encrypted_package[8..];
 
                     let reader = encrypted_ooxml::decrypted_package_reader(
@@ -2417,6 +2443,13 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
                         let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
                         let plaintext_len =
                             parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
+                        if !encrypted_package_plaintext_len_is_plausible(plaintext_len, ciphertext_len) {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            });
+                        }
                         let ciphertext = &encrypted_package[8..];
 
                         let reader = encrypted_ooxml::decrypted_package_reader(
@@ -3763,6 +3796,13 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         })?;
     let ciphertext_len = end.saturating_sub(base);
     let plaintext_len = parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
+    if !encrypted_package_plaintext_len_is_plausible(plaintext_len, ciphertext_len) {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
 
     // Wrap the OLE stream so offset 0 corresponds to the start of ciphertext (after the length
     // header).
