@@ -131,7 +131,8 @@ for wf in "${workflows[@]}"; do
           compact = low;
           gsub(/[[:space:]]+/, "", compact);
           # Treat explicit "false"/0 values (including `${{ false }}`) as disabled.
-          is_false = (compact == "false" ||
+          is_false = (compact == "" ||
+            compact == "false" ||
             compact == "0" ||
             compact == "${{false}}" ||
             compact == "${{0}}" ||
