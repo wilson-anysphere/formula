@@ -2853,6 +2853,8 @@ test("Positive count args suggest 1, 2, 3 (no 0)", async () => {
     { name: "EXPAND columns", currentInput: "=EXPAND(A1:A10, 5, " },
     { name: "WRAPROWS wrap_count", currentInput: "=WRAPROWS(A1:A10, " },
     { name: "WRAPCOLS wrap_count", currentInput: "=WRAPCOLS(A1:A10, " },
+    { name: "OFFSET height", currentInput: "=OFFSET(A1, 0, 0, " },
+    { name: "OFFSET width", currentInput: "=OFFSET(A1, 0, 0, 5, " },
   ];
 
   for (const { name, currentInput } of cases) {

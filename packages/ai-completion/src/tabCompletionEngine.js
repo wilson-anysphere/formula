@@ -1474,6 +1474,12 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
   },
+  OFFSET: {
+    // height
+    3: ROW_COUNT_ENUM_1_2_3,
+    // width
+    4: COLUMN_COUNT_ENUM_1_2_3,
+  },
   EXPAND: {
     // rows
     1: ROW_COUNT_ENUM_1_2_3,
