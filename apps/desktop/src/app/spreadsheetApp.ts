@@ -18461,6 +18461,24 @@ export class SpreadsheetApp {
       this.openInlineAiEdit();
       return;
     }
+    if ((e.key === "Backspace" || e.key === "Delete") && this.selectedChartId != null) {
+      // Chart deletion should not fire while the formula bar is editing (including
+      // range-selection mode).
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      e.preventDefault();
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
+      const chartId = this.selectedChartId;
+      this.setSelectedChartId(null);
+      this.chartStore.deleteChart(chartId);
+      this.focus();
+      return;
+    }
     if ((e.key === "Backspace" || e.key === "Delete") && this.selectedDrawingId != null) {
       // Picture deletion should not fire while the formula bar is editing (including
       // range-selection mode).

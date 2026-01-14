@@ -626,4 +626,32 @@ describe("Selection Pane panel", () => {
     app.destroy();
     sheetRoot.remove();
   });
+
+  it("deletes selected ChartStore charts via Delete key in ?canvasCharts=1 mode", async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("canvasCharts", "1");
+    window.history.replaceState(null, "", url.toString());
+
+    const sheetRoot = createRoot();
+    const app = new SpreadsheetApp(sheetRoot, {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    });
+
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A1:B2", title: "Delete Me" });
+    const drawingId = chartIdToDrawingId(chartId);
+
+    app.selectDrawingById(drawingId);
+    expect(app.getSelectedChartId()).toBe(chartId);
+
+    const evt = new KeyboardEvent("keydown", { key: "Delete", bubbles: true });
+    sheetRoot.dispatchEvent(evt);
+
+    expect(app.listCharts().some((c) => c.id === chartId)).toBe(false);
+    expect(app.getSelectedChartId()).toBeNull();
+
+    app.destroy();
+    sheetRoot.remove();
+  });
 });
