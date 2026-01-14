@@ -2732,17 +2732,73 @@ impl Engine {
             ));
         }
 
-        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
-            self.mark_all_compiled_cells_dirty();
-        }
-
         let key = CellKey {
             sheet: sheet_id,
             addr,
         };
-        let cell = self.workbook.get_or_create_cell_mut(key);
-        cell.number_format =
+        let normalized =
             format_pattern.and_then(|s| if s.trim().is_empty() { None } else { Some(s) });
+
+        let existing = self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.number_format.as_deref());
+        if existing == normalized.as_deref() {
+            return Ok(());
+        }
+
+        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(sheet_id, addr);
+        if sheet_dims_changed {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        match normalized {
+            Some(pattern) => {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.number_format = Some(pattern);
+            }
+            None => {
+                if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+                    if let Some(cell) = sheet_state.cells.get_mut(&addr) {
+                        cell.number_format = None;
+
+                        // Preserve sparse semantics when clearing the explicit override:
+                        // blank + no formula + default style => remove the cell entry entirely.
+                        let remove_cell = cell.value == Value::Blank
+                            && cell.formula.is_none()
+                            && cell.style_id == 0
+                            && cell.phonetic.is_none()
+                            && cell.number_format.is_none();
+                        if remove_cell {
+                            sheet_state.cells.remove(&addr);
+                        }
+                    }
+                }
+            }
+        }
+
+        // In "precision as displayed" mode, cell number format changes can affect stored numeric
+        // values at formula boundaries, even when the formula itself is unchanged. Mark the cell
+        // dirty so it is re-evaluated on the next recalculation tick.
+        let mut needs_recalc = sheet_dims_changed;
+        if !self.calc_settings.full_precision {
+            let has_formula = self
+                .workbook
+                .get_cell(key)
+                .is_some_and(|cell| cell.formula.is_some());
+            if has_formula {
+                let cell_id = cell_id_from_key(key);
+                self.mark_dirty_including_self_with_reasons(key);
+                self.calc_graph.mark_dirty(cell_id);
+                self.sync_dirty_from_calc_graph();
+                needs_recalc = true;
+            }
+        }
+
+        if needs_recalc && self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
         Ok(())
     }
 
@@ -2907,6 +2963,7 @@ impl Engine {
         }
 
         if phonetic.is_some() && self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
             self.mark_all_compiled_cells_dirty();
         }
 
@@ -3001,6 +3058,7 @@ impl Engine {
             .workbook
             .grow_sheet_dimensions(sheet_id, cell_addr_from_cell_ref(range.end))
         {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
             // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. If the sheet
             // grows, formulas that previously evaluated to `#REF!` may now become valid, so
             // conservatively mark all compiled formulas dirty to ensure results refresh on the next
@@ -3051,23 +3109,30 @@ impl Engine {
                 // Replace any existing formula and dependencies.
                 self.calc_graph.remove_cell(cell_id);
                 self.clear_cell_name_refs(key);
+                self.clear_cell_external_refs(key);
                 self.dirty.remove(&key);
                 self.dirty_reasons.remove(&key);
 
                 if is_blank {
                     if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
                         sheet_state.cells.remove(&addr);
+                        sheet_state.origin_dependents.remove(&addr);
                     }
                 } else {
-                    let cell = self.workbook.get_or_create_cell_mut(key);
-                    cell.value = value.clone();
-                    cell.phonetic = None;
-                    cell.formula = None;
-                    cell.compiled = None;
-                    cell.bytecode_compile_reason = None;
-                    cell.volatile = false;
-                    cell.thread_safe = true;
-                    cell.dynamic_deps = false;
+                    {
+                        let cell = self.workbook.get_or_create_cell_mut(key);
+                        cell.value = value.clone();
+                        cell.phonetic = None;
+                        cell.formula = None;
+                        cell.compiled = None;
+                        cell.bytecode_compile_reason = None;
+                        cell.volatile = false;
+                        cell.thread_safe = true;
+                        cell.dynamic_deps = false;
+                    }
+                    if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+                        sheet_state.origin_dependents.remove(&addr);
+                    }
                 }
 
                 // Mark downstream dependents dirty.
@@ -3142,11 +3207,13 @@ impl Engine {
 
                 self.calc_graph.remove_cell(cell_id);
                 self.clear_cell_name_refs(key);
+                self.clear_cell_external_refs(key);
                 self.dirty.remove(&key);
                 self.dirty_reasons.remove(&key);
 
                 if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
                     sheet_state.cells.remove(&addr);
+                    sheet_state.origin_dependents.remove(&addr);
                 }
 
                 self.mark_dirty_dependents_with_reasons(key);
@@ -4820,7 +4887,9 @@ impl Engine {
             row: max_row,
             col: max_col,
         };
-        self.workbook.grow_sheet_dimensions(sheet_id, max_addr);
+        if self.workbook.grow_sheet_dimensions(sheet_id, max_addr) {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+        }
         Ok(())
     }
 
