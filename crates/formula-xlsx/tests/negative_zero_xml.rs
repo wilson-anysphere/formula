@@ -28,6 +28,9 @@ fn xlsx_document_does_not_emit_negative_zero_in_sheet_xml() {
         sheet.default_row_height = Some(-0.0);
         sheet.set_col_width(0, Some(-0.0));
         sheet.set_row_height(0, Some(-0.0));
+        // Split panes use `xSplit`/`ySplit` attributes; ensure we don't emit `-0` there either.
+        sheet.view.pane.x_split = Some(-0.0);
+        sheet.view.pane.y_split = Some(-0.0);
     }
 
     let bytes = XlsxDocument::new(workbook).save_to_vec().expect("save");
@@ -48,6 +51,14 @@ fn xlsx_document_does_not_emit_negative_zero_in_sheet_xml() {
     assert!(
         !sheet_xml.contains("ht=\"-0\""),
         "unexpected -0 in row height: {sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains("xSplit=\"-0\""),
+        "unexpected -0 in pane xSplit: {sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains("ySplit=\"-0\""),
+        "unexpected -0 in pane ySplit: {sheet_xml}"
     );
 }
 
@@ -74,4 +85,3 @@ fn workbook_writer_does_not_emit_negative_zero_in_sheet_xml() {
         "unexpected -0 in sheet XML: {sheet_xml}"
     );
 }
-
