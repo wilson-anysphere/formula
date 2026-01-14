@@ -86,8 +86,9 @@ Why:
 Update guidance:
 
 - When updating a pinned action, keep the ref as a full 40-character SHA and keep a trailing comment
-  with the upstream ref (usually a version tag like `v4.3.1`; sometimes a branch like `master`) for
-  maintainability.
+  with the upstream **version tag** (for example `# v4.3.1` or `# v1`) for maintainability. CI
+  requires the comment to start with a semver-ish token so Dependabot can track the intended update
+  channel.
 - To resolve a tag to a commit SHA (handles annotated tags), run:
 
   ```bash
