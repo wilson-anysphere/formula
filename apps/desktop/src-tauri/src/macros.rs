@@ -641,21 +641,7 @@ impl<'a> AppStateSpreadsheet<'a> {
 
         let remaining = MAX_MACRO_UPDATES.saturating_sub(self.updates.len());
         if new_keys.len() > remaining {
-            // The workbook has already been mutated by the macro. Roll back *all* edits applied
-            // during this macro invocation so we don't return a partial update payload or leave the
-            // frontend/backend out of sync.
-            for _ in 0..self.undo_entries_added {
-                let _ = self.state.undo();
-            }
-            self.undo_entries_added = 0;
-            self.updates.clear();
-            self.update_index_by_cell.clear();
-
-            // Clear redo history so the rolled-back macro changes can't be "redone" later.
-            self.state.mark_dirty();
-            return Err(formula_vba_runtime::VbaError::Runtime(format!(
-                "macro produced too many cell updates (limit {MAX_MACRO_UPDATES})"
-            )));
+            return Err(self.rollback_macro_edits_due_to_update_limit());
         }
 
         for update in updates {
@@ -668,6 +654,24 @@ impl<'a> AppStateSpreadsheet<'a> {
             }
         }
         Ok(())
+    }
+
+    fn rollback_macro_edits_due_to_update_limit(&mut self) -> formula_vba_runtime::VbaError {
+        // The workbook has already been mutated by the macro. Roll back *all* edits applied during
+        // this macro invocation so we don't return a partial update payload or leave the
+        // frontend/backend out of sync.
+        for _ in 0..self.undo_entries_added {
+            let _ = self.state.undo();
+        }
+        self.undo_entries_added = 0;
+        self.updates.clear();
+        self.update_index_by_cell.clear();
+
+        // Clear redo history so the rolled-back macro changes can't be "redone" later.
+        self.state.mark_dirty();
+        formula_vba_runtime::VbaError::Runtime(format!(
+            "macro produced too many cell updates (limit {MAX_MACRO_UPDATES})"
+        ))
     }
 }
 
@@ -757,13 +761,20 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             ));
         }
 
+        let row0 = (row - 1) as usize;
+        let col0 = (col - 1) as usize;
+        let key = (sheet_id.clone(), row0, col0);
+        if !self.update_index_by_cell.contains_key(&key) && self.updates.len() >= MAX_MACRO_UPDATES {
+            return Err(self.rollback_macro_edits_due_to_update_limit());
+        }
+
         let (value_json, formula) = Self::vba_value_to_cell_edit(&value)?;
         let updates = self
             .state
             .set_cell(
                 &sheet_id,
-                (row - 1) as usize,
-                (col - 1) as usize,
+                row0,
+                col0,
                 value_json,
                 formula,
             )
@@ -805,6 +816,13 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             ));
         }
 
+        let row0 = (row - 1) as usize;
+        let col0 = (col - 1) as usize;
+        let key = (sheet_id.clone(), row0, col0);
+        if !self.update_index_by_cell.contains_key(&key) && self.updates.len() >= MAX_MACRO_UPDATES {
+            return Err(self.rollback_macro_edits_due_to_update_limit());
+        }
+
         if formula.len() > MAX_CELL_FORMULA_BYTES {
             return Err(formula_vba_runtime::VbaError::Runtime(format!(
                 "cell formula is too large (max {MAX_CELL_FORMULA_BYTES} bytes)"
@@ -815,8 +833,8 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             .state
             .set_cell(
                 &sheet_id,
-                (row - 1) as usize,
-                (col - 1) as usize,
+                row0,
+                col0,
                 None,
                 Some(formula),
             )
@@ -838,12 +856,19 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             ));
         }
 
+        let row0 = (row - 1) as usize;
+        let col0 = (col - 1) as usize;
+        let key = (sheet_id.clone(), row0, col0);
+        if !self.update_index_by_cell.contains_key(&key) && self.updates.len() >= MAX_MACRO_UPDATES {
+            return Err(self.rollback_macro_edits_due_to_update_limit());
+        }
+
         let updates = self
             .state
             .set_cell(
                 &sheet_id,
-                (row - 1) as usize,
-                (col - 1) as usize,
+                row0,
+                col0,
                 None,
                 None,
             )
