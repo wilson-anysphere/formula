@@ -352,6 +352,100 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     host.remove();
   });
 
+  it("does not invoke engine tooling after canceling before the scheduled flush runs", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {}, onCancel: () => {} },
+      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=1+2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Cancel immediately, before the RAF/timer tooling flush runs.
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+
+    await flushTooling();
+
+    expect(engine.lexFormulaPartial).toHaveBeenCalledTimes(0);
+    expect(engine.parseFormulaPartial).toHaveBeenCalledTimes(0);
+
+    host.remove();
+  });
+
+  it("aborts in-flight engine tooling when canceling", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const signals: AbortSignal[] = [];
+    const abortable = (rpc: any) =>
+      new Promise((_, reject) => {
+        const signal = rpc?.signal as AbortSignal | undefined;
+        if (signal) {
+          signals.push(signal);
+          if (signal.aborted) {
+            reject(new Error("aborted"));
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("aborted"));
+            },
+            { once: true },
+          );
+        }
+      });
+
+    const engine = {
+      lexFormulaPartial: vi.fn((_formula: string, _opts: any, rpc: any) => abortable(rpc) as any),
+      parseFormulaPartial: vi.fn((_formula: string, _cursor: number, _opts: any, rpc: any) => abortable(rpc) as any),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {}, onCancel: () => {} },
+      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=1+2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Allow the scheduled tooling flush to run and start the async engine requests.
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+      else setTimeout(() => resolve(), 0);
+    });
+
+    expect(engine.lexFormulaPartial).toHaveBeenCalledTimes(1);
+    expect(engine.parseFormulaPartial).toHaveBeenCalledTimes(1);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((s) => !s.aborted)).toBe(true);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+
+    expect(signals.every((s) => s.aborted)).toBe(true);
+
+    // Let the abort rejection settle in the background (FormulaBarView swallows it).
+    await Promise.resolve();
+
+    host.remove();
+  });
+
   it("does not invoke engine tooling for non-formula text", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
