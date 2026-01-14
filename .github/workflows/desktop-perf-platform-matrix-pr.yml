@@ -769,13 +769,21 @@ jobs:
               return `${fmt(v, digits)} / ${fmt(t, digits)} ${ok ? "PASS" : "FAIL"}`;
             }
             
-            const mergedPath = path.join(
-              "artifacts",
-              "desktop-perf-platform-matrix",
-              "merged",
-              "desktop-perf-platform-matrix.json",
-            );
-            const merged = readJsonMaybe(mergedPath);
+            const mergedCandidates = [
+              path.join(
+                "artifacts",
+                "desktop-perf-platform-matrix",
+                "merged",
+                "desktop-perf-platform-matrix.json",
+              ),
+              // Some artifact tools flatten single-file uploads; keep a fallback for robustness.
+              path.join("artifacts", "desktop-perf-platform-matrix", "desktop-perf-platform-matrix.json"),
+            ];
+            let merged = null;
+            for (const candidate of mergedCandidates) {
+              merged = readJsonMaybe(candidate);
+              if (merged) break;
+            }
             const artifacts = merged?.artifacts ?? {};
             
             const byOs = [
