@@ -227,7 +227,7 @@
   .pivot-builder__button:focus {
     outline: none;
     border-color: var(--selection-border);
-    box-shadow: 0 0 0 2px var(--selection-bg);
+    box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
   }
 }
 
