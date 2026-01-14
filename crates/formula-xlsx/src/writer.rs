@@ -1,8 +1,10 @@
 use crate::styles::StylesPart;
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
-use crate::WorkbookKind;
 use crate::ConditionalFormattingDxfAggregation;
+use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
+use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     normalize_formula_text, Cell, CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind,
     DataValidationErrorStyle, DataValidationKind, DataValidationOperator, DateSystem,
@@ -10,14 +12,12 @@ use formula_model::{
     PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState,
     Worksheet,
 };
-use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Cursor, Seek, Write};
 use std::path::Path;
 use thiserror::Error;
 use zip::ZipWriter;
-use formula_model::rich_text::{RichText, Underline};
 
 #[derive(Debug, Error)]
 pub enum XlsxWriteError {
@@ -183,7 +183,10 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
             &shared_strings,
             &table_parts_by_sheet[idx],
             &style_to_xf,
-            cf_dxfs.local_to_global_by_sheet.get(&sheet.id).map(|v| v.as_slice()),
+            cf_dxfs
+                .local_to_global_by_sheet
+                .get(&sheet.id)
+                .map(|v| v.as_slice()),
         )?;
         zip.start_file(&sheet_path, options)?;
         zip.write_all(sheet_xml.as_bytes())?;
@@ -787,7 +790,9 @@ fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<
         _ => return None,
     };
 
-    Some(format!(r#"<cfRule type="{type_attr}"{attrs}>{body}</cfRule>"#))
+    Some(format!(
+        r#"<cfRule type="{type_attr}"{attrs}>{body}</cfRule>"#
+    ))
 }
 
 fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
@@ -2060,10 +2065,7 @@ fn inline_string_with_phonetic_xml(base: &str, phonetic: &str) -> String {
 
 fn inline_string_t(text: &str) -> String {
     if needs_xml_space_preserve(text) {
-        format!(
-            r#"<t xml:space="preserve">{}</t>"#,
-            escape_xml(text)
-        )
+        format!(r#"<t xml:space="preserve">{}</t>"#, escape_xml(text))
     } else {
         format!(r#"<t>{}</t>"#, escape_xml(text))
     }
