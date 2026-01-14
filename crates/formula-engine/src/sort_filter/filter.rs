@@ -3,6 +3,7 @@ use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::sort::datetime_to_excel_serial_1900;
 use crate::sort_filter::types::{CellValue, RangeData, RangeRef};
 use chrono::{Local, NaiveDate, NaiveDateTime};
+use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -347,7 +348,7 @@ fn evaluate_criterion(cell: &CellValue, criterion: &FilterCriterion, value_local
         FilterCriterion::Blanks => is_blank(cell),
         FilterCriterion::NonBlanks => !is_blank(cell),
         FilterCriterion::Equals(value) => equals_value(cell, value, value_locale),
-        FilterCriterion::TextMatch(m) => text_match(cell, m),
+        FilterCriterion::TextMatch(m) => text_match(cell, m, value_locale),
         FilterCriterion::Number(cmp) => number_cmp(cell, cmp, value_locale),
         FilterCriterion::Date(cmp) => date_cmp(cell, cmp, value_locale),
     }
@@ -360,7 +361,7 @@ fn is_blank(cell: &CellValue) -> bool {
 fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocaleConfig) -> bool {
     match value {
         FilterValue::Text(s) => {
-            let cell_s = cell_to_string(cell);
+            let cell_s = cell_to_string(cell, value_locale);
             text_eq_case_insensitive(&cell_s, s)
         }
         FilterValue::Number(n) => coerce_number(cell, value_locale).is_some_and(|v| v == *n),
@@ -369,8 +370,8 @@ fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocale
     }
 }
 
-fn text_match(cell: &CellValue, m: &TextMatch) -> bool {
-    let mut cell_s = cell_to_string(cell);
+fn text_match(cell: &CellValue, m: &TextMatch, value_locale: ValueLocaleConfig) -> bool {
+    let mut cell_s = cell_to_string(cell, value_locale);
     let mut pattern = m.pattern.clone();
 
     if !m.case_sensitive {
@@ -433,12 +434,26 @@ fn date_cmp(cell: &CellValue, cmp: &DateComparison, value_locale: ValueLocaleCon
     }
 }
 
-fn cell_to_string(cell: &CellValue) -> String {
+fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
     match cell {
         CellValue::Blank => String::new(),
-        CellValue::Number(n) => n.to_string(),
+        CellValue::Number(n) => formula_format::format_value(
+            FormatValue::Number(*n),
+            Some("General"),
+            &FormatOptions {
+                locale: value_locale.separators,
+                date_system: DateSystem::Excel1900,
+            },
+        )
+        .text,
         CellValue::Text(s) => s.clone(),
-        CellValue::Bool(b) => b.to_string(),
+        CellValue::Bool(b) => {
+            if *b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }
         CellValue::Error(err) => err.to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
@@ -477,6 +492,26 @@ mod tests {
             end_col: rows[0].len() - 1,
         };
         RangeData::new(range, rows).unwrap()
+    }
+
+    #[test]
+    fn cell_to_string_formats_numbers_using_workbook_locale() {
+        assert_eq!(
+            cell_to_string(&CellValue::Number(1.5), ValueLocaleConfig::de_de()),
+            "1,5"
+        );
+    }
+
+    #[test]
+    fn cell_to_string_formats_booleans_as_excel_true_false() {
+        assert_eq!(
+            cell_to_string(&CellValue::Bool(true), ValueLocaleConfig::en_us()),
+            "TRUE"
+        );
+        assert_eq!(
+            cell_to_string(&CellValue::Bool(false), ValueLocaleConfig::en_us()),
+            "FALSE"
+        );
     }
 
     #[test]
