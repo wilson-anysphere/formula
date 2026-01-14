@@ -210,7 +210,11 @@ fn formulatext_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(v) => return v,
     };
 
-    ctx.record_reference(&reference);
+    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+        && reference.start == ctx.current_cell_addr();
+    if !is_self_reference {
+        ctx.record_reference(&reference);
+    }
 
     match ctx.get_cell_formula(&reference.sheet_id, reference.start) {
         Some(formula) => Value::Text(workbook_info::normalize_formula_text(formula)),
@@ -238,7 +242,11 @@ fn isformula_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(v) => return v,
     };
 
-    ctx.record_reference(&reference);
+    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+        && reference.start == ctx.current_cell_addr();
+    if !is_self_reference {
+        ctx.record_reference(&reference);
+    }
 
     let has_formula = ctx
         .get_cell_formula(&reference.sheet_id, reference.start)

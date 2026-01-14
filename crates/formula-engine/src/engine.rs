@@ -15106,6 +15106,88 @@ fn walk_calc_expr(
                         lexical_scopes.pop();
                         return;
                     }
+                    "FORMULATEXT" | "ISFORMULA" => {
+                        let Some(arg0) = args.first() else {
+                            return;
+                        };
+
+                        // These functions consult worksheet *metadata* (stored formula text /
+                        // whether a cell has a formula), not the evaluated value of the referenced
+                        // cell. Direct self-references like `=FORMULATEXT(A1)` in `A1` should not be
+                        // treated as circular.
+                        if is_direct_self_reference(arg0, current_cell) {
+                            return;
+                        }
+
+                        // For direct references, keep the precedent edge so edits to the referenced
+                        // cell mark this formula dirty. For reference-producing expressions (e.g.
+                        // OFFSET/INDIRECT), walk in a "reference context" to avoid spurious
+                        // self-edges while still tracking dependencies used to compute the
+                        // reference.
+                        match arg0 {
+                            Expr::CellRef(_)
+                            | Expr::RangeRef(_)
+                            | Expr::StructuredRef(_)
+                            | Expr::SpillRange(_) => {
+                                walk_calc_expr(
+                                    arg0,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                            Expr::ImplicitIntersection(inner)
+                                if matches!(
+                                    inner.as_ref(),
+                                    Expr::CellRef(_)
+                                        | Expr::RangeRef(_)
+                                        | Expr::StructuredRef(_)
+                                        | Expr::SpillRange(_)
+                                ) =>
+                            {
+                                walk_calc_expr(
+                                    arg0,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                            other => {
+                                walk_calc_expr_reference_context(
+                                    other,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                        }
+
+                        for a in args.iter().skip(1) {
+                            walk_calc_expr(
+                                a,
+                                current_cell,
+                                tables_by_sheet,
+                                workbook,
+                                spills,
+                                precedents,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                        }
+                        return;
+                    }
                     "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "SHEET" | "SHEETS" => {
                         let Some(arg0) = args.first() else {
                             return;
@@ -15955,6 +16037,36 @@ mod tests {
             engine.get_cell_value("Sheet1", "A1"),
             Value::Text("v".to_string())
         );
+    }
+
+    #[test]
+    fn formulatext_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=FORMULATEXT(A1)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+
+        let stored = engine.get_cell_formula("Sheet1", "A1").expect("formula stored");
+        let expected = crate::functions::information::workbook::normalize_formula_text(stored);
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text(expected)
+        );
+    }
+
+    #[test]
+    fn isformula_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ISFORMULA(A1)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
     }
 
     #[test]
