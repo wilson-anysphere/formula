@@ -1920,8 +1920,8 @@ function layoutShapeTextLines(
     maxFontSizePx = 0;
   };
 
-  const appendText = (text: string, run: ShapeTextRun) => {
-    const normalized = normalizeText(text);
+  const appendText = (text: string, run: ShapeTextRun, alreadyNormalized = false) => {
+    const normalized = alreadyNormalized ? text : normalizeText(text);
     if (normalized === "") return;
     const { font, fontSizePx } = shapeRunFont(run, scale);
     ctx.font = font;
@@ -1951,10 +1951,6 @@ function layoutShapeTextLines(
     const tokens = chunk.split(/(\s+)/);
     for (const token of tokens) {
       if (token === "") continue;
-      // Leading tabs are meaningful (Excel uses `<a:tab/>` for indentation). Keep them when
-      // present, but continue to drop leading spaces when wrapping so we don't create
-      // accidental extra whitespace.
-      if (segments.length === 0 && token.trim() === "" && !token.includes("\t")) continue;
 
       const { font } = shapeRunFont(run, scale);
       ctx.font = font;
@@ -1965,7 +1961,7 @@ function layoutShapeTextLines(
         if (token.trim() === "") continue;
       }
 
-      appendText(normalizedToken, run);
+      appendText(normalizedToken, run, true);
     }
   };
 
