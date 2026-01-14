@@ -4629,6 +4629,28 @@ impl<'a> FormulaParser<'a> {
                 break;
             }
         }
+        // Optional scientific notation suffix: `E[+|-]?digits`.
+        let exp_start = self.pos;
+        if matches!(self.peek_char(), Some('e' | 'E')) {
+            self.next_char();
+            if matches!(self.peek_char(), Some('+' | '-')) {
+                self.next_char();
+            }
+            let digits_start = self.pos;
+            while let Some(ch) = self.peek_char() {
+                if ch.is_ascii_digit() {
+                    self.next_char();
+                } else {
+                    break;
+                }
+            }
+            // If we didn't consume any exponent digits, roll back and treat the `E` as a separate
+            // token (the formula will error later, but this avoids silently accepting invalid
+            // numeric literals like `1E`).
+            if self.pos == digits_start {
+                self.pos = exp_start;
+            }
+        }
         let s = &self.input[start..self.pos];
         let n: f64 = s
             .parse()
