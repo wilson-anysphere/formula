@@ -470,6 +470,76 @@ describe("engine sync helpers", () => {
     expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
   });
 
+  it("forces a recalc for cell styleId-only deltas even when DocumentController emits recalc=false", async () => {
+    const expected: CellChange[] = [{ sheet: "Sheet1", address: "A1", value: 123 }];
+    const engine = new FakeEngine(expected);
+
+    const styleObj = { font: { bold: true } };
+    const payload = {
+      recalc: false,
+      deltas: [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: null, formula: null, styleId: 1 },
+        },
+      ],
+    };
+
+    const changes = await engineApplyDocumentChange(engine, payload, {
+      getStyleById: (styleId) => (styleId === 1 ? styleObj : null),
+    });
+
+    expect(engine.setCalls).toEqual([]);
+    expect(engine.internStyleCalls).toEqual([styleObj]);
+    expect(engine.setStyleCalls).toEqual([{ address: "A1", styleId: 1, sheet: "Sheet1" }]);
+    expect(engine.recalcCalls).toEqual([undefined]);
+    expect(changes).toEqual(expected);
+  });
+
+  it("forces a recalc for row/col/sheet style layer deltas even when DocumentController emits recalc=false", async () => {
+    const styleObj = { font: { italic: true } };
+    const recalcResult: CellChange[] = [{ sheet: "Sheet1", address: "B2", value: 456 }];
+
+    const internStyle = vi.fn((_: unknown) => 100);
+    const setRowStyleId = vi.fn(async () => {});
+    const setColStyleId = vi.fn(async () => {});
+    const setSheetDefaultStyleId = vi.fn(async () => {});
+    const recalculate = vi.fn(async () => recalcResult);
+
+    const engine: EngineSyncTarget = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate,
+      internStyle,
+      setRowStyleId,
+      setColStyleId,
+      setSheetDefaultStyleId,
+    };
+
+    const payload = {
+      recalc: false,
+      rowStyleDeltas: [{ sheetId: "Sheet1", row: 0, afterStyleId: 7 }],
+      colStyleDeltas: [{ sheetId: "Sheet1", col: 1, afterStyleId: 7 }],
+      sheetStyleDeltas: [{ sheetId: "Sheet1", afterStyleId: 7 }],
+    };
+
+    const changes = await engineApplyDocumentChange(engine, payload, {
+      getStyleById: (styleId) => (styleId === 7 ? styleObj : null),
+    });
+
+    expect(internStyle).toHaveBeenCalledTimes(1);
+    expect(internStyle).toHaveBeenCalledWith(styleObj);
+    expect(setRowStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
+    expect(setColStyleId).toHaveBeenCalledWith(1, 100, "Sheet1");
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
+
+    expect(recalculate).toHaveBeenCalledTimes(1);
+    expect(changes).toEqual(recalcResult);
+  });
+
   it("engineApplyDocumentChange syncs sheet view column width overrides into the engine (CELL width metadata)", async () => {
     const doc = new DocumentController();
     let payload: any = null;
