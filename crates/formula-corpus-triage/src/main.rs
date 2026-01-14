@@ -49,7 +49,7 @@ struct Args {
 
     /// Optional password for Office-encrypted workbooks.
     ///
-    /// When unset and `--skip-encrypted` is enabled (default), encrypted XLSX/XLSM inputs are
+    /// When unset and `--skip-encrypted` is enabled (default), encrypted XLSX/XLSM/XLSB inputs are
     /// reported as `skipped` instead of `failed`.
     #[arg(long, conflicts_with = "password_file")]
     password: Option<String>,
