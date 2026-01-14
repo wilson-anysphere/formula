@@ -138,13 +138,15 @@ export class FormulaBarTabCompletionController {
 
     const completionClient =
       opts.completionClient ?? createCursorTabCompletionClientFromEnv() ?? new CursorTabCompletionClient();
+    const getLocaleId = () => this.#formulaBar.currentLocaleId();
     this.#completion = new TabCompletionEngine({
-      functionRegistry: createLocaleAwareFunctionRegistry(),
-      starterFunctions: createLocaleAwareStarterFunctions(),
+      functionRegistry: createLocaleAwareFunctionRegistry({ getLocaleId }),
+      starterFunctions: createLocaleAwareStarterFunctions({ getLocaleId }),
       completionClient,
       schemaProvider,
       parsePartialFormula: createLocaleAwarePartialFormulaParser({
         getEngineClient: typeof opts.getEngineClient === "function" ? opts.getEngineClient : undefined,
+        getLocaleId,
         timeoutMs: 10,
       }),
       // Keep room for a backend (Cursor) suggestion even when the rule-based engine

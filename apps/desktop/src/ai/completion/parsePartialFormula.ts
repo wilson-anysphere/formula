@@ -46,6 +46,16 @@ function currentLocaleId(): string {
   }
 }
 
+function safeLocaleId(getLocaleId: () => string): string {
+  try {
+    const raw = getLocaleId();
+    const trimmed = String(raw ?? "").trim();
+    return trimmed || "en-US";
+  } catch {
+    return "en-US";
+  }
+}
+
 function clampCursor(input: string, cursorPosition: number): number {
   const len = typeof input === "string" ? input.length : 0;
   if (!Number.isInteger(cursorPosition)) return len;
@@ -157,8 +167,11 @@ type LocaleAliasMeta = {
  *   localized name wins the completion ranking (important for pure-insertion UX)
  */
 class LocaleAwareFunctionRegistry extends FunctionRegistry {
-  constructor() {
+  readonly #getLocaleId: () => string;
+
+  constructor(options: { getLocaleId?: () => string } = {}) {
     super();
+    this.#getLocaleId = options.getLocaleId ?? currentLocaleId;
 
     // Register localized aliases for any locales the WASM engine supports. The desktop UI
     // may not expose all of these locales yet, but registering them eagerly keeps this
@@ -200,9 +213,7 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
     // avoid accidentally filtering everything out for some prefixes in other locales.
     const candidateLimit = Math.max(rawLimit * 50, 500);
 
-    const localeId = (() => {
-      return currentLocaleId();
-    })();
+    const localeId = safeLocaleId(this.#getLocaleId);
     const formulaLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
     const candidates: any[] = super.search(prefix, { ...options, limit: candidateLimit } as any);
@@ -236,8 +247,8 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
   }
 }
 
-export function createLocaleAwareFunctionRegistry(): FunctionRegistry {
-  return new LocaleAwareFunctionRegistry();
+export function createLocaleAwareFunctionRegistry(options: { getLocaleId?: () => string } = {}): FunctionRegistry {
+  return new LocaleAwareFunctionRegistry(options);
 }
 
 const CANONICAL_STARTER_FUNCTIONS = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
@@ -344,9 +355,10 @@ function functionNameFromIdent(identToken: string | null, functionRegistry: unkn
  * This is intended for tab completion when the user has typed only "=" and expects localized function names
  * (e.g. de-DE `=SUMME(`) instead of canonical English (`=SUM(`).
  */
-export function createLocaleAwareStarterFunctions(): () => string[] {
+export function createLocaleAwareStarterFunctions(options: { getLocaleId?: () => string } = {}): () => string[] {
+  const getLocaleId = options.getLocaleId ?? currentLocaleId;
   return () => {
-    const localeId = currentLocaleId();
+    const localeId = safeLocaleId(getLocaleId);
     const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
     const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[normalizedLocaleId];
     if (!tables) return CANONICAL_STARTER_FUNCTIONS;
@@ -670,6 +682,12 @@ export function createLocaleAwarePartialFormulaParser(options: {
    */
   getEngineClient?: () => EngineClientLike | null;
   /**
+   * Optional locale-id getter used for locale-aware parsing.
+   *
+   * When omitted, the parser uses the best-effort document/i18n locale (`currentLocaleId()`).
+   */
+  getLocaleId?: () => string;
+  /**
    * Maximum time (ms) we're willing to wait for the engine parser before falling back
    * to the JS implementation.
    */
@@ -680,6 +698,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
   functionRegistry: RangeArgRegistry,
 ) => PartialFormulaContext | Promise<PartialFormulaContext> {
   const getEngineClient = options.getEngineClient ?? (() => null);
+  const getLocaleId = options.getLocaleId ?? currentLocaleId;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, Math.trunc(options.timeoutMs as number)) : 15;
   const unsupportedLocaleIds = new Set<string>();
 
@@ -690,7 +709,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
       return { isFormula: false, inFunctionCall: false };
     }
 
-    const localeId = currentLocaleId();
+    const localeId = safeLocaleId(getLocaleId);
     const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
     // Use the built-in JS parser for spans (currentArg.start/end, etc.) and then

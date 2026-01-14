@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FunctionRegistry, parsePartialFormula as parsePartialFormulaFallback } from "@formula/ai-completion";
 
 import { setLocale } from "../../i18n/index.js";
-import { createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
+import {
+  createLocaleAwareFunctionRegistry,
+  createLocaleAwarePartialFormulaParser,
+  createLocaleAwareStarterFunctions,
+} from "./parsePartialFormula.js";
 
 describe("createLocaleAwarePartialFormulaParser", () => {
   afterEach(() => {
@@ -280,5 +284,46 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     } finally {
       (globalThis as any).document = prevDocument;
     }
+  });
+
+  it("respects getLocaleId() overrides over document/i18n locale when choosing the formula locale", async () => {
+    setLocale("en-US");
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = { documentElement: { lang: "en-US" } };
+
+    try {
+      const parser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "de-DE" });
+      const fnRegistry = new FunctionRegistry();
+      const input = "=SUMME(1,";
+      const result = await parser(input, input.length, fnRegistry);
+
+      expect(result.isFormula).toBe(true);
+      expect(result.inFunctionCall).toBe(true);
+      // In de-DE, ',' is a decimal separator, not an argument separator.
+      expect(result.argIndex).toBe(0);
+      expect(result.currentArg?.text).toBe("1,");
+      // Localized function name should be canonicalized.
+      expect(result.functionName).toBe("SUM");
+    } finally {
+      (globalThis as any).document = prevDocument;
+    }
+  });
+
+  it("createLocaleAwareStarterFunctions respects getLocaleId() overrides", () => {
+    setLocale("en-US");
+    const starters = createLocaleAwareStarterFunctions({ getLocaleId: () => "de-DE" });
+    expect(starters()[0]).toBe("SUMME(");
+  });
+
+  it("createLocaleAwareFunctionRegistry respects getLocaleId() overrides", () => {
+    setLocale("en-US");
+
+    const deRegistry = createLocaleAwareFunctionRegistry({ getLocaleId: () => "de-DE" });
+    const deMatches = deRegistry.search("SU", { limit: 50 });
+    expect(deMatches.some((m) => m.name === "SUMME")).toBe(true);
+
+    const enRegistry = createLocaleAwareFunctionRegistry({ getLocaleId: () => "en-US" });
+    const enMatches = enRegistry.search("SU", { limit: 50 });
+    expect(enMatches.some((m) => m.name === "SUMME")).toBe(false);
   });
 });

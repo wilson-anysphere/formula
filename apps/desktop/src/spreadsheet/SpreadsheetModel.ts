@@ -36,12 +36,12 @@ export class SpreadsheetModel {
   readonly #cells = new Map<string, Cell>();
   readonly #aiCellFunctions: AiCellFunctionEngine;
   readonly #completion = new TabCompletionEngine({
-    functionRegistry: createLocaleAwareFunctionRegistry(),
-    starterFunctions: createLocaleAwareStarterFunctions(),
+    functionRegistry: createLocaleAwareFunctionRegistry({ getLocaleId: currentFormulaLocaleId }),
+    starterFunctions: createLocaleAwareStarterFunctions({ getLocaleId: currentFormulaLocaleId }),
     // Mirror the production formula bar adapter: canonicalize localized function names so
     // range-arg heuristics can work in non-en-US locales, and optionally use the WASM
     // engine when available (SpreadsheetModel doesn't provide one, so this remains sync).
-    parsePartialFormula: createLocaleAwarePartialFormulaParser({ timeoutMs: 10 }),
+    parsePartialFormula: createLocaleAwarePartialFormulaParser({ timeoutMs: 10, getLocaleId: currentFormulaLocaleId }),
   });
   #completionRequest = 0;
   #pendingCompletion: Promise<void> | null = null;
