@@ -172,7 +172,7 @@ describe('desktopStartupUtil.runOnce reset guardrails', () => {
     process.env.FORMULA_PERF_HOME = '/';
 
     vi.resetModules();
-    const mod = await import('./desktopStartupRunnerShared.ts');
+    const mod = await import('./desktopStartupUtil.ts');
     await expect(mod.runOnce({ binPath: 'ignored', timeoutMs: 1, profileDir: '/tmp' })).rejects.toThrow(
       /Refusing to reset unsafe desktop benchmark perf home dir/,
     );
