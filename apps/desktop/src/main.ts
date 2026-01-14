@@ -1759,6 +1759,7 @@ function openOrganizeSheets(): void {
     renameSheetById: (sheetId, newName) => renameSheetById(sheetId, newName),
     getDocument: () => app.getDocument(),
     isEditing: () => isSpreadsheetEditing(),
+    readOnly: app.isReadOnly?.() === true,
     focusGrid: () => app.focus(),
     onError: (message) => showToast(message, "error"),
   });

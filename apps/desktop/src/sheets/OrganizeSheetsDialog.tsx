@@ -35,6 +35,13 @@ export type OrganizeSheetsDialogHost = {
    */
   isEditing: () => boolean;
   /**
+   * When true, disable sheet-structure mutations (rename/hide/delete/reorder/unhide).
+   *
+   * Used in read-only collaboration sessions so the dialog behaves consistently with
+   * the sheet tab strip (which disables these controls instead of error-toasting).
+   */
+  readOnly?: boolean;
+  /**
    * Called after the dialog closes (e.g. restore grid focus).
    */
   focusGrid: () => void;
@@ -89,24 +96,25 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
   );
 
   const isSpreadsheetEditing = host.isEditing();
+  const isReadOnly = host.readOnly === true;
   const isRenaming = renameSheetId != null;
 
   const beginRename = React.useCallback(
     (sheet: SheetMeta) => {
-      if (isSpreadsheetEditing) return;
+      if (isSpreadsheetEditing || isReadOnly) return;
       setError(null);
       setDeleteConfirmSheetId(null);
       setRenameSheetId(sheet.id);
       renameDraftRef.current = sheet.name;
       setRenameDraft(sheet.name);
     },
-    [isSpreadsheetEditing],
+    [isReadOnly, isSpreadsheetEditing],
   );
 
   const commitRename = React.useCallback(async () => {
     const sheetId = renameSheetId;
     if (!sheetId) return;
-    if (isSpreadsheetEditing) return;
+    if (isSpreadsheetEditing || isReadOnly) return;
 
     setBusy(true);
     setError(null);
@@ -120,7 +128,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     } finally {
       setBusy(false);
     }
-  }, [host, isSpreadsheetEditing, renameSheetId, reportError]);
+  }, [host, isReadOnly, isSpreadsheetEditing, renameSheetId, reportError]);
 
   const cancelRename = React.useCallback(() => {
     setRenameSheetId(null);
@@ -135,6 +143,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         // Keep the spreadsheet in a consistent state: hidden/veryHidden sheets should not become
         // the active sheet. If the user chooses to activate one, unhide it first.
         if (meta && meta.visibility !== "visible") {
+          if (isReadOnly) return;
           store.unhide(sheetId);
         }
         host.activateSheet(sheetId);
@@ -143,12 +152,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         reportError(err);
       }
     },
-    [host, isSpreadsheetEditing, reportError],
+    [host, isReadOnly, isSpreadsheetEditing, reportError, store],
   );
 
   const hide = React.useCallback(
     (sheet: SheetMeta) => {
-      if (isSpreadsheetEditing) return;
+      if (isSpreadsheetEditing || isReadOnly) return;
       setError(null);
       const currentActive = host.getActiveSheetId();
       const wasActive = sheet.id === currentActive;
@@ -175,12 +184,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         }
       }
     },
-    [activate, host, isSpreadsheetEditing, reportError, store],
+    [activate, host, isReadOnly, isSpreadsheetEditing, reportError, store],
   );
 
   const unhide = React.useCallback(
     (sheet: SheetMeta) => {
-      if (isSpreadsheetEditing) return;
+      if (isSpreadsheetEditing || isReadOnly) return;
       setError(null);
       try {
         store.unhide(sheet.id);
@@ -188,12 +197,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         reportError(err);
       }
     },
-    [isSpreadsheetEditing, reportError, store],
+    [isReadOnly, isSpreadsheetEditing, reportError, store],
   );
 
   const remove = React.useCallback(
     async (sheet: SheetMeta) => {
-      if (isSpreadsheetEditing) return;
+      if (isSpreadsheetEditing || isReadOnly) return;
       setError(null);
       setDeleteConfirmSheetId(null);
 
@@ -234,12 +243,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         reportError(err);
       }
     },
-    [activate, host, isSpreadsheetEditing, reportError, store],
+    [activate, host, isReadOnly, isSpreadsheetEditing, reportError, store],
   );
 
   const move = React.useCallback(
     (sheetId: string, toIndex: number) => {
-      if (isSpreadsheetEditing) return;
+      if (isSpreadsheetEditing || isReadOnly) return;
       setError(null);
       try {
         store.move(sheetId, toIndex);
@@ -247,7 +256,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         reportError(err);
       }
     },
-    [isSpreadsheetEditing, reportError, store],
+    [isReadOnly, isSpreadsheetEditing, reportError, store],
   );
 
   return (
@@ -278,6 +287,8 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
           const actionDisabled = busy || isSpreadsheetEditing || (isRenaming && renameSheetId !== sheet.id);
           const confirmingDelete = deleteConfirmSheetId === sheet.id;
           const activateLabel = sheet.visibility === "visible" ? "Activate" : "Unhide & Activate";
+          const mutationDisabled = actionDisabled || isReadOnly;
+          const canActivate = sheet.visibility === "visible" || !isReadOnly;
 
           return (
             <div
@@ -305,7 +316,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                         void commitRename();
                       }
                     }}
-                    disabled={busy || isSpreadsheetEditing}
+                    disabled={busy || isSpreadsheetEditing || isReadOnly}
                   />
                 ) : (
                   <>
@@ -334,7 +345,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                 <button
                   type="button"
                   onClick={() => activate(sheet.id)}
-                  disabled={actionDisabled}
+                  disabled={actionDisabled || !canActivate}
                   data-testid={`organize-sheet-activate-${sheet.id}`}
                 >
                   {activateLabel}
@@ -345,7 +356,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                     <button
                       type="button"
                       onClick={() => void commitRename()}
-                      disabled={busy || isSpreadsheetEditing}
+                      disabled={busy || isSpreadsheetEditing || isReadOnly}
                       data-testid={`organize-sheet-rename-save-${sheet.id}`}
                     >
                       Save
@@ -363,7 +374,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   <button
                     type="button"
                     onClick={() => beginRename(sheet)}
-                    disabled={actionDisabled}
+                    disabled={mutationDisabled}
                     data-testid={`organize-sheet-rename-${sheet.id}`}
                   >
                     Rename
@@ -374,7 +385,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   <button
                     type="button"
                     onClick={() => hide(sheet)}
-                    disabled={actionDisabled || !canHide}
+                    disabled={mutationDisabled || !canHide}
                     data-testid={`organize-sheet-hide-${sheet.id}`}
                   >
                     Hide
@@ -383,7 +394,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   <button
                     type="button"
                     onClick={() => unhide(sheet)}
-                    disabled={actionDisabled || !canUnhide}
+                    disabled={mutationDisabled || !canUnhide}
                     data-testid={`organize-sheet-unhide-${sheet.id}`}
                   >
                     Unhide
@@ -395,7 +406,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                     <button
                       type="button"
                       onClick={() => void remove(sheet)}
-                      disabled={actionDisabled || !canDelete}
+                      disabled={mutationDisabled || !canDelete}
                       data-testid={`organize-sheet-delete-confirm-${sheet.id}`}
                     >
                       Confirm Delete
@@ -413,11 +424,11 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   <button
                     type="button"
                     onClick={() => {
-                      if (actionDisabled || !canDelete) return;
+                      if (mutationDisabled || !canDelete) return;
                       setDeleteConfirmSheetId(sheet.id);
                       setError(null);
                     }}
-                    disabled={actionDisabled || !canDelete}
+                    disabled={mutationDisabled || !canDelete}
                     data-testid={`organize-sheet-delete-${sheet.id}`}
                   >
                     Delete
@@ -427,7 +438,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                 <button
                   type="button"
                   onClick={() => move(sheet.id, index - 1)}
-                  disabled={actionDisabled || moveUpDisabled}
+                  disabled={mutationDisabled || moveUpDisabled}
                   data-testid={`organize-sheet-move-up-${sheet.id}`}
                 >
                   Up
@@ -435,7 +446,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                 <button
                   type="button"
                   onClick={() => move(sheet.id, index + 1)}
-                  disabled={actionDisabled || moveDownDisabled}
+                  disabled={mutationDisabled || moveDownDisabled}
                   data-testid={`organize-sheet-move-down-${sheet.id}`}
                 >
                   Down
