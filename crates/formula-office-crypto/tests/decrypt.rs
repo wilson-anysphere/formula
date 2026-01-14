@@ -268,6 +268,56 @@ fn decrypts_standard_rc4_with_leading_slash_and_case_variation_stream_names() {
 }
 
 #[test]
+fn standard_rc4_truncated_encrypted_package_returns_invalid_format() {
+    // Ensure we treat truncated EncryptedPackage ciphertext as an InvalidFormat error (after the
+    // password verifier succeeds), not as InvalidPassword.
+    let cursor = Cursor::new(STANDARD_RC4_FIXTURE.to_vec());
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .or_else(|_| ole.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    // Keep only the 8-byte plaintext size prefix (drop all ciphertext).
+    encrypted_package.truncate(8);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole_out
+        .create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+
+    let ole_bytes = ole_out.into_inner().into_inner();
+    let err = decrypt_encrypted_package(&ole_bytes, "password").expect_err("expected error");
+    match err {
+        OfficeCryptoError::InvalidFormat(msg) => {
+            assert!(
+                msg.to_ascii_lowercase().contains("ciphertext"),
+                "expected error message to mention ciphertext, got: {msg}"
+            );
+        }
+        other => panic!("expected InvalidFormat, got {other:?}"),
+    }
+}
+
+#[test]
 fn standard_rc4_unsupported_algidhash_returns_unsupported_encryption() {
     // Requirement: Unsupported `algIdHash` values should return UnsupportedEncryption (not
     // InvalidPassword).
