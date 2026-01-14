@@ -94,7 +94,6 @@ impl From<&str> for PivotFieldRef {
         PivotFieldRef::CacheFieldName(value.to_string())
     }
 }
-
 impl PartialEq<&str> for PivotFieldRef {
     fn eq(&self, other: &&str) -> bool {
         matches!(self, PivotFieldRef::CacheFieldName(name) if name == other)

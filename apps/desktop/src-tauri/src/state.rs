@@ -2277,6 +2277,8 @@ impl AppState {
         let _ = workbook;
         self.engine
             .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+        let changes = self.engine.recalculate_with_value_changes_multi_threaded();
+        let _ = self.refresh_computed_values_from_recalc_changes(&changes)?;
 
         // If the user saved under a new path (Save As), re-key the autosave database to the new file
         // identity so crash recovery uses the correct autosave DB for subsequent opens.
@@ -7171,6 +7173,35 @@ mod tests {
         assert_eq!(workbook.vba_project_bin, None);
         assert_eq!(workbook.vba_project_signature_bin, None);
         assert_eq!(workbook.macro_fingerprint, None);
+    }
+
+    #[test]
+    fn mark_saved_updates_engine_workbook_file_metadata_for_cell_filename() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_formula("=CELL(\"filename\")".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text(String::new())
+        );
+
+        state
+            .mark_saved(Some("/tmp/foo.xlsx".to_string()), None)
+            .expect("mark_saved succeeds");
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text("/tmp/[foo.xlsx]Sheet1".to_string())
+        );
     }
 
     #[test]
