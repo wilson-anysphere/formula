@@ -664,12 +664,18 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     if flags.f_external {
         return Err(OffcryptoError::UnsupportedExternalEncryption);
     }
-    if !flags.f_cryptoapi {
-        return Err(OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
-    }
 
     let size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;
     let alg_id = hr.read_u32_le("EncryptionHeader.algId")?;
+    // Most real-world "Standard" encrypted OOXML packages use CryptoAPI, but some producers omit
+    // `fCryptoAPI` even though the rest of the header follows the CryptoAPI schema (notably for
+    // RC4-encrypted files).
+    //
+    // Be strict for AES variants (to avoid misclassifying arbitrary data as Standard encryption),
+    // but tolerate missing `fCryptoAPI` for RC4 so we can decrypt fixtures observed in the wild.
+    if !flags.f_cryptoapi && alg_id != CALG_RC4 {
+        return Err(OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
+    }
 
     // Policy: be strict about the AES flag/AlgId relationship. This reduces false positives when
     // parsing arbitrary OLE streams as "Standard encryption".
