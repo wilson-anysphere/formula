@@ -122,8 +122,8 @@ implementation of VML / comment extensions.
 
 ### What we preserve byte-for-byte
 
-Unless the caller explicitly requests a rewrite, we preserve **all comment-related parts** exactly
-as they appeared in the input ZIP:
+Unless the caller explicitly requests a rewrite, we preserve **all comment-related parts** as raw
+OPC part payload bytes (uncompressed), byte-for-byte:
 
 - `xl/comments*.xml`
 - `xl/threadedComments/*`
@@ -131,6 +131,10 @@ as they appeared in the input ZIP:
 - `xl/drawings/vmlDrawing*.vml`
 - `xl/commentsExt*.xml`
 - any `*.rels` parts that reference comment artifacts
+
+Note: when using the streaming save path, untouched ZIP entries may be copied via
+`zip::ZipWriter::raw_copy_file(...)`, which preserves the original compressed bytes for those
+entries as well.
 
 ### What we regenerate (when explicitly editing comments)
 
@@ -147,6 +151,5 @@ All other comment-related parts remain preserved verbatim. In particular:
 
 Implementation entry points:
 
-- Read: `formula_xlsx::comments::extract_comment_parts`
+- Read: `formula_xlsx::XlsxPackage::comment_parts`
 - Write: `formula_xlsx::XlsxPackage::write_comment_parts`
-

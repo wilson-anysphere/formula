@@ -107,7 +107,7 @@ From `parse_chart_ex()`:
 
 ### Lossless preservation vs parsed model
 
-**Preserved losslessly (byte-for-byte via `XlsxPackage` round-trip):**
+**Preserved losslessly (byte-for-byte at the OPC part payload level):**
 
 - Chart OPC parts referenced by the drawing:
   - `xl/charts/chartN.xml` (`ChartParts.chart.bytes`)

@@ -47,14 +47,15 @@ In this doc:
 
 ### 1) Round-trip preservation of pivot-related parts
 
-We preserve pivot-related parts **byte-for-byte** during round-trip:
+We preserve pivot-related parts **byte-for-byte** during round-trip (at the OPC part payload level):
 
 - Pivot tables: `xl/pivotTables/**`
 - Pivot caches: `xl/pivotCache/**`
 - Slicers: `xl/slicers/**`, `xl/slicerCaches/**`
 - Timelines: `xl/timelines/**`, `xl/timelineCaches/**`
 
-This is exercised by integration tests that compare original ZIP entries with the written package:
+This is exercised by integration tests that compare the original **part bytes** (e.g.
+`XlsxPackage::part("xl/pivotTables/pivotTable1.xml")`) with the round-tripped part bytes:
 
 - `XlsxDocument` round-trips (load → save): see `crates/formula-xlsx/tests/roundtrip_preserves_pivot_tables.rs`.
 - `XlsxPackage` round-trips (`write_to_bytes`): see `crates/formula-xlsx/tests/roundtrip_preserves_slicers_and_pivot_charts.rs`.
