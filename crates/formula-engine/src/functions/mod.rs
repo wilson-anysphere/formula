@@ -198,6 +198,13 @@ pub trait FunctionContext {
     fn capture_lexical_env(&self) -> HashMap<String, Value>;
     fn apply_implicit_intersection(&self, reference: &Reference) -> Value;
     fn get_cell_value(&self, sheet_id: &SheetId, addr: CellAddr) -> Value;
+    /// Returns the cell's stored phonetic guide (furigana) text, if available.
+    ///
+    /// This is used by the `PHONETIC` worksheet function. Most backends do not model phonetic
+    /// guides, so the default implementation returns `None`.
+    fn get_cell_phonetic(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
+        None
+    }
     fn iter_reference_cells<'a>(
         &'a self,
         reference: &'a Reference,

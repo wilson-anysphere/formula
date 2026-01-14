@@ -202,6 +202,7 @@ struct Cell {
     /// Excel preserves formatting when editing values/formulas, so engine APIs should avoid
     /// overwriting this field unless explicitly changing formatting.
     style_id: u32,
+    phonetic: Option<String>,
     formula: Option<String>,
     compiled: Option<CompiledFormula>,
     bytecode_compile_reason: Option<BytecodeCompileReason>,
@@ -215,6 +216,7 @@ impl Default for Cell {
         Self {
             value: Value::Blank,
             style_id: 0,
+            phonetic: None,
             formula: None,
             compiled: None,
             bytecode_compile_reason: None,
@@ -1118,7 +1120,6 @@ impl Engine {
         }
         Ok(())
     }
-
     /// Returns an immutable view of the tables defined on `sheet`.
     ///
     /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
@@ -1658,6 +1659,7 @@ impl Engine {
         let remove_cell = {
             let cell = self.workbook.get_or_create_cell_mut(key);
             cell.value = value;
+            cell.phonetic = None;
             cell.formula = None;
             cell.compiled = None;
             cell.bytecode_compile_reason = None;
@@ -1668,7 +1670,10 @@ impl Engine {
             // Preserve sparse semantics when clearing contents:
             // - blank + no formula + default style => remove the cell entry entirely
             // - otherwise keep the entry (e.g. style-only cell)
-            cell.value == Value::Blank && cell.formula.is_none() && cell.style_id == 0
+            cell.value == Value::Blank
+                && cell.formula.is_none()
+                && cell.style_id == 0
+                && cell.phonetic.is_none()
         };
         if remove_cell {
             if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
@@ -1698,6 +1703,72 @@ impl Engine {
             .get(sheet_id)
             .and_then(|sheet| sheet.cells.get(&addr))
             .map(|cell| cell.style_id))
+    }
+
+    pub fn set_cell_phonetic(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        phonetic: Option<String>,
+    ) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let addr = parse_a1(addr)?;
+        // Keep coordinates bounded so internal 32-bit conversions remain sound.
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+        let cell_id = cell_id_from_key(key);
+
+        let existing = self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.phonetic.as_deref());
+        if existing == phonetic.as_deref() {
+            return Ok(());
+        }
+
+        if phonetic.is_some() && self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        match phonetic {
+            None => {
+                let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+                    return Ok(());
+                };
+                let remove_cell = {
+                    let Some(cell) = sheet.cells.get_mut(&addr) else {
+                        return Ok(());
+                    };
+                    cell.phonetic = None;
+                    cell.value == Value::Blank
+                        && cell.formula.is_none()
+                        && cell.style_id == 0
+                        && cell.phonetic.is_none()
+                };
+                if remove_cell {
+                    sheet.cells.remove(&addr);
+                }
+            }
+            Some(phonetic) => {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.phonetic = Some(phonetic);
+            }
+        }
+
+        self.mark_dirty_dependents_with_reasons(key);
+        self.calc_graph.mark_dirty(cell_id);
+        self.sync_dirty_from_calc_graph();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
     }
 
     /// Clears a cell's stored value/formula *and formatting* so it behaves as if it does not exist.
@@ -2297,6 +2368,7 @@ impl Engine {
             };
 
         let cell = self.workbook.get_or_create_cell_mut(key);
+        cell.phonetic = None;
         cell.formula = Some(formula.to_string());
         cell.compiled = Some(compiled_formula);
         cell.bytecode_compile_reason = bytecode_compile_reason;
@@ -2485,6 +2557,16 @@ impl Engine {
             addr,
         };
         self.workbook.get_cell(key)?.formula.as_deref()
+    }
+
+    pub fn get_cell_phonetic(&self, sheet: &str, addr: &str) -> Option<&str> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+        self.workbook.get_cell(key)?.phonetic.as_deref()
     }
 
     /// Returns the formula for `addr` localized to `locale`.
@@ -7618,6 +7700,7 @@ struct Snapshot {
     sheet_order: Vec<SheetId>,
     sheet_dimensions: Vec<(u32, u32)>,
     values: HashMap<CellKey, Value>,
+    phonetics: HashMap<CellKey, String>,
     style_ids: HashMap<CellKey, u32>,
     formulas: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
@@ -7668,6 +7751,7 @@ impl Snapshot {
             })
             .collect();
         let mut values = HashMap::new();
+        let mut phonetics = HashMap::new();
         let mut style_ids = HashMap::new();
         let mut formulas = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
@@ -7681,6 +7765,9 @@ impl Snapshot {
                     addr: *addr,
                 };
                 values.insert(key, cell.value.clone());
+                if let Some(phonetic) = cell.phonetic.as_ref() {
+                    phonetics.insert(key, phonetic.clone());
+                }
                 style_ids.insert(key, cell.style_id);
                 if let Some(formula) = cell.formula.as_ref() {
                     formulas.insert(key, formula.clone());
@@ -7787,6 +7874,7 @@ impl Snapshot {
             sheet_order,
             sheet_dimensions,
             values,
+            phonetics,
             style_ids,
             formulas,
             ordered_cells,
@@ -7892,6 +7980,15 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
         self.formulas
+            .get(&CellKey {
+                sheet: sheet_id,
+                addr,
+            })
+            .map(|s| s.as_str())
+    }
+
+    fn get_cell_phonetic(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
+        self.phonetics
             .get(&CellKey {
                 sheet: sheet_id,
                 addr,

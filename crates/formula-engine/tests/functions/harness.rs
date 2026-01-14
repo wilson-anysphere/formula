@@ -41,6 +41,12 @@ impl TestSheet {
             .expect("set cell value");
     }
 
+    pub fn set_phonetic(&mut self, addr: &str, phonetic: Option<&str>) {
+        self.engine
+            .set_cell_phonetic(self.sheet, addr, phonetic.map(|s| s.to_string()))
+            .expect("set cell phonetic");
+    }
+
     pub fn set_formula(&mut self, addr: &str, formula: &str) {
         self.engine
             .set_cell_formula(self.sheet, addr, formula)

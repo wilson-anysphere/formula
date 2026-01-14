@@ -12,17 +12,18 @@
 //! `ASC` / `DBCS` perform half-width / full-width conversions in Japanese locales.
 //! We currently implement these as identity transforms (no conversions).
 //!
-//! `PHONETIC` depends on per-cell phonetic guide metadata, which the engine does
-//! not model yet. We implement a deterministic placeholder that returns the
-//! referenced value coerced to text.
+//! `PHONETIC` depends on per-cell phonetic guide metadata (furigana). When phonetic
+//! metadata is available, the engine returns it; otherwise it falls back to
+//! returning the referenced value coerced to text.
 //!
 //! Once workbook locale + codepage + phonetic metadata are modeled, this module
 //! can be extended to implement real Excel semantics for DBCS workbooks.
 
 use crate::eval::CompiledExpr;
+use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::array_lift;
-use crate::functions::{call_function, FunctionContext};
-use crate::value::Value;
+use crate::functions::{call_function, ArgValue, FunctionContext, Reference};
+use crate::value::{Array, ErrorKind, Value};
 
 pub(crate) fn findb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // en-US: byte counts match character counts.
@@ -61,19 +62,72 @@ pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 
 pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?)))
+    array_lift::lift1(text, |text| {
+        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?))
+    })
 }
 
 pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?)))
+    array_lift::lift1(text, |text| {
+        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?))
+    })
 }
 
 pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    // Placeholder: return the referenced value coerced to text.
-    //
-    // NOTE: Real Excel uses a phonetic guide (furigana) stored in cell metadata,
-    // which is not currently modeled in the engine.
-    let reference = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(reference, |v| Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?)))
+    // If the argument is a reference, attempt to read the target cells' phonetic guides.
+    // Otherwise, this behaves like `TEXT(value)` (coerce to text with locale-aware number
+    // formatting).
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Scalar(v) => {
+            array_lift::lift1(v, |v| Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?)))
+        }
+        ArgValue::Reference(reference) => phonetic_from_reference(ctx, reference),
+        ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn phonetic_from_reference(ctx: &dyn FunctionContext, reference: Reference) -> Value {
+    let reference = reference.normalized();
+    ctx.record_reference(&reference);
+
+    if reference.is_single_cell() {
+        if let Some(phonetic) = ctx.get_cell_phonetic(&reference.sheet_id, reference.start) {
+            return Value::Text(phonetic.to_string());
+        }
+        let value = ctx.get_cell_value(&reference.sheet_id, reference.start);
+        return match value.coerce_to_string_with_ctx(ctx) {
+            Ok(text) => Value::Text(text),
+            Err(e) => Value::Error(e),
+        };
+    }
+
+    let rows = (reference.end.row - reference.start.row + 1) as usize;
+    let cols = (reference.end.col - reference.start.col + 1) as usize;
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for addr in reference.iter_cells() {
+        if let Some(phonetic) = ctx.get_cell_phonetic(&reference.sheet_id, addr) {
+            out.push(Value::Text(phonetic.to_string()));
+            continue;
+        }
+
+        let value = ctx.get_cell_value(&reference.sheet_id, addr);
+        out.push(match value.coerce_to_string_with_ctx(ctx) {
+            Ok(text) => Value::Text(text),
+            Err(e) => Value::Error(e),
+        });
+    }
+
+    Value::Array(Array::new(rows, cols, out))
 }

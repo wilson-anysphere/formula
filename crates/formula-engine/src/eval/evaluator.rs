@@ -227,6 +227,14 @@ pub trait ValueResolver {
         None
     }
 
+    /// Returns the cell's stored phonetic guide (furigana) text, if available.
+    ///
+    /// This is used by the `PHONETIC` worksheet function. Most resolvers do not model phonetic
+    /// guides, so the default implementation returns `None`.
+    fn get_cell_phonetic(&self, _sheet_id: usize, _addr: CellAddr) -> Option<&str> {
+        None
+    }
+
     /// Returns the workbook's style table, if available.
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         None
@@ -1579,6 +1587,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn get_cell_value(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Value {
         self.get_sheet_cell_value(sheet_id, addr)
+    }
+
+    fn get_cell_phonetic(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.get_cell_phonetic(*id, addr),
+            FnSheetId::External(_) => None,
+        }
     }
 
     fn sheet_dimensions(&self, sheet_id: &FnSheetId) -> (u32, u32) {
