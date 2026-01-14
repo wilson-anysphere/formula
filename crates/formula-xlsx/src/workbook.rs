@@ -516,12 +516,13 @@ impl XlsxPackage {
                 node.is_element() && node.tag_name().name() == "drawing"
             }
 
-            let drawing_rids: Vec<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
-                sheet_doc.root_element(),
-                is_drawing_node,
-                is_drawing_node,
-            )
-            .into_iter()
+            let drawing_rids: Vec<String> =
+                crate::drawingml::anchor::descendants_selecting_alternate_content(
+                    sheet_doc.root_element(),
+                    is_drawing_node,
+                    is_drawing_node,
+                )
+                .into_iter()
                 .filter_map(|n| {
                     n.attribute((REL_NS, "id"))
                         .or_else(|| n.attribute("r:id"))
@@ -618,6 +619,47 @@ fn merge_chart_models(
     chart_ex_part: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> ChartModel {
+    fn chart_ex_kind_is_unknown(kind: &ChartKind) -> bool {
+        let ChartKind::Unknown { name } = kind else {
+            return false;
+        };
+        let tail = name.strip_prefix("ChartEx:").unwrap_or(name.as_str());
+        let tail = tail.trim();
+        tail.is_empty() || tail.eq_ignore_ascii_case("unknown")
+    }
+
+    fn normalize_chart_kind_hint(raw: &str) -> Option<String> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+
+        // Some producers include prefixes; keep only the local identifier.
+        let raw = raw.split(':').last().unwrap_or(raw).trim();
+        if raw.is_empty() {
+            return None;
+        }
+        if raw == "missingPlotArea" || raw == "missingChartType" {
+            return None;
+        }
+
+        let base = if raw.len() > 5 && raw.to_ascii_lowercase().ends_with("chart") {
+            &raw[..raw.len() - 5]
+        } else {
+            raw
+        };
+        if base.is_empty() {
+            return None;
+        }
+
+        let mut chars = base.chars();
+        let first = chars.next()?;
+        let mut out = String::with_capacity(base.len());
+        out.push(first.to_ascii_lowercase());
+        out.push_str(chars.as_str());
+        Some(out)
+    }
+
     // Excel may store both a classic `c:chartSpace` part (`xl/charts/chartN.xml`) and a ChartEx
     // `cx:chartSpace` part (`xl/charts/chartExN.xml`) for the same chart. Our ChartEx parsing is
     // best-effort and can be minimal; when both models are available we merge them as follows:
@@ -634,6 +676,21 @@ fn merge_chart_models(
 
     let mut chart_space = chart_space;
     let mut merged = chart_ex;
+
+    // `cx:chartSpace` parts are sometimes minimal (title only), which means the ChartEx parser can
+    // only return `ChartEx:unknown`. When the classic chartSpace model has a more specific chart
+    // type (even if it's not yet a first-class `ChartKind`), propagate it into the merged model so
+    // downstream consumers (like the legacy `extract_charts()` API) can still identify the chart
+    // type.
+    if chart_ex_kind_is_unknown(&merged.chart_kind) {
+        if let ChartKind::Unknown { name } = &chart_space.chart_kind {
+            if let Some(kind) = normalize_chart_kind_hint(name) {
+                merged.chart_kind = ChartKind::Unknown {
+                    name: format!("ChartEx:{kind}"),
+                };
+            }
+        }
+    }
 
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Info,
@@ -715,7 +772,8 @@ fn merge_chart_models(
     // Manual layout for text elements (title/legend) is often stored in the classic chartSpace
     // part even when the ChartEx part provides the actual title/legend content. Preserve that
     // layout information when ChartEx omits it so downstream rendering remains faithful.
-    if let (Some(title), Some(chart_space_title)) = (merged.title.as_mut(), chart_space.title.as_ref())
+    if let (Some(title), Some(chart_space_title)) =
+        (merged.title.as_mut(), chart_space.title.as_ref())
     {
         if title.layout.is_none() {
             title.layout = chart_space_title.layout.clone();
@@ -889,7 +947,9 @@ fn merge_chart_models(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_model::charts::{LegendModel, LegendPosition, ManualLayoutModel, PlotAreaModel, TextModel};
+    use formula_model::charts::{
+        LegendModel, LegendPosition, ManualLayoutModel, PlotAreaModel, TextModel,
+    };
 
     fn minimal_model(rel_id: Option<&str>, auto_update: Option<bool>) -> ChartModel {
         ChartModel {
@@ -1025,6 +1085,62 @@ mod tests {
 
         assert_eq!(merged.external_data_rel_id.as_deref(), Some("rId1"));
         assert_eq!(merged.external_data_auto_update, Some(false));
+    }
+
+    #[test]
+    fn merge_chart_models_infers_chart_ex_kind_from_chart_space_when_chart_ex_unknown() {
+        let mut chart_space = minimal_model(None, None);
+        chart_space.chart_kind = ChartKind::Unknown {
+            name: "waterfallChart".to_string(),
+        };
+
+        let mut chart_ex = minimal_model(None, None);
+        chart_ex.chart_kind = ChartKind::Unknown {
+            name: "ChartEx:unknown".to_string(),
+        };
+
+        let mut diagnostics = Vec::new();
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        assert_eq!(
+            merged.chart_kind,
+            ChartKind::Unknown {
+                name: "ChartEx:waterfall".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn merge_chart_models_does_not_override_chart_ex_kind_when_chart_space_is_known() {
+        let mut chart_space = minimal_model(None, None);
+        chart_space.chart_kind = ChartKind::Bar;
+
+        let mut chart_ex = minimal_model(None, None);
+        chart_ex.chart_kind = ChartKind::Unknown {
+            name: "ChartEx:unknown".to_string(),
+        };
+
+        let mut diagnostics = Vec::new();
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        assert_eq!(
+            merged.chart_kind,
+            ChartKind::Unknown {
+                name: "ChartEx:unknown".to_string()
+            }
+        );
     }
 }
 
