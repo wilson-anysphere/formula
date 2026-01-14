@@ -654,13 +654,13 @@ export async function engineApplyDocumentChange(
   const deltas: readonly DocumentCellDelta[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
   const formatDeltas: unknown[] = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
   const rowStyleDeltas: Array<{ sheetId: string; row: number; afterStyleId: number }> = Array.isArray(payload?.rowStyleDeltas)
-    ? payload.rowStyleDeltas
+    ? [...payload.rowStyleDeltas]
     : [];
   const colStyleDeltas: Array<{ sheetId: string; col: number; afterStyleId: number }> = Array.isArray(payload?.colStyleDeltas)
-    ? payload.colStyleDeltas
+    ? [...payload.colStyleDeltas]
     : [];
   const sheetStyleDeltas: Array<{ sheetId: string; afterStyleId: number }> = Array.isArray(payload?.sheetStyleDeltas)
-    ? payload.sheetStyleDeltas
+    ? [...payload.sheetStyleDeltas]
     : [];
   const sheetViewDeltas: Array<{ sheetId: string; before: any; after: any }> = Array.isArray(payload?.sheetViewDeltas)
     ? payload.sheetViewDeltas
