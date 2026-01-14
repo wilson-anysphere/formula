@@ -78,6 +78,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
+
+    // Home → Cells structural edit commands are also handled directly in `main.ts`.
+    expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBeUndefined();
   });
 
   it("keeps AutoSum dropdown variants enabled even though they are not registered", () => {

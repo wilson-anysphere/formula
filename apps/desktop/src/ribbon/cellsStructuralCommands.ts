@@ -10,6 +10,7 @@ export type CellsStructuralCommandId =
 
 export type CellsStructuralCommandApp = {
   isEditing(): boolean;
+  isReadOnly?(): boolean;
   getDocument(): DocumentController;
   getCurrentSheetId(): string;
   getSelectionRanges(): Range[];
@@ -53,6 +54,7 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
 
   // Match SpreadsheetApp guards: never mutate while editing.
   if (app.isEditing()) return true;
+  if (typeof app.isReadOnly === "function" && app.isReadOnly()) return true;
 
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
@@ -102,4 +104,3 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
       return false;
   }
 }
-

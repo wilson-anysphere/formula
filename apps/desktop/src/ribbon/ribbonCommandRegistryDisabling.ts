@@ -99,6 +99,11 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.cells.format.formatCells",
   "home.cells.format.rowHeight",
   "home.cells.format.columnWidth",
+  // Home → Cells structural edits are handled directly by `main.ts` (not CommandRegistry).
+  "home.cells.insert.insertSheetRows",
+  "home.cells.insert.insertSheetColumns",
+  "home.cells.delete.deleteSheetRows",
+  "home.cells.delete.deleteSheetColumns",
 
   // --- Home editing -----------------------------------------------------------
   "home.editing.autoSum",

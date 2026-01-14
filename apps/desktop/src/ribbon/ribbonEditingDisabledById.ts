@@ -11,6 +11,10 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // --- Sheet structure -------------------------------------------------------
   "home.cells.format.rowHeight": true,
   "home.cells.format.columnWidth": true,
+  "home.cells.insert.insertSheetRows": true,
+  "home.cells.insert.insertSheetColumns": true,
+  "home.cells.delete.deleteSheetRows": true,
+  "home.cells.delete.deleteSheetColumns": true,
 
   // --- Sort / Filter ---------------------------------------------------------
   "home.editing.sortFilter": true,
