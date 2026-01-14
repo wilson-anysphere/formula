@@ -41,6 +41,7 @@
 
 [CmdletBinding()]
 param(
+  [Alias("LocaleId")]
   [string]$Locale,
   [string]$OutPath,
   [switch]$Visible
@@ -180,6 +181,12 @@ try {
 
   $cell = $sheet.Range("A1")
 
+  # Guardrail: if we ever get the same displayed error for multiple canonical codes,
+  # it likely means this Excel build doesn't recognize one of the newer error kinds
+  # and substituted a different error (often #NAME?). Fail rather than emitting an
+  # ambiguous/incorrect mapping.
+  $seenLocalized = @{}
+
   $rows = New-Object System.Collections.Generic.List[object]
   foreach ($code in $canonicalCodes) {
     $formula = "=" + $code
@@ -236,6 +243,13 @@ try {
         throw "Excel returned canonical error literal $localized when extracting $code (expected the same error kind). This may indicate your Excel build does not recognize $code."
       }
     }
+
+    $folded = $localized.ToUpperInvariant()
+    if ($seenLocalized.ContainsKey($folded) -and -not ($seenLocalized[$folded] -ieq $code)) {
+      $prev = [string]$seenLocalized[$folded]
+      throw "Excel returned the same localized error literal for multiple canonical codes: $prev and $code both mapped to $localized. This may indicate your Excel build does not recognize one of the error kinds."
+    }
+    $seenLocalized[$folded] = $code
 
     # Guardrail: for most errors, the trailing punctuation should be stable across locales.
     $last = $code.Substring($code.Length - 1, 1)
