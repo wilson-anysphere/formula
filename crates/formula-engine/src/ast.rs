@@ -911,8 +911,23 @@ pub struct NameRef {
 
 impl NameRef {
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
-        out.push_str(&self.name);
+        match (self.workbook.as_ref(), self.sheet.as_ref()) {
+            (Some(book), None) => {
+                // Workbook-scoped external names are written in Excel as `[Book.xlsx]MyName`, but
+                // this is ambiguous with structured references for our parser/lexer. Emit the
+                // combined token as a quoted identifier (`'[Book.xlsx]MyName'`) so it round-trips.
+                out.push('\'');
+                out.push('[');
+                fmt_sheet_name_escaped(out, book);
+                out.push(']');
+                fmt_sheet_name_escaped(out, &self.name);
+                out.push('\'');
+            }
+            _ => {
+                fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
+                out.push_str(&self.name);
+            }
+        }
     }
 }
 

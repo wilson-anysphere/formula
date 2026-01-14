@@ -57,6 +57,17 @@ fn roundtrip_with_unquoted_external_ref_with_apostrophe_in_workbook_name() {
 }
 
 #[test]
+fn roundtrip_with_external_workbook_scoped_name_ref() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+
+    // Workbook-scoped external defined names are emitted as a single quoted token so they remain
+    // parseable (`[Book]Name` is ambiguous with structured references for our lexer/parser).
+    roundtrip("='[Book2.xlsb]MyName'", opts.clone(), ser.clone());
+    roundtrip("='[AddIn]MyAddinConst'", opts, ser);
+}
+
+#[test]
 fn roundtrip_preserves_sheet_quoting_for_names_that_cannot_be_unquoted() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();
