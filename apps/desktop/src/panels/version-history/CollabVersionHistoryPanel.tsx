@@ -6,7 +6,7 @@ import { buildVersionHistoryItems } from "./VersionHistoryPanel.js";
 import { VersionHistoryCompareSection } from "./VersionHistoryCompare.js";
 import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.react.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { useCollabSessionSyncState } from "../useCollabSessionSyncState.js";
 import { createCollabVersioningForPanel, type CreateVersionStore } from "./createCollabVersioningForPanel.js";

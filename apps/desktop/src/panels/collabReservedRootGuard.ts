@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 import { t } from "../i18n/index.js";
 
 export type ProviderCloseInfo = { code: number; reason: string };
@@ -255,29 +253,6 @@ export function listenForProviderCloseEvents(provider: any | null, onClose: (inf
 export function isReservedRootGuardDisconnect(info: ProviderCloseInfo): boolean {
   if (info.code !== RESERVED_ROOT_GUARD_CLOSE_CODE) return false;
   return info.reason.toLowerCase().includes(RESERVED_ROOT_GUARD_REASON_FRAGMENT);
-}
-
-export function useReservedRootGuardError(provider: any | null): string | null {
-  const [detected, setDetected] = useState(false);
-
-  useEffect(() => {
-    const ensured = ensureReservedRootGuardMonitor(provider);
-    if (!ensured) {
-      setDetected(false);
-      return;
-    }
-
-    const { key, monitor } = ensured;
-    setDetected(providerReservedRootGuardDetected.has(key));
-
-    const subscriber = (nextDetected: boolean) => setDetected(nextDetected);
-    monitor.subscribers.add(subscriber);
-    return () => {
-      monitor.subscribers.delete(subscriber);
-    };
-  }, [provider]);
-
-  return detected ? reservedRootGuardUiMessage() : null;
 }
 
 export function subscribeToReservedRootGuardDisconnect(

@@ -17,7 +17,7 @@ vi.mock("../useCollabSessionSyncState.js", () => ({
   useCollabSessionSyncState: () => ({ connected: true }),
 }));
 
-vi.mock("../collabReservedRootGuard.js", () => ({
+vi.mock("../collabReservedRootGuard.react.js", () => ({
   clearReservedRootGuardError: () => {},
   useReservedRootGuardError: () => null,
 }));

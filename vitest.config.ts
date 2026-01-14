@@ -48,10 +48,12 @@ const workbookBackendEntry = resolve(repoRoot, "packages/workbook-backend/src/in
 const graphemeSplitterShimEntry = resolve(repoRoot, "scripts/vitest-shims/grapheme-splitter.ts");
 const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts");
 const zodShimEntry = resolve(repoRoot, "scripts/vitest-shims/zod.ts");
+const yWebsocketShimEntry = resolve(repoRoot, "scripts/vitest-shims/y-websocket.ts");
 const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
 const linebreakPackageEntry = resolve(repoRoot, "node_modules/linebreak");
 const zodPackageEntry = resolve(repoRoot, "node_modules/zod");
 const reactPackageEntry = resolve(repoRoot, "node_modules/react");
+const yWebsocketPackageEntry = resolve(repoRoot, "node_modules/y-websocket");
 const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
 const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
 const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
@@ -136,6 +138,7 @@ export default defineConfig({
         : []),
       ...(!existsSync(linebreakPackageEntry) ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }] : []),
       ...(!existsSync(zodPackageEntry) ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
+      ...(!existsSync(yWebsocketPackageEntry) ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }] : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.

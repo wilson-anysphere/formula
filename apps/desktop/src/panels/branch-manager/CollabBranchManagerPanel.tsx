@@ -6,7 +6,7 @@ import { t } from "../../i18n/index.js";
 
 import { BranchManagerPanel, type Actor as BranchActor } from "./BranchManagerPanel.js";
 import { MergeBranchPanel } from "./MergeBranchPanel.js";
-import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.react.js";
 import { useCollabSessionSyncState } from "../useCollabSessionSyncState.js";
 import type { BranchStore, CreateBranchStore } from "./branchStoreTypes.js";
 import { resolveBranchStoreForPanel } from "./resolveBranchStoreForPanel.js";
