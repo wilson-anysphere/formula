@@ -81,6 +81,11 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
 
   // Collaboration presence overlay is non-interactive.
   assert.match(css, /\.grid-canvas--presence\s*\{[^}]*pointer-events:\s*none\s*;/);
+  // Presence should participate in the selection overlay stack so it stays above charts/drawings.
+  assert.match(
+    css,
+    /\.grid-canvas--presence\s*\{[\s\S]*?z-index:\s*var\(--grid-z-selection-overlay,\s*4\)\s*;/,
+  );
 
   // Shared-grid overlay stacking is driven via CSS variables + semantic classes.
   assert.match(css, /--grid-z-chart-overlay\s*:/);
