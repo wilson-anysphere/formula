@@ -14,6 +14,18 @@ const STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes
   </cellXfs>
 </styleSheet>"#;
 
+// Like STYLES_XML, but with the custom format at xf index 0.
+const STYLES_XML_XF0_CUSTOM: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="0.00"/>
+  </numFmts>
+  <cellXfs count="2">
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+</styleSheet>"#;
+
 fn build_minimal_xlsx(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -101,3 +113,28 @@ fn save_to_vec_preserves_col_style_when_outline_removed() -> Result<(), Box<dyn 
     Ok(())
 }
 
+#[test]
+fn noop_save_preserves_cols_when_style_xf_is_zero() -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers place a custom xf at index 0. Ensure we treat `style="0"` as a real style
+    // reference so no-op saves don't rewrite <cols> (which would reorder attributes).
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" customFormat="1" style="0"/>
+  </cols>
+  <sheetData/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML_XF0_CUSTOM);
+    let doc = load_from_bytes(&bytes)?;
+    let saved = doc.save_to_vec()?;
+
+    let orig_sheet = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    let saved_sheet = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    assert_eq!(
+        saved_sheet, orig_sheet,
+        "expected no-op save to preserve sheet XML bytes"
+    );
+
+    Ok(())
+}

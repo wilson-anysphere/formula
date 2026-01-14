@@ -2903,11 +2903,7 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     width
                 };
 
-                let style_xf = if custom_format == Some(false) {
-                    None
-                } else {
-                    style.filter(|xf| *xf != 0)
-                };
+                let style_xf = if custom_format == Some(false) { None } else { style };
 
                 if width.is_none() && !hidden && outline_level == 0 && !collapsed && style_xf.is_none()
                 {
