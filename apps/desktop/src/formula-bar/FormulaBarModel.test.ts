@@ -144,6 +144,54 @@ describe("FormulaBarModel", () => {
     expect(model.hoveredReference()).toEqual(parseA1Range("A1:A3"));
   });
 
+  it("resolves multi-column structured refs when columns are contiguous", () => {
+    const model = new FormulaBarModel();
+    model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Col1", "Col2", "Col3"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 2,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    model.setActiveCell({ address: "A1", input: "", value: null });
+
+    // #All includes the header row, so this spans A1:B3.
+    model.setHoveredReference("Table1[[#All],[Col1],[Col2]]");
+    expect(model.hoveredReference()).toEqual(parseA1Range("A1:B3"));
+
+    // Column-range form defaults to #Data (exclude header row), so this spans A2:C3.
+    model.setHoveredReference("Table1[[Col1]:[Col3]]");
+    expect(model.hoveredReference()).toEqual(parseA1Range("A2:C3"));
+  });
+
+  it("does not resolve non-contiguous multi-column structured refs into a misleading rectangle", () => {
+    const model = new FormulaBarModel();
+    model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Col1", "Col2", "Col3"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 2,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    model.setActiveCell({ address: "A1", input: "", value: null });
+    model.setHoveredReference("Table1[[#All],[Col1],[Col3]]");
+    expect(model.hoveredReference()).toBe(null);
+  });
+
   it("includes named ranges in reference highlights when a resolver is provided", () => {
     const model = new FormulaBarModel();
     model.setNameResolver((name) =>
