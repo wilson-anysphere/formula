@@ -126,6 +126,9 @@ describe("SpreadsheetApp.destroy drawing overlay teardown", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
+      const gridCanvas = (app as any).gridCanvas as HTMLCanvasElement;
+      expect(gridCanvas.width).toBeGreaterThan(0);
+      expect(gridCanvas.height).toBeGreaterThan(0);
 
       // Seed an image entry into the DocumentController's image map so DrawingOverlay can load it.
       const imageId = "img_1";
@@ -153,6 +156,9 @@ describe("SpreadsheetApp.destroy drawing overlay teardown", () => {
       app.destroy();
 
       expect(close).toHaveBeenCalledTimes(1);
+      // Destroy should also release the backing store allocations for core grid canvases.
+      expect(gridCanvas.width).toBe(0);
+      expect(gridCanvas.height).toBe(0);
       root.remove();
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
@@ -160,4 +166,3 @@ describe("SpreadsheetApp.destroy drawing overlay teardown", () => {
     }
   });
 });
-

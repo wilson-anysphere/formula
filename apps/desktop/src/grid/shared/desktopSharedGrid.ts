@@ -371,6 +371,21 @@ export class DesktopSharedGrid {
     this.container.style.touchAction = this.containerRestore.touchAction;
     this.a11yStatusEl.remove();
     this.a11yActiveCellEl.remove();
+
+    // Release backing store allocations for the canvas layers in case the
+    // DesktopSharedGrid instance (or its canvas elements) are kept referenced
+    // after teardown (tests/hot reload, split view toggling, etc).
+    const resetCanvas = (canvas: HTMLCanvasElement) => {
+      try {
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch {
+        // Best-effort: ignore failures for mocked canvases.
+      }
+    };
+    resetCanvas(this.gridCanvas);
+    resetCanvas(this.contentCanvas);
+    resetCanvas(this.selectionCanvas);
   }
 
   setInteractionMode(mode: DesktopGridInteractionMode): void {

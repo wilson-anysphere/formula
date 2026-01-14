@@ -3908,6 +3908,29 @@ export class SpreadsheetApp {
     this.drawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.drawingObjects = [];
+
+    // Release backing stores for all canvas layers. Even after `root.replaceChildren()`,
+    // the SpreadsheetApp instance still holds references to these canvases; shrinking
+    // them prevents large GPU/bitmap buffers from sticking around when apps are created/
+    // destroyed repeatedly (tests, hot reload, multi-document workflows).
+    const resetCanvas = (canvas: HTMLCanvasElement | null | undefined) => {
+      if (!canvas) return;
+      try {
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch {
+        // ignore
+      }
+    };
+    resetCanvas(this.gridCanvas);
+    resetCanvas(this.chartCanvas);
+    resetCanvas(this.referenceCanvas);
+    resetCanvas(this.auditingCanvas);
+    resetCanvas(this.selectionCanvas);
+    resetCanvas(this.presenceCanvas);
+    resetCanvas(this.drawingCanvas);
+    resetCanvas(this.chartSelectionCanvas);
+
     this.root.replaceChildren();
   }
 
