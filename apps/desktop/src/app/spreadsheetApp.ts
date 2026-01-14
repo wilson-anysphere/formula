@@ -10805,6 +10805,9 @@ export class SpreadsheetApp {
         const offset = (point as any).offset;
         patchCellRef(cell, next.cell);
         patchCellOffset(offset, next.offset);
+        // Some schemas store offset keys directly on the anchor point object (e.g. `{ from: { cell, dxEmu, dyEmu } }`)
+        // instead of nesting under `offset`. Patch those too if present.
+        patchCellOffset(point, next.offset);
       };
 
       // Preserve the raw enum representation when the anchor is stored as a formula-model/Rust enum
@@ -10822,6 +10825,7 @@ export class SpreadsheetApp {
               // Formula-model uses `ext` for size; accept `size` too for compatibility.
               patchEmuSize((value as any).ext, uiAnchor.size, true);
               patchEmuSize((value as any).size, uiAnchor.size, true);
+              patchEmuSize(value, uiAnchor.size, true);
               return rawAnchor;
             }
             if (normalized === "twocell" && uiType === "twocell") {
@@ -10860,6 +10864,7 @@ export class SpreadsheetApp {
               patchAnchorPoint((payload as any).from, uiAnchor.from);
               patchEmuSize((payload as any).ext, uiAnchor.size, true);
               patchEmuSize((payload as any).size, uiAnchor.size, false);
+              patchEmuSize(payload, uiAnchor.size, true);
               return rawAnchor;
             }
             if (normalized === "twocell" && uiType === "twocell") {
