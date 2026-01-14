@@ -91,7 +91,7 @@ describe("StructuralConflictUiController", () => {
     const ui = new StructuralConflictUiController({
       container,
       monitor: { resolveConflict },
-      resolveUserLabel: (userId: string) => (userId === "u2" ? "Bob" : userId),
+      resolveUserLabel: (userId: string) => (userId === "u2" ? "  Bob  " : userId),
     });
 
     ui.addConflict({

@@ -452,7 +452,8 @@ function formatRemoteLabel(remoteUserId, resolver) {
     resolved = "";
   }
 
-  const label = typeof resolved === "string" && resolved.trim() ? resolved : id;
+  const trimmed = typeof resolved === "string" ? resolved.trim() : "";
+  const label = trimmed ? trimmed : id;
   return `Theirs (${label})`;
 }
 
