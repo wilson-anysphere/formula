@@ -94,5 +94,14 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   // Guardrail: we should not reintroduce bespoke clipboard routing in the ribbon fallback.
-  assert.doesNotMatch(main, /\bcommandId\.startsWith\(\s*["']clipboard\./);
+  assert.doesNotMatch(
+    router,
+    /\bcommandId\.startsWith\(\s*["']clipboard\./,
+    "Did not expect ribbonCommandRouter.ts to add bespoke clipboard prefix routing (dispatch should go through CommandRegistry)",
+  );
+  assert.doesNotMatch(
+    main,
+    /\bcommandId\.startsWith\(\s*["']clipboard\./,
+    "Did not expect main.ts to add bespoke clipboard prefix routing (dispatch should go through ribbonCommandRouter)",
+  );
 });
