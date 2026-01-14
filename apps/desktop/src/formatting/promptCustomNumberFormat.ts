@@ -21,6 +21,7 @@ export async function promptAndApplyCustomNumberFormat(options: {
 }): Promise<void> {
   if (options.isEditing()) return;
 
+  const numberFormatLabel = t("quickPick.numberFormat.placeholder");
   const seed = options.getActiveCellNumberFormat() ?? "";
   const input = await options.showInputBox({
     prompt: t("prompt.customNumberFormat.code"),
@@ -40,10 +41,10 @@ export async function promptAndApplyCustomNumberFormat(options: {
   const desired =
     !trimmed || normalized === "general" || (localizedGeneral && normalized === localizedGeneral) ? null : input;
 
-  options.applyFormattingToSelection(t("quickPick.numberFormat.placeholder"), (doc, sheetId, ranges) => {
+  options.applyFormattingToSelection(numberFormatLabel, (doc, sheetId, ranges) => {
     let applied = true;
     for (const range of ranges) {
-      const ok = doc.setRangeFormat(sheetId, range, { numberFormat: desired }, { label: "Number format" });
+      const ok = doc.setRangeFormat(sheetId, range, { numberFormat: desired }, { label: numberFormatLabel });
       if (ok === false) applied = false;
     }
     return applied;
