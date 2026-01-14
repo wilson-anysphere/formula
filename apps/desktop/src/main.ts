@@ -8366,7 +8366,24 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   // If the active cell is already inside an existing filter range, treat the ribbon command as
   // "edit that filter" (so users don't need to re-select the original range).
   const existingForCell = ribbonAutoFilterStore.findByCell(sheetId, { row: selection.activeRow, col: selection.activeCol });
-  const range = existingForCell ? parseA1Range(existingForCell.rangeA1) : selectionRange;
+  const range = (() => {
+    if (existingForCell) return parseA1Range(existingForCell.rangeA1);
+    // Excel's "Filter" button commonly starts from a single active cell and expands to the used range.
+    // For this MVP, use the DocumentController's used range as a simple heuristic (only when the
+    // active cell is within the used range so we don't unexpectedly filter unrelated data).
+    const isSingleCellSelection =
+      selectionRange.startRow === selectionRange.endRow && selectionRange.startCol === selectionRange.endCol;
+    if (!isSingleCellSelection) return selectionRange;
+    const used = app.getDocument().getUsedRange(sheetId);
+    if (!used) return selectionRange;
+    const inUsed =
+      selection.activeRow >= used.startRow &&
+      selection.activeRow <= used.endRow &&
+      selection.activeCol >= used.startCol &&
+      selection.activeCol <= used.endCol;
+    if (!inUsed) return selectionRange;
+    return used;
+  })();
   const rangeA1 = existingForCell ? existingForCell.rangeA1 : rangeToA1(range);
 
   const headerRows = existingForCell?.headerRows ?? 1;
