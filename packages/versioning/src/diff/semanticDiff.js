@@ -162,13 +162,10 @@ function stableStringifyInner(value, stack) {
  */
 function encryptionMeta(cell) {
   const enc = cell?.enc;
-  // Backwards compatibility: some legacy snapshots explicitly stored `enc: null` for
-  // plaintext cells. Treat `null` the same as "unset" so diffs don't hide values.
-  //
-  // Fail closed for all other non-null markers: if an `enc` field exists with an
-  // unexpected shape, consider the cell encrypted so diffs never fall back to
-  // potentially-sensitive plaintext.
-  if (enc == null) return { encrypted: false, keyId: null };
+  // Fail closed: any *explicit* `enc` field (including `enc: null` markers and
+  // unexpected payload shapes) is treated as encrypted so diffs never fall back
+  // to potentially-sensitive plaintext.
+  if (enc === undefined) return { encrypted: false, keyId: null };
   const keyId = enc && typeof enc === "object" && typeof enc.keyId === "string" ? enc.keyId : null;
   return { encrypted: true, keyId };
 }
@@ -179,7 +176,7 @@ function encryptionMeta(cell) {
  */
 function cellSignature(cell) {
   const enc = cell?.enc;
-  const isEncrypted = enc != null;
+  const isEncrypted = enc !== undefined;
   const normalized = {
     // Preserve `undefined` vs `null` for `enc` so move detection never conflates
     // unencrypted format-only cells with encrypted marker cells (`enc: null`).
@@ -198,8 +195,8 @@ function cellSignature(cell) {
 function sameValueAndFormula(a, b) {
   const aEnc = a?.enc;
   const bEnc = b?.enc;
-  const aEncrypted = aEnc != null;
-  const bEncrypted = bEnc != null;
+  const aEncrypted = aEnc !== undefined;
+  const bEncrypted = bEnc !== undefined;
   if (aEncrypted || bEncrypted) {
     if (!aEncrypted || !bEncrypted) return false;
     return deepEqual(aEnc, bEnc);
