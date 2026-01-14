@@ -2145,7 +2145,6 @@ dependencies = [
  "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
- "md-5",
  "ms-offcrypto-writer",
  "proptest",
  "rand 0.9.2",

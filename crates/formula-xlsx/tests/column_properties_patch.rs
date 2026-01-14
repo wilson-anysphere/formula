@@ -67,6 +67,40 @@ fn apply_cell_patches_persists_column_width_and_hidden() -> Result<(), Box<dyn s
 }
 
 #[test]
+fn apply_cell_patches_preserves_existing_col_attributes() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let sheet_xml = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml exists"),
+    )?;
+
+    // Inject an existing `<cols>` section with an unsupported attribute. Column-metadata patches
+    // should update width/hidden while preserving unrelated `<col>` attributes.
+    let injected = sheet_xml.replace(
+        "<sheetData>",
+        r#"<cols><col min="1" max="1" outlineLevel="2"/></cols><sheetData>"#,
+    );
+    pkg.set_part("xl/worksheets/sheet1.xml", injected.into_bytes());
+
+    let patches = build_basic_col_patches();
+    pkg.apply_cell_patches(&patches)?;
+
+    let updated_xml = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml exists"),
+    )?;
+    assert!(
+        updated_xml.contains("outlineLevel=\"2\""),
+        "expected outlineLevel to be preserved, got:\n{updated_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn streaming_patch_column_metadata_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
     let bytes = std::fs::read(&fixture)?;
@@ -92,4 +126,3 @@ fn streaming_patch_column_metadata_is_idempotent() -> Result<(), Box<dyn std::er
 
     Ok(())
 }
-

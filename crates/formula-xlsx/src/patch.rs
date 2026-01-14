@@ -6,7 +6,7 @@
 //! (charts, pivots, customXml, VBA, etc.) while rewriting only the affected
 //! worksheet XML parts (plus `sharedStrings.xml` / `workbook.xml` when needed).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use formula_model::rich_text::{RichText, RichTextRunStyle};
 use formula_model::{CellRef, CellValue, ColProperties, ErrorValue, StyleTable};
@@ -979,22 +979,8 @@ fn patch_worksheet_xml(
     let mut inserted_dimension = false;
     let col_properties = patches.col_properties.as_ref();
     let mut cols_written = false;
-    let mut skip_cols_depth: usize = 0;
     loop {
         match reader.read_event_into(&mut buf)? {
-            ev if skip_cols_depth > 0 => {
-                // Skip the original `<cols>` section when rewriting column metadata.
-                match ev {
-                    Event::Start(_) => skip_cols_depth += 1,
-                    Event::End(_) => skip_cols_depth = skip_cols_depth.saturating_sub(1),
-                    Event::Eof => {
-                        return Err(XlsxError::Invalid(
-                            "unexpected EOF while skipping <cols> section".to_string(),
-                        ))
-                    }
-                    _ => {}
-                }
-            }
             Event::Start(e) if local_name(e.name().as_ref()) == b"worksheet" => {
                 if worksheet_prefix.is_none() {
                     worksheet_prefix = element_prefix(e.name().as_ref())
@@ -1023,36 +1009,42 @@ fn patch_worksheet_xml(
                 if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
             {
                 let name = e.name();
-                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                let prefix =
+                    element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                let mut attrs_by_col = {
+                    let mut cols_buf = Vec::new();
+                    parse_cols_attribute_map_from_reader(&mut reader, &mut cols_buf)?
+                };
+                merge_col_properties_into_attrs_by_col(
+                    &mut attrs_by_col,
+                    col_properties.expect("checked is_some above"),
+                );
                 if !cols_written {
-                    let cols_xml = render_cols_xml(
-                        col_properties.expect("checked is_some above"),
-                        prefix,
-                    );
+                    let cols_xml = render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
                     if !cols_xml.is_empty() {
                         writer.get_mut().extend_from_slice(cols_xml.as_bytes());
-                        cols_written = true;
                     }
+                    cols_written = true;
                 }
-                skip_cols_depth = 1;
-                drop(e);
             }
             Event::Empty(e)
                 if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
             {
                 let name = e.name();
-                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                let prefix =
+                    element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                let mut attrs_by_col = BTreeMap::new();
+                merge_col_properties_into_attrs_by_col(
+                    &mut attrs_by_col,
+                    col_properties.expect("checked is_some above"),
+                );
                 if !cols_written {
-                    let cols_xml = render_cols_xml(
-                        col_properties.expect("checked is_some above"),
-                        prefix,
-                    );
+                    let cols_xml = render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
                     if !cols_xml.is_empty() {
                         writer.get_mut().extend_from_slice(cols_xml.as_bytes());
-                        cols_written = true;
                     }
+                    cols_written = true;
                 }
-                drop(e);
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
                 writer.write_event(Event::Empty(e.into_owned()))?;
@@ -1231,6 +1223,198 @@ fn patch_worksheet_xml(
 struct ColXmlProps {
     width: Option<f32>,
     hidden: bool,
+}
+
+fn escape_xml_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+pub(crate) fn render_cols_xml_from_attrs_by_col(
+    prefix: Option<&str>,
+    attrs_by_col: &BTreeMap<u32, BTreeMap<String, String>>,
+) -> String {
+    if attrs_by_col.is_empty() {
+        return String::new();
+    }
+
+    let cols_tag = prefixed_tag(prefix, "cols");
+    let col_tag = prefixed_tag(prefix, "col");
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&cols_tag);
+    out.push('>');
+
+    let mut current: Option<(u32, u32, BTreeMap<String, String>)> = None;
+    for (&col_1, attrs) in attrs_by_col {
+        let attrs = attrs.clone();
+        match current.take() {
+            None => current = Some((col_1, col_1, attrs)),
+            Some((start, end, cur)) if col_1 == end + 1 && attrs == cur => {
+                current = Some((start, col_1, cur));
+            }
+            Some((start, end, cur)) => {
+                out.push_str(&render_col_range_from_attrs(&col_tag, start, end, &cur));
+                current = Some((col_1, col_1, attrs));
+            }
+        }
+    }
+    if let Some((start, end, cur)) = current {
+        out.push_str(&render_col_range_from_attrs(&col_tag, start, end, &cur));
+    }
+
+    out.push_str("</");
+    out.push_str(&cols_tag);
+    out.push('>');
+    out
+}
+
+fn render_col_range_from_attrs(
+    col_tag: &str,
+    start_col_1: u32,
+    end_col_1: u32,
+    attrs: &BTreeMap<String, String>,
+) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        r#"<{col_tag} min="{start_col_1}" max="{end_col_1}""#
+    ));
+    for (key, value) in attrs {
+        s.push(' ');
+        s.push_str(key);
+        s.push_str("=\"");
+        s.push_str(&escape_xml_attr(value));
+        s.push('"');
+    }
+    s.push_str("/>");
+    s
+}
+
+pub(crate) fn merge_col_properties_into_attrs_by_col(
+    attrs_by_col: &mut BTreeMap<u32, BTreeMap<String, String>>,
+    col_properties: &BTreeMap<u32, ColProperties>,
+) {
+    let mut touched_cols: BTreeSet<u32> = attrs_by_col.keys().copied().collect();
+    touched_cols.extend(col_properties.keys().copied().map(|c0| c0.saturating_add(1)));
+
+    for col_1 in touched_cols {
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        let col_0 = col_1 - 1;
+        let desired_props = col_properties.get(&col_0);
+        let desired_width = desired_props.and_then(|p| p.width);
+        let desired_hidden = desired_props.map(|p| p.hidden).unwrap_or(false);
+
+        let mut entry = attrs_by_col.remove(&col_1).unwrap_or_default();
+
+        match desired_width {
+            Some(width) => {
+                entry.insert("width".to_string(), width.to_string());
+                entry.insert("customWidth".to_string(), "1".to_string());
+            }
+            None => {
+                entry.remove("width");
+                entry.remove("customWidth");
+            }
+        }
+
+        if desired_hidden {
+            entry.insert("hidden".to_string(), "1".to_string());
+        } else {
+            entry.remove("hidden");
+        }
+
+        if !entry.is_empty() {
+            attrs_by_col.insert(col_1, entry);
+        }
+    }
+}
+
+fn parse_cols_attribute_map_from_reader<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+) -> Result<BTreeMap<u32, BTreeMap<String, String>>, XlsxError> {
+    let mut attrs_by_col: BTreeMap<u32, BTreeMap<String, String>> = BTreeMap::new();
+
+    // We're entering the `<cols>` section after consuming its start tag; consume events until we
+    // hit `</cols>`.
+    let mut depth: usize = 1;
+    loop {
+        match reader.read_event_into(buf)? {
+            Event::Eof => {
+                return Err(XlsxError::Invalid(
+                    "unexpected EOF while parsing <cols> section".to_string(),
+                ))
+            }
+            Event::Start(e) => {
+                if local_name(e.name().as_ref()) == b"col" {
+                    parse_col_element_attrs(&e, &mut attrs_by_col)?;
+                }
+                depth += 1;
+            }
+            Event::Empty(e) => {
+                if local_name(e.name().as_ref()) == b"col" {
+                    parse_col_element_attrs(&e, &mut attrs_by_col)?;
+                }
+            }
+            Event::End(e) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && local_name(e.name().as_ref()) == b"cols" {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(attrs_by_col)
+}
+
+fn parse_col_element_attrs(
+    e: &BytesStart<'_>,
+    attrs_by_col: &mut BTreeMap<u32, BTreeMap<String, String>>,
+) -> Result<(), XlsxError> {
+    let mut min: Option<u32> = None;
+    let mut max: Option<u32> = None;
+    let mut element_attrs: Vec<(String, String)> = Vec::new();
+
+    for attr in e.attributes() {
+        let attr = attr?;
+        let key_bytes = attr.key.as_ref();
+        let key = match std::str::from_utf8(key_bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => continue,
+        };
+        let val = attr.unescape_value()?.into_owned();
+        match key_bytes {
+            b"min" => min = val.parse().ok(),
+            b"max" => max = val.parse().ok(),
+            _ => element_attrs.push((key, val)),
+        }
+    }
+
+    let Some(min_1) = min else {
+        return Ok(());
+    };
+    let max_1 = max.unwrap_or(min_1).min(formula_model::EXCEL_MAX_COLS);
+    if min_1 == 0 || max_1 == 0 || min_1 > formula_model::EXCEL_MAX_COLS {
+        return Ok(());
+    }
+
+    for col_1 in min_1..=max_1 {
+        let entry = attrs_by_col.entry(col_1).or_default();
+        for (k, v) in &element_attrs {
+            entry.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn render_cols_xml(
