@@ -20218,6 +20218,7 @@ export class SpreadsheetApp {
       this.lastSyncedHiddenColsBySheetId.clear();
     }
 
+    const outline = this.getOutlineForSheet(this.sheetId);
     const hiddenCols: number[] = [];
     for (const [summaryIndex, entry] of outline.cols.entries) {
       if (!isHidden(entry.hidden)) continue;
