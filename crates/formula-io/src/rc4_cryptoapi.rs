@@ -365,7 +365,6 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         let key = &digest[..self.key_len];
 
         let mut rc4 = Rc4::new(key);
-        padded_key.zeroize();
         rc4.skip(offset);
 
         self.rc4 = Some(rc4);
