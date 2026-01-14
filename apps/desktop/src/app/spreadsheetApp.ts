@@ -55,6 +55,7 @@ import { duplicateSelected as duplicateDrawingSelected } from "../drawings/comma
 import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromBytes } from "../drawings/insertImage";
 import { pickLocalImageFiles } from "../drawings/pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "../drawings/pngDimensions";
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
@@ -257,14 +258,6 @@ const MAX_FORMULA_RANGE_PREVIEW_CELLS = 100;
 const FORMULA_RANGE_PREVIEW_SAMPLE_ROWS = 3;
 const FORMULA_RANGE_PREVIEW_SAMPLE_COLS = 3;
 
-// Guardrails for PNG decompression bombs: a PNG can advertise extremely large dimensions while the
-// compressed payload remains small. Decoding such images can allocate huge bitmaps and hang/crash
-// the renderer.
-//
-// Keep these in sync with the guards in `ImageBitmapCache` and the collaboration image-bytes binder.
-const MAX_PNG_DIMENSION = 10_000;
-const MAX_PNG_PIXELS = 50_000_000;
-
 const LINE_DASH_NONE: number[] = [];
 const LINE_DASH_FILL_PREVIEW: number[] = [4, 3];
 let formulaRangePreviewTooltipIdCounter = 0;
@@ -331,39 +324,6 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
-}
-
-function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
-  // PNG signature (8 bytes) + IHDR chunk header (8 bytes) + width/height (8 bytes).
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 24) return null;
-
-  if (
-    bytes[0] !== 0x89 ||
-    bytes[1] !== 0x50 ||
-    bytes[2] !== 0x4e ||
-    bytes[3] !== 0x47 ||
-    bytes[4] !== 0x0d ||
-    bytes[5] !== 0x0a ||
-    bytes[6] !== 0x1a ||
-    bytes[7] !== 0x0a
-  ) {
-    return null;
-  }
-
-  // The first chunk should be IHDR: length (4) + type (4) + data...
-  if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) {
-    return null;
-  }
-
-  try {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const width = view.getUint32(16, false);
-    const height = view.getUint32(20, false);
-    if (width === 0 || height === 0) return null;
-    return { width, height };
-  } catch {
-    return null;
-  }
 }
 function inferMimeTypeFromId(id: string, bytes?: Uint8Array): string {
   const ext = String(id ?? "").split(".").pop()?.toLowerCase();
