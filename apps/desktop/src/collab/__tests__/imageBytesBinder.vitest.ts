@@ -311,4 +311,51 @@ describe("imageBytesBinder", () => {
 
     binder.destroy();
   });
+
+  it("hydrates from a nested Y.Map per image id entry", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const bytes = new Uint8Array([10, 20, 30]);
+    const imagesMap = new Y.Map();
+    metadata.set("drawingImages", imagesMap);
+
+    const entryMap = new Y.Map();
+    entryMap.set("mimeType", "image/png");
+    entryMap.set("bytesBase64", Buffer.from(bytes).toString("base64"));
+    imagesMap.set("img-1", entryMap);
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    const hydrated = store.get("img-1");
+    expect(hydrated).toBeTruthy();
+    expect(hydrated?.mimeType).toBe("image/png");
+    expect(Array.from(hydrated?.bytes ?? [])).toEqual([10, 20, 30]);
+
+    binder.destroy();
+  });
+
+  it("hydrates from a direct Uint8Array payload (legacy variant)", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const imagesMap = new Y.Map();
+    metadata.set("drawingImages", imagesMap);
+    imagesMap.set("img-1", new Uint8Array([1, 2, 3]));
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    const hydrated = store.get("img-1");
+    expect(hydrated).toBeTruthy();
+    expect(hydrated?.mimeType).toBe("application/octet-stream");
+    expect(Array.from(hydrated?.bytes ?? [])).toEqual([1, 2, 3]);
+
+    binder.destroy();
+  });
 });  
