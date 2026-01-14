@@ -366,6 +366,15 @@ export class ImageBitmapCache {
     return null;
   }
 
+  /**
+   * Drop a cache entry (and any negative-cache failure state) for an image id.
+   *
+   * Note: `invalidate()` drops the cache entry but does **not** cancel in-flight `get()` calls.
+   * `createImageBitmap` itself is not abortable; if a caller is awaiting a decode that becomes
+   * stale (e.g. bytes changed, workbook/overlay teardown), the caller should pass an
+   * `AbortSignal` to `get()` and abort it before invalidating so any eventually-decoded
+   * ImageBitmap can be deterministically closed.
+   */
   invalidate(imageId: string): void {
     const existing = this.entries.get(imageId);
     if (!existing) {
@@ -382,6 +391,12 @@ export class ImageBitmapCache {
     }
   }
 
+  /**
+   * Close and drop all cached decoded bitmaps (and any negative-cache failure state).
+   *
+   * Note: `clear()` cannot cancel in-flight decodes (see note on `invalidate()`), but it does
+   * ensure any *already-decoded* cached bitmaps are closed immediately.
+   */
   clear(): void {
     for (const entry of this.entries.values()) {
       entry.onReady.clear();
