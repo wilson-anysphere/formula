@@ -29,8 +29,8 @@ python -m tools.corpus.promote_public \
 Notes:
 
 - `--sanitize` currently supports `.xlsx` / `.xlsm` inputs only.
-- `.xlsb` inputs require `--confirm-sanitized` (leak scanning is ZIP/XLSX based), unless the command can determine the
-  workbook is already promoted (fixture bytes + expectations entry match).
+- `.xlsb` inputs are supported, but `--sanitize` does not support `.xlsb` yet. Leak scanning still runs by default
+  (XLSB is also an OPC zip container).
 - For safety, if you omit `--name` when promoting from outside `tools/corpus/public/`, the command will choose a
   hash-based name like `workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}` to avoid leaking sensitive filenames.
 

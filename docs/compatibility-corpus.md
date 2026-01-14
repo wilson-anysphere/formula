@@ -404,8 +404,8 @@ triage and refresh the expectations entry.
 `--dry-run` prints a JSON summary including `needs_force` to indicate whether overwriting the fixture/expectations would
 require `--force`.
 
-For `.xlsb` inputs, `--sanitize` and leak scanning are not supported; provide an already-sanitized workbook and pass
-`--confirm-sanitized` (unless `promote_public` can take the `already_promoted` fast path).
+For `.xlsb` inputs, `--sanitize` is not supported; provide an already-sanitized workbook. Leak scanning still runs by
+default (XLSB is also an OPC zip container).
 
 Filename safety: if you omit `--name` when promoting from outside `tools/corpus/public/`, the command uses a
 hash-based name (`workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`) instead of the local filename to avoid leaking
