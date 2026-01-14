@@ -115,3 +115,23 @@ fn open_rejects_preserved_parts_total_over_budget() {
     }
 }
 
+#[test]
+fn open_rejects_too_many_zip_entries() {
+    let _lock = ENV_LOCK.lock().expect("lock env");
+    // The fixture builder emits multiple parts (at least 5). Set the max to something smaller so
+    // we fail before attempting to read any entries.
+    let _max_entries = EnvVarGuard::set("FORMULA_XLSB_MAX_ZIP_ENTRIES", "4");
+
+    let bytes = XlsbFixtureBuilder::new().build_bytes();
+    let tmp = write_temp_xlsb(&bytes);
+
+    let err = XlsbWorkbook::open_with_options(tmp.path(), OpenOptions::default())
+        .expect_err("expected open to fail due to excessive zip entry count");
+    match err {
+        Error::TooManyZipEntries { count, max } => {
+            assert!(count > max);
+            assert_eq!(max, 4);
+        }
+        other => panic!("expected TooManyZipEntries, got {other:?}"),
+    }
+}

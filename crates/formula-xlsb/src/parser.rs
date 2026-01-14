@@ -112,6 +112,8 @@ pub enum Error {
     PartTooLarge { part: String, size: u64, max: u64 },
     #[error("XLSB preserved parts too large: total {total} bytes exceeds limit {max} bytes")]
     PreservedPartsTooLarge { total: u64, max: u64 },
+    #[error("XLSB has too many ZIP entries: {count} exceeds limit {max}")]
+    TooManyZipEntries { count: usize, max: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

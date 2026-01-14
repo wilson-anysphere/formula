@@ -41,11 +41,18 @@ const MAX_XLSB_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
 /// This bounds memory usage when `preserve_unknown_parts=true` and a package contains many parts.
 const MAX_XLSB_PRESERVED_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
+/// Maximum number of ZIP entries we will process when opening an XLSB file.
+///
+/// This prevents pathological packages with millions of tiny entries from causing excessive CPU
+/// time and memory overhead even when individual parts are size-limited.
+const MAX_XLSB_ZIP_ENTRIES: usize = 100_000;
+
 /// Cap initial allocation when reading a ZIP entry; do not trust `ZipFile::size()` for prealloc.
 const ZIP_ENTRY_READ_PREALLOC_BYTES: usize = 64 * 1024; // 64 KiB
 
 const ENV_MAX_XLSB_ZIP_PART_BYTES: &str = "FORMULA_XLSB_MAX_ZIP_PART_BYTES";
 const ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES: &str = "FORMULA_XLSB_MAX_PRESERVED_TOTAL_BYTES";
+const ENV_MAX_XLSB_ZIP_ENTRIES: &str = "FORMULA_XLSB_MAX_ZIP_ENTRIES";
 
 const OFFICE_DOCUMENT_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
@@ -71,6 +78,13 @@ fn max_xlsb_preserved_total_bytes() -> u64 {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(MAX_XLSB_PRESERVED_TOTAL_BYTES)
+}
+
+fn max_xlsb_zip_entries() -> usize {
+    std::env::var(ENV_MAX_XLSB_ZIP_ENTRIES)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(MAX_XLSB_ZIP_ENTRIES)
 }
 
 /// Controls how much of the original package we keep around for round-trip preservation.
@@ -1898,6 +1912,15 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     options: OpenOptions,
 ) -> Result<ParsedWorkbook, ParseError> {
+    let max_entries = max_xlsb_zip_entries();
+    let entry_count = zip.len();
+    if entry_count > max_entries {
+        return Err(ParseError::TooManyZipEntries {
+            count: entry_count,
+            max: max_entries,
+        });
+    }
+
     let mut preserved_parts = HashMap::new();
     let mut preserved_total_bytes: u64 = 0;
 
