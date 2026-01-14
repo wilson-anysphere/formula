@@ -18,6 +18,7 @@ export type {
   CellBorders,
   CellDiagonalBorders
 } from "./model/CellProvider.ts";
+export { MockCellProvider } from "./model/MockCellProvider.ts";
 
 export type {
   CanvasGridImageResolver,
@@ -39,10 +40,20 @@ export { MAX_GRID_ZOOM, MIN_GRID_ZOOM, clampZoom } from "./utils/zoomMath.ts";
 
 export type { GridTheme } from "./theme/GridTheme.ts";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme.ts";
+export {
+  GRID_THEME_CSS_VAR_NAMES,
+  readGridThemeFromCssVars,
+  resolveCssVarValue,
+  resolveGridThemeFromCssVars
+} from "./theme/resolveThemeFromCssVars.ts";
 
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager.ts";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager.ts";
+export { VariableSizeAxis } from "./virtualization/VariableSizeAxis.ts";
+export type { AxisVisibleRange } from "./virtualization/VariableSizeAxis.ts";
 export { alignScrollToDevicePixels } from "./virtualization/alignScrollToDevicePixels.ts";
+export type { ScrollbarThumb } from "./virtualization/scrollbarMath.ts";
+export { computeScrollbarThumb } from "./virtualization/scrollbarMath.ts";
 
 export { wheelDeltaToPixels } from "./react/wheelDeltaToPixels.ts";
 export type { WheelDeltaToPixelsOptions } from "./react/wheelDeltaToPixels.ts";

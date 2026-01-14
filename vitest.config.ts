@@ -47,8 +47,11 @@ const powerQueryEntry = resolve(repoRoot, "packages/power-query/src/index.js");
 const workbookBackendEntry = resolve(repoRoot, "packages/workbook-backend/src/index.ts");
 const graphemeSplitterShimEntry = resolve(repoRoot, "scripts/vitest-shims/grapheme-splitter.ts");
 const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts");
+const zodShimEntry = resolve(repoRoot, "scripts/vitest-shims/zod.ts");
 const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
 const linebreakPackageEntry = resolve(repoRoot, "node_modules/linebreak");
+const zodPackageEntry = resolve(repoRoot, "node_modules/zod");
+const reactPackageEntry = resolve(repoRoot, "node_modules/react");
 const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
 const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
 const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
@@ -96,7 +99,12 @@ export default defineConfig({
   resolve: {
     alias: [
       // Core UI workspace packages used heavily by desktop tests/benchmarks.
-      { find: /^@formula\/grid$/, replacement: gridEntry },
+      // `@formula/grid`'s primary entrypoint re-exports React components (TSX). In some cached/stale
+      // `node_modules` environments, React may be missing; prefer the Node-friendly entrypoint in
+      // those cases so non-React desktop tests can still run.
+      ...(existsSync(reactPackageEntry)
+        ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
+        : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
       { find: /^@formula\/grid\/node$/, replacement: gridNodeEntry },
       { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
       { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
@@ -127,6 +135,7 @@ export default defineConfig({
         ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
         : []),
       ...(!existsSync(linebreakPackageEntry) ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }] : []),
+      ...(!existsSync(zodPackageEntry) ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.
