@@ -396,6 +396,15 @@ fn derive_cryptoapi_key_material_md5(password: &str, salt: &[u8; 16]) -> [u8; 16
     hash
 }
 
+fn derive_cryptoapi_key_material_legacy(password: &str, salt: &[u8; 16]) -> [u8; 20] {
+    // Legacy BIFF8 CryptoAPI FILEPASS layout (wEncryptionInfo=0x0004):
+    //   key_material = SHA1(salt + UTF16LE(password))
+    //
+    // Unlike the modern CryptoAPI encoding, this does *not* apply the 50,000-iteration hashing step.
+    let pw_bytes = utf16le_bytes(password);
+    sha1_bytes(&[salt, &pw_bytes])
+}
+
 fn derive_cryptoapi_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
@@ -446,6 +455,47 @@ impl Rc4 {
             let k = self.s[t as usize];
             *b ^= k;
         }
+    }
+}
+
+fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
+    // Advance the internal RC4 state without caring about the output bytes. This is used by the
+    // absolute-offset legacy BIFF8 CryptoAPI RC4 variant to jump to `pos_in_block` within a
+    // 1024-byte rekey segment.
+    let mut scratch = [0u8; 64];
+    while n > 0 {
+        let take = n.min(scratch.len());
+        rc4.apply_keystream(&mut scratch[..take]);
+        n -= take;
+    }
+}
+
+fn apply_cryptoapi_legacy_keystream_by_offset(
+    bytes: &mut [u8],
+    start_offset: usize,
+    key_material: &[u8; 20],
+    key_len: usize,
+) {
+    // Symmetric encrypt/decrypt helper matching `decrypt_range_by_offset` in
+    // `crates/formula-xls/src/decrypt.rs`.
+    const BLOCK_SIZE: usize = 1024;
+
+    let mut stream_pos = start_offset;
+    let mut remaining = bytes.len();
+    let mut pos = 0usize;
+    while remaining > 0 {
+        let block = (stream_pos / BLOCK_SIZE) as u32;
+        let in_block = stream_pos % BLOCK_SIZE;
+        let take = remaining.min(BLOCK_SIZE - in_block);
+
+        let key = derive_cryptoapi_block_key(key_material, block, key_len);
+        let mut rc4 = Rc4::new(&key);
+        rc4_discard(&mut rc4, in_block);
+        rc4.apply_keystream(&mut bytes[pos..pos + take]);
+
+        stream_pos += take;
+        pos += take;
+        remaining -= take;
     }
 }
 
@@ -871,8 +921,8 @@ fn build_filepass_cryptoapi_md5_payload(
 
     // Deterministic verifier bytes.
     let verifier_plain: [u8; 16] = [
-        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E,
-        0x0F,
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D,
+        0x1E, 0x0F,
     ];
     let verifier_hash_plain = md5_bytes(&[&verifier_plain]);
 
@@ -917,6 +967,7 @@ fn build_filepass_cryptoapi_md5_payload(
     verifier.extend_from_slice(&encrypted_verifier_hash);
 
     // EncryptionInfo:
+    //   u16 MajorVersion, u16 MinorVersion, u32 Flags, u32 HeaderSize, EncryptionHeader, EncryptionVerifier.
     let mut enc_info = Vec::<u8>::new();
     enc_info.extend_from_slice(&version_major.to_le_bytes()); // Major
     enc_info.extend_from_slice(&version_minor.to_le_bytes()); // Minor
@@ -931,6 +982,91 @@ fn build_filepass_cryptoapi_md5_payload(
     payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
     payload.extend_from_slice(&enc_info);
     payload
+}
+
+fn build_filepass_cryptoapi_legacy_payload(
+    password: &str,
+    salt: &[u8; 16],
+    version_major: u16,
+    version_minor: u16,
+    provider_type: u32,
+    csp_name: Option<&str>,
+) -> (Vec<u8>, [u8; 20]) {
+    // Legacy BIFF8 RC4 CryptoAPI FILEPASS layout ("wEncryptionInfo=0x0004") supported by
+    // `crates/formula-xls/src/decrypt.rs`.
+    //
+    // FILEPASS payload layout:
+    // - u16 wEncryptionType = 0x0001 (RC4)
+    // - u16 wEncryptionInfo = 0x0004 (legacy CryptoAPI)
+    // - u16 vMajor
+    // - u16 vMinor
+    // - u16 reserved (0)
+    // - u32 headerSize
+    // - EncryptionHeader bytes
+    // - EncryptionVerifier bytes
+    const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
+    const ENCRYPTION_INFO_CRYPTOAPI_LEGACY: u16 = 0x0004;
+    const CALG_RC4: u32 = 0x0000_6801;
+    const CALG_SHA1: u32 = 0x0000_8004;
+
+    // Deterministic verifier bytes.
+    let verifier_plain: [u8; 16] = [
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D,
+        0x1E, 0x0F,
+    ];
+    let verifier_hash_plain = sha1_bytes(&[&verifier_plain]);
+
+    // Encrypt verifier + hash using the legacy key material (no 50k-iteration hardening).
+    let key_material = derive_cryptoapi_key_material_legacy(password, salt);
+    let key0 = derive_cryptoapi_block_key(&key_material, 0, 16);
+    let mut rc4 = Rc4::new(&key0);
+
+    let mut verifier_buf = [0u8; 36];
+    verifier_buf[..16].copy_from_slice(&verifier_plain);
+    verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+    rc4.apply_keystream(&mut verifier_buf);
+
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
+    let mut encrypted_verifier_hash = [0u8; 20];
+    encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
+
+    // EncryptionHeader (fixed 32 bytes + optional CSPName UTF-16LE NUL-terminated) [MS-OFFCRYPTO].
+    let mut header = Vec::<u8>::new();
+    header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+    header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+    header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
+    header.extend_from_slice(&128u32.to_le_bytes()); // KeySize bits
+    header.extend_from_slice(&provider_type.to_le_bytes()); // ProviderType
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+    if let Some(csp_name) = csp_name {
+        for cu in csp_name.encode_utf16() {
+            header.extend_from_slice(&cu.to_le_bytes());
+        }
+        header.extend_from_slice(&0u16.to_le_bytes());
+    }
+
+    // EncryptionVerifier (salt is stored plaintext).
+    let mut verifier = Vec::<u8>::new();
+    verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+    verifier.extend_from_slice(salt);
+    verifier.extend_from_slice(&encrypted_verifier);
+    verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
+    verifier.extend_from_slice(&encrypted_verifier_hash);
+
+    let mut payload = Vec::<u8>::new();
+    payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+    payload.extend_from_slice(&ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes());
+    payload.extend_from_slice(&version_major.to_le_bytes());
+    payload.extend_from_slice(&version_minor.to_le_bytes());
+    payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    payload.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    payload.extend_from_slice(&header);
+    payload.extend_from_slice(&verifier);
+
+    (payload, key_material)
 }
 
 fn encrypt_payloads_after_filepass<T>(
@@ -957,6 +1093,68 @@ fn encrypt_payloads_after_filepass<T>(
 
         cipher(&mut workbook_stream[data_start..data_end]);
         cursor = data_end;
+    }
+}
+
+fn encrypt_payloads_after_filepass_cryptoapi_legacy(
+    workbook_stream: &mut [u8],
+    filepass_data_end: usize,
+    key_material: &[u8; 20],
+    key_len: usize,
+) {
+    // Legacy BIFF8 CryptoAPI RC4 encrypts record payloads using an absolute-offset stream position
+    // that includes record headers. Mirror the decryptor's behavior in
+    // `crates/formula-xls/src/decrypt.rs` so regenerated fixtures remain decryptable.
+    let mut offset = filepass_data_end;
+    let mut stream_pos = filepass_data_end;
+
+    while offset < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(offset);
+        if remaining < 4 {
+            break;
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let data_start = offset + 4;
+        let data_end = data_start + len;
+        assert!(
+            data_end <= workbook_stream.len(),
+            "generated BIFF record extends past end of stream"
+        );
+
+        // Record headers are not encrypted but still advance the CryptoAPI stream position.
+        stream_pos = stream_pos.saturating_add(4);
+
+        // Mirror `is_never_encrypted_record` from the decryptor.
+        let skip_entire_payload = matches!(record_id, RECORD_BOF | RECORD_FILEPASS | RECORD_INTERFACEHDR);
+
+        if !skip_entire_payload {
+            match record_id {
+                RECORD_BOUNDSHEET => {
+                    // BoundSheet.lbPlyPos MUST NOT be encrypted.
+                    if len > 4 {
+                        let decrypt_start = stream_pos.saturating_add(4);
+                        apply_cryptoapi_legacy_keystream_by_offset(
+                            &mut workbook_stream[data_start + 4..data_end],
+                            decrypt_start,
+                            key_material,
+                            key_len,
+                        );
+                    }
+                }
+                _ => apply_cryptoapi_legacy_keystream_by_offset(
+                    &mut workbook_stream[data_start..data_end],
+                    stream_pos,
+                    key_material,
+                    key_len,
+                ),
+            }
+        }
+
+        // Advance past the record payload, regardless of whether we encrypted it.
+        stream_pos = stream_pos.saturating_add(len);
+        offset = data_end;
     }
 }
 
@@ -1158,6 +1356,41 @@ fn build_cryptoapi_md5_encrypted_xls_bytes(password: &str) -> Vec<u8> {
         0x0E, 0x0F,
     ];
     build_cryptoapi_md5_encrypted_xls_bytes_with_config(password, &salt, 4, 2, 0, None)
+}
+
+fn build_cryptoapi_legacy_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    // Deterministic parameters to keep the fixture stable.
+    let salt = [
+        0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E,
+        0x2F, 0x30,
+    ];
+
+    let (filepass_payload, key_material) =
+        build_filepass_cryptoapi_legacy_payload(password, &salt, 1, 1, 0, None);
+    // Ensure payload-after-FILEPASS crosses 1024 bytes so the legacy CryptoAPI absolute-offset
+    // decryptor has to re-key mid-stream.
+    let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 2048);
+
+    let mut offset = 0usize;
+    let mut filepass_data_end = None::<usize>;
+    while let Some((record_id, payload, next)) = super_read_record(&workbook_stream, offset) {
+        if record_id == RECORD_FILEPASS {
+            filepass_data_end = Some(offset + 4 + payload.len());
+            break;
+        }
+        offset = next;
+    }
+    let filepass_data_end =
+        filepass_data_end.expect("generated workbook stream should contain FILEPASS");
+
+    encrypt_payloads_after_filepass_cryptoapi_legacy(
+        &mut workbook_stream,
+        filepass_data_end,
+        &key_material,
+        16,
+    );
+
+    build_xls_bytes(&workbook_stream)
 }
 
 fn build_cryptoapi_encrypted_xls_bytes_with_config(
@@ -1373,6 +1606,18 @@ fn regenerate_encrypted_xls_fixtures() {
         .unwrap_or_else(|err| {
             panic!("write encrypted fixture {cryptoapi_unicode_emoji_path:?} failed: {err}");
         });
+
+    // Legacy FILEPASS layout variant (`wEncryptionInfo = 0x0004`).
+    let cryptoapi_legacy_unicode_emoji_path = fixtures_dir
+        .join("biff8_rc4_cryptoapi_legacy_unicode_emoji_pw_open.xls");
+    let cryptoapi_legacy_unicode_emoji_bytes = build_cryptoapi_legacy_encrypted_xls_bytes("pässwörd🔒");
+    std::fs::write(
+        &cryptoapi_legacy_unicode_emoji_path,
+        cryptoapi_legacy_unicode_emoji_bytes,
+    )
+    .unwrap_or_else(|err| {
+        panic!("write encrypted fixture {cryptoapi_legacy_unicode_emoji_path:?} failed: {err}");
+    });
 
     // Non-ASCII password fixture used to validate Unicode password handling.
     let unicode_fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

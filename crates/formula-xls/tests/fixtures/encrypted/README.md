@@ -76,6 +76,7 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 | `biff8_rc4_cryptoapi_md5_pw_open.xls` | RC4 (CryptoAPI, MD5 `AlgIDHash`) | BIFF8 | same as above; used by `tests/import_encrypted_rc4_cryptoapi_md5.rs` to validate MD5-based CryptoAPI RC4 | `password` |
 | `biff8_rc4_cryptoapi_unicode_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd` |
 | `biff8_rc4_cryptoapi_unicode_emoji_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd🔒` |
+| `biff8_rc4_cryptoapi_legacy_unicode_emoji_pw_open.xls` | RC4 (CryptoAPI, legacy FILEPASS layout) | BIFF8 | same as above | `pässwörd🔒` |
 | `../encrypted_rc4_cryptoapi_boundary.xls` | RC4 (CryptoAPI, legacy FILEPASS layout) | BIFF8 | Microsoft Excel (real file; used by `tests/import_encrypted_rc4_boundary.rs` to exercise legacy CryptoAPI + 1024-byte rekey boundary behavior) | `password` |
 | `../encrypted_xor_biff5.xls` | XOR (legacy obfuscation) | BIFF5 | LibreOffice (real file; used by `tests/import_encrypted_xor_biff5.rs`) | `xorpass` |
 
