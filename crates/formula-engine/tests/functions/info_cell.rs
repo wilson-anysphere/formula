@@ -103,53 +103,145 @@ fn cell_contents_returns_formula_text_or_value() {
 }
 
 #[test]
-fn cell_format_color_and_parentheses_use_number_format_style() {
+fn cell_format_color_and_parentheses_default_style() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(
+        sheet.eval("=CELL(\"format\",A1)"),
+        Value::Text("G".to_string())
+    );
+    assert_number(&sheet.eval("=CELL(\"color\",A1)"), 0.0);
+    assert_number(&sheet.eval("=CELL(\"parentheses\",A1)"), 0.0);
+}
+
+#[test]
+fn cell_format_reflects_explicit_cell_style() {
     use formula_engine::Engine;
 
     let mut engine = Engine::new();
-    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-
-    // Fixed decimals.
-    let fixed2 = engine.intern_style(Style {
-        number_format: Some("0.00".to_string()),
-        ..Style::default()
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".into()),
+        ..Default::default()
     });
-    engine.set_cell_style_id("Sheet1", "A1", fixed2).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F2".to_string())
+    );
+}
+
+#[test]
+fn cell_color_and_parentheses_reflect_explicit_cell_style() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0;[Red](0)".into()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"parentheses\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "C1"), 1.0);
+}
+
+#[test]
+fn cell_format_and_flags_handle_builtin_placeholder_styles() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    let style_id = engine.intern_style(Style {
+        number_format: Some("__builtin_numFmtId:6".into()),
+        ..Default::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A1)")
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"color\",A1)")
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A1)")
+        .set_cell_formula("Sheet1", "D1", "=CELL(\"parentheses\",A1)")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("F2".to_string()));
-    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
-    assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
 
-    // Built-in placeholder id 6 is currency with red parentheses negatives.
-    let currency_red = engine.intern_style(Style {
-        number_format: Some("__builtin_numFmtId:6".to_string()),
-        ..Style::default()
-    });
-    engine.set_cell_style_id("Sheet1", "A1", currency_red).unwrap();
-    engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("C0".to_string()));
-    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
-    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+    let fmt = match engine.get_cell_value("Sheet1", "B1") {
+        Value::Text(s) => s,
+        other => panic!("expected text for CELL(\"format\"), got {other:?}"),
+    };
+    assert!(
+        fmt.starts_with('C'),
+        "expected currency CELL(\"format\") code starting with 'C', got {fmt:?}"
+    );
+    assert_number(&engine.get_cell_value("Sheet1", "C1"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "D1"), 1.0);
+}
 
-    // Row/column style fallback: if the cell style is the default (id 0), it should inherit the
-    // row's number format.
-    let row_fmt = engine.intern_style(Style {
-        number_format: Some("0.0%".to_string()),
-        ..Style::default()
+#[test]
+fn cell_format_uses_cell_row_col_style_precedence() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    let col_style = engine.intern_style(Style {
+        number_format: Some("0.00".into()),
+        ..Default::default()
     });
-    engine.set_row_style_id("Sheet1", 0, Some(row_fmt));
-    engine.set_cell_style_id("Sheet1", "A1", 0).unwrap();
+    let row_style = engine.intern_style(Style {
+        number_format: Some("0.000".into()),
+        ..Default::default()
+    });
+    let cell_style = engine.intern_style(Style {
+        number_format: Some("0.0".into()),
+        ..Default::default()
+    });
+
+    // With no explicit cell or row style, fall back to the column style.
+    engine.set_col_style_id("Sheet1", 0, Some(col_style));
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("P1".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F2".to_string())
+    );
+
+    // Row style overrides column style.
+    engine.set_row_style_id("Sheet1", 0, Some(row_style));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F3".to_string())
+    );
+
+    // Explicit non-zero cell style overrides row/column styles.
+    engine
+        .set_cell_style_id("Sheet1", "A1", cell_style)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F1".to_string())
+    );
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use crate::calc_settings::CalculationMode;
+use crate::date::ExcelDateSystem;
 use crate::eval::{parse_a1, CellAddr};
 use crate::functions::{FunctionContext, Reference, SheetId};
 use crate::{ErrorKind, Value};
@@ -215,22 +216,34 @@ fn resolve_horizontal_alignment(
         .unwrap_or(HorizontalAlignment::General)
 }
 
+fn effective_style_id(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> u32 {
+    // Style precedence for `CELL("format")`/`CELL("color")`/`CELL("parentheses")` matches Excel:
+    // cell (when non-zero) > row (when present) > column (when present) > sheet default > 0.
+    let cell_id = ctx.cell_style_id(sheet_id, addr);
+    if cell_id != 0 {
+        return cell_id;
+    }
+    if let Some(row_id) = ctx.row_style_id(sheet_id, addr.row) {
+        return row_id;
+    }
+    if let Some(col_id) = ctx
+        .col_properties(sheet_id, addr.col)
+        .and_then(|props| props.style_id)
+    {
+        return col_id;
+    }
+    ctx.sheet_default_style_id(sheet_id).unwrap_or(0)
+}
+
 fn resolve_number_format<'a>(
     ctx: &'a dyn FunctionContext,
     sheet_id: &SheetId,
     addr: CellAddr,
 ) -> Option<&'a str> {
-    let styles = ctx.style_table()?;
-
-    for style_id in style_layer_ids(ctx, sheet_id, addr) {
-        if let Some(style) = styles.get(style_id) {
-            if let Some(fmt) = style.number_format.as_deref() {
-                return Some(fmt);
-            }
-        }
-    }
-
-    None
+    let style_id = effective_style_id(ctx, sheet_id, addr);
+    ctx.style_table()
+        .and_then(|t| t.get(style_id))
+        .and_then(|s| s.number_format.as_deref())
 }
 
 fn is_ident_cont_char(c: char) -> bool {
@@ -275,14 +288,11 @@ fn cell_number_format<'a>(
 }
 
 fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {
-    use crate::date::ExcelDateSystem;
-    use formula_format::DateSystem;
-
     formula_format::FormatOptions {
         locale: ctx.value_locale().separators,
         date_system: match ctx.date_system() {
-            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
-            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+            ExcelDateSystem::Excel1900 { .. } => formula_format::DateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => formula_format::DateSystem::Excel1904,
         },
     }
 }
