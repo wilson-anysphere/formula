@@ -10,6 +10,18 @@ export function sheetChunkIdPrefix(sheetName: string): string;
  */
 export function legacySheetChunkIdPrefix(sheetName: string): string;
 
+export interface LegacySheetRegionChunkStoreLike {
+  /**
+   * In-memory store shape used by ai-context's sheet-level RAG store.
+   */
+  items?: {
+    keys(): IterableIterator<string> | Iterable<string>;
+    delete(id: string): boolean;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+}
+
 /**
  * Delete all region chunks for a given sheet name (current id scheme), plus best-effort
  * cleanup of legacy `${sheetName}-region-*` ids when supported by the store.
@@ -29,7 +41,7 @@ export function deleteSheetRegionChunks(
  * Returns the number of deleted items when supported by the store.
  */
 export function deleteLegacySheetRegionChunks(
-  store: any,
+  store: LegacySheetRegionChunkStoreLike,
   sheetName: string,
   options?: { signal?: AbortSignal },
 ): number;
