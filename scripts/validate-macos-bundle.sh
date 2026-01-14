@@ -941,107 +941,124 @@ main() {
 
   if [ -n "$DMG_OVERRIDE" ]; then
     dmgs+=("$DMG_OVERRIDE")
-  else
-    # Respect `CARGO_TARGET_DIR` when set (common in CI caching setups). Cargo interprets relative
-    # paths relative to the build working directory (repo root in CI).
-    if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-      local cargo_target_dir="${CARGO_TARGET_DIR}"
-      case "$cargo_target_dir" in
-        /*) ;;
-        *) cargo_target_dir="$REPO_ROOT/$cargo_target_dir" ;;
-      esac
-      roots+=("$cargo_target_dir")
+  fi
+
+  # Respect `CARGO_TARGET_DIR` when set (common in CI caching setups). Cargo interprets relative
+  # paths relative to the build working directory (repo root in CI).
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    local cargo_target_dir="${CARGO_TARGET_DIR}"
+    case "$cargo_target_dir" in
+      /*) ;;
+      *) cargo_target_dir="$REPO_ROOT/$cargo_target_dir" ;;
+    esac
+    roots+=("$cargo_target_dir")
+  fi
+
+  roots+=(
+    "$REPO_ROOT/apps/desktop/src-tauri/target"
+    "$REPO_ROOT/apps/desktop/target"
+    "$REPO_ROOT/target"
+  )
+
+  local nullglob_was_set=0
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+
+  # If the DMG override points at a standard bundle layout, also look for updater archives in the
+  # corresponding `bundle/macos/` directory.
+  if [ -n "$DMG_OVERRIDE" ]; then
+    local dmg_dir bundle_dir macos_bundle_dir
+    dmg_dir="$(dirname "$DMG_OVERRIDE")"
+    bundle_dir="$(dirname "$dmg_dir")"
+    macos_bundle_dir="${bundle_dir}/macos"
+    if [ -d "$macos_bundle_dir" ]; then
+      app_tars+=("$macos_bundle_dir/"*.app.tar.gz)
+      app_tars+=("$macos_bundle_dir/"*.tar.gz)
+      app_tars+=("$macos_bundle_dir/"*.tgz)
     fi
+  fi
 
-    roots+=(
-      "$REPO_ROOT/apps/desktop/src-tauri/target"
-      "$REPO_ROOT/apps/desktop/target"
-      "$REPO_ROOT/target"
-    )
+  local root
+  for root in "${roots[@]}"; do
+    [ -d "$root" ] || continue
 
-    local nullglob_was_set=0
-    if shopt -q nullglob; then
-      nullglob_was_set=1
+    # Fast path: use globs against the expected bundle output directories.
+    if [ -z "$DMG_OVERRIDE" ]; then
+      dmgs+=("$root/release/bundle/dmg/"*.dmg)
+      dmgs+=("$root"/*/release/bundle/dmg/*.dmg)
     fi
-    shopt -s nullglob
+    # Tauri's macOS updater artifact is typically `*.app.tar.gz`, but some toolchains may emit a
+    # plain `*.tar.gz` / `*.tgz`. Accept either under the macOS bundle directory.
+    app_tars+=("$root/release/bundle/macos/"*.app.tar.gz)
+    app_tars+=("$root/release/bundle/macos/"*.tar.gz)
+    app_tars+=("$root/release/bundle/macos/"*.tgz)
+    app_tars+=("$root"/*/release/bundle/macos/*.app.tar.gz)
+    app_tars+=("$root"/*/release/bundle/macos/*.tar.gz)
+    app_tars+=("$root"/*/release/bundle/macos/*.tgz)
+  done
 
-    local root
+  if [ "$nullglob_was_set" -eq 0 ]; then
+    shopt -u nullglob
+  fi
+
+  # Fallback: traverse target roots only when the expected globs produced nothing (layout changed).
+  # Avoid scanning the entire Cargo target tree when the caller explicitly provided a DMG path.
+  if [ -z "$DMG_OVERRIDE" ] && { [ "${#dmgs[@]}" -eq 0 ] || [ "${#app_tars[@]}" -eq 0 ]; }; then
     for root in "${roots[@]}"; do
       [ -d "$root" ] || continue
 
-      # Fast path: use globs against the expected bundle output directories.
-      dmgs+=("$root/release/bundle/dmg/"*.dmg)
-      dmgs+=("$root"/*/release/bundle/dmg/*.dmg)
-      # Tauri's macOS updater artifact is typically `*.app.tar.gz`, but some toolchains may emit a
-      # plain `*.tar.gz` / `*.tgz`. Accept either under the macOS bundle directory.
-      app_tars+=("$root/release/bundle/macos/"*.app.tar.gz)
-      app_tars+=("$root/release/bundle/macos/"*.tar.gz)
-      app_tars+=("$root/release/bundle/macos/"*.tgz)
-      app_tars+=("$root"/*/release/bundle/macos/*.app.tar.gz)
-      app_tars+=("$root"/*/release/bundle/macos/*.tar.gz)
-      app_tars+=("$root"/*/release/bundle/macos/*.tgz)
+      if [ "${#dmgs[@]}" -eq 0 ]; then
+        while IFS= read -r -d '' path; do
+          dmgs+=("$path")
+        done < <(find "$root" -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
+      fi
+
+      if [ "${#app_tars[@]}" -eq 0 ]; then
+        while IFS= read -r -d '' path; do
+          app_tars+=("$path")
+        done < <(find "$root" -type f \( -path "*/release/bundle/macos/*.tar.gz" -o -path "*/release/bundle/macos/*.tgz" \) -print0 2>/dev/null || true)
+      fi
     done
+  fi
 
-    if [ "$nullglob_was_set" -eq 0 ]; then
-      shopt -u nullglob
-    fi
+  if [ "${#dmgs[@]}" -gt 1 ]; then
+    local deduped_dmgs
+    deduped_dmgs="$(printf '%s\n' "${dmgs[@]}" | dedupe_lines)"
+    dmgs=()
+    while IFS= read -r line; do
+      [ -n "$line" ] && dmgs+=("$line")
+    done <<<"$deduped_dmgs"
+  fi
 
-    # Fallback: traverse target roots only when the expected globs produced nothing (layout changed).
-    if [ "${#dmgs[@]}" -eq 0 ] || [ "${#app_tars[@]}" -eq 0 ]; then
-      for root in "${roots[@]}"; do
-        [ -d "$root" ] || continue
+  if [ "${#app_tars[@]}" -gt 1 ]; then
+    local deduped_app_tars
+    deduped_app_tars="$(printf '%s\n' "${app_tars[@]}" | dedupe_lines)"
+    app_tars=()
+    while IFS= read -r line; do
+      [ -n "$line" ] && app_tars+=("$line")
+    done <<<"$deduped_app_tars"
+  fi
 
-        if [ "${#dmgs[@]}" -eq 0 ]; then
-          while IFS= read -r -d '' path; do
-            dmgs+=("$path")
-          done < <(find "$root" -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
-        fi
+  # If both universal and arch-specific artifacts are present (common when the universal build
+  # flow leaves intermediate outputs around), validate only the universal artifacts.
+  if [ "${#dmgs[@]}" -gt 1 ]; then
+    local preferred_dmgs
+    preferred_dmgs="$(prefer_universal_artifacts "DMG" "${dmgs[@]}")"
+    dmgs=()
+    while IFS= read -r line; do
+      [ -n "$line" ] && dmgs+=("$line")
+    done <<<"$preferred_dmgs"
+  fi
 
-        if [ "${#app_tars[@]}" -eq 0 ]; then
-          while IFS= read -r -d '' path; do
-            app_tars+=("$path")
-          done < <(find "$root" -type f \( -path "*/release/bundle/macos/*.tar.gz" -o -path "*/release/bundle/macos/*.tgz" \) -print0 2>/dev/null || true)
-        fi
-      done
-    fi
-
-    if [ "${#dmgs[@]}" -gt 1 ]; then
-      local deduped_dmgs
-      deduped_dmgs="$(printf '%s\n' "${dmgs[@]}" | dedupe_lines)"
-      dmgs=()
-      while IFS= read -r line; do
-        [ -n "$line" ] && dmgs+=("$line")
-      done <<<"$deduped_dmgs"
-    fi
-
-    if [ "${#app_tars[@]}" -gt 1 ]; then
-      local deduped_app_tars
-      deduped_app_tars="$(printf '%s\n' "${app_tars[@]}" | dedupe_lines)"
-      app_tars=()
-      while IFS= read -r line; do
-        [ -n "$line" ] && app_tars+=("$line")
-      done <<<"$deduped_app_tars"
-    fi
-
-    # If both universal and arch-specific artifacts are present (common when the universal build
-    # flow leaves intermediate outputs around), validate only the universal artifacts.
-    if [ "${#dmgs[@]}" -gt 1 ]; then
-      local preferred_dmgs
-      preferred_dmgs="$(prefer_universal_artifacts "DMG" "${dmgs[@]}")"
-      dmgs=()
-      while IFS= read -r line; do
-        [ -n "$line" ] && dmgs+=("$line")
-      done <<<"$preferred_dmgs"
-    fi
-
-    if [ "${#app_tars[@]}" -gt 1 ]; then
-      local preferred_tars
-      preferred_tars="$(prefer_universal_artifacts "updater archive" "${app_tars[@]}")"
-      app_tars=()
-      while IFS= read -r line; do
-        [ -n "$line" ] && app_tars+=("$line")
-      done <<<"$preferred_tars"
-    fi
+  if [ "${#app_tars[@]}" -gt 1 ]; then
+    local preferred_tars
+    preferred_tars="$(prefer_universal_artifacts "updater archive" "${app_tars[@]}")"
+    app_tars=()
+    while IFS= read -r line; do
+      [ -n "$line" ] && app_tars+=("$line")
+    done <<<"$preferred_tars"
   fi
 
   if [ "${#dmgs[@]}" -eq 0 ]; then

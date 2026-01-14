@@ -257,6 +257,72 @@ test(
 );
 
 test(
+  "validate-macos-bundle validates updater tarball artifacts even when --dmg is provided",
+  { skip: !hasBash },
+  () => {
+    assert.ok(expectedIdentifier, "tauri.conf.json identifier must be non-empty for this test");
+    assert.ok(expectedVersion, "tauri.conf.json version must be non-empty for this test");
+
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+    });
+    writeComplianceResources(appRoot);
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const cargoTargetDir = join(tmp, "cargo-target");
+    const archivePath = join(
+      cargoTargetDir,
+      "universal-apple-darwin",
+      "release",
+      "bundle",
+      "macos",
+      "Formula.app.tar.gz",
+    );
+    mkdirSync(dirname(archivePath), { recursive: true });
+
+    const payloadRoot = join(tmp, "payload");
+    const payloadAppContents = join(payloadRoot, "Formula.app", "Contents");
+    const payloadMacosDir = join(payloadAppContents, "MacOS");
+    mkdirSync(payloadMacosDir, { recursive: true });
+    writeFileSync(join(payloadMacosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(payloadMacosDir, "formula-desktop"), 0o755);
+    writeInfoPlist(join(payloadAppContents, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+    });
+    writeComplianceResources(payloadAppContents);
+
+    const tarProc = spawnSync("tar", ["-czf", archivePath, "-C", payloadRoot, "Formula.app"], {
+      encoding: "utf8",
+    });
+    assert.equal(tarProc.status, 0, tarProc.stderr);
+
+    const proc = runValidator({ dmgPath, binDir, env: { CARGO_TARGET_DIR: cargoTargetDir } });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(proc.stdout, /validating updater archive/i);
+    assert.match(proc.stdout, /Formula\.app\.tar\.gz/);
+  },
+);
+
+test(
   "validate-macos-bundle falls back to mainBinaryName when CFBundleExecutable is missing",
   { skip: !hasBash },
   () => {
