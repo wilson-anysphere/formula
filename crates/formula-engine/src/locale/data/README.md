@@ -135,7 +135,8 @@ Error literals themselves start with `#`, so error TSVs use a stricter comment c
 - Lines where the first non-whitespace characters are `#` followed by whitespace are comments
   (e.g. `# Canonical<TAB>Localized`).
 - Empty lines are ignored.
-- Data lines begin with the canonical error literal (e.g. `#VALUE!`).
+- Data lines begin with the canonical error literal (e.g. `#VALUE!`) and map to the localized error
+  literal (also starts with `#`).
 
 The generator outputs entries sorted by canonical error literal for deterministic diffs.
 
