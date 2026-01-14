@@ -586,6 +586,84 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("fails when workflow runs pnpm -C apps/desktop build without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: pnpm -C apps/desktop build
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running pnpm -C apps/desktop build", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - run: pnpm -C apps/desktop build
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
+test("fails when workflow runs pnpm test:e2e without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: pnpm test:e2e
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running pnpm test:e2e", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - run: pnpm test:e2e
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("fails when workflow runs build-formula-wasm-node.mjs without installing pinned toolchain", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `

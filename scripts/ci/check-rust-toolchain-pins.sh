@@ -102,8 +102,14 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /desktop_binary_size_report\.py/) return 1
       # pnpm wrapper scripts that transitively run Rust tooling (e.g. desktop prebuild hooks).
       if (s ~ /pnpm[[:space:]]+build:desktop([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+dev:desktop([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+test:e2e([[:space:]]|$)/) return 1
       if (s ~ /pnpm[[:space:]]+build:wasm([[:space:]]|$)/) return 1
       if (s ~ /pnpm[[:space:]]+-w[[:space:]]+build:wasm([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+-C[[:space:]]+apps\/desktop[[:space:]]+build([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+-C[[:space:]]+apps\/desktop[[:space:]]+dev([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+-C[[:space:]]+apps\/desktop[[:space:]]+test:e2e([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+-C[[:space:]]+packages\/engine[[:space:]]+build:wasm([[:space:]]|$)/) return 1
       if (s ~ /pnpm[[:space:]]+benchmark([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])wasm-pack([[:space:]]|$)/) return 1
