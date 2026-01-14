@@ -245,7 +245,10 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // DAX table identifiers can be written without quotes when they are identifier-like tokens.
     //
     // Use Unicode-aware checks so common non-ASCII names (e.g. `Straße`) can remain unquoted.
+    // Also quote identifiers that collide with keywords like `VAR`/`RETURN`/`IN`.
+    //
     // Keep this conservative—quoting is always accepted by DAX.
+    let raw = raw.trim();
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
