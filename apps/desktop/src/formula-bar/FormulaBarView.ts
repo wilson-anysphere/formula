@@ -3253,13 +3253,25 @@ export class FormulaBarView {
 
   #referenceElementsForIndex(idx: number): HTMLElement[] {
     if (this.#referenceElsByIndex == null) {
-      this.#referenceElsByIndex = new Map();
+      // When cursoring through a formula with many references, `querySelectorAll` per-ref-index
+      // can become noticeable. Build a full index->elements map once per highlight DOM update.
+      const map = new Map<number, HTMLElement[]>();
+      const els = this.#highlightEl.querySelectorAll<HTMLElement>("[data-ref-index]");
+      for (const el of els) {
+        const raw = el.dataset.refIndex;
+        if (!raw) continue;
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) continue;
+        const bucket = map.get(parsed);
+        if (bucket) {
+          bucket.push(el);
+        } else {
+          map.set(parsed, [el]);
+        }
+      }
+      this.#referenceElsByIndex = map;
     }
-    const cached = this.#referenceElsByIndex.get(idx);
-    if (cached) return cached;
-    const found = Array.from(this.#highlightEl.querySelectorAll<HTMLElement>(`[data-ref-index="${idx}"]`));
-    this.#referenceElsByIndex.set(idx, found);
-    return found;
+    return this.#referenceElsByIndex.get(idx) ?? EMPTY_REFERENCE_ELS;
   }
 
   #clearArgumentPreviewState(): void {
@@ -4179,6 +4191,7 @@ const ESCAPE_HTML_RE = /[&<>]/g;
 const ESCAPE_HTML_TEST_RE = /[&<>]/;
 const ESCAPE_HTML_MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
 const ESCAPE_HTML_REPLACER = (ch: string): string => ESCAPE_HTML_MAP[ch] ?? ch;
+const EMPTY_REFERENCE_ELS: HTMLElement[] = [];
 
 function escapeHtml(text: string): string {
   return text.replace(ESCAPE_HTML_RE, ESCAPE_HTML_REPLACER);
