@@ -1024,6 +1024,8 @@ export class FormulaBarView {
     // If permissions flipped while editing, exit edit mode so we never show commit/cancel
     // controls that would no-op.
     if (next && this.model.isEditing) {
+      this.#functionAutocomplete.close();
+      this.#closeFunctionPicker({ restoreFocus: false });
       this.model.cancel();
       this.#hoverOverride = null;
       this.#hoverOverrideText = null;

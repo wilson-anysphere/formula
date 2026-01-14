@@ -422,6 +422,30 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("closes if the formula bar becomes read-only while editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(view.model.isEditing).toBe(true);
+
+    view.setReadOnly(true);
+
+    expect(view.model.isEditing).toBe(false);
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
   it("closes during IME composition", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
