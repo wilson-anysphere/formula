@@ -1437,7 +1437,16 @@ export interface EvolutionaryOptions {
   mutationRate?: number; // default 0.2
   crossoverRate?: number; // default 0.7
   penaltyWeight?: number; // default 50.0
-  seed?: number; // default 0x5EED_5EED_1234_5678 (u64; require safe integer)
+  /**
+   * Optional RNG seed.
+   *
+   * - If provided, it should be a non-negative safe integer (<= `Number.MAX_SAFE_INTEGER`)
+   *   so the binding can losslessly convert it to `u64`.
+   * - If omitted, Rust uses a fixed internal `u64` seed (`0x5EED_5EED_1234_5678`).
+   *   Note: that constant is **not** safely representable as a JS number, but callers
+   *   typically don't need to pass it explicitly.
+   */
+  seed?: number;
 }
 
 export interface SolveOptions {
