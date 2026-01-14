@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -91,6 +92,17 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
         return value
     if value.startswith("sha256="):
         return value
+
+    # Keep repo-relative paths readable. Absolute paths (including Windows drive paths / UNC paths)
+    # tend to embed usernames/mount points and should be redacted.
+    looks_abs = bool(
+        value.startswith(("/", "\\", "~"))
+        or value.startswith("//")
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+    )
+    if not looks_abs:
+        return value
+
     return f"sha256={_sha256_text(value)}"
 
 
@@ -555,6 +567,8 @@ def main() -> int:
     lines.append("## Inputs")
     lines.append("")
     if corpus:
+        corpus_path_str = _fmt_path(repo_root, corpus.path)
+        corpus_path_str = _redact_text(corpus_path_str, privacy_mode=args.privacy_mode) or corpus_path_str
         corpus_meta_parts: list[str] = []
         if corpus.timestamp:
             corpus_meta_parts.append(f"timestamp: `{corpus.timestamp}`")
@@ -564,10 +578,12 @@ def main() -> int:
         if corpus_run_url:
             corpus_meta_parts.append(f"run: {corpus_run_url}")
         extra = f" ({', '.join(corpus_meta_parts)})" if corpus_meta_parts else ""
-        lines.append(f"- Corpus summary: `{_fmt_path(repo_root, corpus.path)}`{extra}")
+        lines.append(f"- Corpus summary: `{corpus_path_str}`{extra}")
     else:
         lines.append("- Corpus summary: **MISSING**")
     if oracle:
+        oracle_path_str = _fmt_path(repo_root, oracle.path)
+        oracle_path_str = _redact_text(oracle_path_str, privacy_mode=args.privacy_mode) or oracle_path_str
         oracle_meta_parts: list[str] = []
         oracle_meta_parts.append(f"cases: {oracle.total_cases}")
         oracle_meta_parts.append(f"mismatches: {oracle.mismatches}")
@@ -585,7 +601,7 @@ def main() -> int:
                 f"actual: `{_redact_text(oracle.actual_path, privacy_mode=args.privacy_mode)}`"
             )
         extra = f" ({', '.join(oracle_meta_parts)})" if oracle_meta_parts else ""
-        lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`{extra}")
+        lines.append(f"- Excel-oracle mismatch report: `{oracle_path_str}`{extra}")
     else:
         lines.append("- Excel-oracle mismatch report: **MISSING**")
     lines.append("")
@@ -661,8 +677,16 @@ def main() -> int:
             "commit": commit,
             "runUrl": run_url,
             "inputs": {
-                "corpusSummaryPath": _fmt_path(repo_root, corpus.path) if corpus else None,
-                "oracleReportPath": _fmt_path(repo_root, oracle.path) if oracle else None,
+                "corpusSummaryPath": _redact_text(
+                    _fmt_path(repo_root, corpus.path), privacy_mode=args.privacy_mode
+                )
+                if corpus
+                else None,
+                "oracleReportPath": _redact_text(
+                    _fmt_path(repo_root, oracle.path), privacy_mode=args.privacy_mode
+                )
+                if oracle
+                else None,
                 "corpus": {
                     "label": corpus_label,
                     "timestamp": corpus.timestamp if corpus else None,
