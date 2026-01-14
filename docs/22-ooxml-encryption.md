@@ -65,6 +65,24 @@ These inputs should fail with actionable “unsupported” errors (not “corrup
 - **Non-AES ciphers**
 - **Extensible Encryption** and other `EncryptionInfo` versions besides `4.4`
 
+#### Important implementation note (per-crate validation)
+
+The MS-OFFCRYPTO XML descriptor contains many parameters. Different Formula crates enforce different
+levels of validation:
+
+- `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` validate:
+  - `cipherAlgorithm == AES`
+  - `cipherChaining == ChainingModeCBC`
+  - password key-encryptor present (and will reject certificate-only encryption with an explicit
+    “unsupported key encryptor” error)
+- `crates/formula-offcrypto`’s Agile parser currently **ignores** `cipherAlgorithm` /
+  `cipherChaining` attributes (it assumes AES-CBC) and will treat missing password key-encryptor
+  data as a structural error (e.g. “missing password `<encryptedKey>` element”).
+
+If you add new decryption entrypoints on top of `formula-offcrypto`, make sure to validate the
+declared cipher/chaining/key-encryptor parameters so unsupported files don’t get misreported as
+“corrupt” or “wrong password”.
+
 ## The `EncryptionInfo` stream (Agile 4.4)
 
 The `EncryptionInfo` stream begins with an 8-byte `EncryptionVersionInfo` header:
@@ -270,6 +288,8 @@ The Agile decryption errors are designed to be actionable. The most important di
 | `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
 | `formula_offcrypto::OffcryptoError::UnsupportedEncryption { encryption_type: ... }` | Encryption type known but not supported by selected decrypt mode | Use correct decrypt mode / add support |
+| `formula_xlsx::offcrypto::OffCryptoError::UnsupportedKeyEncryptor { .. }` | File is encrypted, but only a non-password key-encryptor (e.g. certificate) is present | Re-save using password encryption; or add key-encryptor support |
+| `formula_xlsx::offcrypto::OffCryptoError::{UnsupportedCipherAlgorithm, UnsupportedCipherChaining, UnsupportedHashAlgorithm}` | Cipher/chaining/hash params are not in our supported subset | Re-save with default Excel encryption settings; or add support |
 | XML/structure errors (`InvalidEncryptionInfo`, base64 decode, ciphertext alignment) | Malformed/corrupt encrypted wrapper | Treat as corrupted file |
 
 For the exact user-facing strings, see:
@@ -277,6 +297,15 @@ For the exact user-facing strings, see:
 - `crates/formula-io/src/lib.rs` (`formula_io::Error`)
 - `crates/formula-offcrypto/src/lib.rs` (`formula_offcrypto::OffcryptoError`)
 - `crates/formula-xlsx/src/offcrypto/error.rs` (`formula_xlsx::offcrypto::OffCryptoError`)
+
+### Example message strings (today)
+
+Strings change over time, but these are the common ones you’ll see in logs/bug reports:
+
+- Wrong password (Agile verifier mismatch):  
+  `wrong password for encrypted workbook (verifier mismatch)`
+- Integrity failure (HMAC mismatch):  
+  `encrypted workbook integrity check failed (HMAC mismatch); the file may be corrupted or the password is incorrect`
 
 ## Test oracles / cross-validation
 
