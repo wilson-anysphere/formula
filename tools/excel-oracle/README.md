@@ -123,7 +123,8 @@ To extract a full mapping from a **real Excel install** for the active Excel UI 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId de-DE `
-  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json `
+  -FailOnSkipped
 
 # Normalize sources (omits identity mappings + enforces stable casing)
 node scripts/normalize-locale-function-sources.js
@@ -143,7 +144,8 @@ Example for Spanish (`es-ES`):
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId es-ES `
-  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json `
+  -FailOnSkipped
 
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
@@ -166,6 +168,8 @@ Notes / caveats:
   would later cause `scripts/generate-locale-function-tsv.js` to fail).
 - Use `-Visible`, `-MaxFunctions N`, and/or PowerShell’s `-Verbose` switch for debugging.
   - Note: `-MaxFunctions` is for debugging only; do not commit partial sources.
+- When generating sources intended to be committed, prefer `-FailOnSkipped` so older/misconfigured
+  Excel installs can't silently fall back to canonical/English spellings for unsupported functions.
 - `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
   `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
   English in the generated TSVs.
