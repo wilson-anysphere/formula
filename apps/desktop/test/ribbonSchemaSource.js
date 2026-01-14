@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -27,10 +29,10 @@ export function readRibbonSchemaSource(tabFiles) {
           .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
           .map((entry) => entry.name)
           .sort();
-    return files.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n");
+    return stripComments(files.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n"));
   }
 
   // Back-compat: older versions kept all tab definitions in ribbonSchema.ts.
   const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-  return fs.readFileSync(schemaPath, "utf8");
+  return stripComments(fs.readFileSync(schemaPath, "utf8"));
 }

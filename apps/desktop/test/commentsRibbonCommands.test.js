@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,7 +41,7 @@ test("Ribbon schema uses canonical Review → Comments command ids", () => {
 
 test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Pressed state should follow the SpreadsheetApp comments panel visibility.
   assert.match(
@@ -74,7 +75,7 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
 
 test("Builtin Comments commands are registered with the expected behavior", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   // Toggle command: best-effort toggle semantics.
   assert.match(

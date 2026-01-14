@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,19 +79,19 @@ test("Ribbon schema wires Home → Editing → Clear menu items to canonical com
 
 test("Clear commands are registered under canonical ids (no legacy routing helpers)", () => {
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
   const dropdownPath = path.join(__dirname, "..", "src", "commands", "registerFormatFontDropdownCommands.ts");
-  const dropdown = fs.readFileSync(dropdownPath, "utf8");
+  const dropdown = stripComments(fs.readFileSync(dropdownPath, "utf8"));
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
   const keybindingsPath = path.join(__dirname, "..", "src", "commands", "builtinKeybindings.ts");
-  const keybindings = fs.readFileSync(keybindingsPath, "utf8");
+  const keybindings = stripComments(fs.readFileSync(keybindingsPath, "utf8"));
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
   const editingDisabledPath = path.join(__dirname, "..", "src", "ribbon", "ribbonEditingDisabledById.ts");
-  const editingDisabled = fs.readFileSync(editingDisabledPath, "utf8");
+  const editingDisabled = stripComments(fs.readFileSync(editingDisabledPath, "utf8"));
   const commandHandlersPath = path.join(__dirname, "..", "src", "ribbon", "commandHandlers.ts");
-  const commandHandlers = fs.readFileSync(commandHandlersPath, "utf8");
+  const commandHandlers = stripComments(fs.readFileSync(commandHandlersPath, "utf8"));
 
   // Clear Contents is an editing command (used by Delete key + ribbon), so it should be registered as `edit.clearContents`.
   assert.match(
@@ -141,7 +142,7 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Clear commands should be dispatched through the CommandRegistry bridge (createRibbonActionsFromCommands),
   // not handled via main.ts's ribbon fallback switch.

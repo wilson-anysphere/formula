@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,12 +54,12 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
 
 test("Desktop main.ts routes canonical Editing ribbon commands through the CommandRegistry (no legacy mapping)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   // Canonical editing ids should be registered as builtin commands so ribbon, command palette,
   // and keybindings share the same execution path (via createRibbonActionsFromCommands).

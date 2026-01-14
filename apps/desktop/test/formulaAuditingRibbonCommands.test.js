@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,10 +35,10 @@ test("Ribbon schema includes Formulas → Formula Auditing command ids", () => {
 
 test("Formulas → Formula Auditing ribbon commands are registered in CommandRegistry (not wired only in main.ts)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
 
   // Coverage: the ribbon schema uses these ids; ensure we register builtins using the same ids
   // (so the ribbon + command palette share the same wiring).

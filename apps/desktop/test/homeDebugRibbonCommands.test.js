@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -12,7 +14,7 @@ function escapeRegExp(value) {
 
 test("Ribbon schema uses canonical Home → Debug command ids (Auditing / Split view / Freeze)", () => {
   const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "homeTab.ts");
-  const schema = fs.readFileSync(schemaPath, "utf8");
+  const schema = stripComments(fs.readFileSync(schemaPath, "utf8"));
 
   const cases = [
     { id: "audit.togglePrecedents", testId: "audit-precedents" },
@@ -54,7 +56,7 @@ test("Ribbon schema uses canonical Home → Debug command ids (Auditing / Split 
 
 test("Desktop main.ts no longer handles legacy Home debug ids directly", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   for (const legacy of [
     "audit-precedents",
@@ -74,7 +76,7 @@ test("Desktop main.ts no longer handles legacy Home debug ids directly", () => {
 
 test("Builtin commands exist for the Home debug actions", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   // Transitive auditing toggle should exist + restore focus.
   assert.match(
@@ -99,4 +101,3 @@ test("Builtin commands exist for the Home debug actions", () => {
     assert.match(commands, pattern, `Expected ${id} to call layoutController.setSplitDirection("${dir}", 0.5) and app.focus()`);
   }
 });
-

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +34,7 @@ test("Ribbon schema includes Home → Alignment → Merge & Center command ids",
 
 test("Merge & Center ribbon commands are registered in CommandRegistry (not exempted as ribbon-only)", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const commandIds = [
     "home.alignment.mergeCenter.mergeCenter",
@@ -51,7 +52,7 @@ test("Merge & Center ribbon commands are registered in CommandRegistry (not exem
   }
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
   for (const id of commandIds) {
     assert.doesNotMatch(
       disabling,

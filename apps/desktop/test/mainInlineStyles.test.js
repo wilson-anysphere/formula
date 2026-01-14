@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractSection(source, startMarker, endMarker) {
@@ -18,7 +20,7 @@ function extractSection(source, startMarker, endMarker) {
 
 test("desktop main.ts avoids static inline style assignments", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const source = fs.readFileSync(mainPath, "utf8");
+  const source = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   for (const legacyClass of ["dock-panel__mount", "panel-mount--fill-column", "dock-panel__body--fill"]) {
     assert.equal(
@@ -31,7 +33,7 @@ test("desktop main.ts avoids static inline style assignments", () => {
   // Hidden color inputs are defined in the builtin command registration module so they can be
   // invoked from ribbon/command palette/keybindings through the same path.
   const builtinCommandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtinCommands = fs.readFileSync(builtinCommandsPath, "utf8");
+  const builtinCommands = stripComments(fs.readFileSync(builtinCommandsPath, "utf8"));
 
   const hiddenColorInputSection = extractSection(
     builtinCommands,

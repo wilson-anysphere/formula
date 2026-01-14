@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -79,7 +80,7 @@ test("Ribbon schema uses canonical Home → Alignment command ids", () => {
 
 test("Alignment ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerFormatAlignmentCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const commandIds = [
     "format.alignLeft",
@@ -107,7 +108,7 @@ test("Alignment ribbon commands are registered in CommandRegistry and not handle
   }
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // These ids should be dispatched by `createRibbonActionsFromCommands` via CommandRegistry;
   // main.ts may reference them for pressed/disabled state, but should not handle them in its
@@ -120,4 +121,3 @@ test("Alignment ribbon commands are registered in CommandRegistry and not handle
     );
   }
 });
-

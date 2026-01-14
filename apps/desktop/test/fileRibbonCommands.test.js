@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,10 +50,10 @@ test("Ribbon schema includes File tab command ids", () => {
 
 test("File tab ribbon ids are registered in CommandRegistry (no exemptions needed)", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
 
   const ids = [
     "file.new.new",

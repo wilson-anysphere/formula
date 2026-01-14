@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,10 +26,10 @@ test("Ribbon schema includes Home → Find & Select command ids", () => {
 
 test("Desktop main.ts routes Find/Replace ribbon commands through the CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   // Find/Replace/Go To are registered as commands in registerDesktopCommands (overriding the builtin no-op
   // registrations) and should not be handled by `handleRibbonCommand` switch cases.
@@ -49,4 +50,3 @@ test("Desktop main.ts routes Find/Replace ribbon commands through the CommandReg
   // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
 });
-

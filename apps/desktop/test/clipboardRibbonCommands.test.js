@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,10 +41,10 @@ test("Ribbon schema includes canonical clipboard command ids for Home → Clipbo
 
 test("Desktop main.ts routes clipboard ribbon commands through the CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
 
   // Ensure legacy ribbon-only IDs are no longer handled explicitly.
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.cut["']:/);

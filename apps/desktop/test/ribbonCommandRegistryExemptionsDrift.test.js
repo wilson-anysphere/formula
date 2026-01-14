@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { COMMAND_REGISTRY_EXEMPT_IDS } from "../src/ribbon/ribbonCommandRegistryDisabling.js";
 import { defaultRibbonSchema } from "../src/ribbon/ribbonSchema.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,7 +114,7 @@ function collectRegisteredBuiltinCommandIds() {
   for (const file of files) {
     let text = "";
     try {
-      text = fs.readFileSync(file, "utf8");
+      text = stripComments(fs.readFileSync(file, "utf8"));
     } catch {
       continue;
     }

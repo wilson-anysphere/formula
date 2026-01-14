@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +37,7 @@ test("Ribbon schema includes Data → Queries & Connections controls", () => {
 
 test("Data → Queries & Connections ribbon commands are registered in CommandRegistry (not wired only in main.ts)", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDataQueriesCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const commandIds = [
     "data.queriesConnections.queriesConnections",
@@ -65,7 +66,7 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
   assert.match(commands, /\bservice\.refreshAll\(\)/);
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // main.ts should register the commands and avoid ribbon-only wiring. Registration is
   // centralized in `registerDesktopCommands` so the desktop shell shares a single command catalog.
@@ -93,7 +94,7 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
   // Since these ids are now real commands, they should not be kept in the ribbon
   // CommandRegistry exemption list (that list is for ribbon-only wiring).
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
   for (const id of commandIds) {
     assert.doesNotMatch(
       disabling,

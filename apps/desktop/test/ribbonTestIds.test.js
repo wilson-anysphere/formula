@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,7 +83,7 @@ test("ribbon schema and File backstage expose stable, unique test ids", () => {
   );
 
   const fileBackstagePath = path.join(__dirname, "..", "src", "ribbon", "FileBackstage.tsx");
-  const fileBackstage = fs.readFileSync(fileBackstagePath, "utf8");
+  const fileBackstage = stripComments(fs.readFileSync(fileBackstagePath, "utf8"));
   const backstageTestIds = collectStringPropertyValues(fileBackstage, "testId");
   const backstageDuplicates = findDuplicates(backstageTestIds);
   assert.deepEqual(

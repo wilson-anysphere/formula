@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("Desktop main.ts wires titlebar window controls to Tauri window operations", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const source = fs.readFileSync(mainPath, "utf8");
+  const source = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Ensure the Titlebar is mounted with window control callbacks.
   assert.match(source, /\bwindowControls:\s*titlebarWindowControls\b/);

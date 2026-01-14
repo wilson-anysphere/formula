@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -12,7 +14,7 @@ function escapeRegExp(value) {
 
 test("View → Panels ribbon buttons use canonical CommandRegistry ids (stable testIds)", () => {
   const viewTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "viewTab.ts");
-  const viewTab = fs.readFileSync(viewTabPath, "utf8");
+  const viewTab = stripComments(fs.readFileSync(viewTabPath, "utf8"));
 
   const expected = [
     { commandId: "view.togglePanel.marketplace", testId: "open-marketplace-panel" },
@@ -36,7 +38,7 @@ test("View → Panels ribbon buttons use canonical CommandRegistry ids (stable t
 
 test("View → Panels ribbon actions are wired through CommandRegistry (no ribbon-only open-* switch cases)", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   // Ensure the canonical commands exist.
   for (const id of ["view.togglePanel.marketplace", "view.togglePanel.versionHistory", "view.togglePanel.branchManager"]) {
@@ -65,7 +67,7 @@ test("View → Panels ribbon actions are wired through CommandRegistry (no ribbo
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   for (const legacy of ["open-marketplace-panel", "open-version-history-panel", "open-branch-manager-panel"]) {
     assert.doesNotMatch(
@@ -75,4 +77,3 @@ test("View → Panels ribbon actions are wired through CommandRegistry (no ribbo
     );
   }
 });
-

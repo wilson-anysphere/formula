@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,7 +49,7 @@ test("Ribbon schema includes View/Developer macro command ids", () => {
 
 test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA panels", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Ribbon dispatch should delegate these macro command ids through CommandRegistry so they can
   // also be used by the command palette / keybindings. The ribbon uses the generic
@@ -94,7 +95,7 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
 
   // Command registration should include these ids and wire them to panels/recorder behavior.
   const desktopRegistrationPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopRegistration = fs.readFileSync(desktopRegistrationPath, "utf8");
+  const desktopRegistration = stripComments(fs.readFileSync(desktopRegistrationPath, "utf8"));
   assert.match(
     desktopRegistration,
     /\bregisterRibbonMacroCommands\(/,
@@ -102,7 +103,7 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
   );
 
   const registrationPath = path.join(__dirname, "..", "src", "commands", "registerRibbonMacroCommands.ts");
-  const registration = fs.readFileSync(registrationPath, "utf8");
+  const registration = stripComments(fs.readFileSync(registrationPath, "utf8"));
 
   for (const commandId of commandIds) {
     assert.match(

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,7 +43,7 @@ test("Ribbon schema includes View → Zoom command ids", () => {
 
 test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Zoom commands should not be hardcoded through the ribbon's `onCommand` switch.
   // They are registered as builtin commands and executed via the standard
@@ -53,7 +54,7 @@ test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry
   // Ensure the desktop command catalog registers the zoom commands so they can be
   // dispatched by `createRibbonActionsFromCommands`.
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.zoomToSelection["']/);
   assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.openPicker["']/);

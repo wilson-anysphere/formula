@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,7 +40,7 @@ test("Ribbon schema includes the Theme selector dropdown (View → Appearance)",
 
 test("Desktop theme switching commands are wired via registerDesktopCommands/registerBuiltinCommands", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Theme switching is wired through the shared CommandRegistry so ribbon, command palette, and
   // keybindings share the same implementation.
@@ -55,7 +56,7 @@ test("Desktop theme switching commands are wired via registerDesktopCommands/reg
   );
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
   assert.match(
     desktopCommands,
     /\bregisterBuiltinCommands\s*\(\s*\{\s*[\s\S]*?\bthemeController\b/,
@@ -68,7 +69,7 @@ test("Desktop theme switching commands are wired via registerDesktopCommands/reg
   );
 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const expectations = [
     { commandId: "view.appearance.theme.system", canonicalId: "view.theme.system" },
@@ -94,7 +95,7 @@ test("Desktop theme switching commands are wired via registerDesktopCommands/reg
 
 test("Desktop startup instantiates and starts ThemeController in main.ts", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Import should come from the dedicated desktop theming module.
   assert.match(main, /import\s+\{\s*ThemeController\s*\}\s+from\s+["']\.\/theme\/themeController\.js["']/);

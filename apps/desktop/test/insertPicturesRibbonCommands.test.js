@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,10 +31,10 @@ test("Ribbon schema includes Insert → Pictures command ids", () => {
 
 test("Insert → Pictures ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const ids = [
     "insert.illustrations.pictures",

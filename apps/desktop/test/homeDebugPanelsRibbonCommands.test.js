@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -24,7 +26,7 @@ function findButtonBlockByTestId(source, testId) {
 
 test("Home → Debug → Panels ribbon buttons use canonical CommandRegistry ids (stable testIds)", () => {
   const homeTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "homeTab.ts");
-  const homeTab = fs.readFileSync(homeTabPath, "utf8");
+  const homeTab = stripComments(fs.readFileSync(homeTabPath, "utf8"));
 
   const expected = [
     { commandId: "view.togglePanel.aiAudit", testId: "open-panel-ai-audit" },
@@ -70,7 +72,7 @@ test("Home → Debug → Panels ribbon buttons use canonical CommandRegistry ids
 
 test("Home → Debug → Panels commands are registered in CommandRegistry (not wired only in main.ts)", () => {
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
 
   // Ensure panel toggles are real built-in commands so the ribbon shares wiring with the
   // command palette / keybindings and recents tracking.
@@ -109,7 +111,7 @@ test("Home → Debug → Panels commands are registered in CommandRegistry (not 
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Ensure we don't accidentally re-introduce ribbon-only open-* cases (these should route via CommandRegistry).
   for (const legacy of [

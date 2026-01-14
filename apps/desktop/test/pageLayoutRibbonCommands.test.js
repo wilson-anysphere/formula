@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -15,11 +17,11 @@ test("Ribbon schema includes Page Layout command ids", () => {
   try {
     // The ribbon schema is modularized; Page Layout lives in its own schema module.
     const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "pageLayoutTab.ts");
-    schema = fs.readFileSync(schemaPath, "utf8");
+    schema = stripComments(fs.readFileSync(schemaPath, "utf8"));
   } catch {
     // Back-compat: older versions kept all tab definitions in ribbonSchema.ts.
     const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-    schema = fs.readFileSync(schemaPath, "utf8");
+    schema = stripComments(fs.readFileSync(schemaPath, "utf8"));
   }
 
   const ids = [
@@ -48,7 +50,7 @@ test("Ribbon schema includes Page Layout command ids", () => {
 
 test("CommandRegistry registers Page Layout ribbon ids as builtin commands", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerPageLayoutCommands.ts");
-  const source = fs.readFileSync(commandsPath, "utf8");
+  const source = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   const ids = [
     "pageLayout.pageSetup.pageSetupDialog",
@@ -82,7 +84,7 @@ test("CommandRegistry registers Page Layout ribbon ids as builtin commands", () 
 
 test("Desktop main.ts does not special-case Page Layout ribbon actions in the ribbon switch", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Page Layout actions should be routed through CommandRegistry (not handled as ad-hoc ribbon switch cases).
   assert.ok(!/\bcase\s+["']pageLayout\./.test(main), "Expected main.ts to avoid pageLayout.* case handlers in ribbon switch");

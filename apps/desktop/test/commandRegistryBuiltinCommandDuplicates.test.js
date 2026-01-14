@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function collectSourceFiles(dir, out) {
@@ -58,7 +60,7 @@ test("command registration sources do not register the same builtin command id t
   const duplicatesByFile = [];
 
   for (const file of files) {
-    const text = fs.readFileSync(file, "utf8");
+    const text = stripComments(fs.readFileSync(file, "utf8"));
     const ids = collectRegisteredIdsFromSource(text);
     const duplicates = findDuplicates(ids);
     if (duplicates.length > 0) {
@@ -90,13 +92,13 @@ test("main.ts does not re-register builtin command ids already registered by src
 
   const commandIds = new Set();
   for (const file of commandFiles) {
-    const text = fs.readFileSync(file, "utf8");
+    const text = stripComments(fs.readFileSync(file, "utf8"));
     for (const id of collectRegisteredIdsFromSource(text)) {
       commandIds.add(id);
     }
   }
 
-  const mainText = fs.readFileSync(mainPath, "utf8");
+  const mainText = stripComments(fs.readFileSync(mainPath, "utf8"));
   const overlaps = collectRegisteredIdsFromSource(mainText).filter((id) => commandIds.has(id));
   overlaps.sort((a, b) => a.localeCompare(b));
 
@@ -110,7 +112,7 @@ test("main.ts does not re-register builtin command ids already registered by src
 test("main.ts does not register the same builtin command id twice", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const mainPath = path.join(srcRoot, "main.ts");
-  const mainText = fs.readFileSync(mainPath, "utf8");
+  const mainText = stripComments(fs.readFileSync(mainPath, "utf8"));
   const ids = collectRegisteredIdsFromSource(mainText);
   const duplicates = findDuplicates(ids);
 

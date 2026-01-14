@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CANONICAL_FREEZE_PANES_IDS = [
@@ -107,11 +109,11 @@ function readRibbonSchemaSource() {
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
       .map((entry) => entry.name)
       .sort();
-    return files.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n");
+    return stripComments(files.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n"));
   } catch {
     // Back-compat: older versions kept all tab definitions in ribbonSchema.ts.
     const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-    return fs.readFileSync(schemaPath, "utf8");
+    return stripComments(fs.readFileSync(schemaPath, "utf8"));
   }
 }
 
@@ -134,7 +136,7 @@ test("Ribbon schema uses canonical View → Freeze Panes command ids", () => {
 
 test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   // Legacy ribbon-only ids should not exist anywhere in main.ts.
   for (const id of LEGACY_FREEZE_PANES_IDS) {
@@ -164,7 +166,7 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
 
 test("Desktop main.ts does not disable Freeze Panes commands in read-only mode", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const readOnlyOverrides = extractObjectLiteralAfter(main, /\.\.\.\(isReadOnly\b/);
   const ids = ["view.window.freezePanes", ...CANONICAL_FREEZE_PANES_IDS];
@@ -176,7 +178,7 @@ test("Desktop main.ts does not disable Freeze Panes commands in read-only mode",
 
 test("Builtin command catalog exposes canonical Freeze Panes ids (and does not register the dropdown trigger id)", () => {
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const commands = fs.readFileSync(commandsPath, "utf8");
+  const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
 
   for (const id of CANONICAL_FREEZE_PANES_IDS) {
     const pattern = new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`);

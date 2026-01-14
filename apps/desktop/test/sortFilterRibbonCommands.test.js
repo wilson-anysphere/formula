@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,16 +34,16 @@ test("Ribbon schema includes Sort & Filter command ids (Home/Data tabs)", () => 
 
 test("Sort & Filter ribbon commands are registered in CommandRegistry (no exemptions / no main.ts switch cases)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   const sortFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerSortFilterCommands.ts");
-  const sortFilterCommands = fs.readFileSync(sortFilterCommandsPath, "utf8");
+  const sortFilterCommands = stripComments(fs.readFileSync(sortFilterCommandsPath, "utf8"));
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
 
   // Guardrail: AutoFilter is a registered CommandRegistry toggle command, so it should not be
   // special-cased as a ribbon `toggleOverrides` handler.
