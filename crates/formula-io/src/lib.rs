@@ -1861,14 +1861,14 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         });
     };
 
-    // `EncryptedPackage` streams should start with an 8-byte plaintext length header. If the stream
-    // is too short (and we didn't already detect a plaintext ZIP payload above), treat it as an
-    // unsupported/malformed encryption container rather than an invalid password.
+    // `EncryptedPackage` streams should start with an 8-byte plaintext length header.
+    //
+    // If the stream is too short (and we didn't already detect a plaintext ZIP payload above),
+    // treat it as a decryption failure so callers using the password-capable API can prompt/retry
+    // without needing to surface format-level diagnostics.
     if encrypted_package.len() <= 8 {
-        return Err(Error::UnsupportedOoxmlEncryption {
+        return Err(Error::InvalidPassword {
             path: path.to_path_buf(),
-            version_major,
-            version_minor,
         });
     }
     let decrypted = if (version_major, version_minor) == (4, 4) {
