@@ -18,7 +18,7 @@ import {
   DEFAULT_GRID_FONT_FAMILY,
   DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
   describeActiveCellLabel,
-  describeCell,
+  describeCellForA11y,
   resolveGridThemeFromCssVars,
   wheelDeltaToPixels,
 } from "@formula/grid";
@@ -220,7 +220,13 @@ export class DesktopSharedGrid {
     this.a11yStatusEl.setAttribute("aria-live", "polite");
     this.a11yStatusEl.setAttribute("aria-atomic", "true");
     applySrOnlyStyle(this.a11yStatusEl);
-    this.a11yStatusEl.textContent = describeCell(null, null, this.provider, this.headerRows, this.headerCols);
+    this.a11yStatusEl.textContent = describeCellForA11y({
+      selection: null,
+      range: null,
+      provider: this.provider,
+      headerRows: this.headerRows,
+      headerCols: this.headerCols,
+    });
     this.container.appendChild(this.a11yStatusEl);
 
     this.a11yActiveCellId = `desktop-grid-active-cell-${this.a11yStatusId}`;
@@ -502,7 +508,13 @@ export class DesktopSharedGrid {
   }
 
   private announceSelection(selection: { row: number; col: number } | null, range: CellRange | null): void {
-    const statusText = describeCell(selection, range, this.provider, this.headerRows, this.headerCols);
+    const statusText = describeCellForA11y({
+      selection,
+      range,
+      provider: this.provider,
+      headerRows: this.headerRows,
+      headerCols: this.headerCols,
+    });
     const activeCellLabel = selection ? describeActiveCellLabel(selection, this.provider, this.headerRows, this.headerCols) ?? "" : "";
 
     if (
