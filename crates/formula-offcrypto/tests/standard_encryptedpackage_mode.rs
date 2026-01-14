@@ -43,10 +43,11 @@ fn read_ole_stream(raw_ole: &[u8], name: &str) -> Vec<u8> {
     buf
 }
 
-/// Attempt a CBC+segmented `EncryptedPackage` decrypt using the *same* Standard password verifier
-/// implementation in this crate.
+/// Assert that a committed Standard (CryptoAPI) **AES** fixture uses the baseline **ECB**
+/// `EncryptedPackage` mode (and decrypts to the expected plaintext fixture).
 ///
-/// This is only used as a diagnostic if ECB decryption does not match the plaintext fixture.
+/// If ECB decryption does not match, this function attempts CBC-segmented decryption as a
+/// diagnostic to clearly report fixture drift (ECB vs CBC ambiguity).
 fn assert_fixture_is_ecb(
     encrypted_name: &str,
     plaintext_name: &str,
