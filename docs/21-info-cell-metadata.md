@@ -311,7 +311,8 @@ Merge semantics (as implemented in the UI):
 - `undefined` keys are ignored (patch does not affect the base style)
 - `null` values are meaningful and are commonly used by the UI layer to **clear** a field back to its default
   (e.g. `numberFormat: null` to clear to General; `alignment: { horizontal: null }` to clear to General;
-  `protection: { locked: null }` to clear back to Excel's default locked=true; `protection: { hidden: null }` to clear back to hidden=false;
+  `protection: { locked: null }` to clear back to Excel's default locked=true (use `null` rather than `true` to override a lower-precedence `locked:false`);
+  `protection: { hidden: null }` to clear back to hidden=false;
   `applyStylePatch(base, null)` resets to `{}`)
 
 This is implemented in JS by `applyStylePatch(base, patch)` (deep merge).
