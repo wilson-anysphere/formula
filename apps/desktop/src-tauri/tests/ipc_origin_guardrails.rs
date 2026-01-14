@@ -132,8 +132,8 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "collab_encryption_key_delete",
         "collab_encryption_key_list",
         // Workbook-origin bytes extraction helpers (defense-in-depth against exfil if navigated).
-        "list_imported_chart_models",
         "list_imported_chart_objects",
+        "list_imported_embedded_cell_images",
         // Clipboard (command wrappers in commands.rs; `clipboard/mod.rs` has its own coverage).
         "read_clipboard",
         "write_clipboard",
