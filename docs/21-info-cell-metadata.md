@@ -202,7 +202,9 @@ Current behavior (Excel encoding):
 #### `CELL("format")` / `CELL("color")` / `CELL("parentheses")`
 
 These keys are computed from the cell’s **effective number format string**, not from the cell’s value.
-- If the reference points outside the sheet’s configured dimensions, the engine returns `#REF!`.
+- Unlike `CELL("width")` / `CELL("protect")` / `CELL("prefix")`, these keys do **not** currently enforce
+  sheet-dimension bounds checks; out-of-bounds references may still return a format result based on
+  available formatting metadata (often falling back to General).
 
 - `CELL("format")` returns an Excel format code string (e.g. `"G"`, `"F2"`, `"N0"`, `"C2"`).
 - `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. a second section with a color tag), otherwise `0`.
