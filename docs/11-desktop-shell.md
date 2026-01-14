@@ -215,8 +215,8 @@ Top-level keys in `tauri.conf.json` define the packaged app identity:
 - `productName`: human-readable app name
 - `identifier`: reverse-DNS bundle identifier (`app.formula.desktop`)
 - `version`: desktop app version used by the updater / release tooling. Tagged releases (`vX.Y.Z`)
-  must match this value (CI enforces this via `scripts/check-desktop-version.mjs`; see
-  `docs/release.md`).
+  must match this value *and* `apps/desktop/src-tauri/Cargo.toml` (`[package].version`) (CI enforces
+  this via `scripts/check-desktop-version.mjs`; see `docs/release.md`).
 - `mainBinaryName`: the Rust binary name Tauri expects to launch (matches `[[bin]].name` in `apps/desktop/src-tauri/Cargo.toml`)
 
 ### `build.*` (frontend dev/build + Cargo feature flags)
