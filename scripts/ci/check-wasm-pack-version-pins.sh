@@ -125,4 +125,62 @@ if [ "$matched" -eq 0 ]; then
   exit 1
 fi
 
+# Best-effort docs check: if the release docs pin a WASM_PACK_VERSION, keep it in sync with the
+# canonical workflow pins so bumping is an explicit, coordinated change.
+docs_file="docs/release.md"
+if [ -f "$docs_file" ]; then
+  docs_versions=()
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # Only consider shell-style assignments (optionally prefixed by `export`).
+    if ! [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?WASM_PACK_VERSION[[:space:]]*= ]]; then
+      continue
+    fi
+    value="${line#*=}"
+    value="${value%%#*}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "$value" == \"*\" ]]; then
+      value="${value#\"}"
+      value="${value%\"}"
+    elif [[ "$value" == \'*\' ]]; then
+      value="${value#\'}"
+      value="${value%\'}"
+    fi
+    value="${value#[vV]}"
+    if [ -z "$value" ]; then
+      continue
+    fi
+    docs_versions+=("$value")
+  done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?WASM_PACK_VERSION[[:space:]]*=' "$docs_file" || true)
+
+  if [ "${#docs_versions[@]}" -gt 0 ]; then
+    # De-duplicate.
+    unique_versions=()
+    while IFS= read -r v; do
+      [ -z "$v" ] && continue
+      unique_versions+=("$v")
+    done < <(printf '%s\n' "${docs_versions[@]}" | sort -u)
+    mismatches=()
+    for v in "${unique_versions[@]}"; do
+      if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "docs/release.md WASM_PACK_VERSION must be patch-pinned (X.Y.Z); found: ${v}" >&2
+        exit 1
+      fi
+      if [ "$v" != "$baseline" ]; then
+        mismatches+=("$v")
+      fi
+    done
+
+    if [ "${#mismatches[@]}" -gt 0 ]; then
+      echo "docs/release.md WASM_PACK_VERSION mismatch detected:" >&2
+      echo "  workflows: WASM_PACK_VERSION=${baseline}" >&2
+      printf '  docs/release.md: %s\n' "${unique_versions[@]}" >&2
+      echo "" >&2
+      echo "Fix: update docs/release.md WASM_PACK_VERSION assignments to ${baseline}." >&2
+      exit 1
+    fi
+  fi
+fi
+
 echo "wasm-pack version pins match (${baseline})."

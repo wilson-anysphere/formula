@@ -102,6 +102,53 @@ jobs:
   assert.match(proc.stdout, /wasm-pack version pins match/i);
 });
 
+test("fails when docs/release.md pins a different wasm-pack version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  WASM_PACK_VERSION: 0.13.1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    "docs/release.md": `
+Tool versions:
+
+\`\`\`bash
+WASM_PACK_VERSION=0.13.2
+\`\`\`
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /docs\/release\.md/i);
+  assert.match(proc.stderr, /WASM_PACK_VERSION/i);
+});
+
+test("passes when docs/release.md uses a v/V-prefixed wasm-pack version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  WASM_PACK_VERSION: 0.13.1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    "docs/release.md": `
+\`\`\`bash
+export WASM_PACK_VERSION=v0.13.1
+\`\`\`
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /wasm-pack version pins match/i);
+});
+
 test("ignores WASM_PACK_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `
