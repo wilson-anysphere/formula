@@ -8768,6 +8768,19 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
+    // Ribbon command wiring coverage relies on `main.ts` referencing any enabled ribbon ids that are not
+    // registered in the CommandRegistry, even when the actual behavior is implemented in
+    // `ribbon/commandHandlers.ts`.
+    if (
+      commandId === "home.editing.sortFilter.customSort" ||
+      commandId === "data.sortFilter.sort.customSort" ||
+      commandId === "home.number.moreFormats.custom"
+    ) {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
+    }
+
     // Merge commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
     // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
     // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
