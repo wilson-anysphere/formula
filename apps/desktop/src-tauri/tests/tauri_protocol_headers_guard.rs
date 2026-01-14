@@ -236,6 +236,168 @@ fn find_next_code_byte(src: &str, start: usize, needle: u8) -> Option<usize> {
     None
 }
 
+fn find_next_code_substring(src: &str, start: usize, needle: &str) -> Option<usize> {
+    let needle_bytes = needle.as_bytes();
+    if needle_bytes.is_empty() {
+        return Some(start);
+    }
+    let mut i = start;
+    while let Some(pos) = find_next_code_byte(src, i, needle_bytes[0]) {
+        if src.as_bytes().get(pos..pos + needle_bytes.len()) == Some(needle_bytes) {
+            return Some(pos);
+        }
+        i = pos + 1;
+    }
+    None
+}
+
+fn skip_ws_and_comments(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut i = start;
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+
+        if i + 1 >= bytes.len() {
+            break;
+        }
+
+        // Line comment
+        if bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Block comment (nested)
+        if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            i += 2;
+            let mut depth = 1usize;
+            while i < bytes.len() {
+                if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                    depth += 1;
+                    i += 2;
+                    continue;
+                }
+                if i + 1 < bytes.len() && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    depth = depth.saturating_sub(1);
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        break;
+    }
+    i
+}
+
+fn parse_string_literal(src: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = src.as_bytes();
+    let b0 = *bytes.get(start)?;
+
+    // Normal string: "..."
+    if b0 == b'"' {
+        let mut out = String::new();
+        let mut i = start + 1;
+        let mut escape = false;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if escape {
+                match b {
+                    b'n' => out.push('\n'),
+                    b'r' => out.push('\r'),
+                    b't' => out.push('\t'),
+                    b'\\' => out.push('\\'),
+                    b'"' => out.push('"'),
+                    // Best-effort: keep unknown escapes as-is.
+                    _ if b.is_ascii() => out.push(b as char),
+                    _ => {
+                        let ch = src[i..].chars().next()?;
+                        out.push(ch);
+                    }
+                }
+                escape = false;
+                i += 1;
+                continue;
+            }
+
+            match b {
+                b'\\' => {
+                    escape = true;
+                    i += 1;
+                }
+                b'"' => return Some((out, i + 1)),
+                _ if b.is_ascii() => {
+                    out.push(b as char);
+                    i += 1;
+                }
+                _ => {
+                    let ch = src[i..].chars().next()?;
+                    out.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+        }
+        return None;
+    }
+
+    // Byte string: b"..."
+    if b0 == b'b' && bytes.get(start + 1) == Some(&b'"') {
+        let (s, end) = parse_string_literal(src, start + 1)?;
+        return Some((s, end));
+    }
+
+    // Raw string: r#"..."#
+    if b0 == b'r' || (b0 == b'b' && bytes.get(start + 1) == Some(&b'r')) {
+        let mut i = start;
+        if b0 == b'b' {
+            i += 1; // consume b
+        }
+        if bytes.get(i) != Some(&b'r') {
+            return None;
+        }
+        i += 1;
+        let mut hashes = 0usize;
+        while bytes.get(i) == Some(&b'#') {
+            hashes += 1;
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b'"') {
+            return None;
+        }
+        i += 1;
+        let content_start = i;
+        while i < bytes.len() {
+            if bytes[i] == b'"' {
+                let mut ok = true;
+                for k in 0..hashes {
+                    if i + 1 + k >= bytes.len() || bytes[i + 1 + k] != b'#' {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok {
+                    let content = &src[content_start..i];
+                    return Some((content.to_string(), i + 1 + hashes));
+                }
+            }
+            i += 1;
+        }
+        return None;
+    }
+
+    None
+}
+
 fn repo_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
@@ -255,12 +417,32 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
     // This file (`src/main.rs`) only compiles with `--features desktop` because it depends on the
     // system WebView toolchain, so we use a source-level scan to guard against accidental header
     // regressions in headless CI.
-    let start_marker = ".register_uri_scheme_protocol(\"tauri\"";
-    let start = main_rs_src
-        .find(start_marker)
-        .unwrap_or_else(|| panic!("failed to find `{start_marker}` in src/main.rs"));
+    let register_call_start = {
+        let mut search = 0usize;
+        let needle = ".register_uri_scheme_protocol";
+        loop {
+            let Some(start) = find_next_code_substring(main_rs_src, search, needle) else {
+                panic!(
+                    "failed to find `.register_uri_scheme_protocol(\"tauri\", ...)` in src/main.rs"
+                );
+            };
+            let after = start + needle.len();
+            let open_paren = find_next_code_byte(main_rs_src, after, b'(').unwrap_or_else(|| {
+                panic!(
+                    "failed to find `(` after `{needle}` while scanning for the `tauri://` handler"
+                )
+            });
+            let arg_start = skip_ws_and_comments(main_rs_src, open_paren + 1);
+            if let Some((scheme, _end)) = parse_string_literal(main_rs_src, arg_start) {
+                if scheme == "tauri" {
+                    break start;
+                }
+            }
+            search = after;
+        }
+    };
 
-    let rest = &main_rs_src[start..];
+    let rest = &main_rs_src[register_call_start..];
 
     // Extract the closure body for the `tauri://` handler.
     //
@@ -525,6 +707,11 @@ fn extract_brace_block_ignores_braces_in_strings_and_comments() {
 #[test]
 fn extract_tauri_handler_extractor_ignores_tokens_in_comments_and_strings() {
     let src = r#"
+// This comment intentionally includes a tauri protocol registration-like snippet.
+// If the extractor naively searches by substring without tracking comment state, it can start in
+// the middle of this comment and mis-parse the handler.
+// .register_uri_scheme_protocol("tauri", move |_ctx, _request| { /* not real */ })
+
 tauri::Builder::default()
     .register_uri_scheme_protocol(
         "asset",
@@ -569,11 +756,9 @@ fn tauri_scheme_protocol_handler_injects_cross_origin_isolation_headers_and_pres
     let main_rs_src = load_main_rs_source();
 
     // 1) Ensure `src/main.rs` registers a custom `tauri://` protocol handler.
-    assert!(
-        main_rs_src.contains(".register_uri_scheme_protocol(\"tauri\""),
-        "expected src/main.rs to register a `tauri://` URI scheme handler via `.register_uri_scheme_protocol(\"tauri\", ...)`"
-    );
-
+    //
+    // `extract_tauri_scheme_protocol_handler_block` will panic with a targeted error message if
+    // the call is missing.
     let handler_block = extract_tauri_scheme_protocol_handler_block(&main_rs_src);
     let asset_success_block = extract_tauri_scheme_protocol_asset_success_block(handler_block);
 
