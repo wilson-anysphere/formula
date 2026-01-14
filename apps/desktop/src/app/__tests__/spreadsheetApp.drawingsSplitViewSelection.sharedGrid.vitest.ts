@@ -422,6 +422,86 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     root.remove();
   });
 
+  it("cancels an in-progress drag when switching sheets (secondary pane)", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas, drawing } = setup();
+
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+
+    // Persist the drawing into Sheet1 so a commit would normally update the document.
+    doc.setSheetDrawings(sheet1, [drawing], { label: "Set Drawings" });
+
+    // Ensure Sheet2 exists and contains a drawing with the same id. Without canceling the in-flight
+    // gesture, a pointerup after `sheetId` changes could commit into the wrong sheet.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+    const sheet2Drawing = {
+      ...drawing,
+      kind: { type: "image", imageId: "img-2" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(10), yEmu: pxToEmu(10) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    } satisfies DrawingObject;
+    doc.setSheetDrawings("Sheet2", [sheet2Drawing], { label: "Set Drawings" });
+    const sheet2AnchorBefore = JSON.parse(JSON.stringify(sheet2Drawing.anchor));
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+    const rect = secondaryContainer.getBoundingClientRect();
+
+    const startX = headerOffsetX + 40;
+    const startY = headerOffsetY + 40;
+    const endX = startX + 30;
+    const endY = startY + 20;
+
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: rect.left + startX,
+        clientY: rect.top + startY,
+        button: 0,
+        pointerId: 1,
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointermove", {
+        clientX: rect.left + endX,
+        clientY: rect.top + endY,
+        button: 0,
+        pointerId: 1,
+      }),
+    );
+
+    // Switch sheets while the pointer is still down (mid-gesture). This should cancel the gesture so
+    // the eventual pointerup cannot commit into the newly active sheet.
+    app.activateSheet("Sheet2");
+
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerup", {
+        clientX: rect.left + endX,
+        clientY: rect.top + endY,
+        button: 0,
+        pointerId: 1,
+      }),
+    );
+
+    const sheet2After = Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : [];
+    expect(sheet2After).toHaveLength(1);
+    expect((sheet2After[0] as any).anchor).toEqual(sheet2AnchorBefore);
+
+    const sheet1After = Array.isArray(doc.getSheetDrawings(sheet1)) ? doc.getSheetDrawings(sheet1) : [];
+    expect(sheet1After).toHaveLength(1);
+    expect((sheet1After[0] as any).anchor?.type).toBe("absolute");
+    expect((sheet1After[0] as any).anchor?.pos?.xEmu ?? 0).toBeCloseTo(0, 4);
+    expect((sheet1After[0] as any).anchor?.pos?.yEmu ?? 0).toBeCloseTo(0, 4);
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
   it("reverts an in-progress drag when the secondary pane is torn down", () => {
     const { app, root, secondaryView, secondaryContainer, selectionCanvas, drawing } = setup();
 
