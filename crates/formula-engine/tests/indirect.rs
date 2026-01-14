@@ -44,7 +44,7 @@ fn indirect_r1c1_relative_is_resolved_against_formula_cell() {
 }
 
 #[test]
-fn indirect_rejects_external_workbook_refs_even_with_external_provider() {
+fn indirect_external_workbook_refs_resolve_via_provider() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -73,8 +73,11 @@ fn indirect_rejects_external_workbook_refs_even_with_external_provider() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
-    assert_eq!(provider.calls(), 0, "INDIRECT should not query external providers");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert_eq!(
+        provider.calls(),
+        1,
+        "INDIRECT should query external providers when resolving external references"
+    );
     assert!(engine.precedents("Sheet1", "A1").unwrap().is_empty());
 }
-

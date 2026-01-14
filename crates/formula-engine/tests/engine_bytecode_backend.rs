@@ -7645,9 +7645,11 @@ fn bytecode_compile_diagnostics_accepts_indirect() {
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    let report = engine.bytecode_compile_report(10);
     assert_eq!(stats.compiled, 1);
     assert_eq!(stats.fallback, 0);
+    assert!(stats.fallback_reasons.is_empty());
+
+    let report = engine.bytecode_compile_report(10);
     assert!(report.is_empty());
 }
 
@@ -7660,9 +7662,11 @@ fn bytecode_compile_diagnostics_accepts_offset() {
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    let report = engine.bytecode_compile_report(10);
     assert_eq!(stats.compiled, 1);
     assert_eq!(stats.fallback, 0);
+    assert!(stats.fallback_reasons.is_empty());
+
+    let report = engine.bytecode_compile_report(10);
     assert!(report.is_empty());
 }
 

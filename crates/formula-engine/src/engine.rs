@@ -10308,6 +10308,57 @@ fn bytecode_expr_is_eligible_inner(
                 if args.is_empty() || args.len() > 2 {
                     return false;
                 }
+
+                // The bytecode runtime does not currently support resolving external workbook
+                // references produced by INDIRECT (the runtime's reference value model only
+                // supports local sheet ids). For the common case of a static string literal that
+                // parses to an external reference, force an AST fallback so the evaluator can
+                // resolve the external sheet via the configured provider.
+                if let bytecode::Expr::Literal(bytecode::Value::Text(text)) = &args[0] {
+                    let ref_text = text.trim();
+                    if !ref_text.is_empty() {
+                        let reference_style = match args.get(1) {
+                            Some(bytecode::Expr::Literal(bytecode::Value::Bool(false))) => {
+                                crate::ReferenceStyle::R1C1
+                            }
+                            Some(bytecode::Expr::Literal(bytecode::Value::Number(n)))
+                                if *n == 0.0 =>
+                            {
+                                crate::ReferenceStyle::R1C1
+                            }
+                            _ => crate::ReferenceStyle::A1,
+                        };
+
+                        let parsed = crate::parse_formula(
+                            ref_text,
+                            crate::ParseOptions {
+                                locale: crate::LocaleConfig::en_us(),
+                                reference_style,
+                                normalize_relative_to: None,
+                            },
+                        );
+                        if let Ok(ast) = parsed {
+                            let origin = match reference_style {
+                                crate::ReferenceStyle::A1 => None,
+                                crate::ReferenceStyle::R1C1 => Some(crate::CellAddr::new(0, 0)),
+                            };
+                            let lowered = crate::eval::lower_ast(&ast, origin);
+                            match lowered {
+                                crate::eval::Expr::CellRef(r)
+                                    if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+                                {
+                                    return false;
+                                }
+                                crate::eval::Expr::RangeRef(r)
+                                    if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+                                {
+                                    return false;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 // Both arguments are scalar (text + optional bool), but accept references via
                 // implicit intersection.
                 args.iter()
