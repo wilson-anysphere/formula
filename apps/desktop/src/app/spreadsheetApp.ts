@@ -12088,7 +12088,22 @@ export class SpreadsheetApp {
 
   private onChartPointerDownCapture(e: PointerEvent): void {
     if (this.disposed) return;
-    if (e.button !== 0) return;
+    const pointerType = (e as any).pointerType ?? "mouse";
+    const button = typeof (e as any).button === "number" ? (e as any).button : 0;
+    const isMouse = pointerType === "mouse";
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
+    // On macOS, Ctrl+click is commonly treated as a right click and fires the `contextmenu` event.
+    const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+    const isContextClick = isMouse && (button === 2 || isMacContextClick);
+    const isPrimaryClick = !isMouse || button === 0;
+    if (!(isPrimaryClick || isContextClick)) return;
 
     const target = e.target as HTMLElement | null;
     // Only treat pointerdown events originating from the grid surface (canvases/root) as
@@ -12106,7 +12121,19 @@ export class SpreadsheetApp {
 
     const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
-      if (this.selectedChartId != null) this.setSelectedChartId(null);
+      // Preserve chart selection on context-click misses so right-clicking the grid can open
+      // cell context menus without dropping the existing chart selection (mirrors drawing behavior).
+      if (!isContextClick && this.selectedChartId != null) this.setSelectedChartId(null);
+      return;
+    }
+
+    if (isContextClick) {
+      // Excel-like: right-clicking a chart should select it without moving the active cell.
+      // Tag the pointer event so the shared-grid selection canvas can ignore it.
+      this.setSelectedChartId(hit.chart.id);
+      this.focus();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e as any).__formulaDrawingContextClick = true;
       return;
     }
 
@@ -15336,6 +15363,14 @@ export class SpreadsheetApp {
       typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Context-clicks on charts/drawings should not move the active cell underneath. In shared-grid mode
+    // this is handled by the selection canvas itself; in legacy mode we early-return here.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((e as any).__formulaDrawingContextClick) {
+      this.focus();
+      return;
+    }
 
     const primaryButton = e.pointerType !== "mouse" || e.button === 0;
     const formulaEditing = this.formulaBar?.isFormulaEditing() === true;

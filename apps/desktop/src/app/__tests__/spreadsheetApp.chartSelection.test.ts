@@ -76,19 +76,23 @@ function createRoot(): HTMLElement {
 function dispatchPointerEvent(
   target: EventTarget,
   type: string,
-  opts: { clientX: number; clientY: number; pointerId?: number; button?: number },
+  opts: { clientX: number; clientY: number; pointerId?: number; button?: number; pointerType?: string },
 ): void {
   const pointerId = opts.pointerId ?? 1;
   const button = opts.button ?? 0;
-  const base = { bubbles: true, clientX: opts.clientX, clientY: opts.clientY, pointerId, button };
+  const pointerType = opts.pointerType ?? "mouse";
+  const base = { bubbles: true, cancelable: true, clientX: opts.clientX, clientY: opts.clientY, pointerId, button };
   const event =
     typeof (globalThis as any).PointerEvent === "function"
-      ? new (globalThis as any).PointerEvent(type, base)
+      ? new (globalThis as any).PointerEvent(type, { ...base, pointerType })
       : (() => {
           const e = new MouseEvent(type, base);
-          Object.assign(e, { pointerId });
+          Object.assign(e, { pointerId, pointerType });
           return e;
         })();
+  // Some test environments polyfill `PointerEvent` as `MouseEvent` or omit `pointerId/pointerType`.
+  // Ensure the fields exist so shared-grid and drawing interactions can identify context-clicks.
+  Object.assign(event, { pointerId, pointerType });
   target.dispatchEvent(event);
 }
 
@@ -308,6 +312,59 @@ describe("SpreadsheetApp chart selection + drag", () => {
       if (prior === undefined) delete process.env.CANVAS_CHARTS;
       else process.env.CANVAS_CHARTS = prior;
     }
+  });
+
+  it("context-click selects a chart without moving the active cell", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    // Move the active cell somewhere else so we can verify the context-click does not change it.
+    app.selectRange({ range: { startRow: 2, endRow: 2, startCol: 2, endCol: 2 } }, { scrollIntoView: false, focus: false });
+    expect(status.activeCell.textContent).toBe("C3");
+
+    const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).not.toBeNull();
+    // Shared-grid selection uses the selection canvas's client rect to map pointer coords.
+    selectionCanvas!.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Context Click Chart",
+      position: "A1:H10",
+    });
+    const chart = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(chart).toBeTruthy();
+
+    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    const clickX = originX + rect.left + 10;
+    const clickY = originY + rect.top + 10;
+
+    // Sanity: this point is inside the chart's hit region.
+    const hit = (app as any).hitTestChartAtClientPoint(clickX, clickY);
+    expect(hit?.chart?.id).toBe(chart!.id);
+
+    // Context click should select the chart, but should not move the active cell underneath.
+    dispatchPointerEvent(selectionCanvas!, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 90, button: 2 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 90, button: 2 });
+
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+    expect(status.activeCell.textContent).toBe("C3");
+
+    app.destroy();
+    root.remove();
   });
 
   it("dragging a chart updates its twoCell anchor", () => {
