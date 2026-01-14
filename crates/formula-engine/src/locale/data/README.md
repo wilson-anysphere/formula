@@ -107,6 +107,12 @@ Note: upstream error TSVs can contain multiple localized spellings per canonical
 (aliases). The extractor preserves any existing aliases in the output file; for `es-ES`, it also
 records both inverted- and non-inverted-punctuation variants (e.g. `#¡VALOR!` and `#VALOR!`).
 
+For debugging, you can also pass:
+
+- `-Visible` to watch Excel work
+- `-MaxErrors N` to run a smaller subset
+- PowerShell’s `-Verbose` switch for per-error `FormulaLocal` / `.Text` logging
+
 Note: `*.errors.tsv` exports are expected to match the runtime locale tables. The test
 `crates/formula-engine/tests/locale_error_tsv_sync.rs` enforces that bidirectional mapping. If you
 update upstream error spellings, regenerate the committed TSVs and ensure tests continue to pass.
