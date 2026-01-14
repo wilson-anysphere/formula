@@ -117,6 +117,20 @@ pub enum EngineError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SheetLifecycleError {
+    #[error("sheet not found")]
+    SheetNotFound,
+    #[error(transparent)]
+    InvalidName(#[from] formula_model::SheetNameError),
+    #[error("cannot delete last sheet")]
+    CannotDeleteLastSheet,
+    #[error("sheet index out of range")]
+    IndexOutOfRange,
+    #[error("engine error: {0}")]
+    Internal(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecalcMode {
     SingleThreaded,
@@ -847,14 +861,17 @@ impl Engine {
         self.workbook.ensure_sheet(sheet);
     }
 
-    /// Resolve a worksheet name to its stable sheet id.
+    /// Resolve a worksheet name to its stable [`SheetId`].
     ///
     /// Matching is case-insensitive and Unicode/NFKC-aware (Excel-like).
+    ///
+    /// Sheet ids remain stable across renames and tab reorders, but become invalid once a sheet is
+    /// deleted.
     pub fn sheet_id(&self, name: &str) -> Option<SheetId> {
         self.workbook.sheet_id(name)
     }
 
-    /// Resolve a stable sheet id back to its display name.
+    /// Resolve a stable [`SheetId`] back to its current worksheet name.
     pub fn sheet_name(&self, id: SheetId) -> Option<&str> {
         self.workbook.sheet_name(id)
     }
@@ -886,6 +903,124 @@ impl Engine {
             .collect()
     }
 
+    /// Rename a worksheet by its stable [`SheetId`].
+    pub fn rename_sheet_by_id(
+        &mut self,
+        id: SheetId,
+        new_name: &str,
+    ) -> Result<(), SheetLifecycleError> {
+        if !self.workbook.sheet_exists(id) {
+            return Err(SheetLifecycleError::SheetNotFound);
+        }
+
+        formula_model::validate_sheet_name(new_name)?;
+
+        let new_key = Workbook::sheet_key(new_name);
+        if let Some(existing) = self.workbook.sheet_name_to_id.get(&new_key).copied() {
+            if existing != id {
+                return Err(SheetLifecycleError::InvalidName(
+                    formula_model::SheetNameError::DuplicateName,
+                ));
+            }
+        }
+
+        let old_name = self
+            .workbook
+            .sheet_name(id)
+            .ok_or(SheetLifecycleError::SheetNotFound)?
+            .to_string();
+        if old_name == new_name {
+            return Ok(());
+        }
+
+        // Rewrite stored formulas so future recompiles don't treat references as external.
+        let sheet_ids: Vec<SheetId> = self.workbook.sheet_ids_in_order().to_vec();
+        for sheet_id in sheet_ids {
+            let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+                continue;
+            };
+
+            for cell in sheet.cells.values_mut() {
+                let Some(formula) = cell.formula.as_mut() else {
+                    continue;
+                };
+                let rewritten =
+                    formula_model::rewrite_sheet_names_in_formula(formula, &old_name, new_name);
+                *formula = rewritten;
+            }
+
+            for table in &mut sheet.tables {
+                for column in &mut table.columns {
+                    if let Some(formula) = column.formula.as_mut() {
+                        let rewritten = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &old_name,
+                            new_name,
+                        );
+                        *formula = rewritten;
+                    }
+                    if let Some(formula) = column.totals_formula.as_mut() {
+                        let rewritten = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &old_name,
+                            new_name,
+                        );
+                        *formula = rewritten;
+                    }
+                }
+            }
+
+            for def in sheet.names.values_mut() {
+                match &mut def.definition {
+                    NameDefinition::Constant(_) => {}
+                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                        let rewritten = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &old_name,
+                            new_name,
+                        );
+                        *formula = rewritten;
+                    }
+                }
+            }
+        }
+
+        for def in self.workbook.names.values_mut() {
+            match &mut def.definition {
+                NameDefinition::Constant(_) => {}
+                NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                    let rewritten =
+                        formula_model::rewrite_sheet_names_in_formula(formula, &old_name, new_name);
+                    *formula = rewritten;
+                }
+            }
+        }
+
+        let Some(slot) = self.workbook.sheet_names.get_mut(id) else {
+            return Err(SheetLifecycleError::Internal(format!(
+                "sheet id {id} missing from workbook sheet_names"
+            )));
+        };
+        *slot = Some(new_name.to_string());
+
+        self.workbook.sheet_name_to_id = self
+            .workbook
+            .sheet_names
+            .iter()
+            .enumerate()
+            .filter_map(|(id, name)| name.as_ref().map(|name| (Workbook::sheet_key(name), id)))
+            .collect();
+
+        // Sheet names can be observed by worksheet information functions (e.g. CELL("address")).
+        // Conservatively mark all compiled formula cells dirty so callers see updated results.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        Ok(())
+    }
+
     /// Reorder a worksheet within the workbook's tab order.
     ///
     /// 3D sheet spans like `Sheet1:Sheet3!A1` are defined in terms of workbook tab order, so
@@ -896,33 +1031,53 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return false;
         };
-        if new_index >= self.workbook.sheet_order.len() {
-            return false;
+        self.reorder_sheet_by_id(sheet_id, new_index).is_ok()
+    }
+
+    /// Reorder a worksheet within the workbook's tab order using its stable [`SheetId`].
+    pub fn reorder_sheet_by_id(
+        &mut self,
+        id: SheetId,
+        new_index: usize,
+    ) -> Result<(), SheetLifecycleError> {
+        if !self.workbook.sheet_exists(id) {
+            return Err(SheetLifecycleError::SheetNotFound);
         }
-        let Some(original_index) = self.workbook.sheet_order_index(sheet_id) else {
-            return false;
+        if new_index >= self.workbook.sheet_order.len() {
+            return Err(SheetLifecycleError::IndexOutOfRange);
+        }
+        let Some(original_index) = self.workbook.sheet_order_index(id) else {
+            return Err(SheetLifecycleError::Internal(format!(
+                "sheet id {id} missing from workbook sheet_order"
+            )));
         };
         if original_index == new_index {
-            return true;
+            return Ok(());
         }
-        if !self.workbook.reorder_sheet(sheet_id, new_index) {
-            return false;
+        if !self.workbook.reorder_sheet(id, new_index) {
+            return Err(SheetLifecycleError::Internal(format!(
+                "failed to reorder sheet id {id}"
+            )));
         }
-        if self.recompile_all_defined_names().is_err() || self.rebuild_graph().is_err() {
+
+        if let Err(e) = self
+            .recompile_all_defined_names()
+            .and_then(|_| self.rebuild_graph())
+        {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
             // rebuilding fails for any reason, restore the previous order and best-effort rebuild
             // to keep the engine in a consistent state.
-            let _ = self.workbook.reorder_sheet(sheet_id, original_index);
+            let _ = self.workbook.reorder_sheet(id, original_index);
             let _ = self.recompile_all_defined_names();
             let _ = self.rebuild_graph();
-            return false;
+            return Err(SheetLifecycleError::Internal(e.to_string()));
         }
 
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
 
-        true
+        Ok(())
     }
     /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
     pub fn intern_style(&mut self, style: Style) -> u32 {
@@ -1388,108 +1543,27 @@ impl Engine {
 
     /// Rename a worksheet and rewrite formulas that reference it (Excel-like).
     ///
-    /// Returns `false` if `old_name` does not exist or `new_name` conflicts with another sheet.
+    /// Returns `false` if `old_name` does not exist or `new_name` is invalid/conflicts with another
+    /// sheet.
     pub fn rename_sheet(&mut self, old_name: &str, new_name: &str) -> bool {
         let Some(sheet_id) = self.workbook.sheet_id(old_name) else {
             return false;
         };
-        if let Some(existing) = self.workbook.sheet_id(new_name) {
-            if existing != sheet_id {
-                return false;
-            }
+        self.rename_sheet_by_id(sheet_id, new_name).is_ok()
+    }
+
+    /// Delete a worksheet by its stable [`SheetId`].
+    pub fn delete_sheet_by_id(&mut self, id: SheetId) -> Result<(), SheetLifecycleError> {
+        if !self.workbook.sheet_exists(id) {
+            return Err(SheetLifecycleError::SheetNotFound);
+        }
+        if self.workbook.sheet_order.len() <= 1 {
+            return Err(SheetLifecycleError::CannotDeleteLastSheet);
         }
 
-        let Some(display_old_name) = self.workbook.sheet_name(sheet_id).map(|s| s.to_string())
-        else {
-            return false;
-        };
-
-        if display_old_name == new_name {
-            return true;
-        }
-
-        let sheet_ids: Vec<SheetId> = self.workbook.sheet_ids_in_order().to_vec();
-        for sheet_id in sheet_ids {
-            let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
-                continue;
-            };
-
-            for cell in sheet.cells.values_mut() {
-                if let Some(formula) = cell.formula.as_mut() {
-                    *formula = formula_model::rewrite_sheet_names_in_formula(
-                        formula,
-                        &display_old_name,
-                        new_name,
-                    );
-                }
-            }
-
-            for table in &mut sheet.tables {
-                for column in &mut table.columns {
-                    if let Some(formula) = column.formula.as_mut() {
-                        *formula = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &display_old_name,
-                            new_name,
-                        );
-                    }
-                    if let Some(formula) = column.totals_formula.as_mut() {
-                        *formula = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &display_old_name,
-                            new_name,
-                        );
-                    }
-                }
-            }
-
-            for def in sheet.names.values_mut() {
-                match &mut def.definition {
-                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
-                        *formula = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &display_old_name,
-                            new_name,
-                        );
-                    }
-                    NameDefinition::Constant(_) => {}
-                }
-            }
-        }
-
-        for def in self.workbook.names.values_mut() {
-            match &mut def.definition {
-                NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
-                    *formula = formula_model::rewrite_sheet_names_in_formula(
-                        formula,
-                        &display_old_name,
-                        new_name,
-                    );
-                }
-                NameDefinition::Constant(_) => {}
-            }
-        }
-
-        if let Some(slot) = self.workbook.sheet_names.get_mut(sheet_id) {
-            *slot = Some(new_name.to_string());
-        }
-
-        self.workbook.sheet_name_to_id = self
-            .workbook
-            .sheet_names
-            .iter()
-            .enumerate()
-            .filter_map(|(id, name)| name.as_ref().map(|name| (Workbook::sheet_key(name), id)))
-            .collect();
-
-        // Sheet names can be observed by worksheet information functions (e.g. CELL("address")).
-        // Conservatively mark all compiled formula cells dirty so callers see updated results.
-        self.mark_all_compiled_cells_dirty();
-        if self.calc_settings.calculation_mode != CalculationMode::Manual {
-            self.recalculate();
-        }
-
-        true
+        let name = self.workbook.sheet_name(id).expect("sheet exists").to_string();
+        self.delete_sheet(&name)
+            .map_err(|e| SheetLifecycleError::Internal(e.to_string()))
     }
     /// Store a pivot table definition in the engine and return its allocated id.
     ///
@@ -14576,75 +14650,6 @@ fn walk_calc_expr(
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
                 match spec.name {
-                    "LET" => {
-                        if args.len() < 3 || args.len() % 2 == 0 {
-                            return;
-                        }
-
-                        lexical_scopes.push(HashSet::new());
-                        for pair in args[..args.len() - 1].chunks_exact(2) {
-                            let Some(name_key) = bare_identifier(&pair[0]) else {
-                                lexical_scopes.pop();
-                                return;
-                            };
-                            walk_calc_expr(
-                                &pair[1],
-                                current_cell,
-                                tables_by_sheet,
-                                workbook,
-                                spills,
-                                precedents,
-                                visiting_names,
-                                lexical_scopes,
-                            );
-                            lexical_scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name_key);
-                        }
-
-                        walk_calc_expr(
-                            &args[args.len() - 1],
-                            current_cell,
-                            tables_by_sheet,
-                            workbook,
-                            spills,
-                            precedents,
-                            visiting_names,
-                            lexical_scopes,
-                        );
-                        lexical_scopes.pop();
-                        return;
-                    }
-                    "LAMBDA" => {
-                        if args.is_empty() {
-                            return;
-                        }
-
-                        let mut scope = HashSet::new();
-                        for param in &args[..args.len() - 1] {
-                            let Some(name_key) = bare_identifier(param) else {
-                                return;
-                            };
-                            if !scope.insert(name_key) {
-                                return;
-                            }
-                        }
-
-                        lexical_scopes.push(scope);
-                        walk_calc_expr(
-                            &args[args.len() - 1],
-                            current_cell,
-                            tables_by_sheet,
-                            workbook,
-                            spills,
-                            precedents,
-                            visiting_names,
-                            lexical_scopes,
-                        );
-                        lexical_scopes.pop();
-                        return;
-                    }
                     "CELL" => {
                         if args.is_empty() {
                             return;
@@ -14745,6 +14750,75 @@ fn walk_calc_expr(
                                 _ => {}
                             }
                         }
+                    }
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
+
+                        lexical_scopes.push(HashSet::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Some(name_key) = bare_identifier(&pair[0]) else {
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            walk_calc_expr(
+                                &pair[1],
+                                current_cell,
+                                tables_by_sheet,
+                                workbook,
+                                spills,
+                                precedents,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                            lexical_scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name_key);
+                        }
+
+                        walk_calc_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    "LAMBDA" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        let mut scope = HashSet::new();
+                        for param in &args[..args.len() - 1] {
+                            let Some(name_key) = bare_identifier(param) else {
+                                return;
+                            };
+                            if !scope.insert(name_key) {
+                                return;
+                            }
+                        }
+
+                        lexical_scopes.push(scope);
+                        walk_calc_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
                     }
                     "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "SHEET" | "SHEETS" => {
                         // These functions accept a reference argument but only consult its

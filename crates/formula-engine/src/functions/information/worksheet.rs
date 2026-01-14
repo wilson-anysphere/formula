@@ -412,6 +412,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             //
             // Column widths are stored in Excel "character" units (OOXML `col/@width`).
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
+            const EXCEL_EXPLICIT_WIDTH_MARKER: f64 = 0.1;
 
             let props = ctx.col_properties(&cell_ref.sheet_id, addr.col);
             if props.as_ref().is_some_and(|p| p.hidden) {
@@ -427,7 +428,11 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             };
 
             let chars = width.floor();
-            let flag = if is_custom { 0.1 } else { 0.0 };
+            let flag = if is_custom {
+                EXCEL_EXPLICIT_WIDTH_MARKER
+            } else {
+                0.0
+            };
             Value::Number(chars + flag)
         }
         CellInfoType::Protect => {
