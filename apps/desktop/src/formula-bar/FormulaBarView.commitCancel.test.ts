@@ -158,7 +158,9 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(view.model.isEditing).toBe(false);
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
 
     // Even if events are dispatched (e.g. programmatically), the view should guard
     // against committing/canceling while not editing.
@@ -214,7 +216,9 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(view.model.isEditing).toBe(false);
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
 
     address!.focus();
 
@@ -223,7 +227,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(onBeginEdit).not.toHaveBeenCalled();
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
 
     host.remove();
   });
