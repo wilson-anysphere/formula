@@ -12712,6 +12712,11 @@ export class SpreadsheetApp {
     }
 
     // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
+    //
+    // DocumentController may include empty `imageDeltas: []` / `imagesDeltas: []` arrays in change
+    // payloads even when no images were touched (e.g. regular cell edits). Treat empty arrays as
+    // "no-op" so we don't thrash drawings caches (and clobber any in-memory drawing overrides used
+    // by tests).
     if (Array.isArray(payload?.imagesDeltas) && payload.imagesDeltas.length > 0) return true;
     if (Array.isArray(payload?.imageDeltas) && payload.imageDeltas.length > 0) return true;
 
@@ -15217,7 +15222,7 @@ export class SpreadsheetApp {
       this.dragState = { pointerId: e.pointerId, mode: "formula" };
       this.dragPointerPos = { x, y };
       try {
-        this.root.setPointerCapture(e.pointerId);
+        (this.root as any).setPointerCapture?.(e.pointerId);
       } catch {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
@@ -15262,7 +15267,7 @@ export class SpreadsheetApp {
         this.dragPointerPos = { x, y };
         this.fillPreviewRange = null;
         try {
-          this.root.setPointerCapture(e.pointerId);
+          (this.root as any).setPointerCapture?.(e.pointerId);
         } catch {
           // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
         }
@@ -15308,7 +15313,7 @@ export class SpreadsheetApp {
     this.dragState = { pointerId: e.pointerId, mode: "normal" };
     this.dragPointerPos = { x, y };
     try {
-      this.root.setPointerCapture(e.pointerId);
+      (this.root as any).setPointerCapture?.(e.pointerId);
     } catch {
       // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
     }
