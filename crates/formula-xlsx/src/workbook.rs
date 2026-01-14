@@ -653,8 +653,16 @@ fn is_chart_user_shapes_relationship(rel_type: &str, rel_target: &str) -> bool {
         return true;
     }
     // Fallback to filename heuristic for producers that omit the relationship type.
-    rel_target.ends_with(".xml")
-        && (rel_target.contains("usershapes") || rel_target.contains("drawing"))
+    if !rel_target.ends_with(".xml") {
+        return false;
+    }
+    if rel_target.contains("usershapes") {
+        return true;
+    }
+    // Only consider the final path component so a directory like `../drawings/` doesn't cause us
+    // to misclassify unrelated `*.xml` parts as userShapes.
+    let file_name = rel_target.rsplit('/').next().unwrap_or(rel_target);
+    file_name.contains("drawing")
 }
 
 fn format_chart_space_error(err: &ChartSpaceParseError) -> String {
