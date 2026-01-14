@@ -2822,10 +2822,15 @@ function looksLikeCompleteLiteralArg(text) {
   if (!trimmed) return false;
   const upper = trimmed.toUpperCase();
   if (upper === "TRUE" || upper === "FALSE") return true;
-  // Conservative number literal check (supports integers, decimals, and scientific notation).
+  // Conservative number literal check (supports integers, decimals, scientific notation,
+  // and percent literals). This is intentionally locale-tolerant:
+  // - `1.23` / `.5`
+  // - `1,23` / `,5` (decimal-comma locales; note: `,` only appears inside an arg when the
+  //   partial parser is using `;` as the arg separator)
+  //
   // Intentionally reject trailing-dot forms like "1." to avoid auto-closing while the user
   // is still typing a decimal.
-  if (/^[+\-]?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?$/.test(trimmed)) return true;
+  if (/^[+\-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+\-]?\d+)?%?$/.test(trimmed)) return true;
   // Closed string literal: starts/ends with quotes and is not unterminated.
   if (trimmed.startsWith('"') && trimmed.endsWith('"') && !isInUnclosedDoubleQuotedString(trimmed)) return true;
   return false;

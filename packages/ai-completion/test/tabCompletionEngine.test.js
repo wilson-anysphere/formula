@@ -1716,6 +1716,58 @@ test("Typing =VLOOKUP(..., TRUE suggests auto-closing parens after a complete bo
   );
 });
 
+test("Auto-close parens works for decimal-comma numeric literals (semicolon separators)", async () => {
+  const engine = new TabCompletionEngine();
+
+  // `;` triggers semicolon-arg parsing; `,` remains inside the current arg (decimal comma locale style).
+  const currentInput = "=IF(TRUE;1;1,2";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IF(TRUE;1;1,2)"),
+    `Expected IF to suggest closing parens for a 1,2 literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Auto-close parens works for leading-dot numeric literals (.5)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=IF(TRUE;1;.5";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IF(TRUE;1;.5)"),
+    `Expected IF to suggest closing parens for a .5 literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Auto-close parens works for percent literals (50%)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=IF(TRUE;1;50%";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IF(TRUE;1;50%)"),
+    `Expected IF to suggest closing parens for a 50% literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Auto-closing parens is not suggested when the function needs more args (VLOOKUP)", async () => {
   const engine = new TabCompletionEngine();
 
