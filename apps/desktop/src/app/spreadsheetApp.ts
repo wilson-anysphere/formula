@@ -14,7 +14,12 @@ import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
-import { DrawingInteractionController, resizeAnchor, shiftAnchor, type DrawingInteractionCallbacks } from "../drawings/interaction";
+import {
+  DrawingInteractionController,
+  resizeAnchor,
+  shiftAnchor,
+  type DrawingInteractionCallbacks,
+} from "../drawings/interaction.js";
 import {
   cursorForRotationHandle,
   cursorForResizeHandle,
