@@ -39,9 +39,9 @@ use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use formula_offcrypto::{
-    decrypt_encrypted_package, inspect_encryption_info, parse_encryption_info, standard_derive_key,
-    standard_verify_key, AgileEncryptionInfo, EncryptionInfo, HashAlgorithm, OffcryptoError,
-    StandardEncryptionInfo,
+    decrypt_encrypted_package, inspect_encryption_info, parse_encryption_info,
+    standard_derive_key_zeroizing, standard_verify_key, AgileEncryptionInfo, EncryptionInfo,
+    HashAlgorithm, OffcryptoError, StandardEncryptionInfo,
 };
 use hmac::{Hmac, Mac as _};
 use sha1::Digest as _;
@@ -336,7 +336,7 @@ fn decrypt_standard_encrypted_package(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let key = standard_derive_key(info, password)?;
+    let key = standard_derive_key_zeroizing(info, password)?;
     standard_verify_key(info, &key)?;
 
     let mut iv_seed = Vec::with_capacity(info.verifier.salt.len() + 4);

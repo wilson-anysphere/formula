@@ -107,7 +107,9 @@ fn decrypt_ooxml_encrypted_package<R: Read + Seek + std::io::Write>(
     match info {
         EncryptionInfo::Standard { header, verifier, .. } => {
             let info = StandardEncryptionInfo { header, verifier };
-            let key = formula_offcrypto::standard_derive_key(&info, password)?;
+            // Keep derived key material in a `Zeroizing` buffer so it is wiped from memory when
+            // dropped.
+            let key = formula_offcrypto::standard_derive_key_zeroizing(&info, password)?;
             formula_offcrypto::standard_verify_key(&info, &key)?;
             decrypt_standard_encrypted_package_stream(&encrypted_package_bytes, &key, &info.verifier.salt)
                 .map_err(|err| err.into())
