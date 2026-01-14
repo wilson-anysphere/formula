@@ -635,18 +635,44 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(&table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                            let visible_cols: Vec<usize> = match visible_cols.as_deref() {
-                                Some(cols) => cols.to_vec(),
-                                None => (0..table_ref.columns().len()).collect(),
+                            let (col_count, col_idx) = match visible_cols.as_deref() {
+                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                None => (table_ref.columns().len(), 0),
                             };
-                            if visible_cols.len() != 1 {
+                            if col_count != 1 {
                                 return Err(DaxError::Eval(
                                     "IN currently only supports one-column tables".into(),
                                 ));
                             }
                             let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
-                            let col_idx = visible_cols[0];
                             for row in rows {
+                                let value =
+                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
+                                    return Ok(Value::Boolean(true));
+                                }
+                            }
+                            Ok(Value::Boolean(false))
+                        }
+                        TableResult::PhysicalAll {
+                            table,
+                            row_count,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let (col_count, col_idx) = match visible_cols.as_deref() {
+                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                None => (table_ref.columns().len(), 0),
+                            };
+                            if col_count != 1 {
+                                return Err(DaxError::Eval(
+                                    "IN currently only supports one-column tables".into(),
+                                ));
+                            }
+                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                            for row in 0..row_count {
                                 let value =
                                     table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
                                 if compare_values(&BinaryOp::Equals, &lhs, &value)? {
@@ -1447,19 +1473,19 @@ impl DaxEngine {
                             .table(&table)
                             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
 
-                        let visible_cols: Vec<usize> = match visible_cols.as_deref() {
-                            Some(cols) => cols.to_vec(),
-                            None => (0..table_ref.columns().len()).collect(),
+                        let (col_count, col_idx) = match visible_cols.as_deref() {
+                            Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                            None => (table_ref.columns().len(), 0),
                         };
 
-                        if visible_cols.len() != value_exprs.len() {
+                        if col_count != value_exprs.len() {
                             return Err(DaxError::Eval(format!(
                                 "CONTAINSROW expected {} value arguments, got {}",
-                                visible_cols.len(),
+                                col_count,
                                 value_exprs.len()
                             )));
                         }
-                        if visible_cols.len() != 1 {
+                        if col_count != 1 {
                             return Err(DaxError::Eval(
                                 "CONTAINSROW currently only supports one-column tables".into(),
                             ));
@@ -1467,8 +1493,45 @@ impl DaxEngine {
 
                         let needle =
                             self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
-                        let col_idx = visible_cols[0];
                         for row in rows {
+                            let value =
+                                table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                            if compare_values(&BinaryOp::Equals, &value, &needle)? {
+                                return Ok(Value::Boolean(true));
+                            }
+                        }
+                        Ok(Value::Boolean(false))
+                    }
+                    TableResult::PhysicalAll {
+                        table,
+                        row_count,
+                        visible_cols,
+                    } => {
+                        let table_ref = model
+                            .table(&table)
+                            .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+
+                        let (col_count, col_idx) = match visible_cols.as_deref() {
+                            Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                            None => (table_ref.columns().len(), 0),
+                        };
+
+                        if col_count != value_exprs.len() {
+                            return Err(DaxError::Eval(format!(
+                                "CONTAINSROW expected {} value arguments, got {}",
+                                col_count,
+                                value_exprs.len()
+                            )));
+                        }
+                        if col_count != 1 {
+                            return Err(DaxError::Eval(
+                                "CONTAINSROW currently only supports one-column tables".into(),
+                            ));
+                        }
+
+                        let needle =
+                            self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
+                        for row in 0..row_count {
                             let value =
                                 table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
                             if compare_values(&BinaryOp::Equals, &value, &needle)? {
@@ -3018,6 +3081,52 @@ impl DaxEngine {
                                 Ok(())
                             }
                         }
+                        TableResult::PhysicalAll {
+                            table,
+                            row_count,
+                            visible_cols,
+                        } => {
+                            // See `TableResult::Physical` above for semantics.
+                            let table_key = normalize_ident(&table);
+                            if let Some(visible_cols) = visible_cols {
+                                if visible_cols.len() != 1 {
+                                    return Err(DaxError::Eval(
+                                        "CALCULATE table filters for projected physical tables currently only support one column"
+                                            .into(),
+                                    ));
+                                }
+                                let col_idx = visible_cols[0];
+                                let table_ref = model
+                                    .table(&table)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                let Some(column) = table_ref.columns().get(col_idx) else {
+                                    return Err(DaxError::Eval(format!(
+                                        "row context refers to out-of-bounds column index {col_idx} for table {table}"
+                                    )));
+                                };
+
+                                let mut values = HashSet::new();
+                                for row in 0..row_count {
+                                    let v = table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank);
+                                    values.insert(v);
+                                }
+
+                                let key = (table_key.clone(), normalize_ident(column));
+                                if !keep_filters {
+                                    clear_columns.insert(key.clone());
+                                }
+                                column_filters.push((key, values));
+                                Ok(())
+                            } else {
+                                if !keep_filters {
+                                    clear_tables.insert(table_key.clone());
+                                }
+                                row_filters.push((table_key, (0..row_count).collect()));
+                                Ok(())
+                            }
+                        }
                         TableResult::Virtual { .. } => Err(DaxError::Eval(
                             "CALCULATE table filter must be a physical table expression".into(),
                         )),
@@ -3398,11 +3507,38 @@ impl DaxEngine {
                     columns: vec![("__TABLE_LITERAL__".to_string(), "Value".to_string())],
                     rows: values.iter().cloned().map(|v| vec![v]).collect(),
                 }),
-                None => Ok(TableResult::Physical {
-                    table: normalize_ident(name),
-                    rows: resolve_table_rows(model, filter, name)?,
-                    visible_cols: None,
-                }),
+                None => {
+                    let table_key = normalize_ident(name);
+                    let table_ref = model
+                        .table(name)
+                        .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
+
+                    if filter.is_empty() {
+                        Ok(TableResult::PhysicalAll {
+                            table: table_key,
+                            row_count: table_ref.row_count(),
+                            visible_cols: None,
+                        })
+                    } else {
+                        let sets = resolve_row_sets(model, filter)?;
+                        let allowed = sets
+                            .get(&table_key)
+                            .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
+                        if allowed.all_true() {
+                            Ok(TableResult::PhysicalAll {
+                                table: table_key,
+                                row_count: table_ref.row_count(),
+                                visible_cols: None,
+                            })
+                        } else {
+                            Ok(TableResult::Physical {
+                                table: table_key,
+                                rows: allowed.iter_ones().collect(),
+                                visible_cols: None,
+                            })
+                        }
+                    }
+                }
             },
             Expr::TableLiteral { .. } => {
                 let values =
@@ -3432,6 +3568,27 @@ impl DaxEngine {
                         } => {
                             let mut out_rows = Vec::new();
                             for row in rows.iter().copied() {
+                                let mut inner_ctx = row_ctx.clone();
+                                inner_ctx.push_physical(&table, row, visible_cols.clone());
+                                let pred =
+                                    self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
+                                if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                                    out_rows.push(row);
+                                }
+                            }
+                            Ok(TableResult::Physical {
+                                table,
+                                rows: out_rows,
+                                visible_cols,
+                            })
+                        }
+                        TableResult::PhysicalAll {
+                            table,
+                            row_count,
+                            visible_cols,
+                        } => {
+                            let mut out_rows = Vec::new();
+                            for row in 0..row_count {
                                 let mut inner_ctx = row_ctx.clone();
                                 inner_ctx.push_physical(&table, row, visible_cols.clone());
                                 let pred =
@@ -3479,9 +3636,9 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(name)
                                 .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
-                            Ok(TableResult::Physical {
+                            Ok(TableResult::PhysicalAll {
                                 table: normalize_ident(name),
-                                rows: (0..table_ref.row_count()).collect(),
+                                row_count: table_ref.row_count(),
                                 visible_cols: None,
                             })
                         }
@@ -3565,9 +3722,9 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(name)
                                 .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
-                            Ok(TableResult::Physical {
+                            Ok(TableResult::PhysicalAll {
                                 table: table_key,
-                                rows: (0..table_ref.row_count()).collect(),
+                                row_count: table_ref.row_count(),
                                 visible_cols: None,
                             })
                         }
@@ -3762,11 +3919,34 @@ impl DaxEngine {
                         }
                     }
 
-                    Ok(TableResult::Physical {
-                        table: table_key,
-                        rows: resolve_table_rows(model, &modified_filter, table)?,
-                        visible_cols: None,
-                    })
+                    let table_ref = model
+                        .table(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                    if modified_filter.is_empty() {
+                        return Ok(TableResult::PhysicalAll {
+                            table: table_key,
+                            row_count: table_ref.row_count(),
+                            visible_cols: None,
+                        });
+                    }
+
+                    let sets = resolve_row_sets(model, &modified_filter)?;
+                    let allowed = sets
+                        .get(&table_key)
+                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                    if allowed.all_true() {
+                        Ok(TableResult::PhysicalAll {
+                            table: table_key,
+                            row_count: table_ref.row_count(),
+                            visible_cols: None,
+                        })
+                    } else {
+                        Ok(TableResult::Physical {
+                            table: table_key,
+                            rows: allowed.iter_ones().collect(),
+                            visible_cols: None,
+                        })
+                    }
                 }
                 "CALCULATETABLE" => {
                     if args.is_empty() {
@@ -3792,8 +3972,9 @@ impl DaxEngine {
                     }
 
                     let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
-                    let (base_table, base_rows) = match base {
-                        TableResult::Physical { table, rows, .. } => (table, rows),
+                    let base_table = match &base {
+                        TableResult::Physical { table, .. }
+                        | TableResult::PhysicalAll { table, .. } => table.clone(),
                         TableResult::Virtual { .. } => {
                             return Err(DaxError::Type(
                                 "SUMMARIZE currently only supports a physical base table".into(),
@@ -4085,7 +4266,10 @@ impl DaxEngine {
                     let blank_key = vec![Value::Blank; accessors.len()];
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut out_rows: Vec<Vec<Value>> = Vec::new();
-                    for row in base_rows {
+                    for row_handle in base.iter_rows() {
+                        let RowHandle::Physical(row) = row_handle else {
+                            unreachable!("SUMMARIZE base table is always physical");
+                        };
                         for key in collect_keys_for_node(
                             &root,
                             model,
@@ -4878,6 +5062,18 @@ enum TableResult {
         /// Restrict row context visibility and context transition to only these column indices.
         visible_cols: Option<Vec<usize>>,
     },
+    /// A physical table expression that includes **all** physical rows of the table.
+    ///
+    /// This avoids materializing a potentially huge `Vec<usize>` row index list for common table
+    /// expressions like `Sales` (unfiltered table references) and `ALL(Sales)` when used as an
+    /// iterator input.
+    PhysicalAll {
+        table: String,
+        /// Physical row count (virtual relationship blank rows are *not* included).
+        row_count: usize,
+        /// Restrict row context visibility and context transition to only these column indices.
+        visible_cols: Option<Vec<usize>>,
+    },
     Virtual {
         /// Columns (with lineage) present in the virtual table, in order.
         columns: Vec<(String, String)>,
@@ -4898,6 +5094,7 @@ struct TableRowIter<'a> {
 
 enum TableRowIterInner<'a> {
     Physical(std::slice::Iter<'a, usize>),
+    PhysicalRange(std::ops::Range<usize>),
     Virtual(std::ops::Range<usize>),
 }
 
@@ -4907,6 +5104,7 @@ impl<'a> Iterator for TableRowIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.inner {
             TableRowIterInner::Physical(iter) => iter.next().copied().map(RowHandle::Physical),
+            TableRowIterInner::PhysicalRange(iter) => iter.next().map(RowHandle::Physical),
             TableRowIterInner::Virtual(iter) => iter.next().map(RowHandle::Virtual),
         }
     }
@@ -4916,6 +5114,7 @@ impl TableResult {
     fn row_count(&self) -> usize {
         match self {
             TableResult::Physical { rows, .. } => rows.len(),
+            TableResult::PhysicalAll { row_count, .. } => *row_count,
             TableResult::Virtual { rows, .. } => rows.len(),
         }
     }
@@ -4924,6 +5123,9 @@ impl TableResult {
         match self {
             TableResult::Physical { rows, .. } => TableRowIter {
                 inner: TableRowIterInner::Physical(rows.iter()),
+            },
+            TableResult::PhysicalAll { row_count, .. } => TableRowIter {
+                inner: TableRowIterInner::PhysicalRange(0..*row_count),
             },
             TableResult::Virtual { rows, .. } => TableRowIter {
                 inner: TableRowIterInner::Virtual(0..rows.len()),
@@ -4939,6 +5141,14 @@ impl TableResult {
                     table,
                     visible_cols,
                     ..
+                },
+                RowHandle::Physical(row),
+            ) => {
+                out.push_physical(table, row, visible_cols.clone());
+            }
+            (
+                TableResult::PhysicalAll {
+                    table, visible_cols, ..
                 },
                 RowHandle::Physical(row),
             ) => {
@@ -4969,6 +5179,7 @@ enum IteratorKind {
     Min,
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_table_rows(
     model: &DataModel,
     filter: &FilterContext,
@@ -5817,6 +6028,36 @@ fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxRes
             let mut seen: HashSet<Vec<Value>> = HashSet::new();
             let mut out_rows = Vec::new();
             for &row in rows {
+                let indices: Box<dyn Iterator<Item = usize>> = match visible_cols {
+                    Some(cols) => Box::new(cols.iter().copied()),
+                    None => Box::new(0..table_ref.columns().len()),
+                };
+                let key: Vec<Value> = indices
+                    .map(|idx| table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+                    .collect();
+                if seen.insert(key) {
+                    out_rows.push(row);
+                }
+            }
+
+            Ok(TableResult::Physical {
+                table: table.clone(),
+                rows: out_rows,
+                visible_cols: visible_cols.clone(),
+            })
+        }
+        TableResult::PhysicalAll {
+            table,
+            row_count,
+            visible_cols,
+        } => {
+            let table_ref = model
+                .table(table)
+                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+
+            let mut seen: HashSet<Vec<Value>> = HashSet::new();
+            let mut out_rows = Vec::new();
+            for row in 0..*row_count {
                 let indices: Box<dyn Iterator<Item = usize>> = match visible_cols {
                     Some(cols) => Box::new(cols.iter().copied()),
                     None => Box::new(0..table_ref.columns().len()),
