@@ -59,7 +59,7 @@ fn privileged_ipc_commands_have_string_length_caps() {
     assert_fn_has_ipc_string_cap(
         commands_src,
         "pub async fn open_workbook",
-        &["MAX_IPC_PATH_BYTES"],
+        &["MAX_IPC_PATH_BYTES", "MAX_IPC_WORKBOOK_PASSWORD_BYTES"],
     );
     assert_fn_has_ipc_string_cap(
         commands_src,
@@ -69,7 +69,7 @@ fn privileged_ipc_commands_have_string_length_caps() {
     assert_fn_has_ipc_string_cap(
         commands_src,
         "pub async fn save_workbook",
-        &["MAX_IPC_PATH_BYTES"],
+        &["MAX_IPC_PATH_BYTES", "MAX_IPC_WORKBOOK_PASSWORD_BYTES"],
     );
     assert_fn_has_ipc_string_cap(
         commands_src,
@@ -105,6 +105,25 @@ fn privileged_ipc_commands_have_string_length_caps() {
         commands_src,
         "pub async fn network_fetch",
         &["MAX_IPC_URL_BYTES"],
+    );
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct MarketplaceSearchArgs",
+        &["MAX_IPC_URL_BYTES", "MAX_IPC_MARKETPLACE_QUERY_BYTES"],
+    );
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct MarketplaceGetExtensionArgs",
+        &["MAX_IPC_URL_BYTES", "MAX_IPC_MARKETPLACE_ID_BYTES"],
+    );
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct MarketplaceDownloadArgs",
+        &[
+            "MAX_IPC_URL_BYTES",
+            "MAX_IPC_MARKETPLACE_ID_BYTES",
+            "MAX_IPC_MARKETPLACE_VERSION_BYTES",
+        ],
     );
     assert_fn_has_ipc_string_cap(
         commands_src,

@@ -2182,7 +2182,9 @@ use crate::ipc_limits::MAX_IPC_PATH_BYTES;
 #[cfg(feature = "desktop")]
 use crate::ipc_limits::{
     MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES, MAX_IPC_COLLAB_TOKEN_BYTES,
-    MAX_IPC_SECURE_STORE_KEY_BYTES, MAX_IPC_URL_BYTES,
+    MAX_IPC_MARKETPLACE_ID_BYTES, MAX_IPC_MARKETPLACE_QUERY_BYTES,
+    MAX_IPC_MARKETPLACE_VERSION_BYTES, MAX_IPC_SECURE_STORE_KEY_BYTES, MAX_IPC_URL_BYTES,
+    MAX_IPC_WORKBOOK_PASSWORD_BYTES,
 };
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
@@ -2619,7 +2621,7 @@ pub fn inspect_workbook_encryption(
 pub async fn open_workbook(
     window: tauri::WebviewWindow,
     path: LimitedString<MAX_IPC_PATH_BYTES>,
-    password: Option<String>,
+    password: Option<LimitedString<MAX_IPC_WORKBOOK_PASSWORD_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -2628,6 +2630,7 @@ pub async fn open_workbook(
     ipc_origin::ensure_stable_origin(&window, "workbook opening", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
+    let password = password.map(|p| p.into_inner());
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let resolved =
         crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
@@ -4504,7 +4507,7 @@ pub async fn list_imported_drawing_objects(
 pub async fn save_workbook(
     window: tauri::WebviewWindow,
     path: Option<LimitedString<MAX_IPC_PATH_BYTES>>,
-    password: Option<String>,
+    password: Option<LimitedString<MAX_IPC_WORKBOOK_PASSWORD_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -4513,6 +4516,7 @@ pub async fn save_workbook(
     ipc_origin::ensure_stable_origin(&window, "workbook saving", ipc_origin::Verb::Is)?;
 
     let path = path.map(|p| p.into_inner());
+    let password = password.map(|p| p.into_inner());
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
@@ -8547,15 +8551,15 @@ pub async fn network_fetch(
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceSearchArgs {
     pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
-    pub q: Option<String>,
-    pub category: Option<String>,
-    pub tag: Option<String>,
+    pub q: Option<LimitedString<MAX_IPC_MARKETPLACE_QUERY_BYTES>>,
+    pub category: Option<LimitedString<MAX_IPC_MARKETPLACE_QUERY_BYTES>>,
+    pub tag: Option<LimitedString<MAX_IPC_MARKETPLACE_QUERY_BYTES>>,
     pub verified: Option<bool>,
     pub featured: Option<bool>,
-    pub sort: Option<String>,
+    pub sort: Option<LimitedString<MAX_IPC_MARKETPLACE_QUERY_BYTES>>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
-    pub cursor: Option<String>,
+    pub cursor: Option<LimitedString<MAX_IPC_MARKETPLACE_QUERY_BYTES>>,
 }
 
 #[cfg(feature = "desktop")]
@@ -8704,13 +8708,28 @@ pub async fn marketplace_search(
 
     {
         let mut qp = url.query_pairs_mut();
-        if let Some(v) = args.q.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(v) = args
+            .q
+            .as_ref()
+            .map(|s| s.as_ref())
+            .filter(|s| !s.trim().is_empty())
+        {
             qp.append_pair("q", v);
         }
-        if let Some(v) = args.category.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(v) = args
+            .category
+            .as_ref()
+            .map(|s| s.as_ref())
+            .filter(|s| !s.trim().is_empty())
+        {
             qp.append_pair("category", v);
         }
-        if let Some(v) = args.tag.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(v) = args
+            .tag
+            .as_ref()
+            .map(|s| s.as_ref())
+            .filter(|s| !s.trim().is_empty())
+        {
             qp.append_pair("tag", v);
         }
         if let Some(v) = args.verified {
@@ -8719,7 +8738,12 @@ pub async fn marketplace_search(
         if let Some(v) = args.featured {
             qp.append_pair("featured", if v { "true" } else { "false" });
         }
-        if let Some(v) = args.sort.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(v) = args
+            .sort
+            .as_ref()
+            .map(|s| s.as_ref())
+            .filter(|s| !s.trim().is_empty())
+        {
             qp.append_pair("sort", v);
         }
         if let Some(v) = args.limit {
@@ -8728,7 +8752,12 @@ pub async fn marketplace_search(
         if let Some(v) = args.offset {
             qp.append_pair("offset", &v.to_string());
         }
-        if let Some(v) = args.cursor.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(v) = args
+            .cursor
+            .as_ref()
+            .map(|s| s.as_ref())
+            .filter(|s| !s.trim().is_empty())
+        {
             qp.append_pair("cursor", v);
         }
     }
@@ -8747,7 +8776,7 @@ pub async fn marketplace_search(
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceGetExtensionArgs {
     pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
-    pub id: String,
+    pub id: LimitedString<MAX_IPC_MARKETPLACE_ID_BYTES>,
 }
 
 #[cfg(feature = "desktop")]
@@ -8767,7 +8796,7 @@ pub async fn marketplace_get_extension(
             .path_segments_mut()
             .map_err(|_| "Invalid marketplace baseUrl".to_string())?;
         segments.push("extensions");
-        segments.push(args.id.trim());
+        segments.push(args.id.as_ref().trim());
     }
 
     marketplace_fetch_optional_json_with_limit(
@@ -8784,8 +8813,8 @@ pub async fn marketplace_get_extension(
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceDownloadArgs {
     pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
-    pub id: String,
-    pub version: String,
+    pub id: LimitedString<MAX_IPC_MARKETPLACE_ID_BYTES>,
+    pub version: LimitedString<MAX_IPC_MARKETPLACE_VERSION_BYTES>,
 }
 
 #[cfg(any(feature = "desktop", test))]
@@ -8900,9 +8929,9 @@ pub async fn marketplace_download_package(
             .path_segments_mut()
             .map_err(|_| "Invalid marketplace baseUrl".to_string())?;
         segments.push("extensions");
-        segments.push(args.id.trim());
+        segments.push(args.id.as_ref().trim());
         segments.push("download");
-        segments.push(args.version.trim());
+        segments.push(args.version.as_ref().trim());
     }
 
     marketplace_fetch_optional_download_payload(url, "Marketplace download failed").await

@@ -15,6 +15,13 @@ use std::fmt;
 /// still bounding allocations from untrusted WebView input.
 pub const MAX_IPC_PATH_BYTES: usize = 8_192; // 8 KiB
 
+/// Maximum size (in bytes) of a workbook password string accepted over IPC.
+///
+/// Rationale: passwords are user-provided secrets and are expected to be short. This cap prevents a
+/// compromised WebView from sending multi-megabyte passwords that would increase CPU and memory
+/// usage during workbook decryption/encryption.
+pub const MAX_IPC_WORKBOOK_PASSWORD_BYTES: usize = 1_024; // 1 KiB
+
 /// Maximum size (in bytes) of a URL string accepted over IPC.
 ///
 /// Rationale: URLs used by the app (marketplace, OAuth, external links) are expected to be small.
@@ -89,6 +96,18 @@ pub const MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES: usize = 256;
 /// WebView from sending arbitrarily large strings even though the backend will reject unknown
 /// values.
 pub const MAX_IPC_TRAY_STATUS_BYTES: usize = 32;
+
+/// Maximum size (in bytes) of marketplace query strings accepted over IPC.
+///
+/// These values are embedded into request URLs; keep them small to prevent a compromised WebView
+/// from constructing extremely large request URLs.
+pub const MAX_IPC_MARKETPLACE_QUERY_BYTES: usize = 1_024; // 1 KiB
+
+/// Maximum size (in bytes) of marketplace extension identifiers accepted over IPC.
+pub const MAX_IPC_MARKETPLACE_ID_BYTES: usize = 256;
+
+/// Maximum size (in bytes) of marketplace version identifiers accepted over IPC.
+pub const MAX_IPC_MARKETPLACE_VERSION_BYTES: usize = 128;
 
 /// Maximum size (in bytes) of system notification titles accepted over IPC.
 ///
