@@ -11,7 +11,9 @@ concurrency:
   # Avoid stacking expensive 3xOS runs if the label is re-applied.
   # Note: this workflow triggers on *any* PR label, so include the label name to avoid canceling
   # an in-flight perf run when maintainers apply unrelated labels.
-  group: desktop-perf-platform-matrix-pr-${{ github.event.pull_request.number }}-${{ github.event.label.name }}
+  # For trigger labels, keep a stable "perf" suffix so `desktop-perf-matrix` and `run-desktop-perf`
+  # act like aliases and do not run concurrently.
+  group: desktop-perf-platform-matrix-pr-${{ github.event.pull_request.number }}-${{ (github.event.label.name == 'desktop-perf-matrix' || github.event.label.name == 'run-desktop-perf') && 'perf' || github.event.label.name }}
   cancel-in-progress: true
 
 env:
