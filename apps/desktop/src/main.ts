@@ -51,6 +51,7 @@ import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ri
 import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
 import { handleRibbonCommand as handleRibbonFormattingCommand } from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
+import { resolveHomeEditingClearCommandTarget } from "./ribbon/homeEditingClearCommandRouting.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -8152,6 +8153,11 @@ function handleRibbonCommand(commandId: string): void {
       });
     };
 
+    const editingClearTarget = resolveHomeEditingClearCommandTarget(commandId);
+    if (editingClearTarget) {
+      executeBuiltinCommand(editingClearTarget);
+      return;
+    }
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
       const kind = commandId.slice(cellStylesPrefix.length);
