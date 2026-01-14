@@ -4,7 +4,13 @@ import { distinctColumnValues, TableViewRow } from "./tableView";
 export interface AutoFilterDropdownProps {
   rows: TableViewRow[];
   colId: number;
-  initialSelected: string[];
+  /**
+   * Initial selected values.
+   *
+   * - `null`/`undefined` means "select all" (default Excel-like behavior when no filter exists yet).
+   * - An explicit empty array means "select none" (show nothing).
+   */
+  initialSelected?: string[] | null;
   onApply: (selected: string[]) => void;
   onClose: () => void;
 }
@@ -18,7 +24,7 @@ export function AutoFilterDropdown({
 }: AutoFilterDropdownProps) {
   const values = useMemo(() => distinctColumnValues(rows, colId), [rows, colId]);
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(initialSelected.length ? initialSelected : values),
+    () => new Set(initialSelected == null ? values : initialSelected),
   );
 
   const toggle = (v: string) => {

@@ -8211,7 +8211,7 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
 
 async function showRibbonAutoFilterDialog(args: {
   rows: TableViewRow[];
-  initialSelected: string[];
+  initialSelected: string[] | null;
 }): Promise<string[] | null> {
   return await new Promise<string[] | null>((resolve) => {
     const dialog = document.createElement("dialog");
@@ -8305,7 +8305,7 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   }
 
   const existing = ribbonAutoFilterStore.get(sheetId, rangeA1);
-  const initialSelected = existing?.filterColumns.find((c) => c.colId === colId)?.values ?? [];
+  const initialSelected = existing?.filterColumns.find((c) => c.colId === colId)?.values ?? null;
 
   const selected = await showRibbonAutoFilterDialog({ rows: dialogRows, initialSelected });
   if (selected == null) {
