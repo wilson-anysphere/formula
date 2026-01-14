@@ -584,6 +584,9 @@ jobs:
       - name: "Guard: Windows downgrade / rollback support (allowDowngrades)"
         run: node scripts/ci/check-windows-allow-downgrades.mjs
 
+      - name: "Guard: WiX upgradeCode is pinned (stable MSI upgrades/downgrades)"
+        run: node scripts/ci/check-windows-wix-upgrade-code.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

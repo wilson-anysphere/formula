@@ -128,6 +128,9 @@ node scripts/ci/check-windows-timestamp-url.mjs
 # Ensures Windows installers support manual rollback (downgrades) from the Releases page.
 node scripts/ci/check-windows-allow-downgrades.mjs
 
+# Ensures MSI upgrades/downgrades remain stable by pinning the WiX upgrade code.
+node scripts/ci/check-windows-wix-upgrade-code.mjs
+
 # Ensures the Tauri updater signing secrets are present for *uploading* release assets (tag pushes
 # and `workflow_dispatch` runs with `upload=true`). (CI reads these from GitHub Actions secrets;
 # locally requires env vars to be set.)

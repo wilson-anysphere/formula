@@ -259,6 +259,9 @@ jobs:
       - name: Validate Windows downgrade / rollback support (allowDowngrades)
         run: node scripts/ci/check-windows-allow-downgrades.mjs
 
+      - name: Validate WiX upgradeCode is pinned (stable MSI upgrades/downgrades)
+        run: node scripts/ci/check-windows-wix-upgrade-code.mjs
+
       # Fail fast (before any platform builds start) if maintainers require code signing or if
       # signing secrets are partially configured. This avoids wasting build time and uploading
       # a partial set of GitHub Release assets.
