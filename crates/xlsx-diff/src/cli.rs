@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -266,12 +266,55 @@ pub fn run_with_args(args: Args) -> Result<()> {
 
     match args.format {
         OutputFormat::Text => {
-            println!("Workbook diff report (OPC parts)");
-            println!("  original: {}", args.original.display());
-            println!("  modified: {}", args.modified.display());
+            let stdout = std::io::stdout();
+            let mut out = std::io::BufWriter::new(stdout.lock());
+            let mut pipe_broken = false;
+
+            macro_rules! outln {
+                () => {{
+                    if !pipe_broken {
+                        if let Err(err) = writeln!(&mut out) {
+                            if err.kind() == io::ErrorKind::BrokenPipe {
+                                pipe_broken = true;
+                            } else {
+                                return Err(err.into());
+                            }
+                        }
+                    }
+                }};
+                ($($arg:tt)*) => {{
+                    if !pipe_broken {
+                        if let Err(err) = writeln!(&mut out, $($arg)*) {
+                            if err.kind() == io::ErrorKind::BrokenPipe {
+                                pipe_broken = true;
+                            } else {
+                                return Err(err.into());
+                            }
+                        }
+                    }
+                }};
+            }
+
+            macro_rules! outwrite {
+                ($($arg:tt)*) => {{
+                    if !pipe_broken {
+                        if let Err(err) = write!(&mut out, $($arg)*) {
+                            if err.kind() == io::ErrorKind::BrokenPipe {
+                                pipe_broken = true;
+                            } else {
+                                return Err(err.into());
+                            }
+                        }
+                    }
+                }};
+            }
+
+            outln!("Workbook diff report (OPC parts)");
+            outln!("  original: {}", args.original.display());
+            outln!("  modified: {}", args.modified.display());
             let mut parts: Vec<&str> = options.ignore_parts.iter().map(|s| s.as_str()).collect();
             parts.sort();
-            println!(
+            outln!(
                 "  ignore-part: {}",
                 if parts.is_empty() {
                     "(none)".to_string()
@@ -281,7 +324,7 @@ pub fn run_with_args(args: Args) -> Result<()> {
             );
             let mut globs: Vec<&str> = options.ignore_globs.iter().map(|s| s.as_str()).collect();
             globs.sort();
-            println!(
+            outln!(
                 "  ignore-glob: {}",
                 if globs.is_empty() {
                     "(none)".to_string()
@@ -292,7 +335,7 @@ pub fn run_with_args(args: Args) -> Result<()> {
             let mut presets: Vec<&str> = args.ignore_presets.iter().map(|p| p.as_str()).collect();
             presets.sort();
             presets.dedup();
-            println!(
+            outln!(
                 "  ignore-preset: {}",
                 if presets.is_empty() {
                     "(none)".to_string()
@@ -311,7 +354,7 @@ pub fn run_with_args(args: Args) -> Result<()> {
                 })
                 .collect();
             ignore_paths.sort();
-            println!(
+            outln!(
                 "  ignore-path: {}",
                 if ignore_paths.is_empty() {
                     "(none)".to_string()
@@ -319,23 +362,24 @@ pub fn run_with_args(args: Args) -> Result<()> {
                     ignore_paths.join(", ")
                 }
             );
-            println!();
+            outln!();
 
             if report.is_empty() {
-                println!("No differences.");
+                outln!("No differences.");
+                let _ = pipe_broken;
                 return Ok(());
             }
 
-            println!(
+            outln!(
                 "Summary: critical={} warn={} info={}",
                 report.count(Severity::Critical),
                 report.count(Severity::Warning),
                 report.count(Severity::Info)
             );
-            println!();
+            outln!();
 
             for diff in &report.differences {
-                print!("{diff}");
+                outwrite!("{diff}");
             }
 
             if report.has_at_least(threshold) {
@@ -405,9 +449,24 @@ pub fn run_with_args(args: Args) -> Result<()> {
             };
 
             let stdout = std::io::stdout();
-            let mut handle = stdout.lock();
-            serde_json::to_writer(&mut handle, &json_report)?;
-            handle.write_all(b"\n")?;
+            let mut out = std::io::BufWriter::new(stdout.lock());
+            let mut pipe_broken = false;
+
+            if let Err(err) = serde_json::to_writer(&mut out, &json_report) {
+                if err.io_error_kind() == Some(io::ErrorKind::BrokenPipe) {
+                    pipe_broken = true;
+                } else {
+                    return Err(err.into());
+                }
+            }
+            if !pipe_broken {
+                if let Err(err) = out.write_all(b"\n") {
+                    if err.kind() == io::ErrorKind::BrokenPipe {
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+            }
 
             if report.has_at_least(threshold) {
                 std::process::exit(1);
