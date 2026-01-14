@@ -66,6 +66,12 @@ pub struct Sheet {
     pub visibility: SheetVisibility,
     /// Excel-style tab color (OpenXML CT_Color).
     pub tab_color: Option<TabColor>,
+    /// Sparse per-column formatting/visibility overrides (0-based column index).
+    ///
+    /// This is populated when importing XLSX/XLSM/XLS files via `formula_xlsx`/`formula_xls` so
+    /// workbook metadata (eg column widths/hidden flags) can be applied to the desktop formula
+    /// engine (eg for `CELL("width")`).
+    pub col_properties: BTreeMap<u32, formula_model::ColProperties>,
     /// Stable worksheet identifier for XLSX/XLSM inputs (`xl/worksheets/sheetN.xml`).
     ///
     /// We prefer this over `name` when writing cell patches so in-app sheet renames don't break
@@ -105,6 +111,7 @@ impl Sheet {
             name,
             visibility: SheetVisibility::Visible,
             tab_color: None,
+            col_properties: BTreeMap::new(),
             xlsx_worksheet_part: None,
             origin_ordinal: None,
             cells: HashMap::new(),
@@ -1161,6 +1168,7 @@ fn formula_model_sheet_to_app_sheet(
     let mut out = Sheet::new(sheet.name.clone(), sheet.name.clone());
     out.visibility = sheet.visibility;
     out.tab_color = sheet.tab_color.clone();
+    out.col_properties = sheet.col_properties.clone();
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;

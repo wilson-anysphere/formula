@@ -4062,6 +4062,27 @@ impl AppState {
             );
         }
 
+        // Apply imported worksheet column metadata (width/hidden flags) so worksheet information
+        // functions like `CELL("width")` can observe Excel column properties on desktop.
+        for sheet in &workbook.sheets {
+            let sheet_name = sheet.name.as_str();
+            for (col_0based, props) in &sheet.col_properties {
+                if let Some(width) = props.width {
+                    let _ = self.engine.set_col_width(sheet_name, *col_0based, Some(width));
+                }
+                if props.hidden {
+                    let _ = self
+                        .engine
+                        .set_col_hidden(sheet_name, *col_0based, props.hidden);
+                }
+                if let Some(style_id) = props.style_id {
+                    let _ = self
+                        .engine
+                        .set_col_style_id(sheet_name, *col_0based, Some(style_id));
+                }
+            }
+        }
+
         for sheet in &workbook.sheets {
             let sheet_name = &sheet.name;
             for ((row, col), cell) in sheet.cells_iter() {
@@ -4997,6 +5018,68 @@ mod tests {
                 "Sheet3".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn cell_width_reflects_imported_column_properties() {
+        let mut model = formula_model::Workbook::new();
+        let sheet_id = model.add_sheet("Sheet1").expect("add sheet");
+
+        {
+            let sheet = model.sheet_mut(sheet_id).expect("sheet exists");
+            sheet.set_col_width(0, Some(20.0));
+            sheet.set_col_hidden(1, true);
+        }
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx");
+        let xlsx_bytes = cursor.into_inner();
+
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".xlsx")
+            .tempfile()
+            .expect("temp xlsx file");
+        use std::io::Write as _;
+        tmp.as_file_mut()
+            .write_all(&xlsx_bytes)
+            .expect("write temp xlsx bytes");
+        tmp.as_file_mut().flush().expect("flush temp xlsx bytes");
+
+        let workbook = read_xlsx_blocking(tmp.path()).expect("read xlsx via desktop importer");
+        let app_sheet_id = workbook
+            .sheets
+            .first()
+            .map(|s| s.id.clone())
+            .expect("imported workbook has a sheet");
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        // Column A width override is propagated into the engine.
+        state
+            .set_cell(
+                &app_sheet_id,
+                0,
+                2,
+                None,
+                Some("=CELL(\"width\",A1)".to_string()),
+            )
+            .expect("set width formula");
+        let c1 = state.get_cell(&app_sheet_id, 0, 2).expect("read C1");
+        assert_eq!(c1.value, CellScalar::Number(20.0));
+
+        // Hidden columns report width=0.
+        state
+            .set_cell(
+                &app_sheet_id,
+                1,
+                2,
+                None,
+                Some("=CELL(\"width\",B1)".to_string()),
+            )
+            .expect("set hidden width formula");
+        let c2 = state.get_cell(&app_sheet_id, 1, 2).expect("read C2");
+        assert_eq!(c2.value, CellScalar::Number(0.0));
     }
 
     #[test]

@@ -159,8 +159,9 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         "filename" => Some(CellInfoType::Filename),
         // Notes:
-        // - `CELL("width")`/`CELL("protect")`/`CELL("prefix")` return best-effort defaults because
-        //   this engine does not currently track those properties.
+        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43).
+        // - `CELL("protect")`/`CELL("prefix")` return best-effort defaults because this engine does
+        //   not currently track those properties.
         // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
         //   cell number format string, but do not consider conditional formatting rules.
         _ => None,
@@ -362,9 +363,22 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let _cell_ref = record_explicit_cell(ctx);
 
-            // This engine does not currently track per-column widths. Excel's default column width
-            // is 8.43 "character" units.
-            Value::Number(8.43)
+            // Excel's default column width is 8.43 "character" units.
+            const DEFAULT_WIDTH: f64 = 8.43;
+
+            let Some(props) = ctx.col_properties(&reference.sheet_id, addr.col) else {
+                return Value::Number(DEFAULT_WIDTH);
+            };
+            if props.hidden {
+                return Value::Number(0.0);
+            }
+
+            Value::Number(
+                props
+                    .width
+                    .map(|w| w as f64)
+                    .unwrap_or(DEFAULT_WIDTH),
+            )
         }
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an
