@@ -150,7 +150,8 @@ Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 
 `keySize == 40` (`key_size_bytes == 5`), the RC4 key bytes passed into the RC4 KSA are:
 
 ```text
-rc4_key = h_block[0..5] || 0x00 * 11   // 16 bytes total
+key_material = h_block[0..5]
+rc4_key = key_material || 0x00 * 11   // 16 bytes total
 ```
 
 ## Password verification (EncryptionVerifier)

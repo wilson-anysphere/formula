@@ -768,8 +768,10 @@ function decrypt_standard_ooxml(ole, password):
   // parse EncryptionHeader fixed 8 DWORDs
   algId      = U32LE(header[ 8:12])       // cipher
   algIdHash  = U32LE(header[12:16])       // hash
-  keySizeBit = U32LE(header[16:20])
-  keyLen     = keySizeBit / 8
+  keySizeBits = U32LE(header[16:20])      // stored in bits
+  if algId == CALG_RC4 and keySizeBits == 0:
+    keySizeBits = 40                      // MS-OFFCRYPTO: RC4 KeySize=0 means 40-bit
+  keyLen     = keySizeBits / 8
 
   // parse EncryptionVerifier
   saltSize = U32LE(verifier[0:4])
@@ -788,7 +790,11 @@ function decrypt_standard_ooxml(ole, password):
   // ---------- derive file/verifier key (block = 0) ----------
   H_block0 = Hash( H_final || LE32(0) )
   if algId == CALG_RC4:
-    fileKey = H_block0[0:keyLen]
+    keyMaterial = H_block0[0:keyLen]
+    if keySizeBits == 40:
+      fileKey = keyMaterial || 0x00 * 11  // 16 bytes total
+    else:
+      fileKey = keyMaterial
   else:
     fileKey = CryptDeriveKey(Hash, H_block0, keyLen)
 
@@ -828,7 +834,11 @@ function decrypt_standard_ooxml(ole, password):
     out = ciphertext[0:origSize]
     for blockIndex, block in enumerate(chunks(out, 0x200)):
       H_block = Hash(H_final || LE32(blockIndex))
-      rc4Key  = H_block[0:keyLen]
+      keyMaterial = H_block[0:keyLen]
+      if keySizeBits == 40:
+        rc4Key = keyMaterial || 0x00 * 11  // 16 bytes total
+      else:
+        rc4Key = keyMaterial
       block   = RC4_Decrypt_Block(rc4Key, block)
     return out
 ```
