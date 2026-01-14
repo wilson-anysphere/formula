@@ -5178,9 +5178,14 @@ if (
           renderSplitView();
         })();
         secondaryGridViewInitPromise = initPromise;
-        void initPromise.finally(() => {
-          if (secondaryGridViewInitPromise === initPromise) secondaryGridViewInitPromise = null;
-        });
+        void initPromise
+          .finally(() => {
+            if (secondaryGridViewInitPromise === initPromise) secondaryGridViewInitPromise = null;
+          })
+          .catch(() => {
+            // Best-effort: split view is optional; unexpected errors should not surface as an
+            // unhandled rejection.
+          });
       }
     }
 

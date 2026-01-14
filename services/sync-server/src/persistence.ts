@@ -187,18 +187,23 @@ export class FilePersistence {
       })
       .then(task);
     this.queues.set(docName, next);
-    void next.finally(() => {
-      this.pendingTotal = Math.max(0, this.pendingTotal - 1);
-      const remaining = (this.pendingCountsByDoc.get(docName) ?? 1) - 1;
-      if (remaining <= 0) {
-        this.pendingCountsByDoc.delete(docName);
-      } else {
-        this.pendingCountsByDoc.set(docName, remaining);
-      }
-      if (this.queues.get(docName) === next) {
-        this.queues.delete(docName);
-      }
-    });
+    void next
+      .finally(() => {
+        this.pendingTotal = Math.max(0, this.pendingTotal - 1);
+        const remaining = (this.pendingCountsByDoc.get(docName) ?? 1) - 1;
+        if (remaining <= 0) {
+          this.pendingCountsByDoc.delete(docName);
+        } else {
+          this.pendingCountsByDoc.set(docName, remaining);
+        }
+        if (this.queues.get(docName) === next) {
+          this.queues.delete(docName);
+        }
+      })
+      .catch(() => {
+        // Best-effort: the returned `next` promise is awaited/handled by callers; avoid an
+        // unhandled rejection from the internal `.finally` bookkeeping chain.
+      });
     return next;
   }
 

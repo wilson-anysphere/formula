@@ -638,13 +638,18 @@ export function createSyncServer(
           .then(task);
         const nextForQueue = next as Promise<unknown>;
         queues.set(docName, nextForQueue);
-        void nextForQueue.finally(() => {
-          pendingTotal = Math.max(0, pendingTotal - 1);
-          const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
-          if (remaining <= 0) pendingCountsByDoc.delete(docName);
-          else pendingCountsByDoc.set(docName, remaining);
-          if (queues.get(docName) === nextForQueue) queues.delete(docName);
-        });
+        void nextForQueue
+          .finally(() => {
+            pendingTotal = Math.max(0, pendingTotal - 1);
+            const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
+            if (remaining <= 0) pendingCountsByDoc.delete(docName);
+            else pendingCountsByDoc.set(docName, remaining);
+            if (queues.get(docName) === nextForQueue) queues.delete(docName);
+          })
+          .catch(() => {
+            // Best-effort: the returned `next` promise is handled by callers; avoid an unhandled
+            // rejection from this internal `.finally` bookkeeping chain.
+          });
         return next;
       };
       const docLoadPromises = new Map<string, Promise<void>>();
@@ -942,13 +947,18 @@ export function createSyncServer(
             .then(task);
           const nextForQueue = next as Promise<unknown>;
           queues.set(docName, nextForQueue);
-          void nextForQueue.finally(() => {
-            pendingTotal = Math.max(0, pendingTotal - 1);
-            const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
-            if (remaining <= 0) pendingCountsByDoc.delete(docName);
-            else pendingCountsByDoc.set(docName, remaining);
-            if (queues.get(docName) === nextForQueue) queues.delete(docName);
-          });
+          void nextForQueue
+            .finally(() => {
+              pendingTotal = Math.max(0, pendingTotal - 1);
+              const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
+              if (remaining <= 0) pendingCountsByDoc.delete(docName);
+              else pendingCountsByDoc.set(docName, remaining);
+              if (queues.get(docName) === nextForQueue) queues.delete(docName);
+            })
+            .catch(() => {
+              // Best-effort: the returned `next` promise is handled by callers; avoid an unhandled
+              // rejection from this internal `.finally` bookkeeping chain.
+            });
           return next;
         };
         const docLoadPromises = new Map<string, Promise<void>>();
