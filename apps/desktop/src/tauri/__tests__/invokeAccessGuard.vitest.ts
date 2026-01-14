@@ -18,6 +18,9 @@ function escapeRegExp(value: string): string {
 const TAURI_GLOBAL_REF_RE_SOURCE =
   "(?:\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b|(?:globalThis|window|self)\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b|__TAURI__\\b|\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]|(?:globalThis|window|self)\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\])";
 
+const GLOBAL_OBJECT_REF_RE_SOURCE =
+  "(?:\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)|(?:globalThis|window|self)(?:\\s+as\\s+any)?)";
+
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   const entries = await readdir(dir, { withFileTypes: true });
@@ -44,6 +47,10 @@ function isTestFile(relPath: string): boolean {
 function collectTauriAliases(content: string): Set<string> {
   const tauriRoots = new Set<string>();
 
+  // Fast-path: most source files never mention the Tauri globals. Avoid running the heavier
+  // regex scan in that case so this guard test stays cheap.
+  if (!content.includes("__TAURI__")) return tauriRoots;
+
   // Capture common aliasing patterns like:
   //   const tauri = (globalThis as any).__TAURI__;
   //   let tauri = globalThis.__TAURI__ ?? null;
@@ -57,6 +64,26 @@ function collectTauriAliases(content: string): Set<string> {
     const name = match[1];
     if (name) tauriRoots.add(name);
     if (match[0].length === 0) tauriRootAssignRe.lastIndex += 1;
+  }
+
+  // Capture destructuring aliasing patterns like:
+  //   const { __TAURI__: tauri } = globalThis;
+  //   const { "__TAURI__": tauri } = (globalThis as any);
+  const tauriRootDestructureRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}\\b`,
+    "g",
+  );
+  const tauriRootDestructureRenameQuotedRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?['\\\"]__TAURI__['\\\"]\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}\\b`,
+    "g",
+  );
+
+  for (const re of [tauriRootDestructureRenameRe, tauriRootDestructureRenameQuotedRe]) {
+    while ((match = re.exec(content)) != null) {
+      const name = match[1];
+      if (name) tauriRoots.add(name);
+      if (match[0].length === 0) re.lastIndex += 1;
+    }
   }
 
   return tauriRoots;
@@ -222,6 +249,9 @@ describe("tauri/invoke guardrails", () => {
       if (normalized === "tauri/invoke.js" || normalized === "tauri/invoke.ts") continue;
 
       const content = await readFile(absPath, "utf8");
+      // Fast-path: if the file doesn't mention the Tauri globals at all, none of the banned
+      // patterns can match (including the alias-based checks in this guard).
+      if (!content.includes("__TAURI__")) continue;
 
       const matches = (re: RegExp) => re.test(content);
       if (bannedRes.some(matches)) {

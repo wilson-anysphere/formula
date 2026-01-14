@@ -13,6 +13,14 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Keep this in sync with `tauri/invokeAccessGuard.vitest.ts` so we cover common access patterns
+// (dot access, optional chaining, and bracket access to the global itself).
+const TAURI_GLOBAL_REF_RE_SOURCE =
+  "(?:\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b|(?:globalThis|window|self)\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b|__TAURI__\\b|\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]|(?:globalThis|window|self)\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\])";
+
+const GLOBAL_OBJECT_REF_RE_SOURCE =
+  "(?:\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)|(?:globalThis|window|self)(?:\\s+as\\s+any)?)";
+
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   const entries = await readdir(dir, { withFileTypes: true });
@@ -47,6 +55,12 @@ function collectTauriAliases(content: string): TauriAliasSets {
   const tauriPluginRoots = new Set<string>();
   const tauriPluginsRoots = new Set<string>();
 
+  // Fast-path: most source files never mention the Tauri globals. Avoid running the heavier
+  // regex scan in that case so this guard test stays cheap.
+  if (!content.includes("__TAURI__")) {
+    return { tauriRoots, tauriPluginRoots, tauriPluginsRoots };
+  }
+
   // Capture common aliasing patterns like:
   //   const tauri = (globalThis as any).__TAURI__;
   //   let tauri = globalThis.__TAURI__ ?? null;
@@ -64,6 +78,25 @@ function collectTauriAliases(content: string): TauriAliasSets {
     if (match[0].length === 0) tauriRootAssignRe.lastIndex += 1;
   }
 
+  // Capture destructuring aliasing patterns like:
+  //   const { __TAURI__: tauri } = globalThis;
+  //   const { "__TAURI__": tauri } = (globalThis as any);
+  const tauriRootDestructureRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}\\b`,
+    "g",
+  );
+  const tauriRootDestructureRenameQuotedRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?['\\\"]__TAURI__['\\\"]\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}\\b`,
+    "g",
+  );
+  for (const re of [tauriRootDestructureRenameRe, tauriRootDestructureRenameQuotedRe]) {
+    while ((match = re.exec(content)) != null) {
+      const name = match[1];
+      if (name) tauriRoots.add(name);
+      if (match[0].length === 0) re.lastIndex += 1;
+    }
+  }
+
   // Capture aliases to the plugin container objects:
   //   const plugin = (globalThis as any).__TAURI__?.plugin;
   const tauriPluginAssignRe =
@@ -75,6 +108,102 @@ function collectTauriAliases(content: string): TauriAliasSets {
     if (name && which === "plugin") tauriPluginRoots.add(name);
     if (name && which === "plugins") tauriPluginsRoots.add(name);
     if (match[0].length === 0) tauriPluginAssignRe.lastIndex += 1;
+  }
+
+  // Capture plugin container aliases via destructuring:
+  //   const { plugin } = __TAURI__;
+  //   const { plugin: p } = tauri;
+  const pluginDestructureDirectRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugin\\b(?!\\s*:)` + `[^}]*\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}`,
+  );
+  if (pluginDestructureDirectRe.test(content)) tauriPluginRoots.add("plugin");
+  const pluginDestructureRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugin\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}`,
+    "g",
+  );
+  while ((match = pluginDestructureRenameRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) tauriPluginRoots.add(name);
+    if (match[0].length === 0) pluginDestructureRenameRe.lastIndex += 1;
+  }
+
+  const pluginsDestructureDirectRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugins\\b(?!\\s*:)` + `[^}]*\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}`,
+  );
+  if (pluginsDestructureDirectRe.test(content)) tauriPluginsRoots.add("plugins");
+  const pluginsDestructureRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugins\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}`,
+    "g",
+  );
+  while ((match = pluginsDestructureRenameRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) tauriPluginsRoots.add(name);
+    if (match[0].length === 0) pluginsDestructureRenameRe.lastIndex += 1;
+  }
+
+  for (const root of tauriRoots) {
+    const r = escapeRegExp(root);
+
+    const pluginAssignFromAliasDotRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${r}\\s*(?:\\?\\.|\\.)\\s*plugin\\b`,
+      "g",
+    );
+    const pluginsAssignFromAliasDotRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${r}\\s*(?:\\?\\.|\\.)\\s*plugins\\b`,
+      "g",
+    );
+    const pluginAssignFromAliasBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]plugin['\\\"]\\s*\\]`,
+      "g",
+    );
+    const pluginsAssignFromAliasBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]plugins['\\\"]\\s*\\]`,
+      "g",
+    );
+
+    for (const re of [
+      { which: "plugin", re: pluginAssignFromAliasDotRe },
+      { which: "plugins", re: pluginsAssignFromAliasDotRe },
+      { which: "plugin", re: pluginAssignFromAliasBracketRe },
+      { which: "plugins", re: pluginsAssignFromAliasBracketRe },
+    ] as const) {
+      while ((match = re.re.exec(content)) != null) {
+        const name = match[1];
+        if (!name) continue;
+        if (re.which === "plugin") tauriPluginRoots.add(name);
+        else tauriPluginsRoots.add(name);
+        if (match[0].length === 0) re.re.lastIndex += 1;
+      }
+    }
+
+    // Destructuring from a root alias: `const { plugin } = tauri;`
+    const pluginDestructureFromAliasDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugin\\b(?!\\s*:)[^}]*\\}\\s*=\\s*${r}\\b`,
+    );
+    if (pluginDestructureFromAliasDirectRe.test(content)) tauriPluginRoots.add("plugin");
+    const pluginDestructureFromAliasRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugin\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${r}\\b`,
+      "g",
+    );
+    while ((match = pluginDestructureFromAliasRenameRe.exec(content)) != null) {
+      const name = match[1];
+      if (name) tauriPluginRoots.add(name);
+      if (match[0].length === 0) pluginDestructureFromAliasRenameRe.lastIndex += 1;
+    }
+
+    const pluginsDestructureFromAliasDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugins\\b(?!\\s*:)[^}]*\\}\\s*=\\s*${r}\\b`,
+    );
+    if (pluginsDestructureFromAliasDirectRe.test(content)) tauriPluginsRoots.add("plugins");
+    const pluginsDestructureFromAliasRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bplugins\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${r}\\b`,
+      "g",
+    );
+    while ((match = pluginsDestructureFromAliasRenameRe.exec(content)) != null) {
+      const name = match[1];
+      if (name) tauriPluginsRoots.add(name);
+      if (match[0].length === 0) pluginsDestructureFromAliasRenameRe.lastIndex += 1;
+    }
   }
 
   return { tauriRoots, tauriPluginRoots, tauriPluginsRoots };
@@ -235,6 +364,9 @@ describe("tauri/api guardrails", () => {
       if (normalized === "tauri/api.ts" || normalized === "tauri/api.js") continue;
 
       const content = await readFile(absPath, "utf8");
+      // Fast-path: if the file doesn't mention the Tauri globals at all, none of the banned
+      // patterns can match (including the alias-based checks in this guard).
+      if (!content.includes("__TAURI__")) continue;
       const lines = content.split(/\r?\n/);
 
       const aliasRes: RegExp[] = [];
