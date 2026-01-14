@@ -381,7 +381,7 @@ pub fn pivot_table_to_engine_config(
         .iter()
         .filter_map(|df| {
             let field_idx = df.fld? as usize;
-            let source_field = cache_def.cache_fields.get(field_idx)?.name.clone();
+            let source_field_name = cache_def.cache_fields.get(field_idx)?.name.clone();
             let aggregation = map_subtotal(df.subtotal.as_deref());
             let name = df
                 .name
@@ -391,7 +391,7 @@ pub fn pivot_table_to_engine_config(
                     format!(
                         "{} of {}",
                         aggregation_display_name(aggregation),
-                        &source_field
+                        &source_field_name
                     )
                 });
 
@@ -422,8 +422,9 @@ pub fn pivot_table_to_engine_config(
                         item,
                     )))
                 });
+            let source_field = PivotFieldRef::CacheFieldName(source_field_name);
             Some(ValueField {
-                source_field: PivotFieldRef::CacheFieldName(source_field),
+                source_field,
                 name,
                 aggregation,
                 number_format: None,
@@ -440,7 +441,7 @@ pub fn pivot_table_to_engine_config(
         .filter_map(|page_field| {
             let field_idx = page_field.fld as usize;
             let cache_field = cache_def.cache_fields.get(field_idx)?;
-            let source_field = cache_field.name.clone();
+            let source_field = PivotFieldRef::CacheFieldName(cache_field.name.clone());
 
             // `pageField@item` is typically a shared-item index for the field, with `-1` meaning
             // "(All)". We currently model report filters as a single-selection allowed-set.
@@ -459,7 +460,7 @@ pub fn pivot_table_to_engine_config(
             });
 
             Some(FilterField {
-                source_field: PivotFieldRef::CacheFieldName(source_field),
+                source_field,
                 allowed,
             })
         })

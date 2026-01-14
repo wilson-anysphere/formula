@@ -28,7 +28,7 @@ pub fn pivot_table_to_model_value_fields(
         .iter()
         .filter_map(|df| {
             let field_idx = df.fld? as usize;
-            let source_field = cache_def.cache_fields.get(field_idx)?.name.clone();
+            let source_field_name = cache_def.cache_fields.get(field_idx)?.name.clone();
             let aggregation = map_subtotal(df.subtotal.as_deref());
             let name = df
                 .name
@@ -38,7 +38,7 @@ pub fn pivot_table_to_model_value_fields(
                     format!(
                         "{} of {}",
                         aggregation_display_name(aggregation),
-                        &source_field
+                        &source_field_name
                     )
                 });
 
@@ -46,8 +46,9 @@ pub fn pivot_table_to_model_value_fields(
                 .num_fmt_id
                 .and_then(|id| resolve_pivot_num_fmt_id(id, styles));
 
+            let source_field = PivotFieldRef::CacheFieldName(source_field_name);
             Some(ValueField {
-                source_field: PivotFieldRef::CacheFieldName(source_field),
+                source_field,
                 name,
                 aggregation,
                 number_format,
