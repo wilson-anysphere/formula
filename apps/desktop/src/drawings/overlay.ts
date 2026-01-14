@@ -150,6 +150,13 @@ function resolveCssVarFromStyle(style: CssVarStyle | null, varName: string, fall
 }
 
 function resolveOverlayColorTokens(style: CssVarStyle | null): OverlayColorTokens {
+  const textPrimary = resolveCssVarFromStyle(style, "--text-primary", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderLabel);
+  const selectionBorder = resolveCssVarFromStyle(
+    style,
+    "--selection-border",
+    DEFAULT_OVERLAY_COLOR_TOKENS.selectionStroke,
+  );
+  const bgPrimary = resolveCssVarFromStyle(style, "--bg-primary", DEFAULT_OVERLAY_COLOR_TOKENS.selectionHandleFill);
   return {
     placeholderChartStroke: resolveCssVarFromStyle(style, "--chart-series-1", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderChartStroke),
     placeholderOtherStroke: resolveCssVarFromStyle(style, "--chart-series-2", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderOtherStroke),
@@ -158,9 +165,9 @@ function resolveOverlayColorTokens(style: CssVarStyle | null): OverlayColorToken
       "--chart-series-3",
       DEFAULT_OVERLAY_COLOR_TOKENS.placeholderGraphicFrameStroke,
     ),
-    placeholderLabel: resolveCssVarFromStyle(style, "--text-primary", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderLabel),
-    selectionStroke: resolveCssVarFromStyle(style, "--selection-border", DEFAULT_OVERLAY_COLOR_TOKENS.selectionStroke),
-    selectionHandleFill: resolveCssVarFromStyle(style, "--bg-primary", DEFAULT_OVERLAY_COLOR_TOKENS.selectionHandleFill),
+    placeholderLabel: resolveCssVarFromStyle(style, "--formula-grid-cell-text", textPrimary),
+    selectionStroke: resolveCssVarFromStyle(style, "--formula-grid-selection-border", selectionBorder),
+    selectionHandleFill: resolveCssVarFromStyle(style, "--formula-grid-bg", bgPrimary),
   };
 }
 

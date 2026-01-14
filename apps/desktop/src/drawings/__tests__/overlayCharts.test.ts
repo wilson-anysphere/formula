@@ -113,13 +113,17 @@ describe("DrawingOverlay charts", () => {
       const vars: Record<string, string> = {
         "--chart-series-1": "var(--chart-series-base)",
         "--chart-series-base": "rgb(1, 2, 3)",
-        "--text-primary": "var(--text-primary-base)",
-        "--text-primary-base": "rgb(10, 11, 12)",
+        // Prefer grid-scoped tokens for overlay label/selection colors when running inside the spreadsheet.
+        "--formula-grid-cell-text": "var(--grid-cell-text-base)",
+        "--grid-cell-text-base": "rgb(10, 11, 12)",
+        "--text-primary": "rgb(100, 101, 102)",
         // Exercise `var(--missing, fallback)` handling: the referenced token is undefined,
         // so the resolver should return the fallback value (and not the caller fallback).
-        "--selection-border": "var(--selection-border-missing, rgb(4, 5, 6))",
-        "--bg-primary": "var(--bg-primary-base)",
-        "--bg-primary-base": "rgb(7, 8, 9)",
+        "--formula-grid-selection-border": "var(--selection-border-missing, rgb(4, 5, 6))",
+        "--selection-border": "rgb(200, 201, 202)",
+        "--formula-grid-bg": "var(--grid-bg-base)",
+        "--grid-bg-base": "rgb(7, 8, 9)",
+        "--bg-primary": "rgb(150, 151, 152)",
       };
       (globalThis as any).getComputedStyle = () => ({
         getPropertyValue: (name: string) => vars[name] ?? "",
