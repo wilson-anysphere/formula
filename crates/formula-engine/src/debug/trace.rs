@@ -1833,7 +1833,7 @@ impl ParserImpl {
                 }
             };
             self.expect(TokenKind::Bang)?;
-            if crate::eval::is_valid_external_sheet_key(&start_name) {
+            if let Some((_, start_sheet)) = crate::external_refs::parse_external_key(&start_name) {
                 // Excel treats `[Book]Sheet1:Sheet3!A1` as an external workbook 3D span where the
                 // bracketed workbook prefix applies to both endpoints. We preserve the span in the
                 // external sheet key (`[Book]Sheet1:Sheet3`) so evaluation can expand it using the
@@ -1841,13 +1841,7 @@ impl ParserImpl {
                 //
                 // When the endpoint sheet names match, collapse to the single external sheet key
                 // (`[Book]Sheet1`) so evaluation can consult the external provider directly.
-                let Some((_, sheet_part)) = start_name.rsplit_once(']') else {
-                    return Ok(SpannedExpr {
-                        span: Span::new(sheet_tok.span.start, end_tok.span.end),
-                        kind: SpannedExprKind::Error(ErrorKind::Ref),
-                    });
-                };
-                if sheet_name_eq_case_insensitive(sheet_part, &end_name) {
+                if sheet_name_eq_case_insensitive(start_sheet, &end_name) {
                     SheetReference::External(start_name)
                 } else {
                     // Preserve the full span in the sheet key so `resolve_sheet_id` reliably
@@ -1883,27 +1877,20 @@ impl ParserImpl {
                     }
                     None => SheetReference::External(format!("[{workbook}]{sheet_part}")),
                 }
-            } else {
-                match split_sheet_span_name(&start_name) {
-                    Some((start, end)) => {
-                        if crate::eval::is_valid_external_sheet_key(&start) {
-                            let Some((_, sheet_part)) = start.rsplit_once(']') else {
-                                return Ok(SpannedExpr {
-                                    span: Span::new(sheet_tok.span.start, sheet_tok.span.end),
-                                    kind: SpannedExprKind::Error(ErrorKind::Ref),
-                                });
-                            };
-                            if sheet_name_eq_case_insensitive(sheet_part, &end) {
-                                SheetReference::External(start)
-                            } else {
-                                SheetReference::External(format!("{start}:{end}"))
-                            }
-                        } else {
-                            SheetReference::SheetRange(start, end)
-                        }
+            } else if let Some((start, end)) = split_sheet_span_name(&start_name) {
+                if let Some((_, start_sheet)) = crate::external_refs::parse_external_key(&start) {
+                    if sheet_name_eq_case_insensitive(start_sheet, &end) {
+                        SheetReference::External(start)
+                    } else {
+                        SheetReference::External(format!("{start}:{end}"))
                     }
-                    None => SheetReference::Sheet(start_name),
+                } else {
+                    SheetReference::SheetRange(start, end)
                 }
+            } else if crate::external_refs::parse_external_key(&start_name).is_some() {
+                SheetReference::External(start_name)
+            } else {
+                SheetReference::Sheet(start_name)
             }
         };
 
@@ -2726,12 +2713,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         );
                     }
 
-                    let (workbook, explicit_sheet_key) = match crate::eval::split_external_sheet_key(key)
-                    {
-                        Some((workbook, sheet)) if !sheet.contains(':') => {
+                    let (workbook, explicit_sheet_key) =
+                        if let Some((workbook, _sheet)) = crate::external_refs::parse_external_key(key)
+                        {
                             (workbook, Some(key.as_str()))
-                        }
-                        Some((_workbook, _sheet)) => {
+                        } else if crate::external_refs::parse_external_span_key(key).is_some() {
                             let value = Value::Error(ErrorKind::Ref);
                             return (
                                 EvalValue::Scalar(value.clone()),
@@ -2743,8 +2729,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     children: Vec::new(),
                                 },
                             );
-                        }
-                        None => {
+                        } else {
                             let Some(end) = key.rfind(']') else {
                                 let value = Value::Error(ErrorKind::Ref);
                                 return (
@@ -2772,9 +2757,21 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     },
                                 );
                             }
+                            if !key[end + 1..].is_empty() {
+                                let value = Value::Error(ErrorKind::Ref);
+                                return (
+                                    EvalValue::Scalar(value.clone()),
+                                    TraceNode {
+                                        kind: TraceKind::StructuredRef,
+                                        span: expr.span,
+                                        value,
+                                        reference: None,
+                                        children: Vec::new(),
+                                    },
+                                );
+                            }
                             (workbook, None)
-                        }
-                    };
+                        };
 
                     let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
                         let value = Value::Error(ErrorKind::Ref);
@@ -3333,15 +3330,19 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     return Some(vec![FnSheetId::External(key.clone())]);
                 }
 
-                let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
+                let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
+
+                let start_key = crate::external_refs::casefold_sheet_name(start);
+                let end_key = crate::external_refs::casefold_sheet_name(end);
                 let mut start_idx: Option<usize> = None;
                 let mut end_idx: Option<usize> = None;
                 for (idx, name) in order.iter().enumerate() {
-                    if start_idx.is_none() && sheet_name_eq_case_insensitive(name, start) {
+                    let name_key = crate::external_refs::casefold_sheet_name(name);
+                    if start_idx.is_none() && name_key == start_key {
                         start_idx = Some(idx);
                     }
-                    if end_idx.is_none() && sheet_name_eq_case_insensitive(name, end) {
+                    if end_idx.is_none() && name_key == end_key {
                         end_idx = Some(idx);
                     }
                     if start_idx.is_some() && end_idx.is_some() {

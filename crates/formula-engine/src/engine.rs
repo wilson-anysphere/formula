@@ -15852,16 +15852,20 @@ fn expand_external_sheet_span_key(
     provider: Option<&dyn ExternalValueProvider>,
 ) -> Option<Vec<String>> {
     let provider = provider?;
-    let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
+    let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
     let sheet_names = provider.workbook_sheet_names(workbook)?;
+
+    let start_key = crate::external_refs::casefold_sheet_name(start);
+    let end_key = crate::external_refs::casefold_sheet_name(end);
 
     let mut start_idx: Option<usize> = None;
     let mut end_idx: Option<usize> = None;
     for (idx, name) in sheet_names.iter().enumerate() {
-        if start_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, start) {
+        let name_key = crate::external_refs::casefold_sheet_name(name);
+        if start_idx.is_none() && name_key == start_key {
             start_idx = Some(idx);
         }
-        if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end) {
+        if end_idx.is_none() && name_key == end_key {
             end_idx = Some(idx);
         }
         if start_idx.is_some() && end_idx.is_some() {

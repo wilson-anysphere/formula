@@ -372,7 +372,8 @@ pub trait ValueResolver {
     /// `"[Book.xlsx]Sheet1!Table1[Col]"`.
     ///
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"`),
-    /// matching what [`split_external_sheet_key`] returns.
+    /// matching what [`crate::external_refs::parse_external_key`] extracts from a
+    /// `"[workbook]Sheet"` key.
     ///
     /// Returning `None` indicates that table metadata is unavailable, in which case external
     /// structured references evaluate to `#REF!`.
@@ -928,15 +929,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     }
 
-                    let (workbook, explicit_sheet_key) = match split_external_sheet_key(key) {
-                        Some((workbook, sheet)) if !sheet.contains(':') => {
+                    let (workbook, explicit_sheet_key) =
+                        if let Some((workbook, _sheet)) = crate::external_refs::parse_external_key(key)
+                        {
                             (workbook, Some(key.as_str()))
-                        }
-                        Some((_workbook, _sheet)) => {
+                        } else if crate::external_refs::parse_external_span_key(key).is_some() {
                             // External 3D sheet spans are not valid structured-ref prefixes.
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        None => {
+                        } else {
                             // Workbook-only external reference (`[Book.xlsx]...`); parse the
                             // bracketed workbook prefix.
                             // Workbook ids can contain `]` (either escaped as `]]` in quoted
@@ -949,9 +949,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             if workbook.is_empty() {
                                 return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                             }
+                            if !key[end + 1..].is_empty() {
+                                return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                            }
                             (workbook, None)
-                        }
-                    };
+                        };
 
                     let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
@@ -1432,18 +1434,19 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // External-workbook 3D spans are represented as a single key string (e.g.
                 // `"[Book.xlsx]Sheet1:Sheet3"`). Expand these into per-sheet external keys using
                 // workbook sheet order supplied by the resolver.
-                let (workbook, start, end) = split_external_sheet_span_key(key)?;
+                let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
+
+                let start_key = crate::external_refs::casefold_sheet_name(start);
+                let end_key = crate::external_refs::casefold_sheet_name(end);
                 let mut start_idx: Option<usize> = None;
                 let mut end_idx: Option<usize> = None;
                 for (idx, name) in order.iter().enumerate() {
-                    if start_idx.is_none()
-                        && formula_model::sheet_name_eq_case_insensitive(name, start)
-                    {
+                    let name_key = crate::external_refs::casefold_sheet_name(name);
+                    if start_idx.is_none() && name_key == start_key {
                         start_idx = Some(idx);
                     }
-                    if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end)
-                    {
+                    if end_idx.is_none() && name_key == end_key {
                         end_idx = Some(idx);
                     }
                     if start_idx.is_some() && end_idx.is_some() {
@@ -1762,41 +1765,15 @@ fn intersect_ranges(a: &ResolvedRange, b: &ResolvedRange) -> Option<ResolvedRang
 }
 
 pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
-    let Some((_workbook, sheet)) = split_external_sheet_key(key) else {
-        return false;
-    };
-
-    // Note: This validator is intentionally strict and only accepts *single-sheet* external keys
-    // (e.g. `"[Book.xlsx]Sheet1"`). External-workbook 3D spans are represented as
-    // `"[Book.xlsx]Sheet1:Sheet3"` and are expanded separately using workbook sheet order.
-    !sheet.contains(':')
+    crate::external_refs::parse_external_key(key).is_some()
 }
 
 pub(crate) fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
-    if !key.starts_with('[') {
-        return None;
-    }
-    // External workbook ids can include a path prefix (e.g. from a quoted reference like
-    // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`), and that prefix may itself contain `[` / `]`.
-    //
-    // Our canonical external sheet key format is `"[{workbook}]{sheet}"`, so locate the *last*
-    // closing bracket to recover the workbook id.
-    let end = key.rfind(']')?;
-    let workbook = &key[1..end];
-    let sheet = &key[end + 1..];
-    if workbook.is_empty() || sheet.is_empty() {
-        return None;
-    }
-    Some((workbook, sheet))
+    crate::external_refs::split_external_sheet_key_parts(key)
 }
 
 pub(crate) fn split_external_sheet_span_key(key: &str) -> Option<(&str, &str, &str)> {
-    let (workbook, sheet_part) = split_external_sheet_key(key)?;
-    let (start, end) = sheet_part.split_once(':')?;
-    if start.is_empty() || end.is_empty() {
-        return None;
-    }
-    Some((workbook, start, end))
+    crate::external_refs::parse_external_span_key(key)
 }
 
 #[cfg(test)]

@@ -58,6 +58,8 @@ pub mod style_bridge;
 pub mod value;
 pub mod what_if;
 
+mod external_refs;
+
 /// Excel's hard limit for the maximum number of arguments in a single function call.
 ///
 /// This applies to both built-in function calls (e.g. `SUM(...)`) and call expressions
