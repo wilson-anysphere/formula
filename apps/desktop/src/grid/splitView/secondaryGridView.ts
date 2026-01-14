@@ -814,9 +814,6 @@ export class SecondaryGridView {
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
-    // Axis size overrides can change cell origins/sizes while the drawing object list is stable.
-    // Invalidate the spatial index so `DrawingOverlay` recomputes sheet-space bounds on next render.
-    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 
