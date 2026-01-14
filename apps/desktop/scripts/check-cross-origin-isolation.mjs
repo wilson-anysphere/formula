@@ -394,11 +394,18 @@ async function main() {
   if (runCode !== 0) {
     if (runCode === 124) {
       console.error("[coi-check] ERROR: COI smoke check timed out (the desktop process did not exit in time).");
+      console.error(
+        "[coi-check] Hint: you can adjust the timeout with FORMULA_COI_TIMEOUT_SECS=<seconds> (set to 0 to disable).",
+      );
     } else if (runCode === 2) {
       console.error("[coi-check] ERROR: COI smoke check failed due to an internal error/timeout while starting the app.");
-    } else {
+    } else if (runCode === 1) {
       console.error(
         `[coi-check] FAILED: packaged Tauri build is missing cross-origin isolation and/or Worker support (exit code ${runCode}).`,
+      );
+    } else {
+      console.error(
+        `[coi-check] ERROR: COI smoke check exited with unexpected status code ${runCode}.`,
       );
     }
   } else {
