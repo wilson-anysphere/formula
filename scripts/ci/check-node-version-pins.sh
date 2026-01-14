@@ -222,7 +222,8 @@ mapfile -t node_workflows < <(
     # `git grep` exits 1 when there are no matches. We always include CI + release workflows
     # explicitly below, so treat "no matches" as an empty set (and fail later with a clearer
     # message if needed).
-    git grep -l "actions/setup-node@" -- .github/workflows/*.yml || true
+    git grep -l -E 'actions/setup-node@|pnpm/action-setup@|^[[:space:]]*run:[[:space:]]*node[[:space:]]|^[[:space:]]*node[[:space:]]|\|[[:space:]]*node[[:space:]]' \
+      -- .github/workflows/*.yml || true
     printf '%s\n' "$ci_workflow" "$release_workflow"
   } | sort -u
 )
