@@ -102,6 +102,7 @@ test("appends a short note to GITHUB_STEP_SUMMARY when set", () => {
   assert.equal(proc.status, 0, proc.stderr);
   const summary = readFileSync(stepSummaryPath, "utf8");
   assert.match(summary, /Manifest signature: OK/);
+  assert.match(summary, /Updater pubkey: raw/);
 });
 
 test("supports base64url for both pubkey and signature", () => {

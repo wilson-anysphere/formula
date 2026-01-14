@@ -89,7 +89,7 @@ function main() {
     return;
   }
 
-  /** @type {{ keyId: string | null; publicKeyBytes: Uint8Array }} */
+  /** @type {{ keyId: string | null; publicKeyBytes: Uint8Array; format?: string }} */
   let parsedPubkey;
   try {
     parsedPubkey = parseTauriUpdaterPubkey(pubkeyValue);
@@ -180,6 +180,9 @@ function main() {
   }
 
   console.log("signature OK");
+  const pubkeyFormat = parsedPubkey.format ?? "unknown";
+  const pubkeyKeyIdSuffix = parsedPubkey.keyId ? ` (key id: ${parsedPubkey.keyId})` : "";
+  console.log(`pubkey: ${pubkeyFormat}${pubkeyKeyIdSuffix}`);
 
   // If running in GitHub Actions, append a short note to the step summary so the
   // signature check result is visible alongside the manifest target table written
@@ -187,7 +190,11 @@ function main() {
   const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (stepSummaryPath) {
     try {
-      appendFileSync(stepSummaryPath, `\n### Signature\n\n- Manifest signature: OK\n`, "utf8");
+      appendFileSync(
+        stepSummaryPath,
+        `\n### Signature\n\n- Manifest signature: OK\n- Updater pubkey: ${pubkeyFormat}${pubkeyKeyIdSuffix}\n`,
+        "utf8",
+      );
     } catch {
       // Non-fatal: the signature verification already passed; don't fail the release
       // workflow just because the step summary could not be updated.
