@@ -220,6 +220,16 @@ test("validate-windows-bundles.ps1 validates MSI UpgradeCode against tauri.conf.
   );
 });
 
+test("validate-windows-bundles.ps1 avoids unbounded Get-ChildItem -Recurse scans over target roots (perf guardrail)", () => {
+  // Ensure we don't regress back to a full `Get-ChildItem -Recurse` over `target/` when
+  // bundle discovery fails. Cargo target directories can be enormous once builds have run.
+  assert.doesNotMatch(
+    text,
+    /Get-ChildItem\s+-LiteralPath\s+\\$TargetRoot\s+-Recurse\s+-Directory/,
+    "Expected bundle discovery to avoid unbounded `Get-ChildItem -LiteralPath $TargetRoot -Recurse -Directory` scans.",
+  );
+});
+
 test("validate-windows-bundles.ps1 validates MSI ProductName against tauri.conf.json productName", () => {
   assert.match(
     text,

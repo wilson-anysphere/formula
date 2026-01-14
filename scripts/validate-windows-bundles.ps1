@@ -350,6 +350,99 @@ function Expand-FileInputs {
   return @($out | Sort-Object FullName -Unique)
 }
 
+function Find-BundleKindDirsFallback {
+  <#
+    Best-effort fallback discovery for bundle directories when the expected Cargo/Tauri layout
+    is not present.
+
+    Historical implementations used `Get-ChildItem -Recurse` over the entire Cargo target
+    directory. Target trees can be extremely large (build scripts, deps, incremental, etc),
+    and a full recursive enumeration can add minutes of overhead in CI once builds have run.
+
+    This helper performs a bounded directory walk and prunes well-known large directories.
+  #>
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TargetRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$BundleKind,
+
+    [int]$MaxDepth = 8
+  )
+
+  if (-not (Test-Path -LiteralPath $TargetRoot -PathType Container)) {
+    return @()
+  }
+
+  # Common large directories inside Cargo targets (and other repo trees).
+  $skipNames = @(
+    "build",
+    "deps",
+    "incremental",
+    ".fingerprint",
+    "debug",
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    "target",
+    ".pnpm-store",
+    ".turbo",
+    ".cache",
+    ".vite",
+    "security-report",
+    "test-results",
+    "playwright-report"
+  )
+
+  $found = New-Object System.Collections.Generic.List[string]
+
+  function Walk-Dir {
+    param(
+      [Parameter(Mandatory = $true)]
+      [string]$Path,
+
+      [Parameter(Mandatory = $true)]
+      [int]$Depth
+    )
+
+    if ($Depth -gt $MaxDepth) {
+      return
+    }
+
+    $dirs = @()
+    try {
+      $dirs = @(Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue)
+    } catch {
+      $dirs = @()
+    }
+
+    foreach ($d in $dirs) {
+      # Avoid junction/symlink loops.
+      try {
+        if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+      } catch {
+        # Best-effort; if attribute checks fail, continue.
+      }
+
+      if ($skipNames -contains $d.Name) { continue }
+
+      if ($d.Name -ieq $BundleKind -and $d.FullName -match "[\\\\/](release)[\\\\/](bundle)[\\\\/]$BundleKind$") {
+        $found.Add($d.FullName) | Out-Null
+        continue
+      }
+
+      Walk-Dir -Path $d.FullName -Depth ($Depth + 1)
+    }
+  }
+
+  Walk-Dir -Path $TargetRoot -Depth 0
+
+  return @($found | Sort-Object -Unique)
+}
+
 function Find-BundleFiles {
   param(
     [Parameter(Mandatory = $true)]
@@ -404,12 +497,9 @@ function Find-BundleFiles {
   }
 
   # Fall back to a recursive search for bundle directories for any non-standard layouts.
-  $bundleDirsFallback = @(
-    Get-ChildItem -LiteralPath $TargetRoot -Recurse -Directory -Filter $BundleKind -ErrorAction SilentlyContinue |
-      Where-Object { $_.FullName -match "[\\\\/](release)[\\\\/](bundle)[\\\\/]$BundleKind$" }
-  )
-  foreach ($dir in $bundleDirsFallback) {
-    $files = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
+  $bundleDirsFallback = Find-BundleKindDirsFallback -TargetRoot $TargetRoot -BundleKind $BundleKind -MaxDepth 8
+  foreach ($dirPath in $bundleDirsFallback) {
+    $files = Get-ChildItem -LiteralPath $dirPath -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
     foreach ($f in $files) { $out.Add($f) }
   }
 
