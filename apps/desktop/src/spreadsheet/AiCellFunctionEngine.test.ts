@@ -1049,6 +1049,42 @@ describe("AiCellFunctionEngine", () => {
     expect(resolved).toBe("ok");
   });
 
+  it.each([
+    ["IF", '=AI("summarize", IF(TRUE, A1, "x"))'],
+    ["concatenation", '=AI("summarize", "email:" & A1)'],
+  ])("heuristically redacts sensitive values smuggled via %s expressions", async (_name, formula) => {
+    globalThis.localStorage?.clear();
+
+    const workbookId = `dlp-heuristic-smuggle-${String(_name).replaceAll(" ", "-").toLowerCase()}`;
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : null);
+
+    const pending = evaluateFormula(formula, getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain("user@example.com");
+
+    const resolved = evaluateFormula(formula, getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(resolved).toBe("ok");
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const workbookId = "dlp-redact-workbook";
     const llmClient = {
