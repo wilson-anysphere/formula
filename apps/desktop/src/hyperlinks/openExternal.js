@@ -2,6 +2,8 @@ const DEFAULT_ALLOWED_PROTOCOLS = new Set(["http", "https", "mailto"]);
 // Schemes that should never be opened via external navigation (even with user confirmation).
 const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
 
+import { hasTauri } from "../tauri/api.js";
+
 /**
  * @typedef {{
  *   shellOpen: (uri: string) => Promise<void>,
@@ -51,7 +53,7 @@ export async function openExternalHyperlink(uri, deps) {
 
   // In the desktop shell, link opening is routed through a Rust command that enforces a strict
   // scheme allowlist. Keep the JS allowlist in sync (do not allow overrides in Tauri builds).
-  const isTauri = typeof globalThis !== "undefined" && Boolean(globalThis.__TAURI__);
+  const isTauri = hasTauri();
   const allowlist = isTauri ? DEFAULT_ALLOWED_PROTOCOLS : deps.allowedProtocols ?? DEFAULT_ALLOWED_PROTOCOLS;
   const isTrusted = allowlist.has(protocol);
   if (!isTrusted) {
