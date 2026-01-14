@@ -16565,6 +16565,23 @@ mod tests {
     }
 
     #[test]
+    fn reorder_sheet_rejects_unknown_sheets_and_out_of_range_indices() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.ensure_sheet("Sheet2");
+
+        // Unknown sheet name.
+        assert!(!engine.reorder_sheet("Missing", 0));
+        // Out-of-range tab index (len == 2).
+        assert!(!engine.reorder_sheet("Sheet1", 2));
+
+        // No-op reorder should succeed.
+        assert!(engine.reorder_sheet("Sheet1", 0));
+        // Valid move should succeed.
+        assert!(engine.reorder_sheet("Sheet2", 0));
+    }
+
+    #[test]
     fn bytecode_sheet_span_expansion_respects_tab_order_after_reorder_and_rebuild() {
         let mut engine = Engine::new();
         for sheet in ["Sheet1", "Sheet2", "Sheet3", "Sheet4"] {
