@@ -591,7 +591,7 @@ fn localize_normalizes_canonical_error_variants_before_translation() {
 
 // NOTE: Localized spellings in these tests are based on Microsoft Excel's function/error
 // translations for the de-DE / fr-FR / es-ES locales. Keep these in sync with
-// `src/locale/data/*.tsv` and `src/locale/registry.rs`.
+// `src/locale/data/*.tsv` and `src/locale/data/*.errors.tsv`.
 #[test]
 fn canonicalize_and_localize_external_data_functions_and_errors_for_de_de() {
     let localized_rtd = "=RTD(\"my.server\";\"topic\";1,5)";

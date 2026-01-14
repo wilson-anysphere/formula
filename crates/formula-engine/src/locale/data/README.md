@@ -74,9 +74,9 @@ node scripts/generate-locale-function-tsv.js --check
 
 ### Error translations (`<locale>.errors.tsv`)
 
-Error literal translations are maintained in the locale registry (`src/locale/registry.rs`), but we
-also commit a TSV export per locale (e.g. `de-DE.errors.tsv`) for auditing and keeping coverage in
-sync with the engine’s error set (`ErrorKind`).
+Error literal translations are loaded at runtime from TSV files in this directory
+(e.g. `de-DE.errors.tsv`). These TSVs are committed artifacts that are kept in sync with the
+engine’s canonical error set (`ErrorKind`) via the generator below.
 
 Upstream localized spellings (used to (re)generate the committed TSVs) live under:
 
@@ -236,13 +236,15 @@ Treating bracket content as opaque is also important for correctness because it 
    - Run `node scripts/generate-locale-error-tsvs.mjs` to produce/update
      `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
 3. **Register the locale in code:**
-   - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
-     in `crates/formula-engine/src/locale/registry.rs`.
-   - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
-     error literal mappings.
-   - Add the locale to `get_locale()` in `registry.rs`.
-   - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
-     accessible as `locale::<LOCALE>`.
+    - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
+      in `crates/formula-engine/src/locale/registry.rs`.
+    - Add a `static <LOCALE>_ERRORS: ErrorTranslations = ...include_str!("data/<locale>.errors.tsv")`
+      in `crates/formula-engine/src/locale/registry.rs`.
+    - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
+      error translations.
+    - Add the locale to `get_locale()` in `registry.rs`.
+    - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
+      accessible as `locale::<LOCALE>`.
 4. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
    for separators, a couple of translated functions, and at least one localized error literal.
 5. **Run generators in `--check` mode** to ensure TSVs stay in sync with the engine catalog.

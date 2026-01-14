@@ -108,6 +108,123 @@ static FR_FR_FUNCTIONS: FunctionTranslations =
 static ES_ES_FUNCTIONS: FunctionTranslations =
     FunctionTranslations::new(include_str!("data/es-ES.tsv"));
 
+#[derive(Debug)]
+struct ErrorTranslationMaps {
+    canon_to_loc: HashMap<String, &'static str>,
+    loc_to_canon: HashMap<String, &'static str>,
+}
+
+/// Translation table for Excel error literals (e.g. `#VALUE!`).
+///
+/// Data is stored outside the Rust source in TSV files under `src/locale/data/` with the suffix
+/// `.errors.tsv` (e.g. `de-DE.errors.tsv`).
+///
+/// Error TSVs differ slightly from function TSVs: because data lines themselves start with `#`,
+/// comments are defined as lines where the first non-whitespace characters are `#` followed by
+/// whitespace (see `src/locale/data/README.md` for format details).
+#[derive(Debug)]
+struct ErrorTranslations {
+    data_tsv: &'static str,
+    maps: OnceLock<ErrorTranslationMaps>,
+}
+
+impl ErrorTranslations {
+    const fn new(data_tsv: &'static str) -> Self {
+        Self {
+            data_tsv,
+            maps: OnceLock::new(),
+        }
+    }
+
+    fn maps(&self) -> &ErrorTranslationMaps {
+        self.maps.get_or_init(|| {
+            let mut canon_to_loc = HashMap::new();
+            let mut loc_to_canon = HashMap::new();
+            // Track the exact line that introduced each key so we can produce actionable
+            // diagnostics if the TSV contains duplicate entries.
+            let mut canon_line: HashMap<String, (usize, &'static str)> = HashMap::new();
+            let mut loc_line: HashMap<String, (usize, &'static str)> = HashMap::new();
+
+            for (idx, raw_line) in self.data_tsv.lines().enumerate() {
+                let line_no = idx + 1;
+                let line = raw_line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Error TSVs allow data lines that start with `#` (e.g. `#VALUE!`), so we treat
+                // comments as `#` followed by whitespace.
+                if let Some(rest) = line.strip_prefix('#') {
+                    if rest.is_empty()
+                        || rest
+                            .chars()
+                            .next()
+                            .is_some_and(|ch| ch.is_whitespace())
+                    {
+                        continue;
+                    }
+                }
+
+                let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+                    panic!(
+                        "invalid error translation line (expected TSV) at line {line_no}: {line:?}"
+                    )
+                });
+                let canon = canon.trim();
+                let loc = loc.trim();
+                if canon.is_empty() || loc.is_empty() {
+                    panic!(
+                        "invalid error translation line (empty entry) at line {line_no}: {line:?}"
+                    );
+                }
+
+                let canon_key = casefold(canon);
+                let loc_key = casefold(loc);
+
+                if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
+                    panic!(
+                        "duplicate canonical error translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
+                }
+                if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
+                    panic!(
+                        "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
+                }
+
+                canon_line.insert(canon_key.clone(), (line_no, line));
+                loc_line.insert(loc_key.clone(), (line_no, line));
+
+                canon_to_loc.insert(canon_key, loc);
+                loc_to_canon.insert(loc_key, canon);
+            }
+
+            ErrorTranslationMaps {
+                canon_to_loc,
+                loc_to_canon,
+            }
+        })
+    }
+
+    fn localized_to_canonical(&self, localized_key: &str) -> Option<&'static str> {
+        self.maps().loc_to_canon.get(localized_key).copied()
+    }
+
+    fn canonical_to_localized(&self, canonical_key: &str) -> Option<&'static str> {
+        self.maps().canon_to_loc.get(canonical_key).copied()
+    }
+}
+
+static EMPTY_ERRORS: ErrorTranslations = ErrorTranslations::new("");
+// Locale error TSVs live in `src/locale/data/`. See `src/locale/data/README.md` for
+// contributor docs (format, completeness requirements, and generators).
+static DE_DE_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/de-DE.errors.tsv"));
+static FR_FR_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/fr-FR.errors.tsv"));
+static ES_ES_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/es-ES.errors.tsv"));
+
 /// Locale configuration for parsing and rendering formulas.
 ///
 /// The formula engine keeps function identifiers in a canonical (Excel "English") form internally.
@@ -123,10 +240,7 @@ pub struct FormulaLocale {
     /// Localized boolean literals (Excel keywords).
     pub boolean_true: &'static str,
     pub boolean_false: &'static str,
-    /// Mapping table between canonical (English) error literals and localized error literals.
-    ///
-    /// Each entry is `(canonical, localized)`, e.g. `("#VALUE!", "#WERT!")`.
-    pub error_literal_map: &'static [(&'static str, &'static str)],
+    errors: &'static ErrorTranslations,
     functions: &'static FunctionTranslations,
 }
 
@@ -186,45 +300,13 @@ impl FormulaLocale {
     }
 
     pub fn canonical_error_literal(&self, localized: &str) -> Option<&'static str> {
-        if localized.is_ascii() {
-            for (canonical, loc) in self.error_literal_map {
-                if loc.eq_ignore_ascii_case(localized) {
-                    return Some(*canonical);
-                }
-            }
-            return None;
-        }
-
-        // Use Unicode-aware case folding for localized spellings with non-ASCII characters.
-        // This matches the behavior used for other case-insensitive comparisons in the engine
-        // (e.g. criteria matching).
-        let localized_fold = crate::value::casefold(localized);
-        for (canonical, loc) in self.error_literal_map {
-            if crate::value::casefold(loc) == localized_fold {
-                return Some(*canonical);
-            }
-        }
-        None
+        let folded = casefold(localized);
+        self.errors.localized_to_canonical(&folded)
     }
 
     pub fn localized_error_literal(&self, canonical: &str) -> Option<&'static str> {
-        if canonical.is_ascii() {
-            for (canon, localized) in self.error_literal_map {
-                if canon.eq_ignore_ascii_case(canonical) {
-                    return Some(*localized);
-                }
-            }
-            return None;
-        }
-
-        // Canonical spellings are ASCII today, but keep this Unicode-aware for future additions.
-        let canonical_fold = crate::value::casefold(canonical);
-        for (canon, localized) in self.error_literal_map {
-            if crate::value::casefold(canon) == canonical_fold {
-                return Some(*localized);
-            }
-        }
-        None
+        let folded = casefold(canonical);
+        self.errors.canonical_to_localized(&folded)
     }
 }
 
@@ -257,7 +339,7 @@ pub static EN_US: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
-    error_literal_map: &[],
+    errors: &EMPTY_ERRORS,
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -272,13 +354,7 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "WAHR",
     boolean_false: "FALSCH",
-    // For TSV format + generation workflow, see `src/locale/data/README.md`.
-    error_literal_map: &[
-        ("#VALUE!", "#WERT!"),
-        ("#REF!", "#BEZUG!"),
-        ("#SPILL!", "#ÜBERLAUF!"),
-        ("#GETTING_DATA", "#DATEN_ABRUFEN"),
-    ],
+    errors: &DE_DE_ERRORS,
     functions: &DE_DE_FUNCTIONS,
 };
 
@@ -289,12 +365,7 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VRAI",
     boolean_false: "FAUX",
-    // For TSV format + generation workflow, see `src/locale/data/README.md`.
-    error_literal_map: &[
-        ("#VALUE!", "#VALEUR!"),
-        ("#NAME?", "#NOM?"),
-        ("#GETTING_DATA", "#OBTENTION_DONNEES"),
-    ],
+    errors: &FR_FR_ERRORS,
     functions: &FR_FR_FUNCTIONS,
 };
 
@@ -305,12 +376,7 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
-    // For TSV format + generation workflow, see `src/locale/data/README.md`.
-    error_literal_map: &[
-        ("#VALUE!", "#¡VALOR!"),
-        ("#NAME?", "#¿NOMBRE?"),
-        ("#GETTING_DATA", "#OBTENIENDO_DATOS"),
-    ],
+    errors: &ES_ES_ERRORS,
     functions: &ES_ES_FUNCTIONS,
 };
 
@@ -382,5 +448,50 @@ AVERAGE\tSOMME
         assert!(msg.contains("line 2"));
         assert!(msg.contains("SUM\\tSOMME"));
         assert!(msg.contains("AVERAGE\\tSOMME"));
+    }
+
+    #[test]
+    fn duplicate_canonical_error_key_panics_with_diagnostics() {
+        let translations = ErrorTranslations::new(
+            "\
+# Canonical\tLocalized
+#VALUE!\t#WERT!
+#VALUE!\t#VALEUR!
+",
+        );
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected duplicate canonical key to panic");
+
+        let msg = panic_message(&*err);
+        assert!(msg.contains("duplicate canonical error translation key"));
+        assert!(msg.contains("\"#VALUE!\""));
+        assert!(msg.contains("line 2"));
+        assert!(msg.contains("line 3"));
+        assert!(msg.contains("#VALUE!\\t#WERT!"));
+        assert!(msg.contains("#VALUE!\\t#VALEUR!"));
+    }
+
+    #[test]
+    fn duplicate_localized_error_key_panics_with_diagnostics() {
+        let translations = ErrorTranslations::new(
+            "\
+#VALUE!\t#WERT!
+#REF!\t#WERT!
+",
+        );
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected duplicate localized key to panic");
+
+        let msg = panic_message(&*err);
+        assert!(msg.contains("duplicate localized error translation key"));
+        assert!(msg.contains("\"#WERT!\""));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("line 2"));
+        assert!(msg.contains("#VALUE!\\t#WERT!"));
+        assert!(msg.contains("#REF!\\t#WERT!"));
     }
 }
