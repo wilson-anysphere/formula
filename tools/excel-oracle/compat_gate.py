@@ -772,7 +772,14 @@ def main() -> int:
     if args.dry_run:
         def fmt(cmd: list[str]) -> str:
             # Print a shell-ready representation (useful for copy/paste).
-            return " ".join(shlex.quote(part) for part in cmd)
+            return " ".join(
+                shlex.quote(
+                    _redact_path_str(
+                        Path(part), privacy_mode=args.privacy_mode, repo_root=repo_root
+                    )
+                )
+                for part in cmd
+            )
 
         matched, selected = _count_selected_cases(
             cases_path=cases_path,

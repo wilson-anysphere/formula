@@ -339,6 +339,64 @@ class CompatGateDryRunTests(unittest.TestCase):
         self.assertIn("compare_cmd:", out)
         self.assertIn("cases selected:", out)
 
+    def test_dry_run_private_mode_redacts_paths_in_printed_commands(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            cases_path.write_text('{"schemaVersion":1,"cases":[]}\n', encoding="utf-8", newline="\n")
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel"},
+                "caseSet": {"path": str(cases_path), "count": 0},
+                "results": [],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            old_argv = sys.argv[:]
+            stdout = StringIO()
+            stderr = StringIO()
+            try:
+                sys.argv = [
+                    "compat_gate.py",
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--privacy-mode",
+                    "private",
+                    "--dry-run",
+                ]
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    rc = compat_gate.main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertEqual(rc, 0)
+            out = stdout.getvalue() + "\n" + stderr.getvalue()
+
+            # Absolute filesystem paths should not be printed verbatim in privacy mode.
+            raw_cases = str(cases_path)
+            self.assertNotIn(raw_cases, out)
+            self.assertIn(
+                f"sha256={hashlib.sha256(raw_cases.encode('utf-8')).hexdigest()}",
+                out,
+            )
+
 
 class CompatGateSyntheticExpectedDatasetTests(unittest.TestCase):
     def _load_compat_gate(self):
