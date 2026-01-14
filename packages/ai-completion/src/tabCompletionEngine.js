@@ -1405,6 +1405,20 @@ const COLUMN_COUNT_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3 columns)", confidence: 0.64 },
 ];
 
+const PERCENTILE_K_ENUM_INC = [
+  { replacement: "0.5", displayText: "0.5 (median / 50%)", confidence: 0.66 },
+  { replacement: "0.25", displayText: "0.25 (25th percentile)", confidence: 0.65 },
+  { replacement: "0.75", displayText: "0.75 (75th percentile)", confidence: 0.64 },
+  { replacement: "0", displayText: "0 (minimum)", confidence: 0.62 },
+  { replacement: "1", displayText: "1 (maximum)", confidence: 0.61 },
+];
+
+const PERCENTILE_K_ENUM_EXC = [
+  { replacement: "0.5", displayText: "0.5 (median / 50%)", confidence: 0.66 },
+  { replacement: "0.25", displayText: "0.25 (25th percentile)", confidence: 0.65 },
+  { replacement: "0.75", displayText: "0.75 (75th percentile)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1717,9 +1731,19 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (1st quartile / 25%)", confidence: 0.66 },
       { replacement: "2", displayText: "2 (median / 50%)", confidence: 0.65 },
       { replacement: "3", displayText: "3 (3rd quartile / 75%)", confidence: 0.64 },
-      { replacement: "0", displayText: "0 (minimum)", confidence: 0.62 },
-      { replacement: "4", displayText: "4 (maximum)", confidence: 0.61 },
     ],
+  },
+  PERCENTILE: {
+    // k
+    1: PERCENTILE_K_ENUM_INC,
+  },
+  "PERCENTILE.INC": {
+    // k
+    1: PERCENTILE_K_ENUM_INC,
+  },
+  "PERCENTILE.EXC": {
+    // k
+    1: PERCENTILE_K_ENUM_EXC,
   },
   "T.TEST": {
     // tails

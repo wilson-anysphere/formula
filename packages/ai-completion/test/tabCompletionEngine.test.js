@@ -4164,6 +4164,79 @@ test("HYPGEOM.DIST scalar args suggest a left-cell reference (value-like)", asyn
   );
 });
 
+test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=QUARTILE.EXC(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const q of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=QUARTILE.EXC(A1:A10, ${q}`),
+      `Expected QUARTILE.EXC to suggest quart=${q}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  for (const q of ["0", "4"]) {
+    assert.ok(
+      !suggestions.some((s) => s.text === `=QUARTILE.EXC(A1:A10, ${q}`),
+      `Did not expect QUARTILE.EXC to suggest quart=${q}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("PERCENTILE k suggests common values (including 0 and 1)", async () => {
+  const engine = new TabCompletionEngine();
+
+  for (const fn of ["PERCENTILE", "PERCENTILE.INC"]) {
+    const currentInput = `=${fn}(A1:A10, `;
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const k of ["0.5", "0.25", "0.75", "0", "1"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${k}`),
+        `Expected ${fn} to suggest k=${k}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+  }
+});
+
+test("PERCENTILE.EXC k suggests common values (no 0/1)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PERCENTILE.EXC(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const k of ["0.5", "0.25", "0.75"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${k}`),
+      `Expected PERCENTILE.EXC to suggest k=${k}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  for (const k of ["0", "1"]) {
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}${k}`),
+      `Did not expect PERCENTILE.EXC to suggest k=${k}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
