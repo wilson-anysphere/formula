@@ -758,6 +758,36 @@ pub fn build_shared_formula_ptgmemarean_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture with a shared formula whose `SHRFMLA.rgce` includes a
+/// `PtgMemAreaN` token that contains a nested `PtgArray` constant.
+///
+/// Shared formula range: `B1:B2`
+/// - `B1`: `A1+{5,6;7,8}`
+/// - `B2`: `A2+{5,6;7,8}` (via `PtgExp`)
+///
+/// The shared formula `rgce` includes:
+/// `PtgRefN` + `PtgMemAreaN(cce=8, rgce=PtgArray)` + `PtgArray` + `PtgAdd`
+///
+/// The `SHRFMLA.rgcb` bytes contain two array-constant blocks:
+/// - `{1,2;3,4}` consumed by the nested `PtgArray` inside `PtgMemAreaN` (non-printing)
+/// - `{5,6;7,8}` consumed by the visible `PtgArray`
+///
+/// If the rgce decoder fails to scan `PtgMem*` subexpressions for nested `PtgArray` tokens, the
+/// visible `PtgArray` will decode against the wrong `rgcb` block.
+pub fn build_shared_formula_ptgmemarean_rgcb_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgmemarean_rgcb_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared-formula range (`SharedArea3D!B1:B2`) whose
 /// shared `rgce` uses a 3D area reference (`PtgArea3d`) with relative flags.
 ///
@@ -9746,6 +9776,12 @@ fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Shared", &sheet, 1252)
 }
 
+fn build_shared_formula_ptgmemarean_rgcb_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgmemarean_rgcb_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedMemRgcb", &sheet, 1252)
+}
+
 fn build_shared_formula_area3d_mixed_flags_workbook_stream() -> Vec<u8> {
     // Two-sheet workbook:
     // - Sheet1: a simple value sheet used as the 3D reference target.
@@ -14911,6 +14947,89 @@ fn build_shared_formula_ptgmemarean_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut b2 = formula_cell(1, 1, xf_cell, 0.0, &exp_rgce);
     b2[14..16].copy_from_slice(&0x0008u16.to_le_bytes());
     push_record(&mut sheet, RECORD_FORMULA, &b2);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgmemarean_rgcb_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the shared formula reference points at existing cells.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Shared formula range B1:B2.
+    //
+    // Both B1 (anchor) and B2 store `PtgExp(B1)`; the shared formula body is stored in the
+    // following SHRFMLA record.
+    let grbit_shared: u16 = 0x0008;
+    let ptgexp = ptg_exp(0, 1); // B1
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(0, 1, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
+
+    // Shared rgce stored in SHRFMLA:
+    //   PtgRefN(A(row)) + PtgMemAreaN(nested PtgArray) + PtgArray + PtgAdd
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+
+        // PtgRefN: row_off=0, col_off=-1 relative to the formula cell.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        // PtgMemAreaN containing a nested PtgArray token. This mem token is non-printing, but the
+        // nested PtgArray must still consume its array-constant block from rgcb so subsequent
+        // visible PtgArray tokens decode correctly.
+        v.push(0x2E); // PtgMemAreaN
+        v.extend_from_slice(&8u16.to_le_bytes()); // cce = PtgArray (1) + 7-byte header
+        v.push(0x20); // nested PtgArray
+        v.extend_from_slice(&[0u8; 7]);
+
+        // Visible PtgArray consumes the *second* array constant block from rgcb.
+        v.push(0x20);
+        v.extend_from_slice(&[0u8; 7]);
+
+        // PtgAdd: A(row)+{...}
+        v.push(0x03);
+        v
+    };
+
+    // Two array constant blocks: `{1,2;3,4}` then `{5,6;7,8}`.
+    let rgcb = [
+        rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]),
+        rgcb_array_constant_numbers_2x2(&[5.0, 6.0, 7.0, 8.0]),
+    ]
+    .concat();
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record_with_rgcb(0, 1, 1, 1, &rgce_shared, &rgcb),
+    );
+
+    // B2: PtgExp(B1)
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
