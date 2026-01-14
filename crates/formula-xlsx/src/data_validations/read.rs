@@ -1,6 +1,6 @@
 use formula_model::{
-    parse_sqref, DataValidation, DataValidationErrorAlert, DataValidationErrorStyle,
-    DataValidationInputMessage, DataValidationKind, DataValidationOperator, Range,
+    DataValidation, DataValidationErrorAlert, DataValidationErrorStyle, DataValidationInputMessage,
+    DataValidationKind, DataValidationOperator, Range,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -20,6 +20,14 @@ fn parse_xml_bool(val: &str) -> bool {
 fn strip_leading_equals(formula: &str) -> &str {
     let trimmed = formula.trim();
     trimmed.strip_prefix('=').unwrap_or(trimmed)
+}
+
+fn parse_sqref_best_effort(sqref: &str) -> Vec<Range> {
+    sqref
+        .trim()
+        .split_whitespace()
+        .filter_map(|part| Range::from_a1(part).ok())
+        .collect()
 }
 
 fn parse_kind(val: &str) -> Option<DataValidationKind> {
@@ -138,8 +146,7 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                             show_drop_down = Some(!parse_xml_bool(&val))
                         }
                         b"sqref" => {
-                            ranges =
-                                parse_sqref(&val).map_err(|e| XlsxError::Invalid(e.to_string()))?
+                            ranges = parse_sqref_best_effort(&val);
                         }
                         b"promptTitle" => prompt_title = Some(val),
                         b"prompt" => prompt = Some(val),
@@ -229,8 +236,7 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                         b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
                         b"showDropDown" => show_drop_down = Some(!parse_xml_bool(&val)),
                         b"sqref" => {
-                            ranges =
-                                parse_sqref(&val).map_err(|e| XlsxError::Invalid(e.to_string()))?
+                            ranges = parse_sqref_best_effort(&val);
                         }
                         b"promptTitle" => prompt_title = Some(val),
                         b"prompt" => prompt = Some(val),

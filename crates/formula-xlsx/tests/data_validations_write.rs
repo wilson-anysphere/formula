@@ -399,3 +399,34 @@ fn no_op_roundtrip_preserves_data_validations_with_case_variants_and_empty_formu
     assert_eq!(out_dv, original_dv);
     Ok(())
 }
+
+#[test]
+fn no_op_roundtrip_preserves_data_validations_with_malformed_sqref_tokens(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // The main worksheet reader ignores invalid sqref tokens (best-effort parsing). Our DV
+    // semantic-change detector should do the same so we don't spuriously rewrite
+    // `<dataValidations>` on no-op saves when a file contains a partially malformed `sqref`.
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <dataValidations count="1">
+    <dataValidation sqref="A1 NOT_A_RANGE" type="custom" allowBlank="1" showInputMessage="0" showErrorMessage="0">
+      <formula1>1</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml);
+    let original_sheet_xml = read_part(&bytes, "xl/worksheets/sheet1.xml")?;
+    let original_dv = extract_data_validations_subtree(&original_sheet_xml)
+        .expect("fixture should contain a <dataValidations> block");
+
+    let doc = load_from_bytes(&bytes)?;
+    let out_bytes = doc.save_to_vec()?;
+    let out_sheet_xml = read_part(&out_bytes, "xl/worksheets/sheet1.xml")?;
+    let out_dv = extract_data_validations_subtree(&out_sheet_xml)
+        .expect("output should contain a <dataValidations> block");
+
+    assert_eq!(out_dv, original_dv);
+    Ok(())
+}
