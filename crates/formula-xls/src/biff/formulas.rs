@@ -925,3 +925,50 @@ fn biff8_short_unicode_string_len(input: &[u8]) -> Option<usize> {
 
     (input.len() >= offset).then_some(offset)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::materialize_biff8_rgce;
+
+    #[test]
+    fn materializes_ref3d_oob_to_referr3d_variants() {
+        // When a `PtgRef3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the *3D* error ptg (`PtgRefErr3d*`), preserving token width.
+        for &ptg_ref3d in &[0x3A_u8, 0x5A, 0x7A] {
+            // PtgRef3d payload: [ixti:u16][row:u16][col+flags:u16]
+            // Use row=65535 (max) with the row-relative flag so shifting by +1 row is OOB.
+            let base: Vec<u8> = vec![
+                ptg_ref3d, // PtgRef3d (ref/value/array class)
+                0x00, 0x00, // ixti=0
+                0xFF, 0xFF, // row=65535
+                0x00, 0x40, // col=0 with ROW_RELATIVE_BIT set
+            ];
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 1, 0).expect("materialize");
+            assert_eq!(out[0], ptg_ref3d + 0x02, "ptg={ptg_ref3d:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
+    fn materializes_area3d_oob_to_areaerr3d_variants() {
+        // When a `PtgArea3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the *3D* error ptg (`PtgAreaErr3d*`).
+        for &ptg_area3d in &[0x3B_u8, 0x5B, 0x7B] {
+            // PtgArea3d payload:
+            //   [ixti:u16][row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
+            // Use row2=65535 (max) with row-relative flags so shifting by +1 row is OOB.
+            let mut base = Vec::new();
+            base.push(ptg_area3d);
+            base.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
+            base.extend_from_slice(&0u16.to_le_bytes()); // row1=0
+            base.extend_from_slice(&u16::MAX.to_le_bytes()); // row2=65535 (max)
+            base.extend_from_slice(&0x4000u16.to_le_bytes()); // col1=0 + ROW_RELATIVE_BIT
+            base.extend_from_slice(&0x4000u16.to_le_bytes()); // col2=0 + ROW_RELATIVE_BIT
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 1, 0).expect("materialize");
+            assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+}
