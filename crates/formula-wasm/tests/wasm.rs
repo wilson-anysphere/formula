@@ -1480,6 +1480,71 @@ fn null_inputs_preserve_cell_style_metadata_in_engine() {
 }
 
 #[wasm_bindgen_test]
+fn cell_prefix_respects_effective_alignment_and_explicit_clears() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_str("x"), None)
+        .unwrap();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str(r#"=CELL("prefix",A1)"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String(String::new()));
+
+    // Row alignment should affect CELL("prefix").
+    let style_right = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": "right" } })))
+        .unwrap();
+    wb.set_row_style_id(DEFAULT_SHEET.to_string(), 0, Some(style_right));
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String("\"".to_string()));
+
+    // Range-run alignment should override row/col styles.
+    let style_center = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": "center" } })))
+        .unwrap();
+    wb.set_format_runs_by_col(
+        DEFAULT_SHEET.to_string(),
+        0,
+        to_js_value(&json!([{ "startRow": 0, "endRowExclusive": 10, "styleId": style_center }])),
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String("^".to_string()));
+
+    // Cell-level alignment wins over the range run.
+    let style_fill = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": "fill" } })))
+        .unwrap();
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_fill)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String("\\".to_string()));
+
+    // Explicit clear (`horizontal: null`) should override inherited formatting and revert to General.
+    let style_clear = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": null } })))
+        .unwrap();
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_clear)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String(String::new()));
+}
+
+#[wasm_bindgen_test]
 fn from_json_treats_null_cells_as_absent() {
     let json_str = r#"{
         "sheets": {
