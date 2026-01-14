@@ -986,6 +986,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     > = std::collections::HashMap::new();
     let mut comment_snapshot: std::collections::HashMap<formula_model::WorksheetId, Vec<Comment>> =
         std::collections::HashMap::new();
+    let mut drawings_snapshot: std::collections::HashMap<
+        formula_model::WorksheetId,
+        Vec<DrawingObject>,
+    > = std::collections::HashMap::new();
 
     // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
     // not fail workbook load.
@@ -1182,6 +1186,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         if !drawing_objects.is_empty() {
             if let Some(ws) = workbook.sheet_mut(ws_id) {
                 ws.drawings.extend(drawing_objects);
+                drawings_snapshot.insert(ws_id, ws.drawings.clone());
             }
         }
 
@@ -1253,6 +1258,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             rich_value_cells,
             comment_part_names,
             comment_snapshot,
+            drawings_snapshot,
             print_settings_snapshot,
         },
         calc_affecting_edits: false,

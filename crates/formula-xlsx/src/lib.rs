@@ -170,6 +170,7 @@ pub use writer::{
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
+use formula_model::drawings::DrawingObject;
 use formula_model::{CellRef, CellValue, Comment, ErrorValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
@@ -279,6 +280,11 @@ pub struct XlsxMeta {
     /// This is used to detect when comments have been edited in-memory so we can rewrite only the
     /// affected comment XML parts on save.
     pub comment_snapshot: HashMap<WorksheetId, Vec<Comment>>,
+    /// Snapshot of worksheet drawings as loaded from the original workbook.
+    ///
+    /// This is used by the `XlsxDocument` writer to detect edits to `Worksheet.drawings` without
+    /// having to reparse `xl/drawings/*.xml` parts at save time.
+    pub drawings_snapshot: HashMap<WorksheetId, Vec<DrawingObject>>,
     /// Snapshot of the workbook print settings as they were originally loaded into the
     /// in-memory model.
     ///
