@@ -330,18 +330,22 @@ restrictions (notably: no `]`), so this split is unambiguous.
     `ExternalValueProvider::sheet_order`.
   * The bytecode backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a
     multi-area reference) when all referenced sheets exist.
-* **External structured references:** supported when the host implements
+* **External structured references:** external workbook table refs like
+  `[Book.xlsx]Sheet1!Table1[Col]` are supported when the host implements
   `ExternalValueProvider::workbook_table(workbook, table_name)` to supply table metadata
-  (range + column names), e.g. `=SUM([Book.xlsx]Sheet1!Table1[Col])`.
+  (missing table metadata still evaluates to `#REF!`).
   * Row-context selectors like `[@ThisRow]` / `[@Col]` are not currently supported for external
-    workbooks and evaluate to `#REF!`.
+    workbooks and evaluate to `#REF!` (the engine does not model an external “current row”).
 * **External workbook defined names:** name references cannot be qualified to an external workbook
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
-* **External workbook metadata functions:** `SHEET(...)` / `SHEETS(...)` consult
-  `ExternalValueProvider::sheet_order` when evaluating external sheet references / 3D spans.
-  Other workbook metadata functions such as `CELL(...)` and `INFO(...)` still operate on the
-  *current workbook* and do not query external workbook metadata beyond the external sheet key.
+* **External workbook metadata functions:**
+  * `SHEET(...)` supports external refs when `ExternalValueProvider::sheet_order(workbook)` is
+    available (returns `#N/A` when the external workbook’s sheet order is unavailable, matching
+    Excel).
+  * `SHEETS(...)` can count sheets in an external 3D span when `sheet_order` is available.
+  * Other workbook/sheet metadata functions such as `CELL(...)` and `INFO(...)` currently operate on
+    the *current workbook* and do not introspect external workbooks referenced via `[Book.xlsx]...`.
 * **Volatility / invalidation:** external workbook references are treated as **volatile** by default
   (they are reevaluated on every `Engine::recalculate()` pass). This matches Excel and is
   configurable via `Engine::set_external_refs_volatile(...)`.
@@ -364,9 +368,10 @@ restrictions (notably: no `]`), so this split is unambiguous.
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
-* **INDIRECT + external workbook refs:** `INDIRECT` can resolve *single-sheet* external workbook
-  references like `"[Book.xlsx]Sheet1!A1"` via `ExternalValueProvider` when configured. External
-  3D spans like `"[Book.xlsx]Sheet1:Sheet3!A1"` still evaluate to `#REF!` today.
+* **INDIRECT + external workbook refs:** `INDIRECT` rejects external workbook references and returns
+  `#REF!` (the external provider is **not** consulted). This includes both single-sheet refs/ranges
+  like `INDIRECT("[Book.xlsx]Sheet1!A1")` and external 3D spans like
+  `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")`.
 
 #### Minimal provider sketch (including `sheet_order`)
 
@@ -489,8 +494,9 @@ This reduces memory usage significantly when formulas are dragged/filled.
 Excel formulas can reference cells/ranges in **other workbooks**:
 
 - `[Book.xlsx]Sheet1!A1`
-- `[Book.xlsx]Sheet1:Sheet3!A1` (external **3D** span)
-- `[Book.xlsx]Sheet1!Table1[Col]` (external **structured reference** / table ref; not supported yet)
+- `'C:\path\[Book.xlsx]Sheet1'!A1` (path-qualified workbook)
+- `[Book.xlsx]Sheet1:Sheet3!A1` (external **3D** span; requires `sheet_order`)
+- `[Book.xlsx]Sheet1!Table1[Col]` (external **structured reference** / table ref; requires `workbook_table` metadata)
 
 The engine **does not load external workbooks itself**. Instead, evaluation delegates lookups to an
 integrator-provided resolver:
@@ -514,6 +520,7 @@ Examples:
 |---|---|
 | `[Book.xlsx]Sheet1!A1` | `"[Book.xlsx]Sheet1"` |
 | `='[Book.xlsx]My Sheet'!A1` | `"[Book.xlsx]My Sheet"` |
+| `'C:\path\[Book.xlsx]Sheet1'!A1` | `"[C:\path\Book.xlsx]Sheet1"` |
 
 Notes:
 
@@ -564,7 +571,7 @@ the engine asks the host for the external table definition via:
 
 - `ExternalValueProvider::workbook_table(workbook, table_name) -> Option<(sheet_name, Table)>`
 
-The returned metadata should include:
+The returned metadata must include:
 
 - the table’s worksheet name (within the external workbook)
 - the table’s absolute range
@@ -574,27 +581,28 @@ The engine uses that metadata to expand the structured reference into one or mor
 which are evaluated by calling `get("[Book.xlsx]Sheet…", addr)` (or `get_external_value(...)`) for each
 referenced cell.
 
-Failure semantics:
+Notes / limitations:
 
 - Missing table metadata (including an unknown table name) evaluates to `#REF!`.
 - External structured refs that depend on row context (e.g. `Table1[@Col]` / `[@ThisRow]`) currently
   evaluate to `#REF!` because the engine does not model the external “current row” context.
+- External workbook 3D spans are not valid structured-ref prefixes (e.g.
+  `[Book.xlsx]Sheet1:Sheet3!Table1[Col]` is `#REF!`).
 
 ### Provider API responsibilities
 
-To support external workbook links (cells/ranges and external 3D spans), integrators must implement:
+To support external workbook links (cells/ranges, external 3D spans, and external structured refs),
+integrators must implement:
 
 - `ValueResolver::get_external_value(sheet_key, addr)` — evaluator-facing hook (used when embedding the
   evaluator directly).
 - `ExternalValueProvider::get(sheet_key, addr)` — return a scalar value for an external cell.
-- `ExternalValueProvider::sheet_order(workbook)` — return sheet names for `workbook` in workbook order
-  (required for external 3D spans).
-  - Conceptually (in other host bindings), this can be thought of as `workbook_sheet_names(workbook)`.
-
-To support **external structured references** like `[Book.xlsx]Sheet1!Table1[Col]`, implement:
-
-- `ExternalValueProvider::workbook_table(workbook, table_name)` — return table metadata for `table_name`
-  in the external workbook.
+- `ExternalValueProvider::sheet_order(workbook)` (aka `workbook_sheet_names`) — return sheet names for
+  `workbook` in workbook order (required for external 3D spans).
+  - When embedding the evaluator directly via `ValueResolver`, this is exposed as
+    `ValueResolver::external_sheet_order(workbook)`.
+- `ExternalValueProvider::workbook_table(workbook, table_name)` — return external workbook table metadata
+  (required for external structured refs like `[Book.xlsx]Sheet1!Table1[Col]`).
   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
     `ValueResolver::external_workbook_table(workbook, table_name)`.
 
@@ -614,8 +622,11 @@ External workbooks are outside the engine’s dependency graph. By default, any 
 external sheet key is treated as **volatile** (recalculated on every `recalculate_*` call), since the engine
 cannot know when the external workbook’s values change.
 
-If/when the engine exposes an opt-in external invalidation API, integrations can use it to replace this
-“always volatile” default with targeted invalidation.
+Hosts can opt into explicit invalidation semantics by disabling external volatility via
+`Engine::set_external_refs_volatile(false)`, then calling:
+
+- `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
+- `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
 
 ## Dependency Graph
 
