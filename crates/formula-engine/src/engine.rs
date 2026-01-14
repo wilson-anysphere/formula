@@ -33,6 +33,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use std::sync::OnceLock;
 use thiserror::Error;
+use unicode_normalization::UnicodeNormalization;
 
 mod bytecode_diagnostics;
 mod pivot_refresh;
@@ -279,16 +280,25 @@ struct Workbook {
     workbook_filename: Option<String>,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkbookRenameSheetError {
+    SheetNotFound,
+    DuplicateName,
+}
+
 impl Workbook {
     fn sheet_key(name: &str) -> String {
         // Excel compares sheet names case-insensitively across Unicode and applies compatibility
-        // normalization (NFKC). Keep the engine's sheet-name lookup behavior aligned with
-        // `formula_model::sheet_name_eq_case_insensitive`, and ensure runtime-resolved sheet names
-        // (e.g. INDIRECT) match Excel behavior.
+        // normalization (NFKC). We approximate this by normalizing with Unicode NFKC and then
+        // applying Unicode uppercasing (locale-independent).
         //
-        // Note: `casefold` alone is not enough here; e.g. U+212A KELVIN SIGN (K) should match
-        // ASCII 'K' after NFKC normalization.
-        use unicode_normalization::UnicodeNormalization;
+        // This matches `formula_model::sheet_name_eq_case_insensitive`. Note: `casefold` alone is
+        // not enough here; e.g. U+212A KELVIN SIGN (K) should match ASCII 'K' after NFKC
+        // normalization.
+        if name.is_ascii() {
+            return name.to_ascii_uppercase();
+        }
         name.nfkc().flat_map(|c| c.to_uppercase()).collect()
     }
 
@@ -318,6 +328,43 @@ impl Workbook {
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
         let key = Self::sheet_key(name);
         self.sheet_name_to_id.get(&key).copied()
+    }
+
+    #[cfg(test)]
+    fn rename_sheet(
+        &mut self,
+        sheet_id: SheetId,
+        new_name: &str,
+    ) -> Result<(), WorkbookRenameSheetError> {
+        if !self.sheet_exists(sheet_id) {
+            return Err(WorkbookRenameSheetError::SheetNotFound);
+        }
+
+        let new_key = Self::sheet_key(new_name);
+        if let Some(existing) = self.sheet_name_to_id.get(&new_key).copied() {
+            if existing != sheet_id {
+                return Err(WorkbookRenameSheetError::DuplicateName);
+            }
+        }
+
+        let old_name = self
+            .sheet_names
+            .get(sheet_id)
+            .and_then(|name| name.as_ref())
+            .ok_or(WorkbookRenameSheetError::SheetNotFound)?
+            .clone();
+        let old_key = Self::sheet_key(&old_name);
+
+        self.sheet_names[sheet_id] = Some(new_name.to_string());
+
+        // Remove the old lookup key (if it still points at this sheet) and install the new one.
+        // This keeps lookups consistent even when names are renormalized (e.g. `Å` -> `Å`).
+        if self.sheet_name_to_id.get(&old_key) == Some(&sheet_id) {
+            self.sheet_name_to_id.remove(&old_key);
+        }
+        self.sheet_name_to_id.insert(new_key, sheet_id);
+
+        Ok(())
     }
 
     fn sheet_exists(&self, sheet: SheetId) -> bool {
@@ -9343,7 +9390,6 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             };
             return Some(guard.get_or_intern(name));
         }
-
         None
     }
 
@@ -12240,6 +12286,85 @@ mod tests {
                 .and_then(|p| p.width),
             Some(42.0)
         );
+    }
+
+    #[test]
+    fn sheet_name_lookup_is_nfkc_and_unicode_case_insensitive() {
+        let mut engine = Engine::new();
+
+        // Angstrom sign (U+212B) normalizes to Å (U+00C5) under NFKC.
+        engine
+            .set_cell_value("Å", "A1", Value::Number(1.0))
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Å").expect("sheet exists");
+        assert_eq!(engine.workbook.sheet_ids_in_order().len(), 1);
+        assert_eq!(engine.workbook.sheet_name(sheet_id), Some("Å"));
+
+        // Lookup should succeed under Unicode normalization + case-insensitive compare.
+        assert_eq!(engine.get_cell_value("Å", "A1"), Value::Number(1.0));
+
+        // Creating/updating via an equivalent name should not create a new sheet and should keep
+        // the original display name unchanged.
+        engine
+            .set_cell_value("Å", "B1", Value::Number(2.0))
+            .unwrap();
+        assert_eq!(engine.workbook.sheet_ids_in_order().len(), 1);
+        assert_eq!(engine.workbook.sheet_name(sheet_id), Some("Å"));
+        assert_eq!(engine.get_cell_value("Å", "B1"), Value::Number(2.0));
+    }
+
+    #[test]
+    fn sheet_name_lookup_matches_unicode_uppercase_rules() {
+        let mut engine = Engine::new();
+
+        // Unicode uppercasing maps ß -> SS (Excel matches this).
+        engine
+            .set_cell_value("ß", "A1", Value::Number(1.0))
+            .unwrap();
+        engine
+            .set_cell_value("SS", "B1", Value::Number(2.0))
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("ß").expect("sheet exists");
+        assert_eq!(engine.workbook.sheet_ids_in_order().len(), 1);
+        assert_eq!(engine.workbook.sheet_name(sheet_id), Some("ß"));
+        assert_eq!(engine.get_cell_value("SS", "A1"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("ß", "B1"), Value::Number(2.0));
+    }
+
+    #[test]
+    fn indirect_sheet_lookup_uses_unicode_normalization() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_value("Å", "A1", Value::Number(10.0))
+            .unwrap();
+        engine
+            .set_cell_formula("Å", "B1", "=SUM(INDIRECT(\"'Å'!A1\"))")
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Å", "B1"), Value::Number(10.0));
+    }
+
+    #[test]
+    fn rename_sheet_rejects_nfkc_case_insensitive_duplicates() {
+        let mut workbook = Workbook::default();
+        let sheet_a = workbook.ensure_sheet("Å");
+        let sheet_b = workbook.ensure_sheet("Data");
+
+        // Renaming "Data" to a normalized-equivalent of "Å" should be rejected.
+        let err = workbook
+            .rename_sheet(sheet_b, "Å")
+            .expect_err("expected duplicate rename to fail");
+        assert_eq!(err, WorkbookRenameSheetError::DuplicateName);
+
+        // Workbook state should remain unchanged after the failed rename.
+        assert_eq!(workbook.sheet_name(sheet_a), Some("Å"));
+        assert_eq!(workbook.sheet_name(sheet_b), Some("Data"));
+        assert_eq!(workbook.sheet_id("Å"), Some(sheet_a));
+        assert_eq!(workbook.sheet_id("Å"), Some(sheet_a));
     }
 
     #[test]
