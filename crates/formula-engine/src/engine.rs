@@ -2594,7 +2594,7 @@ impl Engine {
     /// 1. Explicit [`Cell::number_format`] override (if set).
     /// 2. Spill-origin formatting semantics (spilled outputs observe the origin cell's formatting).
     /// 3. Effective number format resolved from layered style ids:
-    ///    sheet < col < row < cell (per-property).
+    ///    sheet < col < row < range-run < cell (per-property).
     fn number_format_pattern_for_rounding(&self, key: CellKey) -> Option<&str> {
         // Explicit per-cell override always wins.
         if let Some(fmt) = self
@@ -2631,14 +2631,40 @@ impl Engine {
             .get(&key.addr.col)
             .and_then(|props| props.style_id)
             .unwrap_or(0);
+        let run_style_id = sheet_state
+            .format_runs_by_col
+            .get(&key.addr.col)
+            .map(|runs| {
+                // Runs are expected to be sorted and non-overlapping, but we use a conservative
+                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
+                // provide unexpected overlaps.
+                let mut style_id = 0;
+                for run in runs {
+                    if key.addr.row < run.start_row {
+                        break;
+                    }
+                    if key.addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0);
         let sheet_style_id = sheet_state.default_style_id.unwrap_or(0);
 
         // Style precedence matches DocumentController layering:
-        // sheet < col < row < cell
+        // sheet < col < row < range-run < cell
         //
         // When a style does not specify a number format (`number_format=None`), it is treated as
         // "inherit" so lower-precedence layers can contribute the number format.
-        for style_id in [cell_style_id, row_style_id, col_style_id, sheet_style_id] {
+        for style_id in [
+            cell_style_id,
+            run_style_id,
+            row_style_id,
+            col_style_id,
+            sheet_style_id,
+        ] {
             if let Some(fmt) = self
                 .workbook
                 .styles
