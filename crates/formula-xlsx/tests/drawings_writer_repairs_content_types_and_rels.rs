@@ -19,6 +19,15 @@ const CHART_CONTENT_TYPE: &str =
 const DRAWING_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 
+fn zip_part(bytes: &[u8], name: &str) -> Vec<u8> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    let mut file = archive.by_name(name).expect("part exists");
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).expect("read part");
+    buf
+}
+
 fn build_corrupted_image_fixture() -> Vec<u8> {
     let fixture_bytes = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
     let cursor = Cursor::new(fixture_bytes.as_slice());
@@ -48,6 +57,47 @@ fn build_corrupted_image_fixture() -> Vec<u8> {
 
     // Drop the worksheet .rels so the writer must recreate the drawing relationship.
     parts.remove("xl/worksheets/_rels/sheet1.xml.rels");
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, bytes) in parts {
+        zip.start_file(name, options).expect("start file");
+        zip.write_all(&bytes).expect("write file");
+    }
+
+    zip.finish().expect("finish zip").into_inner()
+}
+
+fn build_fixture_missing_drawing_content_types() -> Vec<u8> {
+    let fixture_bytes = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
+    let cursor = Cursor::new(fixture_bytes.as_slice());
+    let mut archive = ZipArchive::new(cursor).expect("open fixture zip");
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).expect("zip file");
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().to_string();
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).expect("read zip file");
+        parts.insert(name, buf);
+    }
+
+    // Remove the drawing override and png Default from [Content_Types].xml, but keep the worksheet
+    // relationships + drawing parts intact. This exercises the "repair content types without
+    // rewriting drawing parts" path.
+    let ct_name = "[Content_Types].xml";
+    let ct = String::from_utf8(parts.get(ct_name).expect("ct part").clone()).expect("ct utf8");
+    let ct = ct.replace(r#"<Default Extension="png" ContentType="image/png"/>"#, "");
+    let ct = ct.replace(
+        r#"<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>"#,
+        "",
+    );
+    parts.insert(ct_name.to_string(), ct.into_bytes());
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
@@ -167,6 +217,60 @@ fn save_repairs_drawing_content_types_and_sheet_rels() {
                 && n.attribute("Target") == Some("../drawings/drawing1.xml")
         }),
         "expected sheet drawing relationship to exist, got:\n{rels_xml}"
+    );
+}
+
+#[test]
+fn save_repairs_content_types_without_rewriting_drawing_parts_when_unchanged() {
+    let corrupted = build_fixture_missing_drawing_content_types();
+
+    // Capture drawing part bytes before saving; the writer should only patch [Content_Types].xml
+    // and keep the drawing XML + `.rels` parts byte-for-byte stable.
+    let original_drawing_xml = zip_part(&corrupted, "xl/drawings/drawing1.xml");
+    let original_drawing_rels_xml = zip_part(&corrupted, "xl/drawings/_rels/drawing1.xml.rels");
+
+    let doc = load_from_bytes(&corrupted).expect("load corrupted xlsx");
+    let saved = doc.save_to_vec().expect("save repaired xlsx");
+
+    // [Content_Types].xml: drawing override and png Default must exist.
+    let cursor = Cursor::new(saved.clone());
+    let mut archive = ZipArchive::new(cursor).expect("open saved zip");
+    let mut ct_xml = String::new();
+    archive
+        .by_name("[Content_Types].xml")
+        .expect("ct part exists")
+        .read_to_string(&mut ct_xml)
+        .expect("read ct xml");
+    let ct_doc = Document::parse(&ct_xml).expect("parse ct xml");
+    assert!(
+        ct_doc.descendants().any(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Override"
+                && n.attribute("PartName") == Some("/xl/drawings/drawing1.xml")
+                && n.attribute("ContentType") == Some(DRAWING_CONTENT_TYPE)
+        }),
+        "expected drawing Override content type to be present, got:\n{ct_xml}"
+    );
+    assert!(
+        ct_doc.descendants().any(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Default"
+                && n.attribute("Extension") == Some("png")
+                && n.attribute("ContentType") == Some("image/png")
+        }),
+        "expected png Default content type to be present, got:\n{ct_xml}"
+    );
+
+    // Drawing parts should not be rewritten.
+    assert_eq!(
+        zip_part(&saved, "xl/drawings/drawing1.xml"),
+        original_drawing_xml,
+        "expected drawing XML to remain byte-for-byte stable"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/drawings/_rels/drawing1.xml.rels"),
+        original_drawing_rels_xml,
+        "expected drawing rels XML to remain byte-for-byte stable"
     );
 }
 
