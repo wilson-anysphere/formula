@@ -658,8 +658,15 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
 
   const parseLength = (raw: string | null): number | null => {
     if (!raw) return null;
+    let normalized = raw.trim();
+    // Support simple `calc(<length>)` wrappers used in some SVGs.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const calc = /^\s*calc\(\s*(.+)\s*\)\s*$/i.exec(normalized);
+      if (!calc) break;
+      normalized = String(calc[1] ?? "").trim();
+    }
     const m =
-      /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(raw);
+      /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(normalized);
     if (!m) return null;
     const value = Number(m[1]);
     if (!Number.isFinite(value) || value <= 0) return null;

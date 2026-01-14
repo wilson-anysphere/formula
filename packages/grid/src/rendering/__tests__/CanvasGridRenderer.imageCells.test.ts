@@ -1311,6 +1311,71 @@ describe("CanvasGridRenderer image cells", () => {
     expect(content.rec.fillTexts.some((args) => args[0] === "SVG style bomb")).toBe(true);
   });
 
+  it("rejects SVG images with huge dimensions specified via calc() style without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "svg_calc_style_bomb", altText: "SVG calc style bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="width: calc(10001px); height: 1px"></svg>`;
+    const imageResolver = vi.fn(async () => createSvgBytes(svg));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("svg_calc_style_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "SVG calc style bomb")).toBe(true);
+  });
+
   it("rejects SVG Blob images with huge dimensions without invoking createImageBitmap", async () => {
     vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
 
