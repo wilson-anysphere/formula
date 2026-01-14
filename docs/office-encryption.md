@@ -167,6 +167,12 @@ The password key encryptor stores:
 * `encryptedVerifierHashInput` — AES-CBC-encrypted random verifier bytes
 * `encryptedVerifierHashValue` — AES-CBC-encrypted `Hash(verifierBytes)`
 
+IV nuance (common interop footgun):
+
+- For these password-key-encryptor blobs (and `encryptedKeyValue`), the AES-CBC IV is simply the
+  password key encryptor `saltValue` truncated to `blockSize` (typically 16).
+- The fixed `blockKey` constants above are used for **key derivation**, not IV derivation.
+
 To validate a password:
 1. Derive `K_input` with `VERIFIER_HASH_INPUT_BLOCK`, decrypt `encryptedVerifierHashInput` ⇒ `V`
 2. Derive `K_value` with `VERIFIER_HASH_VALUE_BLOCK`, decrypt `encryptedVerifierHashValue` ⇒ `HV_enc`
@@ -205,9 +211,10 @@ Implementation status:
 
 - `crates/formula-xlsx::offcrypto` validates `dataIntegrity` and returns `IntegrityMismatch` on
   failure.
+- `crates/formula-office-crypto` validates `dataIntegrity` and returns `IntegrityCheckFailed` on
+  failure.
 - `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
   not currently validate them.
-- `crates/formula-office-crypto` also parses these fields but does not currently validate them.
 - If/when we wire Agile decryption into `formula-io`, we should strongly consider enabling HMAC
   verification by default to distinguish wrong passwords from “ZIP happened to parse”.
 
