@@ -9,7 +9,7 @@
  *
  * Environment isolation:
  * - All platforms: `HOME` + `USERPROFILE` => a per-run directory under `target/perf-home`
- * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
  * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `${HOME}/*`
  * - macOS/Linux: `TMPDIR` => `${HOME}/tmp`
  *

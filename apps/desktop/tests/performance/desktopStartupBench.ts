@@ -10,7 +10,7 @@
  * Environment isolation is implemented in `desktopStartupUtil.ts`:
  * - All platforms: `HOME` + `USERPROFILE` => a per-run directory under `target/perf-home`
  *   (override the perf root via `FORMULA_PERF_HOME`).
- * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
  * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `${HOME}/*`
  * - macOS/Linux: `TMPDIR` => `${HOME}/tmp`
  *
