@@ -1072,24 +1072,41 @@ jobs:
             printf '  - %s\n' "${roots[@]}" >&2
             exit 1
           fi
-          mapfile -t dsym_dirs < <(printf '%s\n' "${dsym_dirs[@]}" | sort -u)
+          # Zip (and optionally clean up) dSYM bundles.
+          #
+          # NOTE: macOS runners ship an older Bash (3.2), so avoid Bash 4+ builtins like `mapfile`
+          # and associative arrays. We use a process-substitution `while read` loop instead.
+          bundle_local_dsyms=()
+          while IFS= read -r dsym; do
+            [[ -n "${dsym}" ]] || continue
 
-          for dsym in "${dsym_dirs[@]}"; do
             base="$(basename "$dsym")"
-            out="debug-symbols/${ARTIFACT_LABEL}-${CACHE_TARGET}-${base}.zip"
+
+            # Avoid output filename collisions when the same dSYM name appears in multiple Cargo
+            # target roots (`target/` vs `apps/desktop/src-tauri/target/`, etc).
+            loc="target"
+            case "$dsym" in
+              apps/desktop/src-tauri/target/*|*/apps/desktop/src-tauri/target/*) loc="src-tauri-target" ;;
+              apps/desktop/target/*|*/apps/desktop/target/*) loc="desktop-target" ;;
+              target/*|*/target/*) loc="workspace-target" ;;
+            esac
+
+            out="debug-symbols/${ARTIFACT_LABEL}-${CACHE_TARGET}-${loc}-${base}.zip"
             echo "debug-symbols: zipping $dsym -> $out"
             rm -f "$out"
             # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
             ditto -c -k --sequesterRsrc --keepParent "$dsym" "$out"
-          done
+
+            if [[ "$dsym" == *"/release/bundle/"* ]]; then
+              bundle_local_dsyms+=("$dsym")
+            fi
+          done < <(printf '%s\n' "${dsym_dirs[@]}" | sort -u)
 
           # If any dSYM bundles were emitted into `**/release/bundle/**`, remove them so they
           # don't bloat dry-run bundle artifacts or fail strip/bundle verification checks.
-          for dsym in "${dsym_dirs[@]}"; do
-            if [[ "$dsym" == *"/release/bundle/"* ]]; then
-              echo "debug-symbols: removing bundle-local dSYM: $dsym"
-              rm -rf "$dsym"
-            fi
+          for dsym in "${bundle_local_dsyms[@]}"; do
+            echo "debug-symbols: removing bundle-local dSYM: $dsym"
+            rm -rf "$dsym"
           done
 
           ls -lah debug-symbols
