@@ -54,8 +54,13 @@ async function withMockGitHub(config, fn) {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
       if (url.pathname === "/repos/acme/widgets/actions/workflows") {
+        const page = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+        const workflows =
+          "workflowsByPage" in config && config.workflowsByPage
+            ? config.workflowsByPage[String(page)] ?? []
+            : config.workflows;
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ workflows: config.workflows }));
+        res.end(JSON.stringify({ workflows }));
         return;
       }
 
@@ -88,6 +93,47 @@ async function withMockGitHub(config, fn) {
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+test("finds the CI workflow even when it is on a later workflows API page", async () => {
+  const sha = "abababababababababababababababababababab";
+
+  const filler = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 1,
+    name: `Workflow ${i + 1}`,
+    path: `.github/workflows/${i + 1}.yml`,
+  }));
+
+  await withMockGitHub(
+    {
+      workflowsByPage: {
+        "1": filler,
+        "2": [{ id: 1234, name: "CI", path: ".github/workflows/ci.yml" }],
+      },
+      workflows: [],
+      runsByWorkflowId: {
+        "1234": [
+          {
+            id: 1,
+            head_sha: sha,
+            status: "completed",
+            conclusion: "success",
+            html_url: "http://example.local/runs/1",
+          },
+        ],
+      },
+    },
+    async (baseUrl) => {
+      const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_API_URL: baseUrl,
+        GITHUB_SERVER_URL: "http://example.local",
+      });
+
+      assert.equal(result.code, 0, `expected exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+      assert.match(result.stdout, /CI status check passed/i);
+    },
+  );
+});
 
 test("passes when CI has a successful completed run for the given commit", async () => {
   const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
