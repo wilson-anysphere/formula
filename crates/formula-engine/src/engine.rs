@@ -11050,7 +11050,6 @@ fn rewrite_structured_refs_for_bytecode(
 }
 
 struct Snapshot {
-    sheets: HashSet<SheetId>,
     sheet_keys_by_id: Vec<Option<String>>,
     sheet_display_names_by_id: Vec<Option<String>>,
     sheet_key_to_id: HashMap<String, SheetId>,
@@ -11105,7 +11104,6 @@ impl Snapshot {
         pivot_registry: crate::pivot_registry::PivotRegistry,
     ) -> Self {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
-        let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
         let sheet_keys_by_id = workbook.sheet_keys.clone();
         let sheet_display_names_by_id = workbook.sheet_display_names.clone();
         let sheet_key_to_id = workbook.sheet_key_to_id.clone();
@@ -11318,7 +11316,6 @@ impl Snapshot {
         }
 
         Self {
-            sheets,
             sheet_keys_by_id,
             sheet_display_names_by_id,
             sheet_key_to_id,
@@ -11370,7 +11367,10 @@ impl Snapshot {
 
 impl crate::eval::ValueResolver for Snapshot {
     fn sheet_exists(&self, sheet_id: usize) -> bool {
-        self.sheets.contains(&sheet_id)
+        self.tab_index_by_sheet_id
+            .get(sheet_id)
+            .copied()
+            .is_some_and(|idx| idx != usize::MAX)
     }
 
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
@@ -13162,7 +13162,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         match sheet {
             bytecode::SheetId::Local(sheet_id) => {
                 let sheet_id = *sheet_id;
-                if !self.snapshot.sheets.contains(&sheet_id) {
+                if !self.snapshot.sheet_exists(sheet_id) {
                     return bytecode::Value::Error(bytecode::ErrorKind::Ref);
                 }
 
@@ -13241,7 +13241,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn record_reference(&self, sheet: usize, start: bytecode::CellCoord, end: bytecode::CellCoord) {
         // Dependency tracing is only used for the engine's internal dependency graph, which does
         // not represent external workbooks yet. Ignore references into synthetic external sheets.
-        if !self.snapshot.sheets.contains(&sheet) {
+        if !self.snapshot.sheet_exists(sheet) {
             return;
         }
         let Some(trace) = self.trace else {
@@ -13381,7 +13381,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         if self.snapshot.external_value_provider.is_some() {
             return None;
         }
-        if !self.snapshot.sheets.contains(&sheet_id) {
+        if !self.snapshot.sheet_exists(sheet_id) {
             return None;
         }
 
@@ -13425,7 +13425,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             bytecode::SheetId::Local(id) => *id,
             bytecode::SheetId::External(_) => return None,
         };
-        if !self.snapshot.sheets.contains(&sheet_id) {
+        if !self.snapshot.sheet_exists(sheet_id) {
             return None;
         }
         let (rows, cols) = self.bounds_on_sheet(sheet);
@@ -13453,7 +13453,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             bytecode::SheetId::Local(id) => *id,
             bytecode::SheetId::External(_) => return None,
         };
-        if !self.snapshot.sheets.contains(&sheet_id) {
+        if !self.snapshot.sheet_exists(sheet_id) {
             return None;
         }
         let (rows, cols) = self.bounds_on_sheet(sheet);
@@ -13492,7 +13492,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         match sheet {
             bytecode::SheetId::Local(sheet_id) => {
                 let sheet_id = *sheet_id;
-                if !self.snapshot.sheets.contains(&sheet_id) {
+                if !self.snapshot.sheet_exists(sheet_id) {
                     return (0, 0);
                 }
                 let (rows, cols) = self
