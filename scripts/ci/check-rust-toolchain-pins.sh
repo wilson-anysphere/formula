@@ -86,8 +86,10 @@ for workflow in "${workflow_files[@]}"; do
       # True for:
       # - `cargo ...`, `rustup ...`, `rustc ...` (including `cargo +nightly ...`)
       # - invocations of the repo cargo wrapper
+      # - scripts that invoke cargo (CI preflight helpers)
       # - but not `.cargo/` paths or `cargo-foo` cache keys.
       if (s ~ /cargo_agent\.sh/) return 1
+      if (s ~ /check-cargo-lock-reproducible\.sh/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1

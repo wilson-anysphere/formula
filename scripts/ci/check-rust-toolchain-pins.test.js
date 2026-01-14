@@ -272,6 +272,47 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("fails when workflow runs the Cargo.lock reproducibility script without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check Cargo.lock
+        run: bash scripts/ci/check-cargo-lock-reproducible.sh
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running Cargo.lock reproducibility script", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - name: Check Cargo.lock
+        run: bash scripts/ci/check-cargo-lock-reproducible.sh
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("fails when workflow installs Rust in one job but uses cargo in another", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `
