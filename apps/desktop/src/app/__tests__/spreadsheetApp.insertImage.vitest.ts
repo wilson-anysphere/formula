@@ -155,8 +155,8 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     expect(drawings).toHaveLength(1);
     const obj = drawings[0]!;
 
-    expect(obj.kind.type).toBe("image");
-    expect(obj.anchor).toEqual({
+    expect(obj?.kind?.type).toBe("image");
+    expect(obj?.anchor).toEqual({
       type: "oneCell",
       from: { cell: { row: 3, col: 4 }, offset: { xEmu: 0, yEmu: 0 } },
       size: { cx: pxToEmu(200), cy: pxToEmu(150) },
