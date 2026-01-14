@@ -290,24 +290,41 @@ impl RowContext {
         })
     }
 
-    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
+    fn physical_row_for_level(
+        &self,
+        table: &str,
+        level_from_inner: usize,
+    ) -> Option<(usize, Option<&[usize]>)> {
         self.stack
             .iter()
             .rev()
             .filter_map(|frame| match frame {
-                RowContextFrame::Physical { table: t, row, .. } if t == table => Some(*row),
+                RowContextFrame::Physical {
+                    table: t,
+                    row,
+                    visible_cols,
+                } if t == table => Some((*row, visible_cols.as_deref())),
                 _ => None,
             })
             .nth(level_from_inner)
+    }
+
+    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
+        self.physical_row_for_level(table, level_from_inner)
+            .map(|(row, _)| row)
     }
 
     fn row_for(&self, table: &str) -> Option<usize> {
         self.row_for_level(table, 0)
     }
 
-    fn row_for_outermost(&self, table: &str) -> Option<usize> {
+    fn physical_row_for_outermost(&self, table: &str) -> Option<(usize, Option<&[usize]>)> {
         self.stack.iter().find_map(|frame| match frame {
-            RowContextFrame::Physical { table: t, row, .. } if t == table => Some(*row),
+            RowContextFrame::Physical {
+                table: t,
+                row,
+                visible_cols,
+            } if t == table => Some((*row, visible_cols.as_deref())),
             _ => None,
         })
     }
@@ -1390,7 +1407,9 @@ impl DaxEngine {
                     1
                 };
 
-                let Some(row) = row_ctx.row_for_level(table, level_from_inner) else {
+                let Some((row, visible_cols)) =
+                    row_ctx.physical_row_for_level(table, level_from_inner)
+                else {
                     let available = row_ctx
                         .stack
                         .iter()
@@ -1407,17 +1426,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                if let Some(visible_cols) = visible_cols {
+                    if !visible_cols.contains(&idx) {
+                        return Err(DaxError::Eval(format!(
+                            "column {table}[{column}] is not available in the current row context"
+                        )));
+                    }
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value =
-                    table_ref
-                        .value(row, column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             "EARLIEST" => {
                 let [arg] = args else {
@@ -1429,7 +1452,7 @@ impl DaxEngine {
                     ));
                 };
 
-                let Some(row) = row_ctx.row_for_outermost(table) else {
+                let Some((row, visible_cols)) = row_ctx.physical_row_for_outermost(table) else {
                     return Err(DaxError::Eval(format!(
                         "EARLIEST requires row context for {table}[{column}]"
                     )));
@@ -1438,17 +1461,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                if let Some(visible_cols) = visible_cols {
+                    if !visible_cols.contains(&idx) {
+                        return Err(DaxError::Eval(format!(
+                            "column {table}[{column}] is not available in the current row context"
+                        )));
+                    }
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value =
-                    table_ref
-                        .value(row, column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
         }
@@ -4910,7 +4937,7 @@ fn propagate_filter(
             // compute the visible key set. For columnar fact tables, iterating `to_index` can be
             // expensive (especially when the `to_table` is also large); prefer extracting distinct
             // visible values directly from the `to_table` backend when possible.
-            let allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
+            let mut allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
                 relationship
                     .to_index
                     .iter()
@@ -4966,6 +4993,11 @@ fn propagate_filter(
                     }
                 }
             };
+            // The relationship-generated blank/unknown member is distinct from a *physical* BLANK
+            // key on the `to_table` side. Fact rows with BLANK foreign keys should belong to the
+            // blank member, not match a physical BLANK key value. Therefore, do not treat BLANK as
+            // a matchable relationship key during propagation.
+            allowed_keys.retain(|v| !v.is_blank());
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
