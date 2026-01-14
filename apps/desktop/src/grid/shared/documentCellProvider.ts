@@ -163,6 +163,11 @@ export class DocumentCellProvider implements CellProvider {
   private readonly resolvedFormatCache: LruCache<string, ResolvedFormat>;
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
+  private readonly mergedEpochBySheet = new Map<string, number>();
+  private readonly mergedRangesBySheet = new Map<
+    string,
+    { epoch: number; ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> }
+  >();
 
   constructor(options: {
     document: DocumentController;
@@ -716,6 +721,8 @@ export class DocumentCellProvider implements CellProvider {
     this.lastSheetCache = null;
     this.resolvedFormatCache.clear();
     this.resolvedLinkColor = null;
+    this.mergedRangesBySheet.clear();
+    this.mergedEpochBySheet.clear();
     for (const listener of this.listeners) listener({ type: "invalidateAll" });
   }
 
@@ -966,6 +973,110 @@ export class DocumentCellProvider implements CellProvider {
     return cache;
   }
 
+  private mergedRangesEqual(left: unknown, right: unknown): boolean {
+    const la = Array.isArray(left) ? (left as any[]) : [];
+    const ra = Array.isArray(right) ? (right as any[]) : [];
+    if (la.length !== ra.length) return false;
+    for (let i = 0; i < la.length; i += 1) {
+      const l = la[i];
+      const r = ra[i];
+      if (!l || !r) return false;
+      if (l.startRow !== r.startRow) return false;
+      if (l.endRow !== r.endRow) return false;
+      if (l.startCol !== r.startCol) return false;
+      if (l.endCol !== r.endCol) return false;
+    }
+    return true;
+  }
+
+  private bumpMergedEpoch(sheetId: string): void {
+    this.mergedEpochBySheet.set(sheetId, (this.mergedEpochBySheet.get(sheetId) ?? 0) + 1);
+    this.mergedRangesBySheet.delete(sheetId);
+  }
+
+  private mergedRanges(sheetId: string): Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> {
+    const epoch = this.mergedEpochBySheet.get(sheetId) ?? 0;
+    const cached = this.mergedRangesBySheet.get(sheetId);
+    if (cached && cached.epoch === epoch) return cached.ranges;
+
+    const anyDoc: any = this.options.document as any;
+    const raw = typeof anyDoc.getMergedRanges === "function" ? anyDoc.getMergedRanges(sheetId) : [];
+    const ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        if (!entry) continue;
+        const startRow = Number((entry as any).startRow);
+        const endRow = Number((entry as any).endRow);
+        const startCol = Number((entry as any).startCol);
+        const endCol = Number((entry as any).endCol);
+        if (!Number.isInteger(startRow) || startRow < 0) continue;
+        if (!Number.isInteger(endRow) || endRow < 0) continue;
+        if (!Number.isInteger(startCol) || startCol < 0) continue;
+        if (!Number.isInteger(endCol) || endCol < 0) continue;
+        ranges.push({ startRow, endRow, startCol, endCol });
+      }
+    }
+    this.mergedRangesBySheet.set(sheetId, { epoch, ranges });
+    return ranges;
+  }
+
+  getMergedRangeAt(row: number, col: number): CellRange | null {
+    const { headerRows, headerCols } = this.options;
+    const sheetId = this.options.getSheetId();
+    const docRow = row - headerRows;
+    const docCol = col - headerCols;
+    if (docRow < 0 || docCol < 0) return null;
+
+    for (const range of this.mergedRanges(sheetId)) {
+      if (docRow < range.startRow || docRow > range.endRow) continue;
+      if (docCol < range.startCol || docCol > range.endCol) continue;
+      return {
+        startRow: range.startRow + headerRows,
+        endRow: range.endRow + headerRows + 1,
+        startCol: range.startCol + headerCols,
+        endCol: range.endCol + headerCols + 1,
+      };
+    }
+    return null;
+  }
+
+  getMergedRangesInRange(range: CellRange): CellRange[] {
+    const { headerRows, headerCols } = this.options;
+    const sheetId = this.options.getSheetId();
+
+    const docStartRow = range.startRow - headerRows;
+    const docEndRowExclusive = range.endRow - headerRows;
+    const docStartCol = range.startCol - headerCols;
+    const docEndColExclusive = range.endCol - headerCols;
+
+    // If the requested range falls entirely within header rows/cols, there are no merges to return.
+    if (docEndRowExclusive <= 0 || docEndColExclusive <= 0) return [];
+
+    const startRow = Math.max(0, docStartRow);
+    const endRow = docEndRowExclusive - 1;
+    const startCol = Math.max(0, docStartCol);
+    const endCol = docEndColExclusive - 1;
+    if (endRow < startRow || endCol < startCol) return [];
+
+    const regions = this.mergedRanges(sheetId);
+    if (!regions || regions.length === 0) return [];
+
+    const out: CellRange[] = [];
+    for (const r of regions) {
+      if (!r) continue;
+      // Inclusive intersection checks (our merged-region storage is inclusive).
+      if (r.endRow < startRow || r.startRow > endRow) continue;
+      if (r.endCol < startCol || r.startCol > endCol) continue;
+      out.push({
+        startRow: r.startRow + headerRows,
+        endRow: r.endRow + headerRows + 1,
+        startCol: r.startCol + headerCols,
+        endCol: r.endCol + headerCols + 1,
+      });
+    }
+    return out;
+  }
+
   getCacheStats(): {
     sheetCache: { size: number; max: number };
     resolvedFormatCache: { size: number; max: number };
@@ -997,6 +1108,23 @@ export class DocumentCellProvider implements CellProvider {
         const sheetId = this.options.getSheetId();
         const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
         const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+        let mergedRangesChangedForVisibleSheet = false;
+        if (sheetViewDeltas.length > 0) {
+          for (const delta of sheetViewDeltas) {
+            const id = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+            if (!id) continue;
+            const before = (delta as any)?.before;
+            const after = (delta as any)?.after;
+            // Some callers emit legacy sheetView delta shapes (e.g. `{ sheetId, frozenRows }`).
+            // Only treat deltas that have explicit before/after objects as eligible for merged-range updates.
+            if (!before || !after) continue;
+            const beforeRanges = (before as any)?.mergedRanges;
+            const afterRanges = (after as any)?.mergedRanges;
+            if (this.mergedRangesEqual(beforeRanges, afterRanges)) continue;
+            this.bumpMergedEpoch(id);
+            if (id === sheetId) mergedRangesChangedForVisibleSheet = true;
+          }
+        }
 
         // New layered formatting deltas (row/col/sheet style maps) may arrive without per-cell deltas.
         const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
@@ -1021,6 +1149,12 @@ export class DocumentCellProvider implements CellProvider {
           // Avoid evicting the provider cache in those cases; the renderer will be updated by
           // the view sync code (e.g. `syncFrozenPanes` / shared grid axis sync).
           if (sheetViewDeltas.length > 0 && !recalc) {
+            // Merged-cell regions *do* affect rendering (text layout + gridline suppression),
+            // but they arrive via sheetViewDeltas in the current document model. Ask the
+            // renderer to redraw without flushing cell caches.
+            if (mergedRangesChangedForVisibleSheet) {
+              for (const listener of this.listeners) listener({ type: "invalidateAll" });
+            }
             return;
           }
           this.invalidateAll();

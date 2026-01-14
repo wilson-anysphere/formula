@@ -622,6 +622,77 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(doc.getCell).toHaveBeenCalledTimes(1);
   });
 
+  it("invalidates for sheetViewDeltas that change mergedRanges", () => {
+    class FakeDocument {
+      private readonly listeners = new Set<(payload: any) => void>();
+
+      mergedRanges: any[] = [];
+      getMergedRanges = vi.fn(() => this.mergedRanges);
+      getCell = vi.fn(() => ({ value: "hello", formula: null }));
+
+      on(event: string, listener: (payload: any) => void): () => void {
+        if (event !== "change") return () => {};
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      }
+
+      emitChange(payload: any): void {
+        for (const listener of this.listeners) listener(payload);
+      }
+    }
+
+    const doc = new FakeDocument();
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 10 + headerRows,
+      colCount: 10 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const updates: any[] = [];
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
+
+    doc.mergedRanges = [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]; // A1:B1 (inclusive)
+    doc.emitChange({
+      deltas: [],
+      sheetViewDeltas: [
+        {
+          sheetId: "Sheet1",
+          before: { frozenRows: 0, frozenCols: 0 },
+          after: { frozenRows: 0, frozenCols: 0, mergedRanges: doc.mergedRanges }
+        }
+      ],
+      rowStyleDeltas: [],
+      colStyleDeltas: [],
+      sheetStyleDeltas: [],
+      formatDeltas: [],
+      rangeRunDeltas: [],
+      recalc: false
+    });
+
+    unsubscribe();
+
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+
+    // Ensure merged range queries resolve with header offsets and exclusive end coords.
+    expect(provider.getMergedRangeAt(headerRows + 0, headerCols + 1)).toEqual({
+      startRow: headerRows + 0,
+      endRow: headerRows + 1,
+      startCol: headerCols + 0,
+      endCol: headerCols + 2
+    });
+    expect(provider.getMergedRangesInRange({ startRow: headerRows, endRow: headerRows + 1, startCol: headerCols, endCol: headerCols + 2 })).toEqual(
+      [{ startRow: headerRows + 0, endRow: headerRows + 1, startCol: headerCols + 0, endCol: headerCols + 2 }]
+    );
+  });
+
   it("caches layered-format style resolution by style-id tuple", () => {
     const doc = new DocumentController();
 
