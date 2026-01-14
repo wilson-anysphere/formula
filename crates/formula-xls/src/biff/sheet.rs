@@ -814,7 +814,7 @@ fn parse_horizontal_page_breaks_record(
     let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
     if cbrk > iter_entries {
-        push_warning_bounded(
+        push_warning_bounded_force(
             warnings,
             format!(
                 "HorizontalPageBreaks record at offset {record_offset}: cbrk={cbrk} exceeds available entries (payload_len={}, max_entries_by_len={max_entries_by_len}, spec_max={SPEC_MAX}); parsing {iter_entries} entries",
@@ -859,7 +859,7 @@ fn parse_vertical_page_breaks_record(
     let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
     if cbrk > iter_entries {
-        push_warning_bounded(
+        push_warning_bounded_force(
             warnings,
             format!(
                 "VerticalPageBreaks record at offset {record_offset}: cbrk={cbrk} exceeds available entries (payload_len={}, max_entries_by_len={max_entries_by_len}, spec_max={SPEC_MAX}); parsing {iter_entries} entries",
@@ -2972,6 +2972,45 @@ mod tests {
             1,
             "suppression warning should only be emitted once; warnings={:?}",
             props.warnings
+        );
+    }
+
+    #[test]
+    fn manual_page_break_cap_warning_is_forced_when_warnings_full() {
+        let mut warnings = Vec::new();
+        // Fill the warning buffer and include the suppression marker to simulate prior noisy
+        // best-effort parsing.
+        for idx in 0..MAX_WARNINGS_PER_SHEET {
+            warnings.push(format!("warning {idx}"));
+        }
+        warnings.push(WARNINGS_SUPPRESSED_MESSAGE.to_string());
+
+        let mut breaks = ManualPageBreaks::default();
+
+        // HorizontalPageBreaks payload:
+        // - cbrk (u16)
+        // - HorzBrk[cbrk] (6 bytes each): row (u16), colStart (u16), colEnd (u16)
+        //
+        // Declare an absurd cbrk but only provide a single entry so the parser triggers the cap
+        // warning.
+        let mut data = Vec::new();
+        data.extend_from_slice(&u16::MAX.to_le_bytes()); // cbrk
+        data.extend_from_slice(&2u16.to_le_bytes()); // row
+        data.extend_from_slice(&0u16.to_le_bytes()); // colStart
+        data.extend_from_slice(&0u16.to_le_bytes()); // colEnd
+
+        parse_horizontal_page_breaks_record(&data, 123, &mut breaks, &mut warnings);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("HorizontalPageBreaks") && w.contains("cbrk=")),
+            "expected forced cap warning, got {warnings:?}"
+        );
+        assert_eq!(
+            warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression marker should be preserved; warnings={warnings:?}"
         );
     }
 
