@@ -496,6 +496,9 @@ export async function runOnce({
       FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1',
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
+      // Expose the resolved perf root for downstream tooling. This is the directory under which we
+      // create per-run profile dirs (HOME, XDG dirs, temp dirs, etc).
+      FORMULA_PERF_HOME: perfHome,
       // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
       HOME: dirs.home,
       USERPROFILE: dirs.home,

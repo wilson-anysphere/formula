@@ -274,7 +274,6 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number, pro
     timeoutMs,
     xvfb: useXvfb,
     profileDir,
-    envOverrides: { FORMULA_PERF_HOME: perfHome },
     afterCapture: async (child, _metrics, signal) => {
       try {
         if (settleMs > 0) {
