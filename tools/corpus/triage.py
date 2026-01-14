@@ -292,6 +292,20 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
             return "round_trip_media"
         if "doc_props" in failure_groups:
             return "round_trip_doc_props"
+        if "workbook" in failure_groups:
+            return "round_trip_workbook"
+        if "theme" in failure_groups:
+            return "round_trip_theme"
+        if "pivots" in failure_groups:
+            return "round_trip_pivots"
+        if "charts" in failure_groups:
+            return "round_trip_charts"
+        if "drawings" in failure_groups:
+            return "round_trip_drawings"
+        if "tables" in failure_groups:
+            return "round_trip_tables"
+        if "external_links" in failure_groups:
+            return "round_trip_external_links"
 
     # Either the Rust helper did not provide part-group summaries or the groups are too broad
     # (e.g. everything classified as `other`). Fall back to part-name heuristics.
@@ -305,13 +319,25 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
     if "[content_types].xml" in failure_parts:
         return "round_trip_content_types"
 
-    if "xl/styles.xml" in failure_parts:
+    if (
+        "xl/styles.xml" in failure_parts
+        or "xl/styles.bin" in failure_parts
+        or any(p.startswith("xl/styles/") for p in failure_parts)
+        or any(p.endswith("/styles.xml") or p.endswith("/styles.bin") for p in failure_parts)
+    ):
         return "round_trip_styles"
 
     if any(p.startswith("xl/worksheets/") for p in failure_parts):
         return "round_trip_worksheets"
 
-    if "xl/sharedstrings.xml" in failure_parts:
+    if (
+        "xl/sharedstrings.xml" in failure_parts
+        or "xl/sharedstrings.bin" in failure_parts
+        or any(
+            p.endswith("/sharedstrings.xml") or p.endswith("/sharedstrings.bin")
+            for p in failure_parts
+        )
+    ):
         return "round_trip_shared_strings"
 
     if any(p.startswith("xl/media/") for p in failure_parts):
@@ -321,7 +347,7 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
         return "round_trip_doc_props"
 
     # Additional high-signal buckets for common "other" churn.
-    if "xl/workbook.xml" in failure_parts:
+    if "xl/workbook.xml" in failure_parts or "xl/workbook.bin" in failure_parts:
         return "round_trip_workbook"
 
     if any(p.startswith("xl/theme/") for p in failure_parts):

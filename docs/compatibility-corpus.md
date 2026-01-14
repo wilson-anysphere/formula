@@ -146,12 +146,12 @@ Examples:
 
 - `round_trip_rels` – diffs only in `*.rels`
 - `round_trip_content_types` – diffs include `[Content_Types].xml`
-- `round_trip_styles` – diffs include `xl/styles.xml`
+- `round_trip_styles` – diffs include `xl/styles.xml` (XLSX) or `xl/styles.bin` (XLSB)
 - `round_trip_worksheets` – diffs include `xl/worksheets/*`
-- `round_trip_shared_strings` – diffs include `xl/sharedStrings.xml`
+- `round_trip_shared_strings` – diffs include `xl/sharedStrings.xml` (XLSX) or `xl/sharedStrings.bin` (XLSB)
 - `round_trip_media` – diffs include `xl/media/*`
 - `round_trip_doc_props` – diffs include `docProps/*`
-- `round_trip_workbook` – diffs include `xl/workbook.xml`
+- `round_trip_workbook` – diffs include `xl/workbook.xml` (XLSX) or `xl/workbook.bin` (XLSB)
 - `round_trip_theme` – diffs include `xl/theme/*`
 - `round_trip_pivots` – diffs include `xl/pivotTables/*` or `xl/pivotCache/*`
 - `round_trip_charts` – diffs include `xl/charts/*`

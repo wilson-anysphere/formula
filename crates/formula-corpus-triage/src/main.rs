@@ -883,8 +883,18 @@ fn part_group(part: &str) -> &'static str {
     if part_lower.ends_with(".rels") || part_lower.contains("/_rels/") {
         return "rels";
     }
-    if part_lower == "xl/styles.xml" || part_lower.starts_with("xl/styles/") {
+    if part_lower == "xl/workbook.xml" || part_lower == "xl/workbook.bin" {
+        return "workbook";
+    }
+    if part_lower == "xl/styles.xml" || part_lower == "xl/styles.bin" || part_lower.starts_with("xl/styles/") {
         return "styles";
+    }
+    if part_lower == "xl/sharedstrings.xml"
+        || part_lower == "xl/sharedstrings.bin"
+        || part_lower.ends_with("/sharedstrings.xml")
+        || part_lower.ends_with("/sharedstrings.bin")
+    {
+        return "shared_strings";
     }
     if part_lower.starts_with("xl/worksheets/") {
         if part_lower.ends_with(".bin") {
@@ -892,8 +902,26 @@ fn part_group(part: &str) -> &'static str {
         }
         return "worksheet_xml";
     }
-    if part_lower == "xl/sharedstrings.xml" {
-        return "shared_strings";
+    if part_lower == "xl/calcchain.xml" || part_lower == "xl/calcchain.bin" {
+        return "calc_chain";
+    }
+    if part_lower.starts_with("xl/theme/") {
+        return "theme";
+    }
+    if part_lower.starts_with("xl/pivottables/") || part_lower.starts_with("xl/pivotcache/") {
+        return "pivots";
+    }
+    if part_lower.starts_with("xl/charts/") {
+        return "charts";
+    }
+    if part_lower.starts_with("xl/drawings/") {
+        return "drawings";
+    }
+    if part_lower.starts_with("xl/tables/") {
+        return "tables";
+    }
+    if part_lower.starts_with("xl/externallinks/") {
+        return "external_links";
     }
     if part_lower.starts_with("xl/media/") {
         return "media";
@@ -1475,7 +1503,7 @@ mod tests {
             parts[0],
             PartDiffSummary {
                 part: "xl/workbook.xml".to_string(),
-                group: "other".to_string(),
+                group: "workbook".to_string(),
                 critical: 2,
                 warning: 0,
                 info: 0,
@@ -1488,7 +1516,7 @@ mod tests {
 
         assert_eq!(critical_parts, vec!["xl/workbook.xml".to_string()]);
 
-        assert_eq!(part_groups.get("xl/workbook.xml").map(String::as_str), Some("other"));
+        assert_eq!(part_groups.get("xl/workbook.xml").map(String::as_str), Some("workbook"));
         assert_eq!(
             part_groups.get("docProps/app.xml").map(String::as_str),
             Some("doc_props")
