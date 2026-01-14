@@ -126,7 +126,7 @@ export class RagIndex {
   store: VectorStore;
   constructor(options?: { embedder?: Embedder; store?: VectorStore });
   /**
-   * Index a sheet, replacing any previous region chunks for the same sheet.
+   * Index a sheet, replacing previous region chunks for the same sheet.
    */
   indexSheet(
     sheet: RagSheet,

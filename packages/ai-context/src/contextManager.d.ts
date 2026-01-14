@@ -98,7 +98,7 @@ export interface WorkbookRagNamedRange {
 export interface WorkbookRagSheet {
   name: string;
   /**
-   * Either a 2D matrix `[row][col]`, a sparse Map keyed by coordinates, or any other
+   * Either a 2D matrix `[row][col]`, a sparse Map keyed by coordinates, or some other
    * host-specific cell representation understood by `packages/ai-rag`.
    */
   cells?: unknown;
