@@ -622,10 +622,27 @@ fn is_xml_extension(name: &str) -> bool {
 }
 
 fn looks_like_xml(bytes: &[u8]) -> bool {
-    let mut i = 0usize;
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        i = 3;
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return looks_like_xml_utf8(rest);
     }
+
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return looks_like_xml_utf16(rest, Utf16Endian::Little);
+    }
+
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return looks_like_xml_utf16(rest, Utf16Endian::Big);
+    }
+
+    if let Some(endian) = sniff_utf16_without_bom(bytes) {
+        return looks_like_xml_utf16(bytes, endian);
+    }
+
+    looks_like_xml_utf8(bytes)
+}
+
+fn looks_like_xml_utf8(bytes: &[u8]) -> bool {
+    let mut i = 0usize;
     while i < bytes.len() {
         match bytes[i] {
             b' ' | b'\t' | b'\n' | b'\r' => i += 1,
@@ -633,6 +650,30 @@ fn looks_like_xml(bytes: &[u8]) -> bool {
             _ => return false,
         }
     }
+    false
+}
+
+fn looks_like_xml_utf16(bytes: &[u8], endian: Utf16Endian) -> bool {
+    if bytes.len() % 2 != 0 {
+        return false;
+    }
+
+    let mut i = 0usize;
+    while i + 1 < bytes.len() {
+        let word = match endian {
+            Utf16Endian::Little => u16::from_le_bytes([bytes[i], bytes[i + 1]]),
+            Utf16Endian::Big => u16::from_be_bytes([bytes[i], bytes[i + 1]]),
+        };
+
+        match word {
+            // ASCII whitespace
+            0x0009 | 0x000A | 0x000D | 0x0020 => i += 2,
+            // '<'
+            0x003C => return true,
+            _ => return false,
+        }
+    }
+
     false
 }
 

@@ -1,4 +1,21 @@
-use xlsx_diff::{diff_xml, NormalizedXml, Severity};
+use std::io::{Cursor, Write};
+
+use xlsx_diff::{diff_archives, diff_xml, NormalizedXml, Severity, WorkbookArchive};
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipWriter};
+
+fn zip_bytes(parts: &[(&str, &[u8])]) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+    for (name, bytes) in parts {
+        writer.start_file(*name, options).unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+
+    writer.finish().unwrap().into_inner()
+}
 
 fn utf16le_with_bom(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(2 + text.len() * 2);
@@ -75,4 +92,27 @@ fn utf16_without_bom_with_leading_whitespace_is_detected() {
 
     assert_eq!(utf16le, utf8);
     assert_eq!(utf16be, utf8);
+}
+
+#[test]
+fn non_xml_extension_utf16_bom_is_detected_as_xml_candidate() {
+    // `looks_like_xml` is used for non-standard extensions. Ensure we still treat
+    // UTF-16 BOM encoded XML as XML (rather than binary) so semantically identical
+    // parts don't churn.
+    let a = r#"<root a="1" b="2"/>"#;
+    let b = r#"<root b="2" a="1"/>"#;
+    let a_bytes = utf16le_with_bom(a);
+    let b_bytes = utf16le_with_bom(b);
+
+    let expected_zip = zip_bytes(&[("customXml/item1.dat", a_bytes.as_slice())]);
+    let actual_zip = zip_bytes(&[("customXml/item1.dat", b_bytes.as_slice())]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = diff_archives(&expected, &actual);
+    assert!(
+        report.is_empty(),
+        "expected no diffs for semantically identical XML, got {:#?}",
+        report.differences
+    );
 }
