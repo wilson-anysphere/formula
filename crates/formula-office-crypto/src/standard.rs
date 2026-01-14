@@ -294,6 +294,23 @@ pub(crate) fn verify_password_standard(
                 Err(OfficeCryptoError::InvalidPassword) => {
                     // Compatibility fallback: some producers appear to use the RC4-style key
                     // truncation derivation even when AlgID indicates AES.
+                    //
+                    // This derivation can only produce `digest_len` bytes of key material. If the
+                    // requested AES key length is larger (e.g. AES-256 with SHA-1), skip the
+                    // fallback and report an invalid password instead of surfacing a confusing
+                    // UnsupportedEncryption error.
+                    let key_len = if header.key_bits % 8 == 0 {
+                        (header.key_bits / 8) as usize
+                    } else {
+                        return Err(OfficeCryptoError::InvalidFormat(format!(
+                            "EncryptionHeader keyBits must be divisible by 8 (got {})",
+                            header.key_bits
+                        )));
+                    };
+                    if key_len > hash_alg.digest_len() {
+                        return Err(OfficeCryptoError::InvalidPassword);
+                    }
+
                     let deriver_rc4 = StandardKeyDeriver::new(
                         hash_alg,
                         header.key_bits,
@@ -301,7 +318,13 @@ pub(crate) fn verify_password_standard(
                         password,
                         StandardKeyDerivation::Rc4,
                     );
-                    let key0_rc4 = deriver_rc4.derive_key_for_block(0)?;
+                    let key0_rc4 = match deriver_rc4.derive_key_for_block(0) {
+                        Ok(key) => key,
+                        Err(OfficeCryptoError::UnsupportedEncryption(_)) => {
+                            return Err(OfficeCryptoError::InvalidPassword)
+                        }
+                        Err(e) => return Err(e),
+                    };
                     verify_password_standard_with_key(
                         header,
                         verifier,
@@ -569,6 +592,16 @@ pub(crate) fn decrypt_standard_encrypted_package(
                     Ok(mode) => (key0_aes, mode),
                     Err(OfficeCryptoError::InvalidPassword) => {
                         // Compatibility fallback: try the RC4-style key truncation derivation.
+                        //
+                        // This derivation can only produce `digest_len` bytes of key material. If
+                        // the requested AES key length is larger (e.g. AES-256 with SHA-1), skip
+                        // the fallback and report an invalid password instead of surfacing a
+                        // confusing UnsupportedEncryption error.
+                        let key_len = (info.header.key_bits / 8) as usize;
+                        if key_len > hash_alg.digest_len() {
+                            return Err(OfficeCryptoError::InvalidPassword);
+                        }
+
                         let deriver_rc4 = StandardKeyDeriver::new(
                             hash_alg,
                             info.header.key_bits,
@@ -576,7 +609,13 @@ pub(crate) fn decrypt_standard_encrypted_package(
                             password,
                             StandardKeyDerivation::Rc4,
                         );
-                        let key0_rc4 = deriver_rc4.derive_key_for_block(0)?;
+                        let key0_rc4 = match deriver_rc4.derive_key_for_block(0) {
+                            Ok(key) => key,
+                            Err(OfficeCryptoError::UnsupportedEncryption(_)) => {
+                                return Err(OfficeCryptoError::InvalidPassword)
+                            }
+                            Err(e) => return Err(e),
+                        };
                         let mode = verify_password_standard_with_key_and_mode(
                             &info.header,
                             &info.verifier,
