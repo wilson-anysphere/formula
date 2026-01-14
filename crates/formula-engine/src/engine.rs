@@ -12031,13 +12031,6 @@ fn rewrite_defined_name_structural(
     }
 
     let origin = crate::CellAddr::new(0, 0);
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
@@ -12100,13 +12093,6 @@ fn rewrite_defined_name_range_map(
     }
 
     let origin = crate::CellAddr::new(0, 0);
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
