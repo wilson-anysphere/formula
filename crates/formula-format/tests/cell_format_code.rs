@@ -49,6 +49,18 @@ fn cell_format_code_classifies_thousands_separated_numbers_as_n() {
 }
 
 #[test]
+fn cell_format_code_uses_positive_section_for_grouping_detection() {
+    // Grouping commas in non-positive sections should not affect the CELL("format") classification.
+    assert_eq!(cell_format_code(Some("0;#,##0")), "F0");
+    assert_eq!(cell_format_code(Some("0;0;#,##0")), "F0");
+
+    // Conditional sections: Excel selects the first matching condition, then the first
+    // unconditional section as an "else". CELL("format") uses the selected *positive* section.
+    assert_eq!(cell_format_code(Some("[<0]#,##0;0")), "F0");
+    assert_eq!(cell_format_code(Some("[>=0]#,##0;0")), "N0");
+}
+
+#[test]
 fn cell_format_code_ignores_commas_in_literals_escapes_and_brackets() {
     // Commas inside quoted literals are not thousands separators.
     assert_eq!(cell_format_code(Some(r#"0","0"#)), "F0");
