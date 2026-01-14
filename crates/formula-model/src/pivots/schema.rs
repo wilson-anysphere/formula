@@ -639,6 +639,27 @@ mod tests {
     }
 
     #[test]
+    fn pivot_field_new_accepts_pivot_field_refs() {
+        let col = PivotField::new(PivotFieldRef::DataModelColumn {
+            table: "Sales".to_string(),
+            column: "Amount".to_string(),
+        });
+        assert_eq!(
+            col.source_field,
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string(),
+            }
+        );
+
+        let measure = PivotField::new(PivotFieldRef::DataModelMeasure("Total Sales".to_string()));
+        assert_eq!(
+            measure.source_field,
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+    }
+
+    #[test]
     fn pivot_field_ref_helpers_and_display_formats() {
         let cache = PivotFieldRef::CacheFieldName("Region".to_string());
         assert_eq!(cache.as_cache_field_name(), Some("Region"));

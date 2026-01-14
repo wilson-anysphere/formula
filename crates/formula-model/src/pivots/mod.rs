@@ -255,9 +255,9 @@ pub struct PivotField {
 }
 
 impl PivotField {
-    pub fn new(source_field: impl Into<String>) -> Self {
+    pub fn new(source_field: impl Into<PivotFieldRef>) -> Self {
         Self {
-            source_field: PivotFieldRef::CacheFieldName(source_field.into()),
+            source_field: source_field.into(),
             sort_order: SortOrder::default(),
             manual_sort: None,
         }
