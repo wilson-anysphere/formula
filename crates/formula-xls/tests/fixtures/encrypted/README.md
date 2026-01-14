@@ -37,8 +37,10 @@ crosses the 1024-byte boundary (to exercise RC4 per-block rekeying).
 
 `formula-xls` treats `FILEPASS` as a signal that the workbook is encrypted/password-protected.
 
-- `import_xls_path` does **not** support encrypted workbooks and returns `ImportError::EncryptedWorkbook`.
-- `import_xls_path_with_password` supports these legacy `.xls` encryption schemes:
+- `import_xls_path` / `import_xls_bytes` (no password) do **not** support encrypted workbooks and
+  return `ImportError::EncryptedWorkbook`.
+- `import_xls_path_with_password` / `import_xls_bytes_with_password` support these legacy `.xls`
+  encryption schemes:
   - XOR obfuscation (`wEncryptionType=0x0000`)
   - RC4 “standard” (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
   - RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
