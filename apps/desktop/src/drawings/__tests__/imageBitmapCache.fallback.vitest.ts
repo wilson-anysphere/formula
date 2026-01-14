@@ -77,5 +77,48 @@ describe("ImageBitmapCache decode fallback", () => {
       else URLCtor.revokeObjectURL = originalRevokeObjectURL;
     }
   });
-});
 
+  it("rethrows InvalidStateError when the <img> fallback fails to load, and still revokes the object URL", async () => {
+    const entry: ImageEntry = { id: "img_fallback_error", bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
+
+    const err = new Error("decode failed");
+    (err as any).name = "InvalidStateError";
+    const createImageBitmapMock = vi.fn(() => Promise.reject(err));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_value: string) {
+          queueMicrotask(() => {
+            this.onerror?.();
+          });
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      const cache = new ImageBitmapCache({ maxEntries: 16, negativeCacheMs: 0 });
+      await expect(cache.get(entry)).rejects.toMatchObject({ name: "InvalidStateError" });
+
+      // Should attempt the blob decode once; the image-element fallback does not invoke createImageBitmap again
+      // because the <img> load failed before we could render into a canvas.
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+});
