@@ -175,7 +175,9 @@ function signaturePreview(name: string): string {
     .slice(1, -1)
     .map((p) => p.text)
     .join("");
-  return `(${inner})`;
+  const args = `(${inner})`;
+  const summary = sig.summary?.trim?.() ?? "";
+  return summary ? `${args} — ${summary}` : args;
 }
 
 function preserveTypedCasing(typedPrefix: string, canonical: string): string {
