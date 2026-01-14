@@ -81,7 +81,7 @@ fn parse_absolute_anchor_picture_drawing_part() {
         <xdr:cNvPicPr/>
       </xdr:nvPicPr>
       <xdr:blipFill>
-        <a:blip r:embed="rId1"/>
+        <a:blip r:embed=" rId1 "/>
         <a:stretch><a:fillRect/></a:stretch>
       </xdr:blipFill>
       <xdr:spPr>
@@ -208,7 +208,7 @@ fn parse_absolute_anchor_picture_drawing_part_from_archive() {
         <xdr:cNvPicPr/>
       </xdr:nvPicPr>
       <xdr:blipFill>
-        <a:blip r:embed="rId1"/>
+        <a:blip r:embed=" rId1 "/>
         <a:stretch><a:fillRect/></a:stretch>
       </xdr:blipFill>
       <xdr:spPr>

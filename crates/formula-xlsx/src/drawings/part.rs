@@ -1079,7 +1079,11 @@ fn parse_pic(
         .attribute((REL_NS, "embed"))
         .or_else(|| blip.attribute("r:embed"))
         .ok_or_else(|| XlsxError::Invalid("blip missing r:embed".to_string()))?
-        .to_string();
+        .trim();
+    if embed.is_empty() {
+        return Err(XlsxError::Invalid("blip missing r:embed".to_string()));
+    }
+    let embed = embed.to_string();
 
     Ok((id, pic_xml, embed))
 }
