@@ -128,9 +128,16 @@ test("Formulas → Formula Auditing ribbon commands are registered in CommandReg
     "Expected removeArrows command to clear auditing + focus SpreadsheetApp",
   );
 
-  // Guardrail: "Show Formulas" is a registered CommandRegistry toggle command, so it should not
-  // be special-cased as a ribbon `toggleOverrides` handler in main.ts.
-  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']view\.toggleShowFormulas["']\s*:/m);
+  assert.match(
+    main,
+    // Ribbon toggles are handled via createRibbonActionsFromCommands toggleOverrides.
+    new RegExp(
+      `toggleOverrides:\\s*\\{[\\s\\S]*?["']view\\.toggleShowFormulas["']\\s*:\\s*(?:async\\s*)?\\(pressed\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?commandRegistry\\.executeCommand\\(["']view\\.toggleShowFormulas["']`,
+      "m",
+    ),
+    "Expected main.ts to handle view.toggleShowFormulas via the ribbon toggleOverrides hook",
+  );
 
   assert.match(
     main,
