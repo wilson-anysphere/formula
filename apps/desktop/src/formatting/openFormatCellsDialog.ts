@@ -392,7 +392,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   // --- Buttons ---------------------------------------------------------------
 
   const actions = document.createElement("div");
-  actions.className = "format-cells-dialog__actions";
+  actions.className = "dialog__controls format-cells-dialog__actions";
   dialog.appendChild(actions);
 
   const cancelBtn = document.createElement("button");

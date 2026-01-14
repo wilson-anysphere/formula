@@ -164,26 +164,17 @@ dialog.format-cells-dialog {
 }
 
 .format-cells-dialog__actions {
+  --dialog-controls-margin-top: 0;
+
   padding: var(--space-4) calc(var(--space-4) + var(--space-1));
   border-top: 1px solid var(--border);
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-}
-
-.format-cells-dialog__actions button {
-  border: 1px solid var(--border);
-  font: inherit;
-  border-radius: var(--radius);
-  padding: var(--space-2) var(--space-4);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  cursor: pointer;
 }
 
 .format-cells-dialog__actions button[data-primary="true"] {
-  border-color: var(--selection-border);
-  background: var(--selection-bg);
+  --dialog-button-border: var(--selection-border);
+  --dialog-button-bg: var(--selection-bg);
+  --dialog-button-bg-hover: var(--selection-bg);
+  --dialog-button-bg-active: var(--selection-bg);
 }
 
 @media (forced-colors: active) {
