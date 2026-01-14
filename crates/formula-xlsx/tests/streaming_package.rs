@@ -242,6 +242,38 @@ fn streaming_package_enforce_workbook_kind_template_updates_only_workbook_overri
 }
 
 #[test]
+fn streaming_package_enforce_workbook_kind_is_noop_when_already_correct() {
+    let workbook_ct = WorkbookKind::Template.workbook_content_type();
+    let content_types = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override PartName="/xl/workbook.xml" ContentType="{workbook_ct}"/>
+  <ct:Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</ct:Types>"#
+    );
+
+    let input = build_zip(&[
+        (
+            "[Content_Types].xml",
+            CompressionMethod::Deflated,
+            content_types.as_bytes(),
+        ),
+        ("xl/workbook.xml", CompressionMethod::Deflated, b"<workbook/>"),
+        ("xl/styles.xml", CompressionMethod::Deflated, b"<styleSheet/>"),
+    ]);
+
+    let mut pkg = StreamingXlsxPackage::from_reader(Cursor::new(input)).unwrap();
+    pkg.enforce_workbook_kind(WorkbookKind::Template).unwrap();
+
+    assert!(
+        pkg.part_overrides().get("[Content_Types].xml").is_none(),
+        "expected enforce_workbook_kind to avoid rewriting when workbook override already matches"
+    );
+}
+
+#[test]
 fn streaming_package_enforce_workbook_kind_addin_updates_only_workbook_override() {
     let (input, content_types) = streaming_pkg_fixture_with_prefixed_content_types();
 
