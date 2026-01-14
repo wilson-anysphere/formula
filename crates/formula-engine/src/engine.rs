@@ -776,6 +776,19 @@ pub struct Engine {
     external_workbook_dependents: HashMap<String, HashSet<CellKey>>,
     /// Forward index: local formula cell -> external workbook identifiers referenced by its formula.
     cell_external_workbook_refs: HashMap<CellKey, HashSet<String>>,
+    /// Dynamic external precedents captured at runtime for dynamic-deps formulas.
+    ///
+    /// These precedents cannot be represented in the internal dependency graph yet, but are still
+    /// surfaced via auditing APIs like [`Engine::precedents`].
+    cell_dynamic_external_precedents: HashMap<CellKey, HashSet<crate::functions::Reference>>,
+    /// Reverse index: external sheet key -> local formula cells that dereferenced it at runtime.
+    dynamic_external_sheet_dependents: HashMap<String, HashSet<CellKey>>,
+    /// Forward index: local formula cell -> external sheet keys dereferenced at runtime.
+    cell_dynamic_external_sheet_refs: HashMap<CellKey, HashSet<String>>,
+    /// Reverse index: external workbook identifier -> local formula cells that dereferenced it at runtime.
+    dynamic_external_workbook_dependents: HashMap<String, HashSet<CellKey>>,
+    /// Forward index: local formula cell -> external workbook identifiers dereferenced at runtime.
+    cell_dynamic_external_workbook_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
     calc_graph: CalcGraph,
     dirty: HashSet<CellKey>,
@@ -877,6 +890,11 @@ impl Engine {
             cell_external_sheet_refs: HashMap::new(),
             external_workbook_dependents: HashMap::new(),
             cell_external_workbook_refs: HashMap::new(),
+            cell_dynamic_external_precedents: HashMap::new(),
+            dynamic_external_sheet_dependents: HashMap::new(),
+            cell_dynamic_external_sheet_refs: HashMap::new(),
+            dynamic_external_workbook_dependents: HashMap::new(),
+            cell_dynamic_external_workbook_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
             dirty: HashSet::new(),
             dirty_reasons: HashMap::new(),
@@ -2673,9 +2691,16 @@ impl Engine {
     /// `sheet_key` must be in canonical external sheet form, e.g. `"[Book.xlsx]Sheet1"`.
     pub fn mark_external_sheet_dirty(&mut self, sheet_key: &str) {
         let sheet_key = sheet_key.trim();
-        let Some(cells) = self.external_sheet_dependents.get(sheet_key).cloned() else {
+        let mut cells: HashSet<CellKey> = HashSet::new();
+        if let Some(static_cells) = self.external_sheet_dependents.get(sheet_key) {
+            cells.extend(static_cells.iter().copied());
+        }
+        if let Some(dynamic_cells) = self.dynamic_external_sheet_dependents.get(sheet_key) {
+            cells.extend(dynamic_cells.iter().copied());
+        }
+        if cells.is_empty() {
             return;
-        };
+        }
 
         for key in cells {
             self.dirty_reasons.remove(&key);
@@ -2698,9 +2723,16 @@ impl Engine {
             workbook = stripped;
         }
 
-        let Some(cells) = self.external_workbook_dependents.get(workbook).cloned() else {
+        let mut cells: HashSet<CellKey> = HashSet::new();
+        if let Some(static_cells) = self.external_workbook_dependents.get(workbook) {
+            cells.extend(static_cells.iter().copied());
+        }
+        if let Some(dynamic_cells) = self.dynamic_external_workbook_dependents.get(workbook) {
+            cells.extend(dynamic_cells.iter().copied());
+        }
+        if cells.is_empty() {
             return;
-        };
+        }
 
         for key in cells {
             self.dirty_reasons.remove(&key);
@@ -3150,6 +3182,7 @@ impl Engine {
         self.calc_graph.remove_cell(cell_id);
         self.clear_cell_name_refs(key);
         self.clear_cell_external_refs(key);
+        self.clear_cell_dynamic_external_precedents(key);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -3404,6 +3437,7 @@ impl Engine {
                 self.calc_graph.remove_cell(cell_id);
                 self.clear_cell_name_refs(key);
                 self.clear_cell_external_refs(key);
+                self.clear_cell_dynamic_external_precedents(key);
                 self.dirty.remove(&key);
                 self.dirty_reasons.remove(&key);
 
@@ -3524,6 +3558,7 @@ impl Engine {
                 self.calc_graph.remove_cell(cell_id);
                 self.clear_cell_name_refs(key);
                 self.clear_cell_external_refs(key);
+                self.clear_cell_dynamic_external_precedents(key);
                 self.dirty.remove(&key);
                 self.dirty_reasons.remove(&key);
 
@@ -3578,6 +3613,7 @@ impl Engine {
         self.calc_graph.remove_cell(cell_id);
         self.clear_cell_name_refs(key);
         self.clear_cell_external_refs(key);
+        self.clear_cell_dynamic_external_precedents(key);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -4264,6 +4300,7 @@ impl Engine {
         let cell_id = cell_id_from_key(key);
         self.clear_spill_for_cell(key);
         self.clear_blocked_spill_for_origin(key);
+        self.clear_cell_dynamic_external_precedents(key);
 
         let origin = crate::CellAddr::new(addr.row, addr.col);
         let parsed = crate::parse_formula(
@@ -5740,29 +5777,45 @@ impl Engine {
                         _ => None,
                     })
                     .collect();
+                let mut dynamic_external_precedents: HashSet<crate::functions::Reference> =
+                    HashSet::new();
                 for reference in traced_precedents {
-                    let crate::functions::SheetId::Local(sheet_id) = reference.sheet_id else {
-                        // External references can't be represented in the internal dependency graph
-                        // yet. By default they are handled via the engine's volatile external-ref
-                        // semantics; when external refs are configured as non-volatile, callers
-                        // must explicitly invalidate dependents via `mark_external_*_dirty`.
-                        continue;
-                    };
-                    let sheet_id = sheet_id_for_graph(sheet_id);
-                    if reference.start == reference.end {
-                        new_precedents.insert(Precedent::Cell(CellId::new(
-                            sheet_id,
-                            reference.start.row,
-                            reference.start.col,
-                        )));
-                    } else {
-                        let range = Range::new(
-                            CellRef::new(reference.start.row, reference.start.col),
-                            CellRef::new(reference.end.row, reference.end.col),
-                        );
-                        new_precedents.insert(Precedent::Range(SheetRange::new(sheet_id, range)));
+                    let crate::functions::Reference { sheet_id, start, end } = reference;
+                    match sheet_id {
+                        crate::functions::SheetId::Local(sheet_id) => {
+                            let sheet_id = sheet_id_for_graph(sheet_id);
+                            if start == end {
+                                new_precedents.insert(Precedent::Cell(CellId::new(
+                                    sheet_id, start.row, start.col,
+                                )));
+                            } else {
+                                let range = Range::new(
+                                    CellRef::new(start.row, start.col),
+                                    CellRef::new(end.row, end.col),
+                                );
+                                new_precedents
+                                    .insert(Precedent::Range(SheetRange::new(sheet_id, range)));
+                            }
+                        }
+                        crate::functions::SheetId::External(key) => {
+                            // External references can't be represented in the internal dependency graph yet.
+                            //
+                            // By default, these are handled via the engine's volatile external-ref semantics;
+                            // when external refs are configured as non-volatile, callers must explicitly
+                            // invalidate dependents via `mark_external_*_dirty`.
+                            //
+                            // Persist them separately so auditing + explicit invalidation can still surface them.
+                            if crate::eval::split_external_sheet_key(&key).is_some() {
+                                dynamic_external_precedents.insert(crate::functions::Reference {
+                                    sheet_id: crate::functions::SheetId::External(key),
+                                    start,
+                                    end,
+                                });
+                            }
+                        }
                     }
                 }
+                self.set_cell_dynamic_external_precedents(*k, dynamic_external_precedents);
 
                 // Dynamic dependency tracing can record both a range and individual cells within
                 // that range (e.g. INDEX(OFFSET(...), ...) records the OFFSET range, then the
@@ -7597,6 +7650,99 @@ impl Engine {
         }
     }
 
+    fn clear_cell_dynamic_external_precedents(&mut self, cell: CellKey) {
+        self.cell_dynamic_external_precedents.remove(&cell);
+
+        if let Some(keys) = self.cell_dynamic_external_sheet_refs.remove(&cell) {
+            for key in keys {
+                let should_remove = self
+                    .dynamic_external_sheet_dependents
+                    .get_mut(&key)
+                    .map(|deps| {
+                        deps.remove(&cell);
+                        deps.is_empty()
+                    })
+                    .unwrap_or(false);
+                if should_remove {
+                    self.dynamic_external_sheet_dependents.remove(&key);
+                }
+            }
+        }
+
+        if let Some(workbooks) = self.cell_dynamic_external_workbook_refs.remove(&cell) {
+            for workbook in workbooks {
+                let should_remove = self
+                    .dynamic_external_workbook_dependents
+                    .get_mut(&workbook)
+                    .map(|deps| {
+                        deps.remove(&cell);
+                        deps.is_empty()
+                    })
+                    .unwrap_or(false);
+                if should_remove {
+                    self.dynamic_external_workbook_dependents.remove(&workbook);
+                }
+            }
+        }
+    }
+
+    fn set_cell_dynamic_external_precedents(
+        &mut self,
+        cell: CellKey,
+        precedents: HashSet<crate::functions::Reference>,
+    ) {
+        self.clear_cell_dynamic_external_precedents(cell);
+        if precedents.is_empty() {
+            return;
+        }
+
+        let mut sheet_keys: HashSet<String> = HashSet::new();
+        let mut workbook_keys: HashSet<String> = HashSet::new();
+        for reference in &precedents {
+            let crate::functions::SheetId::External(key) = &reference.sheet_id else {
+                continue;
+            };
+
+            if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key(key) {
+                workbook_keys.insert(workbook.to_string());
+            }
+
+            if crate::eval::is_valid_external_sheet_key(key) {
+                sheet_keys.insert(key.clone());
+            } else if crate::eval::split_external_sheet_span_key(key).is_some() {
+                if let Some(expanded) =
+                    expand_external_sheet_span_key(key, self.external_value_provider.as_deref())
+                {
+                    sheet_keys.extend(expanded);
+                }
+            }
+        }
+
+        self.cell_dynamic_external_precedents.insert(cell, precedents);
+
+        if !sheet_keys.is_empty() {
+            self.cell_dynamic_external_sheet_refs
+                .insert(cell, sheet_keys.clone());
+            for key in sheet_keys {
+                self.dynamic_external_sheet_dependents
+                    .entry(key)
+                    .or_default()
+                    .insert(cell);
+            }
+        }
+
+        if !workbook_keys.is_empty() {
+            self.cell_dynamic_external_workbook_refs
+                .insert(cell, workbook_keys.clone());
+            for workbook in workbook_keys {
+                self.dynamic_external_workbook_dependents
+                    .entry(workbook)
+                    .or_default()
+                    .insert(cell);
+            }
+        }
+    }
+
     fn refresh_cells_after_name_change(&mut self, name: &str) {
         let Some(cells) = self.name_dependents.get(name).cloned() else {
             return;
@@ -7620,6 +7766,7 @@ impl Engine {
             };
 
             let cell_id = cell_id_from_key(key);
+            self.clear_cell_dynamic_external_precedents(key);
 
             let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
                 analyze_expr_flags(
@@ -7730,6 +7877,11 @@ impl Engine {
         self.cell_external_sheet_refs.clear();
         self.external_workbook_dependents.clear();
         self.cell_external_workbook_refs.clear();
+        self.cell_dynamic_external_precedents.clear();
+        self.dynamic_external_sheet_dependents.clear();
+        self.cell_dynamic_external_sheet_refs.clear();
+        self.dynamic_external_workbook_dependents.clear();
+        self.cell_dynamic_external_workbook_refs.clear();
         self.dirty.clear();
         self.dirty_reasons.clear();
         self.spills = SpillState::default();
@@ -7948,6 +8100,39 @@ impl Engine {
         })
     }
 
+    fn dynamic_external_precedent_nodes(&self, cell: CellKey) -> Vec<PrecedentNode> {
+        let Some(precedents) = self.cell_dynamic_external_precedents.get(&cell) else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        for reference in precedents {
+            let crate::functions::SheetId::External(key) = &reference.sheet_id else {
+                continue;
+            };
+            if crate::eval::split_external_sheet_key(key).is_none() {
+                continue;
+            }
+
+            let start = clamp_addr_to_excel_dimensions(reference.start);
+            let end = clamp_addr_to_excel_dimensions(reference.end);
+            let (start, end) = normalize_range(start, end);
+            if start == end {
+                out.push(PrecedentNode::ExternalCell {
+                    sheet: key.clone(),
+                    addr: start,
+                });
+            } else {
+                out.push(PrecedentNode::ExternalRange {
+                    sheet: key.clone(),
+                    start,
+                    end,
+                });
+            }
+        }
+        out
+    }
+
     fn precedents_impl(
         &self,
         sheet: &str,
@@ -7983,6 +8168,7 @@ impl Engine {
                 ));
             }
         }
+        out.extend(self.dynamic_external_precedent_nodes(key));
         sort_and_dedup_nodes(&mut out, &self.workbook);
         Ok(out)
     }
@@ -8127,6 +8313,7 @@ impl Engine {
                             ));
                         }
                     }
+                    neighbors.extend(self.dynamic_external_precedent_nodes(key));
                     neighbors
                 }
                 PrecedentNode::Range { sheet, start, end } => {
@@ -12109,6 +12296,23 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                     row: coord.row as u32,
                     col: coord.col as u32,
                 };
+
+                // Bytecode dependency tracing historically ignored external workbook references
+                // because the internal dependency graph cannot represent them. The engine now uses
+                // these traces for auditing (and optional explicit invalidation), so record the
+                // external dereference here.
+                if let Some(trace) = self.trace {
+                    let reference = crate::functions::Reference {
+                        sheet_id: crate::functions::SheetId::External(sheet_key.to_string()),
+                        start: addr,
+                        end: addr,
+                    };
+                    let mut guard = match trace.lock() {
+                        Ok(g) => g,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    guard.record_reference(reference);
+                }
 
                 let Some(provider) = self.snapshot.external_value_provider.as_ref() else {
                     return bytecode::Value::Error(bytecode::ErrorKind::Ref);

@@ -365,6 +365,38 @@ fn precedents_include_external_refs() {
 }
 
 #[test]
+fn precedents_include_dynamic_external_precedents_from_offset() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 1, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=OFFSET([Book.xlsx]Sheet1!A1,1,0)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 1, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
 fn precedents_expand_external_3d_sheet_span_when_sheet_order_available() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(
