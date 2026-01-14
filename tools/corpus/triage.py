@@ -497,6 +497,9 @@ def _redact_uri_like(text: str) -> str:
             return text
         return f"sha256={_sha256_text(text)}"
 
+    if text.startswith("~/"):
+        return f"sha256={_sha256_text(text)}"
+
     # Absolute filesystem paths can appear in external relationship targets (e.g. linked workbooks)
     # and can leak usernames/mount points. Hash common OS-level path prefixes.
     if text.startswith("/") and re.search(
@@ -586,6 +589,8 @@ def _redact_uri_like_in_text(text: str) -> str:
         flags=re.IGNORECASE,
     )
     out = re.sub(r"\b[A-Za-z]:/[^\s\"'<>]+", _replace_url, out)
+    out = re.sub(r"\b[A-Za-z]:\\[^\s\"'<>]+", _replace_url, out)
+    out = re.sub(r"\\\\[^\s\"'<>]+", _replace_url, out)
     out = re.sub(r"~/(?:[^\s\"'<>]+)", _replace_url, out)
     return out
 

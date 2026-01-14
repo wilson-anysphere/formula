@@ -281,6 +281,18 @@ class TriagePrivacyModeTests(unittest.TestCase):
                                     "path": '/Relationships/Relationship[@Target="C:/Users/alice/secret.xlsx"]@Target',
                                     "kind": "attribute_changed",
                                 },
+                                {
+                                    "severity": "CRITICAL",
+                                    "part": "xl/workbook.xml.rels",
+                                    "path": '/Relationships/Relationship[@Target="C:\\\\Users\\\\alice\\\\secret.xlsx"]@Target',
+                                    "kind": "attribute_changed",
+                                },
+                                {
+                                    "severity": "CRITICAL",
+                                    "part": "xl/workbook.xml.rels",
+                                    "path": '/Relationships/Relationship[@Target="\\\\\\\\corp.example.com\\\\share\\\\secret.xlsx"]@Target',
+                                    "kind": "attribute_changed",
+                                },
                             ]
                         },
                     }
@@ -302,7 +314,7 @@ class TriagePrivacyModeTests(unittest.TestCase):
             triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
 
         top = report["steps"]["diff"]["details"]["top_differences"]
-        self.assertEqual(len(top), 6)
+        self.assertEqual(len(top), 8)
         self.assertIn("sha256=", top[0]["path"])
         self.assertNotIn("file:///C:/corp/secret.xlsx", top[0]["path"])
         self.assertIn("sha256=", top[1]["path"])
@@ -315,6 +327,10 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertNotIn("/Users/alice/secret.xlsx", top[4]["path"])
         self.assertIn("sha256=", top[5]["path"])
         self.assertNotIn("C:/Users/alice/secret.xlsx", top[5]["path"])
+        self.assertIn("sha256=", top[6]["path"])
+        self.assertNotIn("C:\\\\Users\\\\alice\\\\secret.xlsx", top[6]["path"])
+        self.assertIn("sha256=", top[7]["path"])
+        self.assertNotIn("\\\\\\\\corp.example.com\\\\share\\\\secret.xlsx", top[7]["path"])
 
     def test_private_mode_hashes_non_github_run_url(self) -> None:
         import tools.corpus.triage as triage_mod
