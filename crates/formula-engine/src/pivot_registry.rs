@@ -439,6 +439,21 @@ mod normalize_pivot_cache_field_name_escape_tests {
     use super::normalize_pivot_cache_field_name;
 
     #[test]
+    fn normalize_pivot_cache_field_name_preserves_bracket_escapes() {
+        // Column refs escape `]` as `]]` within `[...]`.
+        assert_eq!(
+            normalize_pivot_cache_field_name("'Dim Product'[A]]B]").as_ref(),
+            "Dim Product[A]]B]"
+        );
+
+        // Measures escape `]` the same way.
+        assert_eq!(
+            normalize_pivot_cache_field_name("[A]]B]").as_ref(),
+            "[A]]B]"
+        );
+    }
+
+    #[test]
     fn normalize_pivot_cache_field_name_escapes_dax_brackets() {
         // Bracket escapes inside identifiers should be canonicalized to DAX `]]` form.
         assert_eq!(
@@ -465,21 +480,6 @@ mod normalize_pivot_cache_field_name_escape_tests {
         assert_eq!(
             normalize_pivot_cache_field_name("'My[Table]'[Col]").as_ref(),
             "'My[Table]'[Col]"
-        );
-    }
-
-    #[test]
-    fn normalize_pivot_cache_field_name_preserves_bracket_escapes() {
-        // Column refs escape `]` as `]]` within `[...]`.
-        assert_eq!(
-            normalize_pivot_cache_field_name("'Dim Product'[A]]B]").as_ref(),
-            "Dim Product[A]]B]"
-        );
-
-        // Measures escape `]` the same way.
-        assert_eq!(
-            normalize_pivot_cache_field_name("[A]]B]").as_ref(),
-            "[A]]B]"
         );
     }
 }
