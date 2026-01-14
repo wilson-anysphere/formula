@@ -947,7 +947,8 @@ From `apps/desktop/src-tauri`:
 
 ```bash
 # Inspect the control file (check Depends: ...)
-deb="$(ls target/release/bundle/deb/*.deb | head -n 1)"
+deb="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/deb/*.deb' 2>/dev/null | head -n 1 || true)"
+test -n "$deb" || { echo "No .deb found under target/**/release/bundle/deb/*.deb" >&2; exit 1; }
 dpkg -I "$deb"
 
 # Extract and confirm all linked shared libraries resolve
@@ -959,8 +960,9 @@ ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
 For a clean install test (no GUI required), use a container:
 
 ```bash
+deb_dir="$(cd "$(dirname "$deb")" && pwd -P)"
 docker run --rm -it \
-  -v "$PWD/target/release/bundle/deb:/deb" \
+  -v "$deb_dir:/deb:ro" \
   ubuntu:24.04 bash -lc '
     apt-get update
     apt-get install -y --no-install-recommends /deb/*.deb
@@ -1039,7 +1041,8 @@ From `apps/desktop/src-tauri`:
 
 ```bash
 # Inspect declared dependencies (check webkit2gtk/gtk3/appindicator/etc)
-rpm_pkg="$(ls target/release/bundle/rpm/*.rpm | head -n 1)"
+rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1 || true)"
+test -n "$rpm_pkg" || { echo "No RPM found under target/**/release/bundle/rpm/*.rpm" >&2; exit 1; }
 rpm -qpR "$rpm_pkg"
 
 # Extract and confirm all linked shared libraries resolve
@@ -1054,8 +1057,9 @@ ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
 For a clean install test (no GUI required), use a Fedora container:
 
 ```bash
+rpm_dir="$(cd "$(dirname "$rpm_pkg")" && pwd -P)"
 docker run --rm -it \
-  -v "$PWD/target/release/bundle/rpm:/rpm" \
+  -v "$rpm_dir:/rpm:ro" \
   fedora:40 bash -lc '
     # The Tauri updater `.sig` files are *not* RPM GPG signatures, so install with --nogpgcheck.
     dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpm/*.rpm
@@ -1067,7 +1071,7 @@ Optional: openSUSE smoke install (helps validate our RPM rich-deps cover openSUS
 
 ```bash
 docker run --rm -it \
-  -v "$PWD/target/release/bundle/rpm:/rpm" \
+  -v "$rpm_dir:/rpm:ro" \
   opensuse/tumbleweed:latest bash -lc '
     zypper --non-interactive refresh
     zypper --non-interactive install --no-recommends --allow-unsigned-rpm /rpm/*.rpm
