@@ -566,8 +566,38 @@ fn decrypt_segmented_aes_cbc(
 ) -> Result<Vec<u8>, DecryptError> {
     const AES_BLOCK: usize = 16;
 
+    // Defensive: validate lengths before allocating attacker-controlled buffers.
+    if segment_len == 0 {
+        return Err(DecryptError::InvalidInfo(
+            "segment length is zero".to_string(),
+        ));
+    }
+    let full_segments = plaintext_len / segment_len;
+    let last_plain_len = plaintext_len % segment_len;
+    let full_seg_cipher_len = round_up_to_multiple(segment_len, AES_BLOCK);
+    let last_cipher_len = if last_plain_len == 0 {
+        0
+    } else {
+        round_up_to_multiple(last_plain_len, AES_BLOCK)
+    };
+    let needed_cipher_len = full_segments
+        .checked_mul(full_seg_cipher_len)
+        .and_then(|n| n.checked_add(last_cipher_len))
+        .ok_or_else(|| DecryptError::InvalidInfo("segment length overflow".to_string()))?;
+    if ciphertext.len() < needed_cipher_len {
+        return Err(DecryptError::InvalidInfo(format!(
+            "EncryptedPackage ciphertext truncated: have {}, need at least {}",
+            ciphertext.len(),
+            needed_cipher_len
+        )));
+    }
+
     let mut out = Vec::new();
-    out.reserve(plaintext_len);
+    out.try_reserve(plaintext_len).map_err(|_| {
+        DecryptError::InvalidInfo(format!(
+            "decrypted package size {plaintext_len} is too large to allocate"
+        ))
+    })?;
 
     let mut segment_index: u32 = 0;
     while out.len() < plaintext_len {
@@ -678,7 +708,8 @@ fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
     if rem == 0 {
         value
     } else {
-        value + (multiple - rem)
+        // Use saturating arithmetic to avoid panicking or wrapping on attacker-controlled sizes.
+        value.saturating_add(multiple - rem)
     }
 }
 
