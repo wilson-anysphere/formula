@@ -1536,7 +1536,8 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.setAiSuggestion("=1+2");
+    view.setAiSuggestion({ text: "=1+2", preview: 42 });
+    expect(view.model.aiSuggestionPreview()).toBe(42);
 
     const e = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
     view.textarea.dispatchEvent(e);
@@ -1545,6 +1546,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("=1+", { reason: "enter", shift: false });
     expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiSuggestionPreview()).toBeNull();
     expect(view.model.isEditing).toBe(false);
 
     host.remove();
@@ -1564,8 +1566,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.setAiSuggestion("=1+2");
+    view.setAiSuggestion({ text: "=1+2", preview: 42 });
     expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiSuggestionPreview()).toBe(42);
 
     expect(commit.hidden).toBe(false);
     expect(cancel.hidden).toBe(false);
@@ -1575,6 +1578,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("=1+", { reason: "command", shift: false });
     expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiSuggestionPreview()).toBeNull();
     expect(view.model.isEditing).toBe(false);
     expect(view.model.activeCell.input).toBe("=1+");
     expect(document.activeElement).not.toBe(view.textarea);
@@ -1599,8 +1603,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.setAiSuggestion("=1+2");
+    view.setAiSuggestion({ text: "=1+2", preview: 42 });
     expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiSuggestionPreview()).toBe(42);
     expect(view.model.aiGhostText()).toBe("2");
 
     cancel.click();
@@ -1610,6 +1615,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("orig");
     expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiSuggestionPreview()).toBeNull();
     expect(view.model.aiGhostText()).toBe("");
     expect(commit.hidden).toBe(true);
     expect(cancel.hidden).toBe(true);
@@ -1631,8 +1637,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.setAiSuggestion("=1+2");
+    view.setAiSuggestion({ text: "=1+2", preview: 42 });
     expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiSuggestionPreview()).toBe(42);
     expect(view.model.aiGhostText()).toBe("2");
 
     const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
@@ -1644,6 +1651,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("orig");
     expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiSuggestionPreview()).toBeNull();
     expect(view.model.aiGhostText()).toBe("");
 
     host.remove();
@@ -1752,8 +1760,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.setAiSuggestion("=SUM(A1)");
+    view.setAiSuggestion({ text: "=SUM(A1)", preview: 123 });
     expect(view.model.aiSuggestion()).toBe("=SUM(A1)");
+    expect(view.model.aiSuggestionPreview()).toBe(123);
     expect(view.model.aiGhostText()).toBe("A1)");
 
     const e = new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true });
@@ -1766,6 +1775,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.textarea.value).toBe("=SUM(\n  ");
     expect(view.model.draft).toBe("=SUM(\n  ");
     expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiSuggestionPreview()).toBeNull();
     expect(view.model.aiGhostText()).toBe("");
     expect(cancel.hidden).toBe(false);
     expect(commit.hidden).toBe(false);
