@@ -4285,22 +4285,17 @@ impl DaxEngine {
                     // member is visible.
                     let row_sets = resolve_row_sets(model, &summarize_filter)?;
 
-                    let mut base_rows: Vec<usize> = row_sets
+                    let base_rows_set = row_sets
                         .get(&base_table)
-                        .ok_or_else(|| DaxError::UnknownTable(base_table.clone()))?
-                        .iter_ones()
-                        .collect();
-                    if group_tables.len() == 1
+                        .ok_or_else(|| DaxError::UnknownTable(base_table.clone()))?;
+                    let include_virtual_blank_row = group_tables.len() == 1
                         && blank_row_allowed(&summarize_filter, &base_table)
                         && virtual_blank_row_exists(
                             model,
                             &summarize_filter,
                             &base_table,
                             Some(&row_sets),
-                        )?
-                    {
-                        base_rows.push(base_table_ref.row_count());
-                    }
+                        )?;
 
                     #[derive(Default)]
                     struct PathNode {
@@ -4446,6 +4441,9 @@ impl DaxEngine {
                     let blank_key = vec![Value::Blank; accessors.len()];
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut out_rows: Vec<Vec<Value>> = Vec::new();
+                    let base_rows = base_rows_set
+                        .iter_ones()
+                        .chain(include_virtual_blank_row.then_some(base_table_ref.row_count()));
                     for row in base_rows {
                         for key in collect_keys_for_node(
                             &root,
@@ -5423,72 +5421,38 @@ fn propagate_filter(
 
                 let visible_count = from_set.count_ones();
                 if visible_count > 0 {
-                    // `distinct_values_filtered` takes a row index list. For large row sets, that
-                    // list can be prohibitively expensive (8 bytes/row). Prefer scanning the
-                    // allowed `BitVec` directly once it would be cheaper than materializing row
-                    // indices (same heuristic as `UnmatchedFactRowsBuilder`).
-                    let sparse_to_dense_threshold = from_table.row_count() / 64;
-                    if visible_count > sparse_to_dense_threshold {
-                        let mut keys: HashSet<Value> = HashSet::new();
-                        for row in from_set.iter_ones() {
-                            let v = from_table
-                                .value_by_idx(row, relationship.from_idx)
-                                .unwrap_or(Value::Blank);
-                            // Fact rows whose FK is BLANK always belong to the relationship-generated
-                            // blank member, even if a physical BLANK key exists on the dimension
-                            // side. Therefore, do not treat BLANK as a matchable key during
-                            // propagation.
-                            if !v.is_blank() {
-                                keys.insert(v);
+                    let keys = from_table
+                        .distinct_values_filtered_mask(relationship.from_idx, Some(from_set))
+                        .unwrap_or_else(|| {
+                            let mut seen = HashSet::new();
+                            let mut out = Vec::new();
+                            for row in from_set.iter_ones() {
+                                let v = from_table
+                                    .value_by_idx(row, relationship.from_idx)
+                                    .unwrap_or(Value::Blank);
+                                if seen.insert(v.clone()) {
+                                    out.push(v);
+                                }
                             }
-                        }
-                        for key in keys {
-                            let Some(to_rows) = relationship.to_index.get(&key) else {
-                                continue;
-                            };
-                            to_rows.for_each_row(|to_row| {
-                                if to_row < to_set.len() && to_set.get(to_row) {
-                                    next.set(to_row, true);
-                                }
-                            });
-                        }
-                    } else {
-                        let rows: Vec<usize> = from_set.iter_ones().collect();
+                            out
+                        });
 
-                        let keys = from_table
-                            .distinct_values_filtered(relationship.from_idx, Some(rows.as_slice()))
-                            .unwrap_or_else(|| {
-                                let mut seen = HashSet::new();
-                                let mut out = Vec::new();
-                                for &row in &rows {
-                                    let v = from_table
-                                        .value_by_idx(row, relationship.from_idx)
-                                        .unwrap_or(Value::Blank);
-                                    if seen.insert(v.clone()) {
-                                        out.push(v);
-                                    }
-                                }
-                                out
-                            });
+                    for key in keys {
+                        // Fact rows whose FK is BLANK always belong to the relationship-generated
+                        // blank member, even if a physical BLANK key exists on the dimension side.
+                        // Therefore, do not treat BLANK as a matchable key during propagation.
+                        if key.is_blank() {
+                            continue;
+                        }
 
-                        for key in keys {
-                            // Fact rows whose FK is BLANK always belong to the relationship-generated
-                            // blank member, even if a physical BLANK key exists on the dimension
-                            // side. Therefore, do not treat BLANK as a matchable key during
-                            // propagation.
-                            if key.is_blank() {
-                                continue;
+                        let Some(to_rows) = relationship.to_index.get(&key) else {
+                            continue;
+                        };
+                        to_rows.for_each_row(|to_row| {
+                            if to_row < to_set.len() && to_set.get(to_row) {
+                                next.set(to_row, true);
                             }
-
-                            let Some(to_rows) = relationship.to_index.get(&key) else {
-                                continue;
-                            };
-                            to_rows.for_each_row(|to_row| {
-                                if to_row < to_set.len() && to_set.get(to_row) {
-                                    next.set(to_row, true);
-                                }
-                            });
-                        }
+                        });
                     }
                 }
             }
