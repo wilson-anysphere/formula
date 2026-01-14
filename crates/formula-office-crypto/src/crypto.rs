@@ -171,43 +171,43 @@ pub(crate) fn hash_password(
 
     match hash_alg {
         HashAlgorithm::Md5 => {
+            let mut hasher = Md5::new();
             for i in 0..spin_count {
-                let mut hasher = Md5::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
-                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize_reset());
             }
         }
         HashAlgorithm::Sha1 => {
+            let mut hasher = sha1::Sha1::new();
             for i in 0..spin_count {
-                let mut hasher = sha1::Sha1::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
-                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize_reset());
             }
         }
         HashAlgorithm::Sha256 => {
+            let mut hasher = sha2::Sha256::new();
             for i in 0..spin_count {
-                let mut hasher = sha2::Sha256::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
-                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize_reset());
             }
         }
         HashAlgorithm::Sha384 => {
+            let mut hasher = sha2::Sha384::new();
             for i in 0..spin_count {
-                let mut hasher = sha2::Sha384::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
-                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize_reset());
             }
         }
         HashAlgorithm::Sha512 => {
+            let mut hasher = sha2::Sha512::new();
             for i in 0..spin_count {
-                let mut hasher = sha2::Sha512::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
-                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize_reset());
             }
         }
     }
