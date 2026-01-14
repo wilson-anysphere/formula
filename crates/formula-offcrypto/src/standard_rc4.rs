@@ -53,24 +53,25 @@ pub fn verify_password(
         hash_alg,
     )?;
 
-    let key0 = cryptoapi::rc4_key_for_block(&h, 0, info.header.key_size_bits, hash_alg)?;
-    let mut rc4 = Rc4::new(key0.as_slice());
+    // Some producers incorrectly treat export-grade 40-bit keys as 128-bit RC4 keys with trailing
+    // zeros (changing RC4 KSA). For compatibility, attempt both verifier decryption schemes when the
+    // declared key size implies a 40-bit key.
+    let key_bits = if info.header.key_size_bits == 0 {
+        40
+    } else {
+        info.header.key_size_bits
+    };
+    let pad_candidates: &[bool] = if key_bits == 40 { &[false, true] } else { &[false] };
 
-    let mut verifier = info.verifier.encrypted_verifier;
-    rc4.apply_keystream(&mut verifier);
-
-    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
-    rc4.apply_keystream(&mut verifier_hash);
-
-    let hash_len = info.verifier.verifier_hash_size as usize;
-    if verifier_hash.len() < hash_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "decrypted verifierHash shorter than verifierHashSize",
-        });
+    for &pad_40_bit_to_128 in pad_candidates {
+        match verify_password_with_h(info, h.as_slice(), hash_alg, pad_40_bit_to_128) {
+            Ok(()) => return Ok(h),
+            Err(OffcryptoError::InvalidPassword) => continue,
+            Err(other) => return Err(other),
+        }
     }
 
-    verify_verifier(&verifier, &verifier_hash[..hash_len], hash_alg)?;
-    Ok(h)
+    Err(OffcryptoError::InvalidPassword)
 }
 
 fn rc4_key_for_block_with_optional_padding(
@@ -423,5 +424,85 @@ mod tests {
             max_alloc < 10 * 1024 * 1024,
             "expected no large allocations, observed max allocation request: {max_alloc} bytes"
         );
+    }
+
+    #[test]
+    fn verify_password_accepts_zero_padded_40_bit_rc4_keys_for_compatibility() {
+        // MS-OFFCRYPTO Standard RC4 specifies that 40-bit keys are 5-byte RC4 keys derived from the
+        // per-block digest. However, some producers incorrectly treat the 40-bit key material as a
+        // 16-byte RC4 key with trailing zeros. Ensure we accept that variant when validating the
+        // verifier.
+
+        let password = "password";
+        let wrong_password = "wrong password";
+
+        // Use the deterministic MD5 vector from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+        let h: [u8; 16] = [
+            0x20, 0x79, 0x47, 0x60, 0x89, 0xFD, 0xA7, 0x84, 0xC3, 0xA3, 0xCF, 0xEB, 0x98, 0x10,
+            0x2C, 0x7E,
+        ];
+
+        let key_size_bits: u32 = 0; // interpreted as 40-bit for RC4
+        let hash_alg = HashAlgorithm::Md5;
+
+        // Encrypt the verifier fields using the padded 16-byte key scheme.
+        let key_material =
+            cryptoapi::rc4_key_for_block(&h, 0, key_size_bits, hash_alg).expect("rc4 key");
+        assert_eq!(key_material.len(), 5, "expected 40-bit key material length");
+        let mut padded_key = vec![0u8; 16];
+        padded_key[..key_material.len()].copy_from_slice(key_material.as_slice());
+
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+        let verifier_hash_plain = hash_alg.digest(&verifier_plain);
+        assert_eq!(
+            verifier_hash_plain.len(),
+            16,
+            "expected MD5 verifier digest length"
+        );
+
+        let mut rc4 = Rc4::new(&padded_key);
+        let mut encrypted_verifier = verifier_plain;
+        rc4.apply_keystream(&mut encrypted_verifier);
+        let mut encrypted_verifier_hash = verifier_hash_plain.clone();
+        rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+        let info = StandardEncryptionInfo {
+            header: StandardEncryptionHeader {
+                flags: StandardEncryptionHeaderFlags::from_raw(0),
+                size_extra: 0,
+                alg_id: CALG_RC4,
+                alg_id_hash: CALG_MD5,
+                key_size_bits,
+                provider_type: 0,
+                reserved1: 0,
+                reserved2: 0,
+                csp_name: String::new(),
+            },
+            verifier: StandardEncryptionVerifier {
+                salt: salt.to_vec(),
+                encrypted_verifier,
+                verifier_hash_size: 16,
+                encrypted_verifier_hash,
+            },
+        };
+
+        // Sanity check: without padding, verifier decryption should fail for this construction.
+        let err = verify_password_with_h(&info, &h, hash_alg, false)
+            .expect_err("expected raw 5-byte key verifier to fail");
+        assert!(matches!(err, OffcryptoError::InvalidPassword));
+        verify_password_with_h(&info, &h, hash_alg, true).expect("padded verifier should succeed");
+
+        let derived = verify_password(&info, password).expect("password should verify");
+        assert_eq!(derived.as_slice(), &h);
+
+        let err = verify_password(&info, wrong_password).expect_err("expected wrong password error");
+        assert!(matches!(err, OffcryptoError::InvalidPassword));
     }
 }
