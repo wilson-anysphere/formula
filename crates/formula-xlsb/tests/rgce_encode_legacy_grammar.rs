@@ -55,3 +55,46 @@ fn legacy_encoder_roundtrips_sum_range_still_works() {
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(normalize("SUM(A1:A3)"), normalize(&decoded));
 }
+
+#[test]
+fn legacy_encoder_roundtrips_boolean_literals() {
+    let ctx = WorkbookContext::default();
+    for (raw, expected) in [("=TRUE", "TRUE"), ("=FALSE", "FALSE")] {
+        let encoded = encode_rgce_with_context(raw, &ctx, CellCoord::new(0, 0)).expect("encode");
+        let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+        assert_eq!(normalize(expected), normalize(&decoded));
+    }
+}
+
+#[test]
+fn legacy_encoder_roundtrips_pow_right_associative() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=2^3^2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("2^3^2"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_union_inside_function_args() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=SUM((A1,B1))", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("SUM((A1,B1))"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_ne_comparison() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=A1<>B1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("A1<>B1"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_parenthesized_grouping() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=(1+2)*3", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("(1+2)*3"), normalize(&decoded));
+}
