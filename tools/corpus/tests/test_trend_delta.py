@@ -9,6 +9,7 @@ class TrendDeltaTests(unittest.TestCase):
     def test_trend_delta_markdown_renders_expected_sections(self) -> None:
         prev = {
             "timestamp": "t0",
+            "round_trip_fail_on": "critical",
             "open_rate": 0.9,
             "round_trip_rate": 0.8,
             "load_p90_ms": 10,
@@ -32,6 +33,7 @@ class TrendDeltaTests(unittest.TestCase):
         }
         cur = {
             "timestamp": "t1",
+            "round_trip_fail_on": "warning",
             "open_rate": 1.0,
             "round_trip_rate": 0.9,
             "load_p90_ms": 12,
@@ -58,6 +60,7 @@ class TrendDeltaTests(unittest.TestCase):
         self.assertIsNotNone(md)
         assert md is not None
         self.assertIn("## Trend delta", md)
+        self.assertIn("Round-trip fail-on", md)
         self.assertIn("Open rate", md)
         self.assertIn("Round-trip rate", md)
         self.assertIn("Load p90", md)

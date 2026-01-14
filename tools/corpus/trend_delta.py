@@ -174,6 +174,25 @@ def trend_delta_markdown(
     lines: list[str] = []
     lines.append("## Trend delta (vs previous private run)")
     lines.append("")
+
+    if cur.get("round_trip_fail_on") is not None:
+        cur_fail_on = cur.get("round_trip_fail_on")
+        prev_fail_on = prev.get("round_trip_fail_on")
+
+        def _fmt_fail_on(v: Any) -> str:
+            if isinstance(v, str):
+                return v
+            if isinstance(v, list):
+                return ", ".join(str(x) for x in v)
+            return "n/a"
+
+        if prev_fail_on is None or prev_fail_on == cur_fail_on:
+            lines.append(f"- Round-trip fail-on: `{_fmt_fail_on(cur_fail_on)}`")
+        else:
+            lines.append(
+                f"- Round-trip fail-on: `{_fmt_fail_on(cur_fail_on)}` (was `{_fmt_fail_on(prev_fail_on)}`)"
+            )
+
     lines.append(
         f"- Open rate: **{_pct(cur.get('open_rate'))}** ({_delta_pct(prev.get('open_rate'), cur.get('open_rate'))})"
     )
