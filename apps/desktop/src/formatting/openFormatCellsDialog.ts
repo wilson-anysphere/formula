@@ -67,6 +67,21 @@ function normalizeArgb(value: unknown): string | null {
   return trimmed.toUpperCase();
 }
 
+function showDialogModal(dialog: HTMLDialogElement): void {
+  // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+  if (typeof dialog.showModal === "function") {
+    try {
+      // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+      dialog.showModal();
+      return;
+    } catch {
+      // Fall through to non-modal open attribute.
+    }
+  }
+  // jsdom fallback: `open` attribute is enough for our tests.
+  dialog.setAttribute("open", "true");
+}
+
 export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   if (host.isEditing()) return;
 
@@ -606,7 +621,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   );
 
   document.body.appendChild(dialog);
-  dialog.showModal();
+  showDialogModal(dialog);
   // If the active style is already a custom number format, focus the code field directly.
   if (numberSelect.value === "__custom__") {
     try {

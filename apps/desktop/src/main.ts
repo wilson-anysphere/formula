@@ -8338,9 +8338,25 @@ const { findDialog, replaceDialog, goToDialog } = registerFindReplaceShortcuts({
   }
 });
 
+function showDialogModalBestEffort(dialog: HTMLDialogElement): void {
+  const showModal = (dialog as any).showModal as (() => void) | undefined;
+  if (typeof showModal === "function") {
+    try {
+      showModal.call(dialog);
+      return;
+    } catch {
+      // Fall through to non-modal open attribute.
+    }
+  }
+
+  // jsdom doesn't implement showModal(). Best-effort fallback so tests/headless contexts can
+  // still exercise dialog contents without crashing.
+  dialog.setAttribute("open", "");
+}
+
 function showDialogAndFocus(dialog: HTMLDialogElement): void {
   if (!dialog.open) {
-    dialog.showModal();
+    showDialogModalBestEffort(dialog);
   }
 
   const focusInput = () => {
@@ -8752,6 +8768,13 @@ function pageSetupToTauri(raw: PageSetup): TauriPageSetup {
 }
 
 function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (next: PageSetup) => void }): void {
+  // Avoid throwing when another modal dialog is already open.
+  const openModal = document.querySelector("dialog[open]");
+  if (openModal) {
+    if (openModal.classList.contains("page-setup-dialog")) return;
+    return;
+  }
+
   const dialog = document.createElement("dialog");
   dialog.className = "page-setup-dialog";
   markKeybindingBarrier(dialog);
@@ -8825,7 +8848,7 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
     dialog.close();
   });
 
-  dialog.showModal();
+  showDialogModalBestEffort(dialog);
 }
 
 async function handleRibbonPageSetup(): Promise<void> {
@@ -9097,6 +9120,13 @@ async function generateSheetPdfBytes(invoke: TauriInvoke): Promise<{ sheetId: st
 }
 
 function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string; autoPrint?: boolean }): void {
+  // Avoid throwing when another modal dialog is already open.
+  const openModal = document.querySelector("dialog[open]");
+  if (openModal) {
+    if (openModal.classList.contains("print-preview-dialog")) return;
+    return;
+  }
+
   const dialog = document.createElement("dialog");
   // `data-keybinding-barrier` prevents global spreadsheet keybindings from firing while the
   // user is interacting with the modal (e.g. Cmd+P should not re-trigger Print).
@@ -9197,7 +9227,7 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
     }
   });
 
-  dialog.showModal();
+  showDialogModalBestEffort(dialog);
 }
 
 const whatIfApi = createWhatIfApi();
@@ -9362,6 +9392,11 @@ async function showRibbonAutoFilterDialog(args: {
   rows: TableViewRow[];
   initialSelected: string[] | null;
 }): Promise<string[] | null> {
+  // Avoid throwing when another modal dialog is already open. Treat this as a cancel so callers
+  // don't hang awaiting a dialog that can never become modal.
+  const openModal = document.querySelector("dialog[open]");
+  if (openModal) return null;
+
   return await new Promise<string[] | null>((resolve) => {
     const dialog = document.createElement("dialog");
     dialog.className = "dialog";
@@ -9407,7 +9442,7 @@ async function showRibbonAutoFilterDialog(args: {
       dialog.close();
     });
 
-    dialog.showModal();
+    showDialogModalBestEffort(dialog);
   });
 }
 

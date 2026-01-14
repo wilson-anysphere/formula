@@ -34,9 +34,13 @@ export type CustomSortDialogHost = {
 function showModal(dialog: HTMLDialogElement): void {
   // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
   if (typeof dialog.showModal === "function") {
-    // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
-    dialog.showModal();
-    return;
+    try {
+      // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+      dialog.showModal();
+      return;
+    } catch {
+      // Fall through to non-modal open attribute.
+    }
   }
   // jsdom fallback: `open` attribute is enough for our tests.
   dialog.setAttribute("open", "true");
