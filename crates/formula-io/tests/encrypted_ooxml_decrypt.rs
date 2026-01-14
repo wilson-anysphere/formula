@@ -534,7 +534,8 @@ fn open_workbook_with_password_decrypts_standard_large_fixture() {
 
     let plaintext = open_workbook_model(&plaintext_large_path).expect("open plaintext-large.xlsx");
 
-    let decrypted_bytes = open_decrypted_package_bytes_with_password(&standard_large_path, "password");
+    let decrypted_bytes =
+        open_decrypted_package_bytes_with_password(&standard_large_path, "password");
     let decrypted =
         formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted_bytes))
             .expect("parse decrypted standard-large.xlsx bytes");
@@ -548,10 +549,41 @@ fn open_workbook_with_password_decrypts_standard_large_fixture() {
 }
 
 #[test]
+fn open_workbook_with_password_decrypts_unicode_and_empty_password_fixtures() {
+    // Ensure the high-level API (`open_workbook_with_password`) can decrypt real-world fixtures
+    // across multiple password edge cases.
+    for (fixture, password) in [
+        ("agile-empty-password.xlsx", ""),
+        ("agile-unicode.xlsx", "pässwörd"),
+        ("agile-unicode-excel.xlsx", "pässwörd🔒"),
+        ("standard-4.2.xlsx", "password"),
+        ("standard-rc4.xlsx", "password"),
+        ("standard-unicode.xlsx", "pässwörd🔒"),
+    ] {
+        let path = fixture_path(fixture);
+        let decrypted = open_decrypted_package_bytes_with_password(&path, password);
+        let model = formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted))
+            .unwrap_or_else(|err| panic!("parse decrypted {fixture} bytes: {err:?}"));
+        if fixture == "agile-unicode-excel.xlsx" {
+            assert_expected_excel_contents(&model);
+        } else {
+            assert_expected_contents(&model);
+        }
+    }
+}
+
+#[test]
 fn errors_on_missing_password_for_empty_password_fixture() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
     let err = open_workbook_model_with_password(&agile_empty_password_path, None)
+        .expect_err("expected missing password to error");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    let err = open_workbook_with_password(&agile_empty_password_path, None)
         .expect_err("expected missing password to error");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
@@ -564,6 +596,13 @@ fn errors_on_missing_password_for_standard_fixture() {
     let standard_path = fixture_path("standard.xlsx");
 
     let err = open_workbook_model_with_password(&standard_path, None)
+        .expect_err("expected missing password to error");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    let err = open_workbook_with_password(&standard_path, None)
         .expect_err("expected missing password to error");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
