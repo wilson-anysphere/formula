@@ -2130,7 +2130,21 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
     let mut out = SheetTableFormulas::default();
 
     let mut tables: HashMap<(u16, u16), TableRecordDecoded> = HashMap::new();
-    let mut ptg_tbl_cells: Vec<(CellRef, Option<(u16, u16)>, usize)> = Vec::new();
+
+    #[derive(Debug, Clone)]
+    enum PtgTblBase {
+        Canonical { row: u16, col: u16 },
+        WidePayload(Vec<u8>),
+    }
+
+    #[derive(Debug, Clone)]
+    struct PendingPtgTbl {
+        cell: CellRef,
+        base: PtgTblBase,
+        offset: usize,
+    }
+
+    let mut ptg_tbl_cells: Vec<PendingPtgTbl> = Vec::new();
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
     while let Some(next) = iter.next() {
@@ -2349,9 +2363,28 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                     continue;
                 }
 
-                let base_row = u16::from_le_bytes([rgce[1], rgce[2]]);
-                let base_col = u16::from_le_bytes([rgce[3], rgce[4]]) & 0x3FFF;
-                ptg_tbl_cells.push((cell, Some((base_row, base_col)), record.offset));
+                if cce == 5 {
+                    // Canonical BIFF8 payload: [ptg:0x02][rw:u16][col:u16]
+                    let base_row = u16::from_le_bytes([rgce[1], rgce[2]]);
+                    let base_col = u16::from_le_bytes([rgce[3], rgce[4]]) & 0x3FFF;
+                    ptg_tbl_cells.push(PendingPtgTbl {
+                        cell,
+                        base: PtgTblBase::Canonical {
+                            row: base_row,
+                            col: base_col,
+                        },
+                        offset: record.offset,
+                    });
+                } else {
+                    // Non-canonical payload width. Some writers emit BIFF12-style u32 row/col
+                    // coordinates even in BIFF8 `.xls` files. Collect the raw payload bytes (after
+                    // the PtgTbl opcode) and resolve later using `ptgexp_candidates`.
+                    ptg_tbl_cells.push(PendingPtgTbl {
+                        cell,
+                        base: PtgTblBase::WidePayload(rgce[1..].to_vec()),
+                        offset: record.offset,
+                    });
+                }
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -2360,11 +2393,48 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
 
     // Resolve PtgTbl references after scanning the full substream so TABLE records can appear
     // before or after their referencing formula cells.
-    for (cell, base, offset) in ptg_tbl_cells {
-        let Some((base_row, base_col)) = base else {
-            out.formulas.insert(cell, "TABLE(#REF!,#REF!)".to_string());
+    for pending in ptg_tbl_cells {
+        let (resolved_base, multiple_matches) = match pending.base {
+            PtgTblBase::Canonical { row, col } => (Some((row, col)), false),
+            PtgTblBase::WidePayload(payload) => {
+                let candidates = worksheet_formulas::ptgexp_candidates(&payload);
+
+                let mut matches: Vec<(u16, u16)> = Vec::new();
+                for (r, c) in candidates {
+                    let key = (r as u16, c as u16);
+                    if tables.contains_key(&key) {
+                        matches.push(key);
+                    }
+                }
+
+                let resolved = matches.first().copied();
+                (resolved, matches.len() > 1)
+            }
+        };
+
+        let Some((base_row, base_col)) = resolved_base else {
+            push_warning_bounded(
+                &mut out.warnings,
+                format!(
+                    "PtgTbl formula at offset {} (cell {}) references missing TABLE record (no matching base cell candidates); rendering TABLE()",
+                    pending.offset,
+                    pending.cell.to_a1()
+                ),
+            );
+            out.formulas.insert(pending.cell, "TABLE()".to_string());
             continue;
         };
+
+        if multiple_matches {
+            push_warning_bounded(
+                &mut out.warnings,
+                format!(
+                    "PtgTbl formula at offset {} (cell {}) has ambiguous wide payload; multiple TABLE record base-cell candidates matched; choosing row={base_row} col={base_col}",
+                    pending.offset,
+                    pending.cell.to_a1()
+                ),
+            );
+        }
 
         let formula = match tables.get(&(base_row, base_col)) {
             Some(def) => def.render_formula(),
@@ -2373,15 +2443,15 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                     &mut out.warnings,
                     format!(
                         "PtgTbl formula at offset {} (cell {}) references missing TABLE record at row={base_row} col={base_col}; rendering TABLE()",
-                        offset,
-                        cell.to_a1()
+                        pending.offset,
+                        pending.cell.to_a1()
                     ),
                 );
                 "TABLE()".to_string()
             }
         };
 
-        out.formulas.insert(cell, formula);
+        out.formulas.insert(pending.cell, formula);
     }
 
     Ok(out)

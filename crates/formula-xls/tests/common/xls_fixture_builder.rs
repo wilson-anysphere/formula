@@ -655,6 +655,27 @@ pub fn build_table_formula_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_table_formula_fixture_xls`], but where the `PtgTbl`
+/// token in the result cell uses a non-canonical payload width (row u32 + col u16, 6 bytes).
+///
+/// Some `.xls` producers embed BIFF12-style coordinate widths in `PtgTbl`/`PtgExp` tokens. The `.xls`
+/// importer should still recover a stable, parseable `TABLE(A1,B2)` formula string.
+pub fn build_table_formula_ptgtbl_wide_payload_fixture_xls() -> Vec<u8> {
+    let xf_general = 16u16;
+    let sheet_stream = build_table_formula_ptgtbl_wide_payload_sheet_stream(xf_general);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing array formulas (`ARRAY` + `PtgExp`) whose array `rgce`
 /// references an external workbook (`SUPBOOK`/`EXTERNSHEET`) and an external name (`PtgNameX`).
 ///
@@ -757,6 +778,69 @@ fn build_table_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
+
+fn build_table_formula_ptgtbl_wide_payload_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: keep large enough to cover our TABLE base cell and formula cell.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&25u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&10u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // WINDOW2 is required by some consumers; keep defaults.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide an input cell value (A1) so calamine reports a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // TABLE record anchored at F11 (row=10, col=5), with two input cells: A1 (row input) and
+    // B2 (col input).
+    let base_row: u16 = 10;
+    let base_col: u16 = 5;
+    let grbit: u16 = 0x0003; // best-effort: both inputs present
+
+    let mut table_payload = Vec::new();
+    table_payload.extend_from_slice(&base_row.to_le_bytes());
+    table_payload.extend_from_slice(&base_col.to_le_bytes());
+    table_payload.extend_from_slice(&grbit.to_le_bytes());
+    // row input: A1
+    table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
+    table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
+    // col input: B2
+    table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
+    table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
+    push_record(&mut sheet, RECORD_TABLE, &table_payload);
+
+    // FORMULA record at D21 whose rgce is a single PtgTbl with a *wide* payload:
+    //   [ptg:0x02][rw:u32][col:u16]
+    let cell_row: u16 = 20;
+    let cell_col: u16 = 3;
+    let mut rgce: Vec<u8> = Vec::new();
+    rgce.push(0x02); // PtgTbl
+    rgce.extend_from_slice(&(base_row as u32).to_le_bytes());
+    rgce.extend_from_slice(&base_col.to_le_bytes());
+
+    let mut formula_payload = Vec::new();
+    formula_payload.extend_from_slice(&cell_row.to_le_bytes());
+    formula_payload.extend_from_slice(&cell_col.to_le_bytes());
+    formula_payload.extend_from_slice(&xf_cell.to_le_bytes()); // xf
+    formula_payload.extend_from_slice(&0f64.to_le_bytes()); // cached result
+    formula_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    formula_payload.extend_from_slice(&0u32.to_le_bytes()); // chn
+    formula_payload.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    formula_payload.extend_from_slice(&rgce);
+    push_record(&mut sheet, RECORD_FORMULA, &formula_payload);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 /// Build a BIFF8 `.xls` fixture like [`build_shared_formula_area3d_fixture_xls`], but using a
 /// `PtgArea3d` token whose endpoints have *different* relative flags.
 ///
