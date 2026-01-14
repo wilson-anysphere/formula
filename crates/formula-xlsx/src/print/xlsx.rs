@@ -116,7 +116,8 @@ fn write_workbook_print_settings_impl(
     max_part_bytes: u64,
 ) -> Result<Vec<u8>, PrintError> {
     let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
-    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml", max_part_bytes)?;
+    let (workbook_part_name, workbook_xml) =
+        read_zip_bytes_with_entry_name(&mut zip, "xl/workbook.xml", max_part_bytes)?;
     let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels", max_part_bytes)?;
 
     let workbook = parse_workbook_xml(&workbook_xml)?;
@@ -174,9 +175,10 @@ fn write_workbook_print_settings_impl(
             continue;
         };
         let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
-        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path, max_part_bytes)?;
+        let (sheet_part_name, sheet_xml) =
+            read_zip_bytes_with_entry_name(&mut zip, &sheet_path, max_part_bytes)?;
         let updated_xml = update_worksheet_xml(&sheet_xml, sheet_settings)?;
-        updated_sheets.insert(sheet_path, updated_xml);
+        updated_sheets.insert(sheet_part_name, updated_xml);
     }
 
     // Rewind zip to iterate entries again.
@@ -193,7 +195,7 @@ fn write_workbook_print_settings_impl(
             continue;
         }
 
-        let replacement = if canonical_name == "xl/workbook.xml" {
+        let replacement = if canonical_name == workbook_part_name.as_str() {
             Some(updated_workbook_xml.as_slice())
         } else {
             updated_sheets.get(canonical_name).map(|v| v.as_slice())
@@ -227,6 +229,29 @@ fn read_zip_bytes<R: Read + Seek>(
             other.to_string(),
         )),
     })
+}
+
+fn read_zip_bytes_with_entry_name<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+    max_part_bytes: u64,
+) -> Result<(String, Vec<u8>), PrintError> {
+    let mut file = open_zip_part(zip, name)?;
+    let raw_name = file.name().to_string();
+    let canonical_name = raw_name.strip_prefix('/').unwrap_or(raw_name.as_str()).to_string();
+    let bytes = read_zip_file_bytes_with_limit(&mut file, &canonical_name, max_part_bytes)
+        .map_err(|err| match err {
+            crate::XlsxError::PartTooLarge { part, size, max } => {
+                PrintError::PartTooLarge { part, size, max }
+            }
+            crate::XlsxError::Io(err) => PrintError::Io(err),
+            crate::XlsxError::Zip(err) => PrintError::Zip(err),
+            other => PrintError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                other.to_string(),
+            )),
+        })?;
+    Ok((canonical_name, bytes))
 }
 
 #[derive(Debug)]

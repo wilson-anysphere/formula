@@ -306,4 +306,36 @@ mod percent_encoded_zip_entries_tests {
             "expected all parts to be removed from the minimal macro test workbook"
         );
     }
+
+    #[test]
+    fn write_workbook_print_settings_updates_percent_encoded_sheet_entries() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+
+        let settings = formula_xlsx::print::WorkbookPrintSettings {
+            sheets: vec![formula_xlsx::print::SheetPrintSettings {
+                sheet_name: "Sheet1".to_string(),
+                print_area: None,
+                print_titles: None,
+                page_setup: formula_xlsx::print::PageSetup {
+                    orientation: formula_xlsx::print::Orientation::Landscape,
+                    ..Default::default()
+                },
+                manual_page_breaks: Default::default(),
+            }],
+        };
+
+        let out_bytes = formula_xlsx::print::write_workbook_print_settings(&bytes, &settings)
+            .expect("write print settings");
+
+        let mut archive = ZipArchive::new(Cursor::new(out_bytes)).expect("open output zip");
+        let mut sheet = archive
+            .by_name("xl/worksheets/sheet%201.xml")
+            .expect("open sheet");
+        let mut xml = String::new();
+        sheet.read_to_string(&mut xml).expect("read sheet xml");
+        assert!(
+            xml.contains("orientation=\"landscape\""),
+            "expected worksheet XML to include landscape orientation (got {xml:?})"
+        );
+    }
 }

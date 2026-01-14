@@ -607,7 +607,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
-    let mut part_name_keys: HashSet<Vec<u8>> = HashSet::new();
+    let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
@@ -618,7 +618,9 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         let name = file.name();
         let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
         part_names.insert(canonical.to_string());
-        part_name_keys.insert(crate::zip_util::zip_part_name_lookup_key(canonical));
+        part_name_keys
+            .entry(crate::zip_util::zip_part_name_lookup_key(canonical))
+            .or_insert_with(|| canonical.to_string());
     }
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
@@ -680,20 +682,20 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
                         return Some(candidate.clone());
                     }
                 }
-                candidates.into_iter().find(|candidate| {
-                    part_name_keys.contains(&crate::zip_util::zip_part_name_lookup_key(candidate))
+                candidates.into_iter().find_map(|candidate| {
+                    part_name_keys
+                        .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                        .cloned()
                 })
             })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                if part_names.contains(&candidate)
-                    || part_name_keys
-                        .contains(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                {
-                    Some(candidate)
-                } else {
-                    None
+                if part_names.contains(&candidate) {
+                    return Some(candidate);
                 }
+                part_name_keys
+                    .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                    .cloned()
             });
 
         let Some(worksheet_part) = resolved else {
@@ -723,7 +725,7 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
-    let mut part_name_keys: HashSet<Vec<u8>> = HashSet::new();
+    let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
@@ -734,7 +736,9 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         let name = file.name();
         let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
         part_names.insert(canonical.to_string());
-        part_name_keys.insert(crate::zip_util::zip_part_name_lookup_key(canonical));
+        part_name_keys
+            .entry(crate::zip_util::zip_part_name_lookup_key(canonical))
+            .or_insert_with(|| canonical.to_string());
     }
 
     fn read_zip_part_required<R: Read + Seek>(
@@ -792,20 +796,20 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
                         return Some(candidate.clone());
                     }
                 }
-                candidates.into_iter().find(|candidate| {
-                    part_name_keys.contains(&crate::zip_util::zip_part_name_lookup_key(candidate))
+                candidates.into_iter().find_map(|candidate| {
+                    part_name_keys
+                        .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                        .cloned()
                 })
             })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                if part_names.contains(&candidate)
-                    || part_name_keys
-                        .contains(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                {
-                    Some(candidate)
-                } else {
-                    None
+                if part_names.contains(&candidate) {
+                    return Some(candidate);
                 }
+                part_name_keys
+                    .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                    .cloned()
             });
 
         let Some(worksheet_part) = resolved else {
