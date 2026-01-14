@@ -1123,8 +1123,8 @@ jobs:
           # Last resort: accept any target triple to avoid failing hard if the output layout changes.
           if ((${#dsym_dirs[@]} == 0)); then
             for root in "${roots[@]}"; do
-              dsym_dirs+=("${root}"/*/release/bundle/macos/"*.dSYM)
-              dsym_dirs+=("${root}"/*/release/"*.dSYM)
+              dsym_dirs+=("${root}"/*/release/bundle/macos/*.dSYM)
+              dsym_dirs+=("${root}"/*/release/*.dSYM)
             done
           fi
           shopt -u nullglob
