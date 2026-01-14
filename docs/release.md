@@ -1531,6 +1531,11 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
 
 - macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
   `CFBundleURLTypes` includes the `formula` scheme.
+- Windows: the built installers register:
+  - spreadsheet file associations (at least `.xlsx`)
+  - the `formula://` URL protocol handler
+  - Note: MSI validation is static/authoritative (Windows Installer tables via COM). NSIS `.exe`
+    validation is **heuristic** (marker scan) and is intended to catch obvious regressions.
 - Linux: the installed `.desktop` file advertises the expected `MimeType=` list
   (including `x-scheme-handler/formula` for deep links) and has an `Exec=`
   placeholder so double-click open passes a path/URL.
@@ -1560,6 +1565,10 @@ tmpdir_rpm="$(mktemp -d)"
 # `cd` for the extraction destination.
 rpm2cpio "$rpm" | (cd "$tmpdir_rpm" && cpio -idm --quiet --no-absolute-filenames)
 python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
+
+# Windows
+# (Run from a Windows machine/runner; this script uses signtool + Windows Installer COM APIs.)
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1
 ```
 
 CI note: the release workflow runs this check on Linux (and, by default, macOS/Windows) **after** the Tauri build step, reusing the
