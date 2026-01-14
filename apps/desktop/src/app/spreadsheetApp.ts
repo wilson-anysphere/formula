@@ -17059,14 +17059,15 @@ export class SpreadsheetApp {
     return false;
   }
 
-  private recomputeWorkbookCellImageIdsFromStoredCells(): boolean {
+  private recomputeWorkbookCellImageIdsFromStoredCells(sheetIds?: readonly string[]): boolean {
     const docAny = this.document as any;
     const modelSheets: unknown = docAny?.model?.sheets;
     if (!(modelSheets instanceof Map)) return false;
 
     const next = new Set<string>();
     try {
-      for (const sheetId of this.document.getSheetIds()) {
+      const ids = Array.isArray(sheetIds) ? sheetIds : this.document.getSheetIds();
+      for (const sheetId of ids) {
         const sheet = (modelSheets as Map<string, any>).get(sheetId);
         const cells: unknown = sheet?.cells;
         if (!(cells instanceof Map)) continue;
@@ -17098,9 +17099,10 @@ export class SpreadsheetApp {
     return changed;
   }
 
-  private listWorkbookExternalImageIds(): string[] {
+  private listWorkbookExternalImageIds(sheetIds?: readonly string[]): string[] {
     const ids: string[] = [];
-    for (const sheetId of this.document.getSheetIds()) {
+    const sheets = Array.isArray(sheetIds) ? sheetIds : this.document.getSheetIds();
+    for (const sheetId of sheets) {
       const id = this.getSheetBackgroundImageId(sheetId);
       const normalized = typeof id === "string" ? id.trim() : "";
       if (normalized) ids.push(normalized);
@@ -17128,13 +17130,24 @@ export class SpreadsheetApp {
 
     // Unknown/global updates: recompute from scratch.
     if (!payload || source === "applyState" || drawingsChanged) {
-      this.recomputeWorkbookCellImageIdsFromStoredCells();
+      const sheetIds = (() => {
+        if (source !== "applyState") return this.document.getSheetIds();
+        const docAny = this.document as any;
+        const sheetMeta: unknown = docAny?.sheetMeta;
+        // During `applyState`, removed sheets can remain reachable in `model.sheets` until the end of
+        // the method, but `sheetMeta` is cleared + repopulated with only the snapshot sheets before
+        // the synchronous change event is emitted. Prefer `sheetMeta` as the authoritative sheet set
+        // so we don't retain image refs for sheets that are about to be deleted.
+        return sheetMeta instanceof Map ? Array.from(sheetMeta.keys()) : this.document.getSheetIds();
+      })();
+
+      this.recomputeWorkbookCellImageIdsFromStoredCells(sheetIds);
       const drawingsBySheetId = new Map<string, DrawingObject[]>();
-      for (const sheetId of this.document.getSheetIds()) {
+      for (const sheetId of sheetIds) {
         drawingsBySheetId.set(sheetId, this.listDrawingObjectsForSheet(sheetId));
       }
       this.workbookImageManager.replaceAllSheetDrawings(drawingsBySheetId, {
-        externalImageIds: this.listWorkbookExternalImageIds(),
+        externalImageIds: this.listWorkbookExternalImageIds(sheetIds),
       });
       return;
     }

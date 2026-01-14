@@ -131,12 +131,30 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
       const doc = app.getDocument();
       const activateSpy = vi.spyOn(app, "activateSheet");
       const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown>;
+      const workbookImageManager = (app as any).workbookImageManager as { imageRefCount: Map<string, number> };
 
       app.activateSheet("Sheet2");
       // Ensure per-sheet outline state is created for Sheet2 so we can verify it is cleaned up when
       // applyState removes the sheet.
       app.hideRows([0]);
       expect(outlinesBySheet.has("Sheet2")).toBe(true);
+
+      const imageId = "test_image";
+      doc.setSheetDrawings("Sheet2", [
+        {
+          id: 1,
+          kind: { type: "image", imageId },
+          // Use UI-style anchors so SpreadsheetApp can treat this as a normalized DrawingObject
+          // without needing to run the model adapter (avoids test-only overlay render errors).
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: 10_000, cy: 10_000 },
+          },
+          zOrder: 0,
+        },
+      ]);
+      expect(workbookImageManager.imageRefCount.get(imageId)).toBe(1);
       activateSpy.mockClear();
 
       const snapshotDoc = new DocumentController();
@@ -151,6 +169,9 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
       // applyState deletes sheets after emitting its change event; ensure per-sheet caches do not
       // retain state for removed sheets.
       expect(outlinesBySheet.has("Sheet2")).toBe(false);
+      // The workbook image ref counter should also drop image refs that were only present on the
+      // removed sheet.
+      expect(workbookImageManager.imageRefCount.get(imageId) ?? 0).toBe(0);
     } finally {
       app.destroy();
     }
