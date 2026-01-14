@@ -129,6 +129,10 @@ pub(crate) fn parse_biff_sheet_print_settings(
     let mut setup_scale: Option<u16> = None;
     let mut setup_fit_width: Option<u16> = None;
     let mut setup_fit_height: Option<u16> = None;
+    // Track whether the last SETUP record had `fNoPls=1` so we can avoid inferring FitTo mode from
+    // `iFitWidth`/`iFitHeight` when WSBOOL is missing. Per [MS-XLS], `fNoPls` makes various
+    // printer-related fields undefined, which can otherwise result in false positives.
+    let mut setup_no_pls: bool = false;
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
@@ -151,6 +155,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 saw_any_record = true;
                 let (scale, fit_width, fit_height, no_pls) =
                     parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings);
+                setup_no_pls = no_pls;
                 // Best-effort: preserve the most recent values when later SETUP records are
                 // truncated/malformed (so corrupt files don't clobber earlier state).
                 //
@@ -230,8 +235,19 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
+    let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
+        // Heuristic: infer FitTo mode when WSBOOL is missing but the SETUP record contains
+        // non-default fit dimensions. Disable this inference when `fNoPls=1` so we don't treat
+        // undefined printer state as a FitTo signal.
+        if setup_no_pls {
+            false
+        } else {
+            setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
+        }
+    });
+
     if saw_any_record {
-        page_setup.scaling = if wsbool_fit_to_page == Some(true) {
+        page_setup.scaling = if fit_to_page {
             // Some `.xls` writers omit the SETUP record even when fit-to-page is enabled.
             // Preserve the scaling intent: FitTo {0,0} means "as many pages as needed".
             Scaling::FitTo {
@@ -340,8 +356,15 @@ fn parse_setup_record(
     // Printer fields (including iScale) are undefined when fNoPls is set.
     let scale_out = if f_no_pls { None } else { scale };
 
-    // Apply paper size + orientation only when fNoPls is not set.
-    if !f_no_pls {
+    // Per [MS-XLS], when `fNoPls` is set the printer-related fields are undefined and must be
+    // ignored. The spec does not list `iFitWidth`/`iFitHeight` as undefined, and Excel will honor
+    // them when WSBOOL.fFitToPage is set, so we always preserve the fit dimensions.
+    if f_no_pls {
+        // Reset any previously imported printer settings so "last wins" behaves as if the printer
+        // fields were absent.
+        page_setup.paper_size = PageSetup::default().paper_size;
+        page_setup.orientation = Orientation::Portrait;
+    } else {
         if let Some(code) = paper_size {
             // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom paper sizes.
             // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not

@@ -1698,6 +1698,42 @@ pub fn build_page_setup_flags_nopls_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a `SETUP` record where
+/// `SETUP.fNoPls=1` and a `WSBOOL` record where `WSBOOL.fFitToPage=1`.
+///
+/// This exercises the nuance that `fNoPls` only makes *printer-related* SETUP fields undefined
+/// (paper size/orientation/percent scaling), while `iFitWidth`/`iFitHeight` can still be honored
+/// when fit-to-page mode is enabled.
+pub fn build_page_setup_flags_nopls_fit_to_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_flags_sheet_stream_with_wsbool(
+        16,
+        setup_record_with_grbit(
+            9,                  // iPaperSize (ignored due to fNoPls)
+            80,                 // iScale (ignored due to fNoPls)
+            2,                  // iFitWidth (preserved)
+            3,                  // iFitHeight (preserved)
+            SETUP_GRBIT_F_NOPLS, // fNoPls=1, fPortrait=0 (landscape)
+            0.5,                // numHdr (non-default)
+            0.6,                // numFtr (non-default)
+        ),
+        WSBOOL_OPTION_FIT_TO_PAGE,
+    );
+    let workbook_stream =
+        build_single_sheet_workbook_stream("PageSetupNoPlsFitTo", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a `SETUP` record where
 /// `SETUP.fNoOrient=1` (and `SETUP.fNoPls=0`).
 ///
 /// This is used to validate that the importer treats orientation as the default portrait and
@@ -2394,6 +2430,15 @@ fn setup_record_with_grbit(
 }
 
 fn build_page_setup_flags_sheet_stream(xf_cell: u16, setup: Vec<u8>) -> Vec<u8> {
+    // WSBOOL: explicit fFitToPage=0 so SETUP.iScale semantics are stable for the fixture.
+    build_page_setup_flags_sheet_stream_with_wsbool(xf_cell, setup, 0)
+}
+
+fn build_page_setup_flags_sheet_stream_with_wsbool(
+    xf_cell: u16,
+    setup: Vec<u8>,
+    wsbool: u16,
+) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
 
@@ -2411,8 +2456,7 @@ fn build_page_setup_flags_sheet_stream(xf_cell: u16, setup: Vec<u8>) -> Vec<u8> 
     // SETUP record under test.
     push_record(&mut sheet, RECORD_SETUP, &setup);
 
-    // WSBOOL: explicit fFitToPage=0 so SETUP.iScale semantics are stable for the fixture.
-    push_record(&mut sheet, RECORD_WSBOOL, &0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
 
     // A1: ensure calamine produces a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));

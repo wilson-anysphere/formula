@@ -43,3 +43,22 @@ fn imports_setup_f_no_orient_ignores_f_portrait() {
     assert_eq!(settings.page_setup.paper_size, PaperSize::A4);
     assert_eq!(settings.page_setup.scaling, Scaling::Percent(80));
 }
+
+#[test]
+fn imports_setup_f_no_pls_preserves_fit_to_dimensions_when_wsbool_enables_fit_to_page() {
+    let bytes = xls_fixture_builder::build_page_setup_flags_nopls_fit_to_fixture_xls();
+    let result = import_fixture(&bytes);
+    let workbook = result.workbook;
+
+    let settings = workbook.sheet_print_settings_by_name("PageSetupNoPlsFitTo");
+    assert_eq!(settings.page_setup.scaling, Scaling::FitTo { width: 2, height: 3 });
+
+    // `fNoPls=1` causes paper size and orientation to be treated as undefined, so model defaults
+    // should be preserved.
+    assert_eq!(settings.page_setup.paper_size, PaperSize::LETTER);
+    assert_eq!(settings.page_setup.orientation, Orientation::Portrait);
+
+    // Header/footer margins are still imported even when `fNoPls=1`.
+    assert_eq!(settings.page_setup.margins.header, 0.5);
+    assert_eq!(settings.page_setup.margins.footer, 0.6);
+}
