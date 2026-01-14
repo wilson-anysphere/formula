@@ -262,7 +262,6 @@ fn quote_dax_identifier(raw: &str) -> String {
     // are escaped by doubling them (`''`).
     format!("'{}'", raw.replace('\'', "''"))
 }
-
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -275,7 +274,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
         Cow::Borrowed(raw)
     }
 }
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
