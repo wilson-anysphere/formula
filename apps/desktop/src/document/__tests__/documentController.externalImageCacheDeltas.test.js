@@ -123,3 +123,27 @@ test("encodeState includes persisted images but excludes cached images", () => {
   assert.ok(ids.includes("persisted.png"));
   assert.ok(!ids.includes("cached.png"), "cached images must not be serialized into snapshots");
 });
+
+test("deleting a persisted image clears any cached fallback bytes for the same id", () => {
+  const doc = new DocumentController();
+
+  // Seed collab-hydrated bytes.
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { bytes: new Uint8Array([9, 9, 9]), mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  // Then create a persisted image with the same id (so the persisted store shadows the cache).
+  doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+  assert.deepEqual(Array.from(doc.getImage("img1")?.bytes ?? []), [1, 2, 3]);
+
+  // Deleting the persisted entry should not fall back to the cached bytes.
+  doc.deleteImage("img1");
+  assert.equal(doc.getImage("img1"), null);
+});

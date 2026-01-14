@@ -7964,6 +7964,20 @@ export class DocumentController {
       throw err;
     }
 
+    // If the persisted image store deletes an entry, ensure any ephemeral cached bytes for the
+    // same id are cleared so `getImage()` doesn't "resurrect" a deleted image by falling back
+    // to `imageCache`.
+    //
+    // This is only done after the engine accepts the change (i.e. outside the try/catch) so a
+    // failed engine apply doesn't accidentally discard cached bytes.
+    if (Array.isArray(imageDeltas) && imageDeltas.length > 0) {
+      for (const delta of imageDeltas) {
+        if (!delta) continue;
+        if (delta.after) continue;
+        this.imageCache.delete(delta.imageId);
+      }
+    }
+
     // Update versions before emitting events so observers can synchronously read the latest value.
     this._updateVersion += 1;
     if (shouldBumpContentVersion) this._contentVersion += 1;
