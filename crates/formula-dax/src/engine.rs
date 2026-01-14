@@ -2127,8 +2127,9 @@ impl DaxEngine {
                                     "row context refers to out-of-bounds column index {col_idx} for table {table}"
                                 )));
                             };
-                            let value =
-                                table_ref.value_by_idx(*row, col_idx).unwrap_or(Value::Blank);
+                            let value = table_ref
+                                .value_by_idx(*row, col_idx)
+                                .unwrap_or(Value::Blank);
                             let key = (table.clone(), column.clone());
                             match new_filter.column_filters.get_mut(&key) {
                                 Some(existing) => existing.retain(|v| v == &value),
@@ -2141,8 +2142,9 @@ impl DaxEngine {
                         }
                     } else {
                         for (col_idx, column) in table_ref.columns().iter().enumerate() {
-                            let value =
-                                table_ref.value_by_idx(*row, col_idx).unwrap_or(Value::Blank);
+                            let value = table_ref
+                                .value_by_idx(*row, col_idx)
+                                .unwrap_or(Value::Blank);
                             let key = (table.clone(), column.clone());
                             match new_filter.column_filters.get_mut(&key) {
                                 Some(existing) => existing.retain(|v| v == &value),
@@ -2961,7 +2963,7 @@ impl DaxEngine {
                         return Err(DaxError::Eval("FILTER expects 2 arguments".into()));
                     };
                     let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
-                    
+
                     match base {
                         TableResult::Physical {
                             table,
@@ -3421,7 +3423,9 @@ impl DaxEngine {
 
                     #[derive(Clone)]
                     enum GroupSpec {
-                        Base { idxs: Vec<usize> },
+                        Base {
+                            idxs: Vec<usize>,
+                        },
                         Related {
                             hops: Vec<Hop>,
                             to_table: String,
@@ -3452,16 +3456,17 @@ impl DaxEngine {
                             } => {
                                 let path_key: Vec<usize> =
                                     hops.iter().map(|h| h.relationship_idx).collect();
-                                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
-                                    let idx = group_specs.len();
-                                    group_positions.push(Vec::new());
-                                    group_specs.push(GroupSpec::Related {
-                                        hops: hops.clone(),
-                                        to_table: to_table.clone(),
-                                        to_col_idxs: Vec::new(),
+                                let group_idx =
+                                    *related_groups.entry(path_key).or_insert_with(|| {
+                                        let idx = group_specs.len();
+                                        group_positions.push(Vec::new());
+                                        group_specs.push(GroupSpec::Related {
+                                            hops: hops.clone(),
+                                            to_table: to_table.clone(),
+                                            to_col_idxs: Vec::new(),
+                                        });
+                                        idx
                                     });
-                                    idx
-                                });
 
                                 group_positions[group_idx].push(pos);
                                 let GroupSpec::Related { to_col_idxs, .. } =
@@ -3506,7 +3511,14 @@ impl DaxEngine {
                             for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
                                 key[*pos] = value.clone();
                             }
-                            insert_group_keys_for_row(positions, values, idx + 1, key, seen, out_rows);
+                            insert_group_keys_for_row(
+                                positions,
+                                values,
+                                idx + 1,
+                                key,
+                                seen,
+                                out_rows,
+                            );
                         }
 
                         for pos in &positions[idx] {
@@ -3891,7 +3903,9 @@ impl DaxEngine {
 
                     #[derive(Clone)]
                     enum GroupSpec {
-                        Base { idxs: Vec<usize> },
+                        Base {
+                            idxs: Vec<usize>,
+                        },
                         Related {
                             hops: Vec<Hop>,
                             to_table: String,
@@ -3915,16 +3929,17 @@ impl DaxEngine {
                                 let to_table = group_cols[pos].0.clone();
                                 let path_key: Vec<usize> =
                                     hops.iter().map(|h| h.relationship_idx).collect();
-                                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
-                                    let idx = group_specs.len();
-                                    group_positions.push(Vec::new());
-                                    group_specs.push(GroupSpec::Related {
-                                        hops: hops.clone(),
-                                        to_table,
-                                        to_col_idxs: Vec::new(),
+                                let group_idx =
+                                    *related_groups.entry(path_key).or_insert_with(|| {
+                                        let idx = group_specs.len();
+                                        group_positions.push(Vec::new());
+                                        group_specs.push(GroupSpec::Related {
+                                            hops: hops.clone(),
+                                            to_table,
+                                            to_col_idxs: Vec::new(),
+                                        });
+                                        idx
                                     });
-                                    idx
-                                });
 
                                 group_positions[group_idx].push(pos);
                                 let GroupSpec::Related { to_col_idxs, .. } =
@@ -3969,7 +3984,14 @@ impl DaxEngine {
                             for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
                                 key[*pos] = value.clone();
                             }
-                            insert_group_keys_for_row(positions, values, idx + 1, key, seen, out_rows);
+                            insert_group_keys_for_row(
+                                positions,
+                                values,
+                                idx + 1,
+                                key,
+                                seen,
+                                out_rows,
+                            );
                         }
 
                         for pos in &positions[idx] {
@@ -4014,7 +4036,9 @@ impl DaxEngine {
                                         let allowed_to = row_sets
                                             .get(rel_info.rel.to_table.as_str())
                                             .ok_or_else(|| {
-                                                DaxError::UnknownTable(rel_info.rel.to_table.clone())
+                                                DaxError::UnknownTable(
+                                                    rel_info.rel.to_table.clone(),
+                                                )
                                             })?;
 
                                         let mut next_rows: HashSet<usize> = HashSet::new();
@@ -4025,7 +4049,8 @@ impl DaxEngine {
                                             if fk.is_blank() {
                                                 continue;
                                             }
-                                            let Some(to_row_set) = rel_info.to_index.get(&fk) else {
+                                            let Some(to_row_set) = rel_info.to_index.get(&fk)
+                                            else {
                                                 continue;
                                             };
                                             to_row_set.for_each_row(|to_row| {
@@ -4226,9 +4251,7 @@ impl DaxEngine {
                             let from_table_ref = model
                                 .table(target_table)
                                 .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
-                            if let Some(candidates) =
-                                from_table_ref.filter_eq(rel.from_idx, &key)
-                            {
+                            if let Some(candidates) = from_table_ref.filter_eq(rel.from_idx, &key) {
                                 for row in candidates {
                                     if row < allowed.len() && allowed.get(row) {
                                         rows.push(row);
@@ -4296,9 +4319,13 @@ impl DaxEngine {
                             }
 
                             if include_blank {
-                                for (fk, candidates) in from_index {
-                                    if fk.is_blank() || !rel_info.to_index.contains_key(fk) {
-                                        next_rows.extend(candidates.iter().copied());
+                                if let Some(unmatched) = rel_info.unmatched_fact_rows.as_ref() {
+                                    unmatched.extend_into(&mut next_rows);
+                                } else {
+                                    for (fk, candidates) in from_index {
+                                        if fk.is_blank() || !rel_info.to_index.contains_key(fk) {
+                                            next_rows.extend(candidates.iter().copied());
+                                        }
                                     }
                                 }
 
@@ -4922,14 +4949,12 @@ fn propagate_filter(
                     // Include `from_table` rows whose key is BLANK or does not match any key in
                     // `to_table`. Tabular models treat those rows as belonging to a virtual
                     // blank/unknown member on the `to_table` side.
-                    for (key, rows) in from_index {
-                        if key.is_blank() || !relationship.to_index.contains_key(key) {
-                            for &row in rows {
-                                if row < from_set.len() && from_set.get(row) {
-                                    next.set(row, true);
-                                }
+                    if let Some(unmatched) = relationship.unmatched_fact_rows.as_ref() {
+                        unmatched.for_each_row(|row| {
+                            if row < from_set.len() && from_set.get(row) {
+                                next.set(row, true);
                             }
-                        }
+                        });
                     }
                 }
             } else {
@@ -4940,9 +4965,7 @@ fn propagate_filter(
                     .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
 
                 if !allowed_keys.is_empty() {
-                    if let Some(rows) =
-                        from_table.filter_in(relationship.from_idx, &allowed_keys)
-                    {
+                    if let Some(rows) = from_table.filter_in(relationship.from_idx, &allowed_keys) {
                         for row in rows {
                             if row < from_set.len() && from_set.get(row) {
                                 next.set(row, true);
@@ -5319,17 +5342,9 @@ fn virtual_blank_row_exists(
         // A virtual blank row exists if the relationship has any *currently visible* `from_table`
         // row whose key is BLANK or has no match in `to_table`.
         if filter.is_empty() {
-            if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
-                if !unmatched.is_empty() {
-                    return Ok(true);
-                }
-            } else if let Some(from_index) = rel.from_index.as_ref() {
-                if from_index
-                    .keys()
-                    .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
-                {
-                    return Ok(true);
-                }
+            if matches!(rel.unmatched_fact_rows.as_ref(), Some(unmatched) if !unmatched.is_empty())
+            {
+                return Ok(true);
             }
             continue;
         }
@@ -5341,23 +5356,11 @@ fn virtual_blank_row_exists(
             .get(rel.rel.from_table.as_str())
             .ok_or_else(|| DaxError::UnknownTable(rel.rel.from_table.clone()))?;
 
-        if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
-            if unmatched.any_row_allowed(from_set) {
-                return Ok(true);
-            }
-        } else if let Some(from_index) = rel.from_index.as_ref() {
-            for (key, rows) in from_index {
-                if !key.is_blank() && rel.to_index.contains_key(key) {
-                    continue;
-                }
-                if rows
-                    .iter()
-                    .copied()
-                    .any(|row| row < from_set.len() && from_set.get(row))
-                {
-                    return Ok(true);
-                }
-            }
+        if matches!(
+            rel.unmatched_fact_rows.as_ref(),
+            Some(unmatched) if unmatched.any_row_allowed(from_set)
+        ) {
+            return Ok(true);
         }
     }
 

@@ -224,7 +224,6 @@ impl Table {
                     name: name.clone(),
                     column_type,
                 };
-
                 // The columnar backend is stored behind an `Arc`.
                 //
                 // When the `Arc` is uniquely owned, try to unwrap it to avoid cloning the existing
@@ -574,6 +573,78 @@ impl UnmatchedFactRows {
         }
     }
 
+    pub(crate) fn push_row(&mut self, row: usize, new_len: usize, is_unmatched: bool) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => {
+                if is_unmatched {
+                    rows.push(row);
+                }
+
+                // Compare the approximate memory usage of:
+                // - sparse list: `unmatched_count * size_of::<usize>()`
+                // - dense bitset: `row_count / 8` bytes
+                //
+                // Switch to the dense representation once it becomes more memory-efficient:
+                //   unmatched_count > row_count / 64.
+                let sparse_to_dense_threshold = new_len / 64;
+                if rows.len() > sparse_to_dense_threshold {
+                    let word_len = (new_len + 63) / 64;
+                    let mut bits = vec![0u64; word_len];
+                    for &row in rows.iter() {
+                        let word = row / 64;
+                        let bit = row % 64;
+                        bits[word] |= 1u64 << bit;
+                    }
+                    let count = rows.len();
+                    *self = UnmatchedFactRows::Dense {
+                        bits,
+                        len: new_len,
+                        count,
+                    };
+                }
+            }
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                if new_len > *len {
+                    let word_len = (new_len + 63) / 64;
+                    if bits.len() < word_len {
+                        bits.resize(word_len, 0u64);
+                    }
+                    *len = new_len;
+                }
+                if is_unmatched {
+                    let word = row / 64;
+                    let bit = row % 64;
+                    let mask = 1u64 << bit;
+                    if (bits[word] & mask) == 0 {
+                        bits[word] |= mask;
+                        *count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn clear_row(&mut self, row: usize) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => {
+                if let Some(pos) = rows.iter().position(|&r| r == row) {
+                    rows.swap_remove(pos);
+                }
+            }
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                if row >= *len {
+                    return;
+                }
+                let word = row / 64;
+                let bit = row % 64;
+                let mask = 1u64 << bit;
+                if (bits[word] & mask) != 0 {
+                    bits[word] &= !mask;
+                    *count = count.saturating_sub(1);
+                }
+            }
+        }
+    }
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {
@@ -708,10 +779,12 @@ pub(crate) struct RelationshipInfo {
     pub(crate) from_index: Option<HashMap<Value, Vec<usize>>>,
 
     /// Fact-side row indices whose foreign key is BLANK or does not map to any key in
-    /// [`Self::to_index`]. These rows belong to the "virtual blank" member on the dimension side.
+    /// [`Self::to_index`]. These rows belong to the relationship's "virtual blank" member on the
+    /// dimension side.
     ///
-    /// This is primarily used for columnar fact tables where we do not materialize
-    /// [`Self::from_index`].
+    /// The engine uses this cache to implement Tabular's unknown-member semantics efficiently,
+    /// without scanning `from_index` / the fact table to determine blank-row existence or to
+    /// enumerate unmatched fact rows.
     pub(crate) unmatched_fact_rows: Option<UnmatchedFactRows>,
 }
 
@@ -1031,26 +1104,17 @@ impl DataModel {
                 }
                 UnmatchedFactRows::Dense { .. } => {
                     let key = &key_for_updates;
-                    if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
-                        let UnmatchedFactRows::Dense { bits, len, count } = unmatched else {
-                            unreachable!("match arm already ensures unmatched fact rows are dense");
-                        };
-                        let len = *len;
-                        let mut clear_row = |row: usize| {
-                            if row >= len {
-                                return;
+                    // Prefer the precomputed fact-side index when available (in-memory fact
+                    // tables). For columnar facts, fall back to backend filtering.
+                    if let Some(from_index) = rel_info.from_index.as_ref() {
+                        if let Some(rows) = from_index.get(key) {
+                            for &row in rows {
+                                unmatched.clear_row(row);
                             }
-                            let word = row / 64;
-                            let bit = row % 64;
-                            let mask = 1u64 << bit;
-                            if (bits[word] & mask) != 0 {
-                                bits[word] &= !mask;
-                                *count = (*count).saturating_sub(1);
-                            }
-                        };
-
+                        }
+                    } else if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
                         for row in rows {
-                            clear_row(row);
+                            unmatched.clear_row(row);
                         }
                     } else {
                         // Fallback: keep only rows that are still unmatched.
@@ -1072,12 +1136,33 @@ impl DataModel {
         for rel_info in &mut self.relationships {
             let rel = &rel_info.rel;
             if rel.from_table == table {
+                let key = full_row
+                    .get(rel_info.from_idx)
+                    .cloned()
+                    .unwrap_or(Value::Blank);
+
                 if let Some(from_index) = rel_info.from_index.as_mut() {
-                    let key = full_row
-                        .get(rel_info.from_idx)
-                        .cloned()
-                        .unwrap_or(Value::Blank);
-                    from_index.entry(key).or_default().push(row_index);
+                    from_index.entry(key.clone()).or_default().push(row_index);
+                }
+
+                // Maintain the cached set of "virtual blank member" fact rows so `VALUES` /
+                // `DISTINCTCOUNT` and relationship propagation don't need to scan relationship
+                // indexes to determine blank-row existence.
+                let is_unmatched = key.is_blank() || !rel_info.to_index.contains_key(&key);
+                let new_len = row_index + 1;
+                match rel_info.unmatched_fact_rows.as_mut() {
+                    Some(unmatched) => {
+                        unmatched.push_row(row_index, new_len, is_unmatched);
+                        if unmatched.is_empty() {
+                            rel_info.unmatched_fact_rows = None;
+                        }
+                    }
+                    None if is_unmatched => {
+                        let mut builder = UnmatchedFactRowsBuilder::new(new_len);
+                        builder.push(row_index);
+                        rel_info.unmatched_fact_rows = Some(builder.finish());
+                    }
+                    None => {}
                 }
             }
         }
@@ -1161,6 +1246,7 @@ impl DataModel {
         let (from_index, unmatched_fact_rows) = match &from_table.storage {
             TableStorage::InMemory(_) => {
                 let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
+                let mut unmatched = UnmatchedFactRowsBuilder::new(from_table.row_count());
                 for row in 0..from_table.row_count() {
                     let value = from_table
                         .value_by_idx(row, from_idx)
@@ -1178,30 +1264,27 @@ impl DataModel {
                     }
 
                     rows.push(row);
-                }
 
-                if relationship.enforce_referential_integrity {
-                    for row in 0..from_table.row_count() {
-                        let value = from_table
-                            .value_by_idx(row, from_idx)
-                            .unwrap_or(Value::Blank);
-                        if value.is_blank() {
-                            continue;
-                        }
-                        if !to_index.contains_key(&value) {
-                            return Err(DaxError::ReferentialIntegrityViolation {
-                                relationship: relationship.name.clone(),
-                                from_table: relationship.from_table.clone(),
-                                from_column: from_col.clone(),
-                                to_table: relationship.to_table.clone(),
-                                to_column: to_col.clone(),
-                                value: value.clone(),
-                            });
-                        }
+                    let matched = to_index.contains_key(&value);
+                    if value.is_blank() || !matched {
+                        unmatched.push(row);
+                    }
+
+                    if relationship.enforce_referential_integrity && !value.is_blank() && !matched {
+                        return Err(DaxError::ReferentialIntegrityViolation {
+                            relationship: relationship.name.clone(),
+                            from_table: relationship.from_table.clone(),
+                            from_column: from_col.clone(),
+                            to_table: relationship.to_table.clone(),
+                            to_column: to_col.clone(),
+                            value: value.clone(),
+                        });
                     }
                 }
 
-                (Some(from_index), None)
+                let unmatched = unmatched.finish();
+                let unmatched_fact_rows = (!unmatched.is_empty()).then_some(unmatched);
+                (Some(from_index), unmatched_fact_rows)
             }
             TableStorage::Columnar(_) => {
                 // Avoid materializing `from_index` for columnar fact tables. Instead, precompute
@@ -1287,9 +1370,7 @@ impl DataModel {
         //   considered compatible for relationship joins. The DAX engine coerces these logical
         //   types to `Value::Number` internally (see `ColumnarTableBackend::dax_from_columnar`).
         // - `String` and `Boolean` must match exactly with their respective kinds.
-        fn join_type_from_columnar(
-            column_type: formula_columnar::ColumnType,
-        ) -> JoinTypeInfo {
+        fn join_type_from_columnar(column_type: formula_columnar::ColumnType) -> JoinTypeInfo {
             let kind = match column_type {
                 formula_columnar::ColumnType::Number
                 | formula_columnar::ColumnType::DateTime
@@ -2076,7 +2157,9 @@ impl DataModel {
 mod tests {
     use super::*;
     use crate::FilterContext;
-    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
+    use formula_columnar::{
+        ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
+    };
     use std::time::Instant;
 
     #[test]
@@ -2273,6 +2356,41 @@ mod tests {
     }
 
     #[test]
+    fn in_memory_relationships_compute_unmatched_fact_rows() {
+        let mut model = DataModel::new();
+
+        let mut dim = Table::new("Dim", vec!["Id"]);
+        dim.push_row(vec![1.into()]).unwrap();
+        model.add_table(dim).unwrap();
+
+        let mut fact = Table::new("Fact", vec!["Id"]);
+        fact.push_row(vec![1.into()]).unwrap();
+        fact.push_row(vec![999.into()]).unwrap(); // unmatched
+        model.add_table(fact).unwrap();
+
+        model
+            .add_relationship(Relationship {
+                name: "Fact_Dim".into(),
+                from_table: "Fact".into(),
+                from_column: "Id".into(),
+                to_table: "Dim".into(),
+                to_column: "Id".into(),
+                cardinality: Cardinality::OneToMany,
+                cross_filter_direction: CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: false,
+            })
+            .unwrap();
+
+        let rel = model.relationships.first().expect("relationship exists");
+        assert!(rel.from_index.is_some());
+        assert!(
+            matches!(rel.unmatched_fact_rows.as_ref(), Some(rows) if !rows.is_empty()),
+            "expected unmatched fact rows cache to be populated for in-memory relationships"
+        );
+    }
+
+    #[test]
     fn columnar_relationships_do_not_build_from_row_list_index() {
         let mut model = DataModel::new();
 
@@ -2381,7 +2499,9 @@ mod tests {
             DaxError::DuplicateColumn { table, column } if table == "T" && column == "Y"
         ));
 
-        let err = table.add_column("TooShort", vec![Value::Blank]).unwrap_err();
+        let err = table
+            .add_column("TooShort", vec![Value::Blank])
+            .unwrap_err();
         assert!(matches!(
             err,
             DaxError::ColumnLengthMismatch { table, column, expected, actual }
