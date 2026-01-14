@@ -80,4 +80,16 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
 
   // Pressed state sync should reflect whether the Data Queries panel is open.
   assert.match(main, /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/);
+
+  // Since these ids are now real commands, they should not be kept in the ribbon
+  // CommandRegistry exemption list (that list is for ribbon-only wiring).
+  const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
+  const disabling = fs.readFileSync(disablingPath, "utf8");
+  for (const id of commandIds) {
+    assert.doesNotMatch(
+      disabling,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
+    );
+  }
 });
