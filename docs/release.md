@@ -73,7 +73,7 @@ To update runner pins, open a PR that bumps the runner labels in
 runner images (recommended: run the workflow via `workflow_dispatch` with `upload=false`).
 
 CI enforces this policy via `scripts/ci/check-gha-runner-pins.sh`, so PRs that reintroduce
-`macos-latest` / `windows-latest` / `ubuntu-latest` into the release workflow will fail.
+`macos-latest` / `windows-latest` / `ubuntu-latest` runner labels into workflow configuration will fail.
 
 ## GitHub Actions action pinning (supply-chain hardening)
 
@@ -788,7 +788,7 @@ CI smoke test:
 - `.github/workflows/windows-arm64-smoke.yml` runs `cargo tauri build --target aarch64-pc-windows-msvc`
   and asserts that the expected Windows bundles land under
   `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**`.
-  - It also runs on a weekly schedule in the upstream repo to catch `windows-latest` runner image
+  - It also runs on a weekly schedule in the upstream repo to catch `windows-2022` runner image
     regressions (missing MSVC/SDK ARM64 components) early.
   - Additional validations:
     - `formula-desktop.exe` must report **AA64** in `dumpbin /headers` output (guards against accidentally producing an x64 binary).

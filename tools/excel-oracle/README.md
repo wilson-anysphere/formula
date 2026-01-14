@@ -12,7 +12,7 @@ The intent is to continuously compare our formula engine against Excel across a 
 - A Windows-only **error-literal extractor** to verify locale error spellings against real Excel (`extract-error-literals.ps1`)
 - A **comparison tool** that diffs engine output vs Excel output and emits a mismatch report (`compare.py`)
 - A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
-- A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-latest`
+- A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-2022` (engine validation) and optionally on a self-hosted Windows runner with Excel installed (oracle generation)
 
 ## Unified compatibility scorecard (corpus + Excel-oracle)
 
@@ -106,7 +106,7 @@ Notes / caveats:
 
 ## CI note (Excel availability)
 
-GitHub-hosted `windows-latest` runners typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.
+GitHub-hosted Windows runners (for example `windows-2022`) typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.
 
 If you commit a pinned oracle dataset (see below), CI can still validate the engine even when Excel is not available.
 

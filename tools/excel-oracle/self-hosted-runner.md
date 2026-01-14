@@ -2,7 +2,7 @@
 
 The Excel oracle harness (`tools/excel-oracle/run-excel-oracle.ps1`) requires **real Microsoft Excel desktop**.
 
-GitHub-hosted `windows-latest` runners typically do **not** include Excel, so generating oracle datasets in CI usually requires a **self-hosted Windows runner** with Office installed.
+GitHub-hosted Windows runners (for example `windows-2022`) typically do **not** include Excel, so generating oracle datasets in CI usually requires a **self-hosted Windows runner** with Office installed.
 
 ## High-level setup
 
