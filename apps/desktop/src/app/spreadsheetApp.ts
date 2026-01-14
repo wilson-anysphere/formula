@@ -6742,13 +6742,14 @@ export class SpreadsheetApp {
              const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
              const hasViews = sheetViewDeltas.length > 0;
              const hasRangeRuns = rangeRunDeltas.length > 0;
+             const hasSheetMeta = sheetMetaDeltas.length > 0;
 
              const recalc = payload?.recalc;
              const wantsRecalc = recalc === true;
 
              // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
              // task unless the payload can impact calculation results.
-             if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns) {
+             if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
                if (wantsRecalc) {
                  void this.enqueueWasmSync(async (worker) => {
                    const changes = await worker.recalculate();

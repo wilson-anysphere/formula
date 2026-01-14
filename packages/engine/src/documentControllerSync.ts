@@ -597,6 +597,7 @@ export async function engineApplyDocumentChange(
   }
 
   const deltas: readonly DocumentCellDelta[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
+  const formatDeltas: unknown[] = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
   const rowStyleDeltas: Array<{ sheetId: string; row: number; afterStyleId: number }> = Array.isArray(payload?.rowStyleDeltas)
     ? payload.rowStyleDeltas
     : [];
@@ -778,7 +779,10 @@ export async function engineApplyDocumentChange(
   const recalcFlag = typeof payload?.recalc === "boolean" ? (payload.recalc as boolean) : undefined;
   let shouldRecalculate = options.recalculate ?? recalcFlag ?? true;
 
-  const hasStyles = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+  // Prefer the explicit style delta streams, but fall back to the raw `formatDeltas` list when
+  // consumers pass through older DocumentController payload shapes.
+  const hasStyles =
+    rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0 || formatDeltas.length > 0;
   const hasViews = sheetViewDeltas.length > 0;
   const hasRangeRuns = rangeRunDeltas.length > 0;
   const hasSheetMeta = sheetMetaDeltas.length > 0;

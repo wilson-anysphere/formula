@@ -530,7 +530,6 @@ describe("engine sync helpers", () => {
     // metadata/volatile functions update.
     expect(engine.recalcCalls).toEqual([undefined]);
   });
-
   it("engineApplyDocumentChange syncs compressed range-run formatting deltas into the engine", async () => {
     const doc = new DocumentController();
     let payload: any = null;
@@ -542,6 +541,7 @@ describe("engine sync helpers", () => {
     doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
     unsubscribe();
 
+    expect(payload?.recalc).toBe(false);
     expect(Array.isArray(payload?.rangeRunDeltas)).toBe(true);
     expect(payload.rangeRunDeltas.length).toBeGreaterThan(0);
 
@@ -558,9 +558,7 @@ describe("engine sync helpers", () => {
     expect(engine.internStyleCalls).toEqual(expect.arrayContaining([doc.styleTable.get(docStyleId)]));
     const col0 = engine.formatRunsByColCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
     expect(col0).toBeTruthy();
-    expect(col0?.runs).toEqual(
-      expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]),
-    );
+    expect(col0?.runs).toEqual(expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]));
 
     // Range-run formatting edits are metadata-only; they should still advance the engine's recalc tick.
     expect(engine.recalcCalls).toEqual([undefined]);
