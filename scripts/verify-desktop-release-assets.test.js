@@ -373,9 +373,34 @@ test("validateLatestJson allows raw Windows .exe updater URLs when explicitly en
     "Formula.app.tar.gz",
   ]);
 
-  assert.doesNotThrow(() =>
-    validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }),
-  );
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }));
+});
+
+test("validateLatestJson allows installer-specific platform keys to reference installers (.exe) without affecting required updater keys", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      // Additional (installer-specific) key: allowed to reference an installer like NSIS `.exe`.
+      "windows-x86_64-nsis": { url: "https://example.com/Formula_x64.exe", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.app.tar.gz",
+    "Formula_x64.exe",
+  ]);
+
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
 });
 
 test("verifyUpdaterManifestSignature verifies latest.json.sig against latest.json with minisign pubkey", () => {
@@ -610,8 +635,8 @@ test("validateReleaseExpectations fails when an asset matches multiple arch toke
   const manifest = {
     version: "0.1.0",
     platforms: {
-      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
     },
   };
 

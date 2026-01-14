@@ -510,7 +510,7 @@ function usage() {
       "Options:",
       "  --tag <tag>        Release tag (default: env GITHUB_REF_NAME)",
       "  --repo <owner/repo> GitHub repo (default: env GITHUB_REPOSITORY)",
-      "  --allow-windows-msi (deprecated; Windows updater entries use .msi by default in this repo).",
+      "  --allow-windows-msi Deprecated/no-op (Windows updater entries use .msi by default in this repo).",
       "  --allow-windows-exe Allow raw .exe in latest.json Windows entries (defaults to disallowed).",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --all-assets       Hash all release assets (still excludes .sig by default)",
