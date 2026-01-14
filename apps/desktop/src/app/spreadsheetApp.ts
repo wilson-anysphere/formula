@@ -3860,6 +3860,27 @@ export class SpreadsheetApp {
         return;
       }
 
+      // If the active sheet disappears while a cell edit is in progress, the cell editor textarea can
+      // remain focused even after we switch sheets. If it later commits (blur/Enter/Tab), it would
+      // apply the edit to the *new* active sheet (or even recreate the deleted sheet via lazy writes).
+      //
+      // Close the editor silently before switching sheets to avoid committing to the wrong sheet.
+      if (this.editor?.isOpen?.()) {
+        try {
+          this.editor.close();
+        } catch {
+          // ignore
+        }
+        try {
+          // Ensure the now-closed textarea doesn't keep swallowing keyboard input.
+          this.editor.element.blur();
+        } catch {
+          // ignore
+        }
+        // Keep edit-state listeners (ribbon, comments UI, etc.) consistent.
+        this.updateEditState();
+      }
+
       this.activateSheet(fallback);
 
       if (isApplyState && applyStateSheetIds && applyStateSheetIds.length > 0) {
@@ -26082,6 +26103,33 @@ export class SpreadsheetApp {
       return;
     }
     const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
+
+    // If the sheet being edited was deleted or became hidden while the user was editing the
+    // formula bar (e.g. collaboration / undo/redo / applyState restore), avoid resurrecting it
+    // via a lazy write (`document.getCell` inside `applyEdit` would recreate the sheet).
+    const targetMeta = this.document.getSheetMeta(target.sheetId);
+    const targetVisibility = targetMeta?.visibility ?? "visible";
+    if (!targetMeta || targetVisibility !== "visible") {
+      this.formulaEditCell = null;
+      this.updateEditState();
+      this.referencePreview = null;
+      this.referenceHighlights = [];
+      this.referenceHighlightsSource = [];
+      if (this.sharedGrid) {
+        this.syncSharedGridInteractionMode();
+        this.sharedGrid.clearRangeSelection();
+        this.sharedGrid.renderer.setReferenceHighlights(null);
+      }
+      try {
+        showToast("The sheet you were editing was deleted or hidden. Your edit was cancelled.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; tests don't always include it.
+      }
+      this.refresh();
+      this.focus();
+      return;
+    }
+
     this.applyEdit(target.sheetId, target.cell, text);
 
     this.formulaEditCell = null;
@@ -26145,7 +26193,7 @@ export class SpreadsheetApp {
 
   private cancelFormulaBar(): void {
     this.endKeyboardRangeSelection();
-    const target = this.formulaEditCell;
+    let target = this.formulaEditCell;
     this.formulaEditCell = null;
     this.updateEditState();
     this.referencePreview = null;
@@ -26159,6 +26207,14 @@ export class SpreadsheetApp {
     }
 
     this.updateEditState();
+
+    if (target) {
+      const meta = this.document.getSheetMeta(target.sheetId);
+      const visibility = meta?.visibility ?? "visible";
+      if (!meta || visibility !== "visible") {
+        target = null;
+      }
+    }
 
     if (target) {
       // Restore the original edit location (sheet + cell).
