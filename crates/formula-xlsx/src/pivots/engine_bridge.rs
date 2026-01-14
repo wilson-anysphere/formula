@@ -834,7 +834,7 @@ mod tests {
             ],
             ..Default::default()
         };
- 
+  
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));
@@ -868,7 +868,7 @@ mod tests {
             ],
             ..Default::default()
         };
- 
+  
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));
