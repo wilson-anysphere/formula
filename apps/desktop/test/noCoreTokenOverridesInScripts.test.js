@@ -55,7 +55,7 @@ test("desktop UI scripts should not override core design tokens", () => {
   // These APIs are less common, but they can still override CSS variables at runtime.
   const tokenAssignmentInStyleString =
     /(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*:/gi;
-  const cssTextAssignment = /\.style\.cssText\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
+  const cssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
   const setAttributeStyle = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
 
   for (const file of files) {

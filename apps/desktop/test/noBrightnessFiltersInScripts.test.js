@@ -68,7 +68,7 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
       kind: "setAttribute(style)",
     },
     // cssText assignment (e.g. `el.style.cssText = "filter: brightness(0.9)"`)
-    { re: /\.style\.cssText\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.cssText" },
+    { re: /\.style\.cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.cssText" },
   ];
 
   for (const file of files) {
