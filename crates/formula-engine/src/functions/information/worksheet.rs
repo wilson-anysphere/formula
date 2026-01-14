@@ -49,16 +49,38 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
             }
             CalculationMode::Manual => Value::Text("Manual".to_string()),
         },
-        InfoType::System => Value::Text("pcdos".to_string()),
+        InfoType::System => Value::Text(ctx.info_system().unwrap_or("pcdos").to_string()),
         InfoType::NumFile => Value::Number(ctx.sheet_count() as f64),
-        // Known Excel keys that this engine does not currently expose.
-        InfoType::Directory
-        | InfoType::Origin
-        | InfoType::OSVersion
-        | InfoType::Release
-        | InfoType::Version
-        | InfoType::MemAvail
-        | InfoType::TotMem => Value::Error(ErrorKind::NA),
+        InfoType::Directory => ctx
+            .info_directory()
+            .map(|s| Value::Text(s.to_string()))
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::Origin => ctx
+            .info_origin()
+            .map(|s| Value::Text(s.to_string()))
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::OSVersion => ctx
+            .info_osversion()
+            .map(|s| Value::Text(s.to_string()))
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::Release => ctx
+            .info_release()
+            .map(|s| Value::Text(s.to_string()))
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::Version => ctx
+            .info_version()
+            .map(|s| Value::Text(s.to_string()))
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::MemAvail => ctx
+            .info_memavail()
+            .filter(|n| n.is_finite())
+            .map(Value::Number)
+            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::TotMem => ctx
+            .info_totmem()
+            .filter(|n| n.is_finite())
+            .map(Value::Number)
+            .unwrap_or(Value::Error(ErrorKind::NA)),
     }
 }
 

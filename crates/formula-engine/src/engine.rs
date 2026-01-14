@@ -41,6 +41,35 @@ pub use bytecode_diagnostics::{
 
 pub type SheetId = usize;
 
+/// Host-provided workbook / system metadata surfaced via the Excel `INFO()` worksheet function.
+///
+/// The engine does not currently read live OS state at runtime (to keep evaluation deterministic
+/// and portable). Hosts may populate these fields explicitly if they want `INFO()` to return
+/// Excel-like values.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct EngineInfo {
+    /// `INFO("system")` override.
+    ///
+    /// When unset, `INFO("system")` defaults to `"pcdos"` for backward compatibility.
+    pub system: Option<String>,
+    /// `INFO("directory")`.
+    pub directory: Option<String>,
+    /// `INFO("osversion")`.
+    pub osversion: Option<String>,
+    /// `INFO("release")`.
+    pub release: Option<String>,
+    /// `INFO("version")`.
+    pub version: Option<String>,
+    /// `INFO("memavail")`.
+    pub memavail: Option<f64>,
+    /// `INFO("totmem")`.
+    pub totmem: Option<f64>,
+    /// Workbook-level fallback for `INFO("origin")`.
+    pub origin: Option<String>,
+    /// Per-sheet override for `INFO("origin")`, keyed by internal sheet id.
+    pub origin_by_sheet: HashMap<SheetId, String>,
+}
+
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error(transparent)]
@@ -453,6 +482,7 @@ pub struct Engine {
     circular_references: HashSet<CellKey>,
     spills: SpillState,
     next_recalc_id: u64,
+    info: EngineInfo,
 }
 
 #[derive(Default)]
@@ -531,11 +561,71 @@ impl Engine {
             circular_references: HashSet::new(),
             spills: SpillState::default(),
             next_recalc_id: 0,
+            info: EngineInfo::default(),
         }
     }
 
     pub fn calc_settings(&self) -> &CalcSettings {
         &self.calc_settings
+    }
+
+    /// Returns the host-provided metadata surfaced by the `INFO()` worksheet function.
+    pub fn engine_info(&self) -> &EngineInfo {
+        &self.info
+    }
+
+    /// Replace the host-provided metadata surfaced by the `INFO()` worksheet function.
+    pub fn set_engine_info(&mut self, info: EngineInfo) {
+        if self.info == info {
+            return;
+        }
+        self.info = info;
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the workbook-level default value for `INFO("origin")`.
+    pub fn set_info_origin(&mut self, origin: Option<impl Into<String>>) {
+        let origin = origin.map(Into::into);
+        if self.info.origin == origin {
+            return;
+        }
+        self.info.origin = origin;
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the per-sheet value for `INFO("origin")`.
+    ///
+    /// This overrides [`Engine::set_info_origin`] for the given sheet.
+    pub fn set_info_origin_for_sheet(&mut self, sheet: &str, origin: Option<impl Into<String>>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let origin = origin.map(Into::into);
+        let changed = match &origin {
+            Some(v) => self.info.origin_by_sheet.get(&sheet_id) != Some(v),
+            None => self.info.origin_by_sheet.contains_key(&sheet_id),
+        };
+        if !changed {
+            return;
+        }
+
+        match origin {
+            Some(v) => {
+                self.info.origin_by_sheet.insert(sheet_id, v);
+            }
+            None => {
+                self.info.origin_by_sheet.remove(&sheet_id);
+            }
+        }
+
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     /// Ensure a sheet exists in the workbook.
@@ -2433,6 +2523,7 @@ impl Engine {
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
+            self.info.clone(),
         );
         let bytecode_default_bounds = snapshot
             .sheet_dimensions
@@ -2948,6 +3039,7 @@ impl Engine {
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
+            self.info.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let date_system = self.date_system;
@@ -5144,6 +5236,7 @@ impl Engine {
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
+            self.info.clone(),
         );
         let ctx = crate::eval::EvalContext {
             current_sheet: sheet_id,
@@ -6957,6 +7050,7 @@ struct Snapshot {
     workbook_filename: Option<String>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
+    info: EngineInfo,
 }
 
 impl Snapshot {
@@ -6965,6 +7059,7 @@ impl Snapshot {
         spills: &SpillState,
         external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
         external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
+        info: EngineInfo,
     ) -> Self {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
         let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
@@ -7116,6 +7211,7 @@ impl Snapshot {
             workbook_filename: workbook.workbook_filename.clone(),
             external_value_provider,
             external_data_provider,
+            info,
         }
     }
 
@@ -7137,6 +7233,42 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn sheet_count(&self) -> usize {
         self.sheet_order.len()
+    }
+
+    fn info_system(&self) -> Option<&str> {
+        self.info.system.as_deref()
+    }
+
+    fn info_directory(&self) -> Option<&str> {
+        self.info.directory.as_deref()
+    }
+
+    fn info_osversion(&self) -> Option<&str> {
+        self.info.osversion.as_deref()
+    }
+
+    fn info_release(&self) -> Option<&str> {
+        self.info.release.as_deref()
+    }
+
+    fn info_version(&self) -> Option<&str> {
+        self.info.version.as_deref()
+    }
+
+    fn info_memavail(&self) -> Option<f64> {
+        self.info.memavail
+    }
+
+    fn info_totmem(&self) -> Option<f64> {
+        self.info.totmem
+    }
+
+    fn info_origin(&self, sheet_id: usize) -> Option<&str> {
+        self.info
+            .origin_by_sheet
+            .get(&sheet_id)
+            .map(|s| s.as_str())
+            .or(self.info.origin.as_deref())
     }
 
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
@@ -11887,6 +12019,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -12015,6 +12148,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let key_b1 = CellKey {
             sheet: sheet_id,
@@ -12088,6 +12222,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let key_c1 = CellKey {
             sheet: sheet_id,
@@ -12168,6 +12303,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let key_b1 = CellKey {
             sheet: sheet1_id,
@@ -12300,6 +12436,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -12464,6 +12601,7 @@ mod tests {
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
+            bytecode_engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -12847,6 +12985,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -12883,6 +13022,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -12921,6 +13061,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -12965,6 +13106,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13033,6 +13175,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13088,6 +13231,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13862,6 +14006,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let sheet_cols = i32::try_from(snapshot.sheet_dimensions[0].1).unwrap_or(i32::MAX);
 

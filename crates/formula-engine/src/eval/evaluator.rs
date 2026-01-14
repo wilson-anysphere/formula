@@ -141,6 +141,37 @@ pub trait ValueResolver {
     fn sheet_count(&self) -> usize {
         1
     }
+
+    /// Host-provided system metadata used by the Excel `INFO()` worksheet function.
+    ///
+    /// The engine does not attempt to query the real OS at runtime; to keep evaluation portable
+    /// and deterministic, hosts may populate these values explicitly (e.g. via `EngineInfo`).
+    fn info_system(&self) -> Option<&str> {
+        None
+    }
+    fn info_directory(&self) -> Option<&str> {
+        None
+    }
+    fn info_osversion(&self) -> Option<&str> {
+        None
+    }
+    fn info_release(&self) -> Option<&str> {
+        None
+    }
+    fn info_version(&self) -> Option<&str> {
+        None
+    }
+    fn info_memavail(&self) -> Option<f64> {
+        None
+    }
+    fn info_totmem(&self) -> Option<f64> {
+        None
+    }
+    /// Returns the upper-left visible cell for `sheet_id`, as an absolute A1 reference (e.g.
+    /// `"$A$1"`).
+    fn info_origin(&self, _sheet_id: usize) -> Option<&str> {
+        None
+    }
     /// Returns the current (row_count, col_count) dimensions for a sheet.
     ///
     /// Coordinates are in-bounds iff:
@@ -1718,6 +1749,38 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn sheet_count(&self) -> usize {
         self.resolver.sheet_count()
+    }
+
+    fn info_system(&self) -> Option<&str> {
+        self.resolver.info_system()
+    }
+
+    fn info_directory(&self) -> Option<&str> {
+        self.resolver.info_directory()
+    }
+
+    fn info_osversion(&self) -> Option<&str> {
+        self.resolver.info_osversion()
+    }
+
+    fn info_release(&self) -> Option<&str> {
+        self.resolver.info_release()
+    }
+
+    fn info_version(&self) -> Option<&str> {
+        self.resolver.info_version()
+    }
+
+    fn info_memavail(&self) -> Option<f64> {
+        self.resolver.info_memavail()
+    }
+
+    fn info_totmem(&self) -> Option<f64> {
+        self.resolver.info_totmem()
+    }
+
+    fn info_origin(&self) -> Option<&str> {
+        self.resolver.info_origin(self.ctx.current_sheet)
     }
 
     fn get_cell_formula(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {

@@ -176,6 +176,97 @@ fn info_numfile_counts_sheets() {
 }
 
 #[test]
+fn info_exposes_host_provided_metadata() {
+    use formula_engine::{Engine, EngineInfo};
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"system\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=INFO(\"osversion\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=INFO(\"release\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=INFO(\"version\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=INFO(\"memavail\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A7", "=INFO(\"totmem\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A8", "=INFO(\"origin\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A8", "=INFO(\"origin\")")
+        .unwrap();
+
+    // Unset metadata returns Excel `#N/A` for supported-but-unknown keys.
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("pcdos".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A7"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "A8"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet2", "A8"), Value::Error(ErrorKind::NA));
+
+    engine.set_engine_info(EngineInfo {
+        system: Some("unix".to_string()),
+        directory: Some("/tmp".to_string()),
+        osversion: Some("14.2".to_string()),
+        release: Some("release-x".to_string()),
+        version: Some("v1".to_string()),
+        memavail: Some(1234.0),
+        totmem: Some(5678.0),
+        origin: Some("$A$1".to_string()),
+        ..EngineInfo::default()
+    });
+    engine.set_info_origin_for_sheet("Sheet2", Some("$B$2"));
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("unix".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("/tmp".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Text("14.2".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Text("release-x".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Text("v1".to_string()));
+    assert_number(&engine.get_cell_value("Sheet1", "A6"), 1234.0);
+    assert_number(&engine.get_cell_value("Sheet1", "A7"), 5678.0);
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A8"),
+        Value::Text("$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "A8"),
+        Value::Text("$B$2".to_string())
+    );
+}
+
+#[test]
 fn cell_errors_for_unknown_info_types() {
     let mut sheet = TestSheet::new();
 

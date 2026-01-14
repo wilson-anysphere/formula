@@ -214,6 +214,38 @@ pub trait FunctionContext {
     fn calculation_mode(&self) -> crate::calc_settings::CalculationMode {
         crate::calc_settings::CalculationMode::Automatic
     }
+
+    /// Host-provided system metadata used by the Excel `INFO()` worksheet function.
+    ///
+    /// The engine does not attempt to query the real OS at runtime; to keep evaluation portable
+    /// and deterministic, hosts may populate these values explicitly (e.g. via `EngineInfo`).
+    fn info_system(&self) -> Option<&str> {
+        None
+    }
+    fn info_directory(&self) -> Option<&str> {
+        None
+    }
+    fn info_osversion(&self) -> Option<&str> {
+        None
+    }
+    fn info_release(&self) -> Option<&str> {
+        None
+    }
+    fn info_version(&self) -> Option<&str> {
+        None
+    }
+    fn info_memavail(&self) -> Option<f64> {
+        None
+    }
+    fn info_totmem(&self) -> Option<f64> {
+        None
+    }
+    /// Returns the upper-left visible cell on the current worksheet, as an absolute A1 reference
+    /// (e.g. `"$A$1"`).
+    fn info_origin(&self) -> Option<&str> {
+        None
+    }
+
     fn date_system(&self) -> ExcelDateSystem;
     fn current_sheet_id(&self) -> usize;
     fn current_cell_addr(&self) -> CellAddr;

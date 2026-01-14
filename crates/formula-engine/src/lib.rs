@@ -58,8 +58,8 @@ pub use editing::{
 };
 pub use engine::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
-    ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope, PrecedentNode, RecalcMode,
-    RecalcValueChange,
+    EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope,
+    PrecedentNode, RecalcMode, RecalcValueChange,
 };
 pub use parser::{
     lex, lex_partial, parse_formula_partial, FunctionContext, ParseContext, PartialLex, PartialParse,
