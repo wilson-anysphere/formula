@@ -2661,6 +2661,8 @@ export function bindYjsToDocumentController(options) {
     let existingEncPayload = undefined;
     /** @type {string | null} */
     let existingEncKeyId = null;
+    /** @type {boolean | null} */
+    let encPayloadSupported = null;
     for (const rawKey of targets) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
@@ -2669,8 +2671,10 @@ export function bindYjsToDocumentController(options) {
       if (encRaw !== undefined) {
         existingEnc = true;
         existingEncPayload = encRaw;
-        if (isEncryptedCellPayload(encRaw)) {
-          existingEncKeyId = encRaw.keyId;
+        encPayloadSupported = isEncryptedCellPayload(encRaw);
+        const keyId = typeof encRaw === "object" && encRaw && typeof encRaw.keyId === "string" ? String(encRaw.keyId).trim() : "";
+        if (keyId) {
+          existingEncKeyId = keyId;
         }
         break;
       }
@@ -2684,22 +2688,22 @@ export function bindYjsToDocumentController(options) {
       : false;
 
     const wantsEncryption = existingEnc || shouldEncryptByConfig;
-    if (!wantsEncryption) return { allowed: true, existingEncKeyId };
+    if (!wantsEncryption) return { allowed: true, existingEncKeyId, encPayloadSupported };
 
     // If the cell is encrypted (or must be encrypted by config) we need a key to
     // avoid writing plaintext into the shared CRDT.
-    if (!key) return { allowed: false, existingEncKeyId };
+    if (!key) return { allowed: false, existingEncKeyId, encPayloadSupported };
 
     // If a cell already contains an `enc` payload, require that the key resolver returns
     // a *matching* key id (and reject unknown payload schemas). This prevents an older
     // client from overwriting encrypted content it cannot decrypt (including newer
     // encryption versions) just because it happens to have *some* key material.
     if (existingEnc) {
-      if (!isEncryptedCellPayload(existingEncPayload)) return { allowed: false, existingEncKeyId };
-      if (key.keyId !== existingEncPayload.keyId) return { allowed: false, existingEncKeyId };
+      if (!encPayloadSupported) return { allowed: false, existingEncKeyId, encPayloadSupported };
+      if (key.keyId !== existingEncPayload.keyId) return { allowed: false, existingEncKeyId, encPayloadSupported };
     }
 
-    return { allowed: true, existingEncKeyId };
+    return { allowed: true, existingEncKeyId, encPayloadSupported };
   }
 
   /**
@@ -3092,13 +3096,16 @@ export function bindYjsToDocumentController(options) {
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
       const allowedByPermissions = editGuard ? editGuard(cellRef) : true;
-      const encryptionCheck = needsEncryptionGuard ? canWriteCellWithEncryption(cellRef) : { allowed: true, existingEncKeyId: null };
+      const encryptionCheck = needsEncryptionGuard
+        ? canWriteCellWithEncryption(cellRef)
+        : { allowed: true, existingEncKeyId: null, encPayloadSupported: null };
       const allowedByEncryption = Boolean(encryptionCheck.allowed);
 
       if (allowedByPermissions && allowedByEncryption) {
         allowed.push(delta);
       } else {
         const existingEncKeyId = typeof encryptionCheck?.existingEncKeyId === "string" ? encryptionCheck.existingEncKeyId : null;
+        const encryptionPayloadUnsupported = encryptionCheck?.encPayloadSupported === false;
         rejected.push({
           ...delta,
           rejectionKind: "cell",
@@ -3110,6 +3117,7 @@ export function bindYjsToDocumentController(options) {
           // surface "missing encryption key" rather than a generic permission error.
           rejectionReason: !allowedByEncryption ? "encryption" : !allowedByPermissions ? "permission" : "unknown",
           ...(existingEncKeyId ? { encryptionKeyId: existingEncKeyId } : {}),
+          ...(encryptionPayloadUnsupported ? { encryptionPayloadUnsupported: true } : {}),
         });
         if (!allowedByEncryption) {
           console.warn(

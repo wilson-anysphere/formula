@@ -123,6 +123,13 @@ function inferEncryptionKeyId(rejected: any[]): string | null {
   return null;
 }
 
+function inferEncryptionPayloadUnsupported(rejected: any[]): boolean {
+  for (const delta of rejected) {
+    if ((delta as any)?.encryptionPayloadUnsupported === true) return true;
+  }
+  return false;
+}
+
 /**
  * Best-effort UX for binder edit rejections.
  *
@@ -160,13 +167,18 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
   const kind = inferRejectionKind(rejected);
   const target = describeRejectedTarget(kind, rejected);
   const encryptionKeyId = reason === "encryption" ? inferEncryptionKeyId(rejected) : null;
+  const encryptionPayloadUnsupported = reason === "encryption" ? inferEncryptionPayloadUnsupported(rejected) : false;
 
   const message = (() => {
     if (reason === "encryption") {
-      const suffix = encryptionKeyId ? ` (key id: ${encryptionKeyId})` : "";
+      const keySuffix = encryptionKeyId ? ` (key id: ${encryptionKeyId})` : "";
+      if (encryptionPayloadUnsupported) {
+        const loc = target ? ` (${target})` : "";
+        return `Encrypted cell payload is in an unsupported format${loc}${keySuffix}. Update Formula to edit.`;
+      }
       return target
-        ? `Missing encryption key for protected cell (${target})${suffix}`
-        : `Missing encryption key for protected cell${suffix}`;
+        ? `Missing encryption key for protected cell (${target})${keySuffix}`
+        : `Missing encryption key for protected cell${keySuffix}`;
     }
 
     if (kind === "format" || kind === "rangeRun") {

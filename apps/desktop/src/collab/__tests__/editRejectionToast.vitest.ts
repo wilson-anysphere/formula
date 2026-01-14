@@ -66,6 +66,25 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("k-range-1");
   });
 
+  it("shows an actionable toast when the encrypted payload schema is unsupported", () => {
+    showCollabEditRejectedToast([
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        rejectionKind: "cell",
+        rejectionReason: "encryption",
+        encryptionPayloadUnsupported: true,
+        encryptionKeyId: "k-range-1",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("unsupported format");
+    expect(content).toContain("Update Formula");
+    expect(content).toContain("k-range-1");
+  });
+
   it("shows a formatting toast for rejected format edits", () => {
     showCollabEditRejectedToast([
       {
