@@ -246,6 +246,8 @@ export class DesktopSharedGrid {
     this.container.setAttribute("aria-rowcount", String(options.rowCount));
     this.container.setAttribute("aria-colcount", String(options.colCount));
     this.container.setAttribute("aria-multiselectable", "true");
+    // If the container is re-used (e.g. grid mode switches), ensure we start from a clean state.
+    this.container.removeAttribute("aria-activedescendant");
     this.container.setAttribute("aria-describedby", this.a11yStatusId);
     this.container.style.touchAction = "none";
 
@@ -337,6 +339,8 @@ export class DesktopSharedGrid {
     this.disposeFns = [];
     this.stopAutoScroll();
     this.renderer.destroy();
+    this.container.removeAttribute("aria-activedescendant");
+    this.container.removeAttribute("aria-describedby");
     this.a11yStatusEl.remove();
     this.a11yActiveCellEl.remove();
   }

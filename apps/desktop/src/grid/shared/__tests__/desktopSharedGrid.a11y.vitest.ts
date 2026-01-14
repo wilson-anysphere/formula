@@ -71,6 +71,8 @@ describe("DesktopSharedGrid a11y", () => {
 
   it("exposes the active cell via aria-activedescendant with stable row/col indices", () => {
     const container = document.createElement("div");
+    // Simulate a reused container that may already have stale a11y attributes.
+    container.setAttribute("aria-activedescendant", "stale-active-descendant");
     document.body.appendChild(container);
 
     const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
@@ -96,6 +98,8 @@ describe("DesktopSharedGrid a11y", () => {
       canvases,
       scrollbars
     });
+
+    expect(container.getAttribute("aria-activedescendant")).toBeNull();
 
     grid.resize(300, 200, 1);
 
@@ -127,4 +131,3 @@ describe("DesktopSharedGrid a11y", () => {
     grid.destroy();
   });
 });
-
