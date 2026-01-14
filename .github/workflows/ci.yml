@@ -250,12 +250,20 @@ jobs:
         run: pnpm build:desktop
 
       - name: Desktop dist asset report
-        run: node scripts/desktop_dist_asset_report.mjs
+        run: node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets-report.json
         env:
           # Optional: define these as GitHub Actions "Variables" to enable gating without
           # changing the workflow. Leaving them unset (or empty) keeps the report informational.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Upload desktop dist asset report (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-dist-assets-report
+          path: desktop-dist-assets-report.json
+          if-no-files-found: ignore
 
       - name: Report frontend asset download size (desktop)
         env:
