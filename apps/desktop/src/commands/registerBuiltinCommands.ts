@@ -745,7 +745,7 @@ export function registerBuiltinCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Open Scenario Manager (What-If Analysis)",
+      description: t("commandDescription.data.forecast.whatIfAnalysis.scenarioManager"),
       keywords: ["what-if", "what if", "scenario", "manager"],
     },
   );
@@ -757,7 +757,7 @@ export function registerBuiltinCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Open Monte Carlo simulation (What-If Analysis)",
+      description: t("commandDescription.data.forecast.whatIfAnalysis.monteCarlo"),
       keywords: ["what-if", "what if", "monte carlo", "simulation"],
     },
   );
@@ -775,7 +775,7 @@ export function registerBuiltinCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Open Goal Seek (What-If Analysis)",
+      description: t("commandDescription.data.forecast.whatIfAnalysis.goalSeek"),
       keywords: ["what-if", "what if", "goal seek"],
     },
   );
@@ -787,7 +787,7 @@ export function registerBuiltinCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Open Solver",
+      description: t("commandDescription.formulas.solutions.solver"),
       keywords: ["solver", "optimization"],
     },
   );
