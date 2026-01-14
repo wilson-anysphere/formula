@@ -78,6 +78,45 @@ fn sheets_reports_workbook_sheet_count_and_3d_reference_span() {
 }
 
 #[test]
+fn sheets_3d_span_expands_by_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet4", "A1", 4.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEETS(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+    // Move Sheet4 into the middle of the span so the set of referenced sheets changes.
+    assert!(engine.reorder_sheet("Sheet4", 1));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+}
+
+#[test]
+fn sheets_3d_span_excludes_deleted_intermediate_sheets() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEETS(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+    // Deleting an intermediate sheet should shrink the span without producing #REF!.
+    engine.delete_sheet("Sheet2").unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}
+
+#[test]
 fn sheet_uses_tab_order_after_reorder() {
     let mut engine = Engine::new();
     engine
