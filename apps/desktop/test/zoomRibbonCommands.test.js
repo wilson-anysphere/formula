@@ -45,13 +45,21 @@ test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry
   const main = fs.readFileSync(mainPath, "utf8");
 
   // Zoom commands should not be hardcoded through the ribbon's `onCommand` switch.
-  // They are either:
-  // - registered as builtin commands (executed through CommandRegistry), or
-  // - routed via a prefix-based handler for dynamic zoom menu items.
+  // They are registered as builtin commands and executed via the standard
+  // ribbon → CommandRegistry bridge (`createRibbonActionsFromCommands`).
   assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoom100["']:/);
   assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoomToSelection["']:/);
 
-  // Ensure ribbon onCommand delegates registered ids through CommandRegistry.
-  assert.match(main, /\bcommandRegistry\.getCommand\(commandId\)/);
-  assert.match(main, /\bexecuteBuiltinCommand\(\s*commandId/);
+  // Ensure the desktop command catalog registers the zoom commands so they can be
+  // dispatched by `createRibbonActionsFromCommands`.
+  const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const commands = fs.readFileSync(commandsPath, "utf8");
+
+  assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.zoomToSelection["']/);
+  assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.openPicker["']/);
+  // Alias used by the ribbon dropdown trigger id.
+  assert.match(commands, /\bregisterBuiltinCommand\(\s*["']view\.zoom\.zoom["']/);
+  // Zoom preset commands are registered dynamically via a helper.
+  assert.match(commands, /\bview\.zoom\.zoom\$\{value\}/);
+  assert.match(commands, /\bfor\s*\(const\s+percent\s+of\s+\[25,\s*50,\s*75,\s*100,\s*150,\s*200,\s*400\]\)/);
 });
