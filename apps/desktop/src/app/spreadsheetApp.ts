@@ -1249,6 +1249,7 @@ export class SpreadsheetApp {
   private splitViewDrawingHitTestIndexGrid: DesktopSharedGrid | null = null;
   private splitViewDrawingHitTestIndexRowsVersion: number | null = null;
   private splitViewDrawingHitTestIndexColsVersion: number | null = null;
+  private splitViewSecondaryDrawingGeomMemo: { grid: DesktopSharedGrid; geom: DrawingGridGeometry } | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly chartCursorScratchRect = { left: 0, top: 0, width: 0, height: 0 };
   private readonly chartCursorScratchBounds = { x: 0, y: 0, width: 0, height: 0 };
@@ -1302,6 +1303,20 @@ export class SpreadsheetApp {
     frozenHeightPx: 0,
   };
   private readonly splitViewSecondaryDrawingInteractionViewportScratch: DrawingViewport = {
+    scrollX: 0,
+    scrollY: 0,
+    width: 0,
+    height: 0,
+    dpr: 1,
+    zoom: 1,
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    frozenRows: 0,
+    frozenCols: 0,
+    frozenWidthPx: 0,
+    frozenHeightPx: 0,
+  };
+  private readonly splitViewSecondaryDrawingHoverViewportScratch: DrawingViewport = {
     scrollX: 0,
     scrollY: 0,
     width: 0,
@@ -8359,7 +8374,14 @@ export class SpreadsheetApp {
     const zoomRaw = secondary.grid.renderer.getZoom();
     const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
 
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations on the pointer-move interaction path.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
 
     out.scrollX = scroll.x;
     out.scrollY = scroll.y;
@@ -8691,42 +8713,29 @@ export class SpreadsheetApp {
 
     const zoomRaw = secondary.grid.renderer.getZoom();
     const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations on the pointermove hover path.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
+    const viewport = this.splitViewSecondaryDrawingHoverViewportScratch;
+    viewport.scrollX = scroll.x;
+    viewport.scrollY = scroll.y;
+    viewport.width = width;
+    viewport.height = height;
+    viewport.dpr = 1;
+    viewport.zoom = zoom;
+    viewport.frozenRows = frozenRows;
+    viewport.frozenCols = frozenCols;
+    viewport.headerOffsetX = headerOffsetX;
+    viewport.headerOffsetY = headerOffsetY;
+    viewport.frozenWidthPx = viewportState.frozenWidth;
+    viewport.frozenHeightPx = viewportState.frozenHeight;
 
-    const viewport: DrawingViewport = {
-      scrollX: scroll.x,
-      scrollY: scroll.y,
-      width,
-      height,
-      dpr: 1,
-      zoom,
-      frozenRows,
-      frozenCols,
-      headerOffsetX,
-      headerOffsetY,
-      frozenWidthPx: viewportState.frozenWidth,
-      frozenHeightPx: viewportState.frozenHeight,
-    };
-
-    const geom: DrawingGridGeometry = {
-      cellOriginPx: (cell) => {
-        const gridRow = cell.row + headerRows;
-        const gridCol = cell.col + headerCols;
-        return {
-          x: secondary.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
-          y: secondary.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
-        };
-      },
-      cellSizePx: (cell) => {
-        const gridRow = cell.row + headerRows;
-        const gridCol = cell.col + headerCols;
-        return {
-          width: secondary.grid.renderer.getColWidth(gridCol),
-          height: secondary.grid.renderer.getRowHeight(gridRow),
-        };
-      },
-    };
-
+    const geom = this.getSplitViewSecondaryDrawingGeom(secondary);
     const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
     const bounds = this.drawingHitTestScratchRect;
     const selectedId = this.getSelectedDrawingId();
@@ -9499,42 +9508,30 @@ export class SpreadsheetApp {
       const headerOffsetY = Math.min(headerHeight, rect.height);
       const zoomRaw = secondary.grid.renderer.getZoom();
       const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
-      const { frozenRows, frozenCols } = this.getFrozen();
+      // Avoid `getFrozen()` allocations; compute frozen counts directly.
+      const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+      const rawFrozenRows = Number(view?.frozenRows);
+      const rawFrozenCols = Number(view?.frozenCols);
+      const maxRows = this.limits.maxRows;
+      const maxCols = this.limits.maxCols;
+      const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+      const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
 
-      const viewport: DrawingViewport = {
-        scrollX: scroll.x,
-        scrollY: scroll.y,
-        width: rect.width,
-        height: rect.height,
-        dpr: 1,
-        zoom,
-        frozenRows,
-        frozenCols,
-        headerOffsetX,
-        headerOffsetY,
-        frozenWidthPx: viewportState.frozenWidth,
-        frozenHeightPx: viewportState.frozenHeight,
-      };
+      const viewport = this.splitViewSecondaryDrawingHoverViewportScratch;
+      viewport.scrollX = scroll.x;
+      viewport.scrollY = scroll.y;
+      viewport.width = rect.width;
+      viewport.height = rect.height;
+      viewport.dpr = 1;
+      viewport.zoom = zoom;
+      viewport.frozenRows = frozenRows;
+      viewport.frozenCols = frozenCols;
+      viewport.headerOffsetX = headerOffsetX;
+      viewport.headerOffsetY = headerOffsetY;
+      viewport.frozenWidthPx = viewportState.frozenWidth;
+      viewport.frozenHeightPx = viewportState.frozenHeight;
 
-      const geom: DrawingGridGeometry = {
-        cellOriginPx: (cell) => {
-          const gridRow = cell.row + headerRows;
-          const gridCol = cell.col + headerCols;
-          return {
-            x: secondary.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
-            y: secondary.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
-          };
-        },
-        cellSizePx: (cell) => {
-          const gridRow = cell.row + headerRows;
-          const gridCol = cell.col + headerCols;
-          return {
-            width: secondary.grid.renderer.getColWidth(gridCol),
-            height: secondary.grid.renderer.getRowHeight(gridRow),
-          };
-        },
-      };
-
+      const geom = this.getSplitViewSecondaryDrawingGeom(secondary);
       const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
       if (selectedId != null && sx >= headerOffsetX && sy >= headerOffsetY) {
         const selectedIndex = index.byId.get(selectedId);
@@ -9568,7 +9565,7 @@ export class SpreadsheetApp {
         }
       }
 
-      const hit = hitTestDrawingsInto(index, viewport, sx, sy, scratchBounds);
+      const hit = hitTestDrawingsInto(index, viewport, sx, sy, scratchBounds, geom);
       if (hit) return { id: hit.id };
     }
 
@@ -12108,6 +12105,7 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndexGrid = null;
     this.splitViewDrawingHitTestIndexRowsVersion = null;
     this.splitViewDrawingHitTestIndexColsVersion = null;
+    this.splitViewSecondaryDrawingGeomMemo = null;
   }
 
   private invalidateDrawingGeometryCaches(): void {
@@ -12134,6 +12132,38 @@ export class SpreadsheetApp {
     return index;
   }
 
+  private getSplitViewSecondaryDrawingGeom(secondary: { container: HTMLElement; grid: DesktopSharedGrid }): DrawingGridGeometry {
+    const cached = this.splitViewSecondaryDrawingGeomMemo;
+    if (cached && cached.grid === secondary.grid) return cached.geom;
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const grid = secondary.grid;
+    const geom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => {
+        const headerWidth = headerCols > 0 ? grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: grid.renderer.getColWidth(gridCol),
+          height: grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    this.splitViewSecondaryDrawingGeomMemo = { grid, geom };
+    return geom;
+  }
+
   private getSplitViewDrawingHitTestIndex(
     secondary: { container: HTMLElement; grid: DesktopSharedGrid },
     objects: readonly DrawingObject[],
@@ -12142,25 +12172,26 @@ export class SpreadsheetApp {
   ): HitTestIndex {
     const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const cached = this.splitViewDrawingHitTestIndex;
-    const versions = (() => {
-      try {
-        const scroll = (secondary.grid.renderer as any)?.scroll;
-        const rowsObj = scroll?.rows;
-        const colsObj = scroll?.cols;
-        const rowsVersion = typeof rowsObj?.getVersion === "function" ? (rowsObj.getVersion() as number) : null;
-        const colsVersion = typeof colsObj?.getVersion === "function" ? (colsObj.getVersion() as number) : null;
-        return { rowsVersion, colsVersion };
-      } catch {
-        return { rowsVersion: null, colsVersion: null };
-      }
-    })();
+    // Avoid allocating an intermediate `{ rowsVersion, colsVersion }` object on hover paths.
+    let rowsVersion: number | null = null;
+    let colsVersion: number | null = null;
+    try {
+      const scroll = (secondary.grid.renderer as any)?.scroll;
+      const rowsObj = scroll?.rows;
+      const colsObj = scroll?.cols;
+      rowsVersion = typeof rowsObj?.getVersion === "function" ? (rowsObj.getVersion() as number) : null;
+      colsVersion = typeof colsObj?.getVersion === "function" ? (colsObj.getVersion() as number) : null;
+    } catch {
+      rowsVersion = null;
+      colsVersion = null;
+    }
     if (
       cached &&
       this.splitViewDrawingHitTestIndexGrid === secondary.grid &&
       this.splitViewDrawingHitTestIndexObjects === objects &&
       Math.abs(cached.zoom - z) < 1e-6 &&
-      (versions.rowsVersion == null || this.splitViewDrawingHitTestIndexRowsVersion === versions.rowsVersion) &&
-      (versions.colsVersion == null || this.splitViewDrawingHitTestIndexColsVersion === versions.colsVersion)
+      (rowsVersion == null || this.splitViewDrawingHitTestIndexRowsVersion === rowsVersion) &&
+      (colsVersion == null || this.splitViewDrawingHitTestIndexColsVersion === colsVersion)
     ) {
       return cached;
     }
@@ -12168,8 +12199,8 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndex = index;
     this.splitViewDrawingHitTestIndexObjects = objects;
     this.splitViewDrawingHitTestIndexGrid = secondary.grid;
-    this.splitViewDrawingHitTestIndexRowsVersion = versions.rowsVersion;
-    this.splitViewDrawingHitTestIndexColsVersion = versions.colsVersion;
+    this.splitViewDrawingHitTestIndexRowsVersion = rowsVersion;
+    this.splitViewDrawingHitTestIndexColsVersion = colsVersion;
     return index;
   }
 
@@ -15207,7 +15238,14 @@ export class SpreadsheetApp {
     const layout = this.chartOverlayLayout(sharedViewport);
     const paneRects = layout.paneRects;
 
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations on scroll/resize driven chart renders.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
 
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
