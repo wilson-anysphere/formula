@@ -159,9 +159,11 @@ Internally, `DataModel` materializes two indices (`RelationshipInfo`):
 - `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**
   (only materialized for in-memory fact tables; for columnar fact tables it stays `None` and the engine
   relies on backend primitives like `filter_eq` / `filter_in` instead)
-- `unmatched_fact_rows: Option<Vec<usize>>` containing **from_table rows whose foreign key is `BLANK` or
-  does not exist in `to_index`** (used for the virtual blank row behavior when `from_index` is not
-  materialized)
+- `unmatched_fact_rows: Option<UnmatchedFactRows>` containing **from_table rows whose foreign key is
+  `BLANK` or does not exist in `to_index`** (used for the virtual blank member behavior when
+  `from_index` is not materialized). `UnmatchedFactRows` is stored either as:
+  - `Sparse(Vec<usize>)` for small sets, or
+  - `Dense { bits: Vec<u64>, len, count }` for large sets (bitset representation).
 
 These indices are built eagerly when the relationship is added. For in-memory tables,
 `DataModel::insert_row(...)` updates `to_index` and `from_index` incrementally (columnar tables are
