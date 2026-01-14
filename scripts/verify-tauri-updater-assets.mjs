@@ -713,7 +713,7 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
     blocks.push({
       heading: "Missing updater manifest signature",
       details: [
-        `apps/desktop/src-tauri/tauri.conf.json has plugins.updater.active=true and a non-placeholder pubkey,`,
+        `${tauriConfigRelativePath} has plugins.updater.active=true and a non-placeholder pubkey,`,
         `but the release is missing "latest.json.sig".`,
       ],
     });
