@@ -85,6 +85,12 @@ function parseArgs(argv) {
 
 Options:
   --check    Fail if any locale source JSON differs from the normalized form.
+
+Notes:
+  - This script only normalizes existing locale sources; it does not validate completeness.
+  - Missing translations still silently fall back to canonical (English) spellings in generated TSVs.
+  - For `es-ES`, sources should be extracted from a real Excel install via:
+      tools/excel-oracle/extract-function-translations.ps1
 `);
       process.exit(0);
     }

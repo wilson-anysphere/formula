@@ -72,6 +72,12 @@ Options:
   --date     Override the generation date written into TSV header comments.
              If not provided, SOURCE_DATE_EPOCH is used (seconds since Unix epoch),
              falling back to 0 for reproducible output.
+
+Notes:
+  - Locale sources live under crates/formula-engine/src/locale/data/sources/*.json.
+  - Missing translations silently fall back to canonical (English) spellings in the generated TSVs.
+  - After re-extracting locale sources from Excel, run:
+      node scripts/normalize-locale-function-sources.js
 `);
       process.exit(0);
     }
