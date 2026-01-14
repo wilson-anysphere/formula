@@ -12304,22 +12304,28 @@ export class SpreadsheetApp {
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const baseObjects = this.listDrawingObjectsForSheet();
     this.drawingObjects = baseObjects;
-    if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
-      this.selectedDrawingId = null;
-    }
 
     const objects: DrawingObject[] = (() => {
       if (!this.useCanvasCharts) return baseObjects;
-      const maxZ = baseObjects.reduce((acc, obj) => Math.max(acc, obj.zOrder), -1);
+      // `listDrawingObjectsForSheet` keeps drawings z-order sorted ascending (back-to-front).
+      // Use the final entry for `maxZ` to avoid an O(n) scan per render.
+      const maxZ = baseObjects.length > 0 ? baseObjects[baseObjects.length - 1]!.zOrder : -1;
       const charts = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, maxZ + 1);
       return charts.length > 0 ? [...baseObjects, ...charts] : baseObjects;
     })();
 
     if (this.useCanvasCharts && this.selectedDrawingId == null && this.selectedChartId != null) {
-      const selectedChartDrawingId = chartStoreIdToDrawingId(this.selectedChartId);
-      if (!objects.some((o) => o.id === selectedChartDrawingId)) {
-        this.selectedChartId = null;
+      // Validating a chart selection should not scan every drawing; chart counts are
+      // typically much smaller than drawing counts.
+      const selectedChartId = this.selectedChartId;
+      const charts = this.chartStore.listCharts();
+      let found = false;
+      for (const chart of charts) {
+        if (chart.id !== selectedChartId) continue;
+        found = chart.sheetId === this.sheetId;
+        break;
       }
+      if (!found) this.selectedChartId = null;
     }
 
     const selectedOverlayId =
