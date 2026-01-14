@@ -30,19 +30,19 @@ export function createRibbonActionsFromCommands(params: {
    */
   onUnknownCommand?: (commandId: string) => void | Promise<void>;
   /**
-    * Fallback handler for unregistered toggle commands.
-    *
-    * Toggle buttons should invoke `onToggle(id, pressed)` only.
-    *
-    * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
-    * immediately after `onToggle`, when this handler returns anything other than
-    * `false` the follow-up `onCommand` callback will be suppressed to avoid
-    * double-executing toggle actions.
-    *
-    * To opt into the legacy `onCommand` fallback behavior for unknown toggles
-    * (e.g. show the default toast / call `onUnknownCommand`), return `false`
-    * synchronously.
-    */
+   * Fallback handler for unregistered toggle commands.
+   *
+   * Toggle buttons should invoke `onToggle(id, pressed)` only.
+   *
+   * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
+   * immediately after `onToggle`, when this handler returns anything other than
+   * `false` the follow-up `onCommand` callback will be suppressed to avoid
+   * double-executing toggle actions.
+   *
+   * To opt into the legacy `onCommand` fallback behavior for unknown toggles
+   * (e.g. show the default toast / call `onUnknownCommand`), return `false`
+   * synchronously.
+   */
   onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
   const {
@@ -160,9 +160,22 @@ export function createRibbonActionsFromCommands(params: {
             markToggleHandled(commandId);
           }
           await handled;
+          return;
         }
-        // If there's no handler for this toggle, intentionally do nothing.
-        // (Legacy: if the host also calls `onCommand`, it can fall back to `onUnknownCommand`.)
+
+        // Fallback: in modern Ribbon builds, toggle buttons do *not* invoke `onCommand`.
+        // Mirror the unknown-command behavior here so unregistered toggle ids still surface
+        // a toast (and so older hosts won't double-toast thanks to `markToggleHandled`).
+        markToggleHandled(commandId);
+        if (onUnknownCommand) {
+          await onUnknownCommand(commandId);
+          return;
+        }
+        if (commandId.startsWith("file.")) {
+          safeShowToast(`File command not implemented: ${commandId}`);
+        } else {
+          safeShowToast(`Ribbon: ${commandId}`);
+        }
       });
     },
   };
