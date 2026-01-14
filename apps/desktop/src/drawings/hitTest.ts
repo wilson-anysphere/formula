@@ -522,7 +522,6 @@ export function hitTestDrawingsObject(
       } else if (!pointInRect(sheetX, sheetY, rect)) {
         continue;
       }
-
       return obj;
     }
     return null;

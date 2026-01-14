@@ -9254,6 +9254,7 @@ export class SpreadsheetApp {
       width: this.width,
       height: this.height,
       dpr: this.dpr,
+      zoom: this.getZoom(),
       frozenRows,
       frozenCols,
       frozenWidthPx: layout.frozenBoundaryX,

@@ -296,6 +296,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
           headerOffsetY: offsetY,
           frozenRows: 1,
           frozenCols: 1,
+          zoom: sharedGrid.renderer.getZoom(),
         }),
       );
 

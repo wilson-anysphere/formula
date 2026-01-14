@@ -27,9 +27,9 @@ describe("DrawingInteractionController hit-test perf", () => {
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 800, height: 600, dpr: 1 };
     const canvas: any = {
       style: { cursor: "" },
-      getBoundingClientRect: () => ({ left: 0, top: 0 }) as unknown as DOMRect,
       addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
       removeEventListener: (type: string) => listeners.delete(type),
+      getBoundingClientRect: () => ({ left: 0, top: 0 }) as unknown as DOMRect,
       setPointerCapture: () => {},
       releasePointerCapture: () => {},
     };
