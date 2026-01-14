@@ -180,3 +180,42 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             self.assertEqual(report["limits_mb"]["binary"], 1.0)
             self.assertEqual(report["binary"]["size_bytes"], 1_500_000)
             self.assertTrue(report["binary"]["over_limit"])
+
+    def test_dist_oversize_failure_still_writes_json(self) -> None:
+        repo_root = self._repo_root()
+        target_dir = repo_root / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(dir=target_dir) as tmp:
+            tmp_dir = Path(tmp)
+            binary_path = tmp_dir / "formula-desktop"
+            dist_dir = tmp_dir / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(binary_path, "wb") as f:
+                f.truncate(10)
+            # Create a 2MB file under dist to exceed a 1MB limit.
+            with open(dist_dir / "big.bin", "wb") as f:
+                f.truncate(2_000_000)
+
+            json_path = tmp_dir / "desktop-size.json"
+            proc = self._run(
+                repo_root,
+                [
+                    "--binary",
+                    binary_path.relative_to(repo_root).as_posix(),
+                    "--dist",
+                    dist_dir.relative_to(repo_root).as_posix(),
+                    "--no-gzip",
+                    "--json-out",
+                    str(json_path),
+                ],
+                extra_env={"FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB": "1"},
+            )
+            self.assertEqual(proc.returncode, 1)
+
+            report = self._read_report(json_path)
+            self._assert_basic_schema(report)
+            self.assertEqual(report["limits_mb"]["dist"], 1.0)
+            self.assertEqual(report["dist"]["size_bytes"], 2_000_000)
+            self.assertTrue(report["dist"]["over_limit"])
