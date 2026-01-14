@@ -445,7 +445,7 @@ console.log(workbookCtx.promptContext);
 | Value | Safe to send to a cloud model by default? | Notes |
 |---|---:|---|
 | `promptContext` | ✅ Yes | Designed to be prompt-facing and budgeted; still subject to your org’s DLP policy. |
-| `retrieved` | ⚠️ Usually | Chunk `text` is redacted/prompt-safe and `metadata.text` is stripped to avoid footguns, but prefer `promptContext` unless you need custom formatting. |
+| `retrieved` | ⚠️ Usually | Chunk `text` is redacted/prompt-safe and `metadata.text` is stripped to avoid footguns. Under structured DLP redaction, chunk ids and metadata tokens (e.g. `sheetName`/`title`) may be replaced with stable placeholders. Prefer `promptContext` unless you need custom formatting. |
 | `indexStats` | ❌ No | Diagnostic/perf info; not useful in prompts and may bloat context. |
 
 ### Common options for `buildWorkbookContextFromSpreadsheetApi()`
