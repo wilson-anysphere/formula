@@ -323,3 +323,28 @@ fn parser_reads_simple_inline_string_with_trailing_bytes() {
         .expect("find cell");
     assert_eq!(cell.value, CellValue::Text(text));
 }
+
+#[test]
+fn parser_reads_simple_inline_string_with_trailing_bytes_non_ascii() {
+    // Ensure the reader does not misclassify a simple-layout string as flagged when trailing bytes
+    // are present and the UTF-16 bytes do not have the common ASCII `high=0` pattern.
+    let text = "😀".to_string();
+    let cch = text.encode_utf16().count() as u32;
+    let utf16 = utf16_le_bytes(&text);
+
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&cch.to_le_bytes());
+    cell_st_payload.extend_from_slice(&utf16);
+    cell_st_payload.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // trailing junk bytes
+
+    let sheet_bin = sheet_with_single_cell_st(&cell_st_payload);
+    let parsed = parse_sheet_bin(&mut Cursor::new(&sheet_bin), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(text));
+}

@@ -1839,9 +1839,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             // bytes with printable ASCII highs), which is typical of misaligned
                             // parsing when a flags byte is mistaken for UTF-16.
                             let mut score = 0i32;
-                            for pair in raw.chunks_exact(2) {
-                                let low = pair[0];
-                                let high = pair[1];
+                            let mut i = 0usize;
+                            while i + 1 < raw.len() {
+                                let low = raw[i];
+                                let high = raw[i + 1];
                                 if high == 0 {
                                     score += 2;
                                     if (0x20..=0x7E).contains(&low) {
@@ -1851,6 +1852,34 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                 if low == 0 && (0x20..=0x7E).contains(&high) {
                                     score -= 1;
                                 }
+
+                                // Penalize invalid surrogate structure. Misaligned parsing is
+                                // likely to introduce unpaired surrogates.
+                                let unit = u16::from_le_bytes([low, high]);
+                                if (0xD800..=0xDBFF).contains(&unit) {
+                                    // High surrogate: must be followed by a low surrogate.
+                                    if i + 3 < raw.len() {
+                                        let next = u16::from_le_bytes([raw[i + 2], raw[i + 3]]);
+                                        if (0xDC00..=0xDFFF).contains(&next) {
+                                            score += 2;
+                                            i += 4;
+                                            continue;
+                                        }
+                                    }
+                                    score -= 5;
+                                } else if (0xDC00..=0xDFFF).contains(&unit) {
+                                    // Low surrogate without preceding high surrogate.
+                                    score -= 5;
+                                }
+
+                                // NULs and control characters are uncommon in visible cell text.
+                                if unit == 0 {
+                                    score -= 2;
+                                } else if unit < 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D
+                                {
+                                    score -= 1;
+                                }
+                                i += 2;
                             }
                             score
                         };
