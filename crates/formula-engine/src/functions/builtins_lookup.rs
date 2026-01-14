@@ -9,7 +9,7 @@ use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::pivot::{
     AggregationType as PivotAggregationType, PivotKeyPart, PivotValue as PivotEngineValue,
 };
-use crate::value::{Array, ErrorKind, Value};
+use crate::value::{casefold, Array, ErrorKind, Value};
 use chrono::Datelike;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -1220,9 +1220,9 @@ struct PivotLayout {
     top_left_col: u32,
     row_fields: HashMap<String, u32>,
     value_cols: Vec<PivotValueCol>,
-    /// Map of uppercased rendered header -> index into `value_cols`.
+    /// Map of casefolded rendered header -> index into `value_cols`.
     value_col_by_header: HashMap<String, usize>,
-    /// Map of uppercased value field name -> indices into `value_cols`.
+    /// Map of casefolded value field name -> indices into `value_cols`.
     value_cols_by_value_name: HashMap<String, Vec<usize>>,
     has_column_fields: bool,
 }
@@ -1298,7 +1298,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut row_criteria = Vec::new();
     let mut col_criteria = Vec::new();
     for (field, item_value) in criteria {
-        if let Some(col) = layout.row_fields.get(&field.to_ascii_uppercase()) {
+        if let Some(col) = layout.row_fields.get(&casefold(&field)) {
             row_criteria.push((*col, item_value));
             continue;
         }
@@ -1639,9 +1639,9 @@ fn find_pivot_layout(
     let sheet_id = &pivot_ref.sheet_id;
     let anchor = pivot_ref.start;
 
-    let data_field_lc = data_field.to_ascii_lowercase();
-    let data_field_suffix_lc = format!(" - {data_field_lc}");
-    let data_field_gt_lc = format!("grand total - {data_field_lc}");
+    let data_field_fold = casefold(data_field);
+    let data_field_suffix_fold = casefold(&format!(" - {data_field}"));
+    let data_field_gt_fold = casefold(&format!("Grand Total - {data_field}"));
 
     let mut header_row: Option<u32> = None;
     let mut header_match_col: Option<u32> = None;
@@ -1661,10 +1661,10 @@ fn find_pivot_layout(
                 continue;
             }
 
-            let t_lc = t.to_ascii_lowercase();
-            let matches = t_lc == data_field_lc
-                || t_lc == data_field_gt_lc
-                || t_lc.ends_with(&data_field_suffix_lc);
+            let t_fold = casefold(&t);
+            let matches = t_fold == data_field_fold
+                || t_fold == data_field_gt_fold
+                || t_fold.ends_with(&data_field_suffix_fold);
             if !matches {
                 continue;
             }
@@ -1749,7 +1749,7 @@ fn find_pivot_layout(
             _ => return Err(ErrorKind::Ref),
         };
         // Duplicate field names would make criteria ambiguous.
-        if row_fields.insert(name.to_ascii_uppercase(), col).is_some() {
+        if row_fields.insert(casefold(&name), col).is_some() {
             return Err(ErrorKind::Ref);
         }
     }
@@ -1788,14 +1788,14 @@ fn find_pivot_layout(
             kind: parsed.kind,
         });
 
-        let header_key = header.to_ascii_uppercase();
+        let header_key = casefold(&header);
         if value_col_by_header.insert(header_key, idx).is_some() {
             // Duplicate rendered header -> ambiguous, not a supported pivot shape.
             return Err(ErrorKind::Ref);
         }
 
         value_cols_by_value_name
-            .entry(parsed.value_name.to_ascii_uppercase())
+            .entry(casefold(&parsed.value_name))
             .or_default()
             .push(idx);
     }
@@ -1864,7 +1864,7 @@ fn select_pivot_value_col(
 ) -> Result<u32, ErrorKind> {
     // If the caller provided an exact rendered header (e.g. `"A - Sum of Sales"`),
     // honor it directly.
-    let data_field_key = data_field.to_ascii_uppercase();
+    let data_field_key = casefold(data_field);
     let mut candidates: Vec<usize> =
         if let Some(idx) = layout.value_col_by_header.get(&data_field_key) {
             vec![*idx]
@@ -1891,7 +1891,7 @@ fn select_pivot_value_col(
             col_items.iter().all(|needle| {
                 col.column_items
                     .iter()
-                    .any(|item| item.eq_ignore_ascii_case(needle))
+                    .any(|item| text_eq_case_insensitive(item, needle))
             })
         });
 
@@ -2038,7 +2038,7 @@ fn pivot_item_matches(
         (_, Value::Error(e)) => Err(*e),
         (Value::Text(cell_text), _) => {
             let item_text = item.coerce_to_string_with_ctx(ctx)?;
-            Ok(cell_text.eq_ignore_ascii_case(&item_text))
+            Ok(text_eq_case_insensitive(cell_text, &item_text))
         }
         (Value::Blank, _) => {
             let item_text = item.coerce_to_string_with_ctx(ctx)?;

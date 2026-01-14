@@ -1352,6 +1352,29 @@ fn getpivotdata_errors() {
 }
 
 #[test]
+fn getpivotdata_is_case_insensitive_for_unicode_fields_items_and_values() {
+    let mut sheet = TestSheet::new();
+
+    // Simulated pivot-engine output (tabular layout, 1 row field, 1 value field) with Unicode
+    // identifiers that require Unicode-aware case folding (ß -> SS).
+    sheet.set("A1", "Straße");
+    sheet.set("B1", "Sum of Maß");
+    sheet.set("A2", "Maß");
+    sheet.set("B2", 10.0);
+    sheet.set("A3", "Grand Total");
+    sheet.set("B3", 10.0);
+
+    // Ensure we can reference:
+    // - the value header "Sum of Maß" as "SUM OF MASS"
+    // - the field header "Straße" as "STRASSE"
+    // - the item "Maß" as "MASS"
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"SUM OF MASS\", A1, \"STRASSE\", \"MASS\")"),
+        Value::Number(10.0)
+    );
+}
+
+#[test]
 fn getpivotdata_supports_column_fields() {
     let mut sheet = TestSheet::new();
 
@@ -1405,6 +1428,32 @@ fn getpivotdata_supports_column_fields() {
     assert_eq!(
         sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2)"),
         Value::Number(700.0)
+    );
+}
+
+#[test]
+fn getpivotdata_column_item_criteria_is_case_insensitive_for_unicode_text() {
+    let mut sheet = TestSheet::new();
+
+    // Simulated pivot-engine output with a column field item containing ß ("Maß").
+    sheet.set("A1", "Region");
+    sheet.set("B1", "Maß - Sum of Sales");
+    sheet.set("C1", "Grand Total - Sum of Sales");
+
+    sheet.set("A2", "East");
+    sheet.set("B2", 100.0);
+    sheet.set("C2", 100.0);
+
+    sheet.set("A3", "Grand Total");
+    sheet.set("B3", 100.0);
+    sheet.set("C3", 100.0);
+
+    // Column-field pivots do not render the column field name in the output grid, so the scan-based
+    // GETPIVOTDATA implementation treats unknown fields as column criteria. Use "Product" as a
+    // placeholder field name (matching other tests); the important part is the item match.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\", \"Product\", \"MASS\")"),
+        Value::Number(100.0)
     );
 }
 
