@@ -724,10 +724,6 @@ export class SecondaryGridView {
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
-    // Axis size overrides mutate the underlying GridGeometry while the `DrawingOverlay` spatial
-    // index is keyed by the stable `geom` object reference. Invalidate the cached bounds so the
-    // overlay recomputes drawing positions under the new row/col sizes.
-    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 
