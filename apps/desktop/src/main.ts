@@ -7618,6 +7618,7 @@ registerDesktopCommands({
   sheetStructureHandlers: {
     insertSheet: handleAddSheet,
     deleteActiveSheet: handleDeleteActiveSheet,
+    openOrganizeSheets,
   },
   workbenchFileHandlers: {
     newWorkbook: () => {
@@ -7738,10 +7739,6 @@ registerDesktopCommands({
     },
   },
   openCommandPalette: () => openCommandPalette?.(),
-  sheetStructureHandlers: {
-    insertSheet: handleAddSheet,
-    deleteActiveSheet: handleDeleteActiveSheet,
-  },
   openGoalSeekDialog: () => showGoalSeekDialogModal(),
 });
 
@@ -8915,9 +8912,6 @@ function handleRibbonCommand(commandId: string): void {
     case "home.cells.format":
       // This command is a dropdown with menu items; the top-level command is not expected
       // to fire when the menu is present. Keep this as a fallback.
-      return;
-    case "home.cells.format.organizeSheets":
-      openOrganizeSheets();
       return;
     default:
       if (commandId.startsWith("file.")) {

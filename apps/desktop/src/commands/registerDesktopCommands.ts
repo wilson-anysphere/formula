@@ -64,6 +64,10 @@ export type SheetStructureCommandHandlers = {
    * Delete the active sheet (with confirmation) and activate a remaining sheet if needed.
    */
   deleteActiveSheet: () => void | Promise<void>;
+  /**
+   * Open the "Organize Sheets" dialog (reorder/rename/delete).
+   */
+  openOrganizeSheets?: (() => void | Promise<void>) | null;
 };
 
 export function registerDesktopCommands(params: {
@@ -523,6 +527,25 @@ export function registerDesktopCommands(params: {
       icon: null,
       description: "Delete the active sheet",
       keywords: ["delete", "sheet", "worksheet", "tab"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "home.cells.format.organizeSheets",
+    "Organize Sheets…",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handler = sheetStructureHandlers?.openOrganizeSheets;
+      if (!handler) {
+        safeShowToast("Organize Sheets is not available in this environment.", "warning");
+        return;
+      }
+      await handler();
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Open the Organize Sheets dialog",
+      keywords: ["organize sheets", "sheets", "tabs", "reorder", "rename"],
     },
   );
 

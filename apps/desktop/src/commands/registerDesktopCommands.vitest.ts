@@ -128,12 +128,13 @@ describe("registerDesktopCommands", () => {
 
     const insertSheet = vi.fn(async () => {});
     const deleteActiveSheet = vi.fn(async () => {});
+    const openOrganizeSheets = vi.fn(async () => {});
 
     registerDesktopCommands({
       commandRegistry,
       app: { isReadOnly: () => false } as any,
       layoutController: null,
-      sheetStructureHandlers: { insertSheet, deleteActiveSheet },
+      sheetStructureHandlers: { insertSheet, deleteActiveSheet, openOrganizeSheets },
       applyFormattingToSelection: () => {},
       getActiveCellNumberFormat: () => null,
       getActiveCellIndentLevel: () => 0,
@@ -158,6 +159,9 @@ describe("registerDesktopCommands", () => {
 
     await commandRegistry.executeCommand("home.cells.delete.deleteSheet");
     expect(deleteActiveSheet).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("home.cells.format.organizeSheets");
+    expect(openOrganizeSheets).toHaveBeenCalledTimes(1);
   });
 
   it("registers Data → Queries & Connections commands when dataQueriesHandlers are provided", async () => {
