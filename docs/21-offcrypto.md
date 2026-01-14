@@ -120,6 +120,8 @@ Current state in this repo (important nuance):
   - Without the `formula-io` cargo feature **`encrypted-workbooks`**, encrypted OOXML containers
     surface `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
     `EncryptionInfo` versions).
+    - Note: `formula-io` currently enables `encrypted-workbooks` by default. Consumers that want to
+      exclude password-based decryption (and its crypto dependencies) can disable default features.
   - With **`encrypted-workbooks`** enabled:
     - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::PasswordRequired` when no
       password is provided.

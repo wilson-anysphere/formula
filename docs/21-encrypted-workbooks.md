@@ -30,6 +30,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   - Without the `formula-io` cargo feature **`encrypted-workbooks`**, Office-encrypted OOXML
     workbooks are treated as unsupported and surface `formula_io::Error::UnsupportedEncryption`
     (Formula does not attempt to decrypt them).
+    - Note: `formula-io` currently enables `encrypted-workbooks` by default. Consumers that want to
+      exclude password-based decryption (and its crypto dependencies) can disable default features.
   - With **`encrypted-workbooks`** enabled:
     - `open_workbook(..)` / `open_workbook_model(..)` surface `formula_io::Error::PasswordRequired`
       when no password is provided.
