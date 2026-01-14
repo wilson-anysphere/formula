@@ -4164,7 +4164,10 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setInfoSystem")]
     pub fn set_info_system(&mut self, system: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
-        info.system = system;
+        info.system = system.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
         let _ = self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
@@ -4174,7 +4177,10 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setInfoOSVersion")]
     pub fn set_info_os_version(&mut self, os_version: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
-        info.osversion = os_version;
+        info.osversion = os_version.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
         let _ = self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
@@ -4184,7 +4190,10 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setInfoRelease")]
     pub fn set_info_release(&mut self, release: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
-        info.release = release;
+        info.release = release.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
         let _ = self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
@@ -4194,7 +4203,10 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setInfoVersion")]
     pub fn set_info_version(&mut self, version: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
-        info.version = version;
+        info.version = version.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
         let _ = self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
@@ -4202,23 +4214,35 @@ impl WasmWorkbook {
     }
 
     #[wasm_bindgen(js_name = "setInfoMemAvail")]
-    pub fn set_info_mem_avail(&mut self, mem_avail: Option<f64>) {
+    pub fn set_info_mem_avail(&mut self, mem_avail: Option<f64>) -> Result<(), JsValue> {
+        if let Some(n) = mem_avail {
+            if !n.is_finite() {
+                return Err(js_err("memAvail must be a finite number"));
+            }
+        }
         let mut info = self.inner.engine.engine_info().clone();
         info.memavail = mem_avail;
-        let _ = self.inner.with_manual_calc_mode(|this| {
+        self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
-        });
+        })?;
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "setInfoTotMem")]
-    pub fn set_info_tot_mem(&mut self, tot_mem: Option<f64>) {
+    pub fn set_info_tot_mem(&mut self, tot_mem: Option<f64>) -> Result<(), JsValue> {
+        if let Some(n) = tot_mem {
+            if !n.is_finite() {
+                return Err(js_err("totMem must be a finite number"));
+            }
+        }
         let mut info = self.inner.engine.engine_info().clone();
         info.totmem = tot_mem;
-        let _ = self.inner.with_manual_calc_mode(|this| {
+        self.inner.with_manual_calc_mode(|this| {
             this.engine.set_engine_info(info);
             Ok(())
-        });
+        })?;
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "fromJson")]
