@@ -14265,10 +14265,10 @@ fn walk_expr_flags(
                             }
                         }
                     }
-                    "LET" => {
-                        if args.len() < 3 || args.len() % 2 == 0 {
-                            return;
-                        }
+                     "LET" => {
+                         if args.len() < 3 || args.len() % 2 == 0 {
+                             return;
+                         }
 
                         lexical_scopes.push(HashSet::new());
                         for pair in args[..args.len() - 1].chunks_exact(2) {

@@ -81,6 +81,7 @@ pub use parser::{
 };
 pub use perf::{run_benchmarks, BenchmarkResult};
 pub use value::{Entity, ErrorKind, Record, Value};
+pub use metadata::FormatRun;
 
 /// Parse a formula into an [`Ast`].
 ///
