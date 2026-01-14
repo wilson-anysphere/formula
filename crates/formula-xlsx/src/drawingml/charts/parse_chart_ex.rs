@@ -50,7 +50,7 @@ pub fn parse_chart_ex(
 
     let root = doc.root_element();
     let root_name = root.tag_name().name();
-    let root_ns = root.tag_name().namespace().unwrap_or("");
+    let root_ns = root.tag_name().namespace().unwrap_or("<none>");
 
     let external_data_node = root
         .descendants()
