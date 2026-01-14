@@ -1024,8 +1024,9 @@ function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) 
  * }} opts
  */
 async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, token, publicKey, pubkeyKeyId }) {
-  const platforms = manifest?.platforms;
-  if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
+  const foundPlatforms = findPlatformsObject(manifest);
+  const platforms = foundPlatforms?.platforms;
+  if (!platforms) {
     throw new ActionableError(
       "latest.json is missing a 'platforms' object; cannot verify updater asset signatures.",
     );
