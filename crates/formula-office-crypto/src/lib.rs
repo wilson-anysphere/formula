@@ -630,10 +630,10 @@ mod tests {
                 cipher_algorithm: String::new(),
                 cipher_chaining: String::new(),
             },
-            data_integrity: agile::AgileDataIntegrity {
+            data_integrity: Some(agile::AgileDataIntegrity {
                 encrypted_hmac_key: Vec::new(),
                 encrypted_hmac_value: Vec::new(),
-            },
+            }),
             password_key_encryptor: agile::AgilePasswordKeyEncryptor {
                 salt: Vec::new(),
                 block_size: 16,

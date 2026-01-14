@@ -44,8 +44,9 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
   `crates/formula-office-crypto`
-  - Note: `formula-office-crypto` also validates `dataIntegrity` (HMAC) and returns
-    `OfficeCryptoError::IntegrityCheckFailed` on mismatch.
+  - Note: `formula-office-crypto` validates `dataIntegrity` (HMAC) when present and returns
+    `OfficeCryptoError::IntegrityCheckFailed` on mismatch. If the `<dataIntegrity>` element is
+    missing, it will still decrypt but cannot validate integrity.
 - **MS-OFFCRYPTO parsing + decrypt helpers + low-level building blocks:** `crates/formula-offcrypto`
   - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
   - End-to-end decrypt helpers:
@@ -76,7 +77,7 @@ Standard/CryptoAPI (minor=2) encryption is a different scheme; see
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` HMAC verification **when `<dataIntegrity>` is present** (algorithm documented below). Some real-world producers omit the `<dataIntegrity>` element; in that case `crates/formula-xlsx::offcrypto` will still decrypt `EncryptedPackage` but **skips integrity verification** (and `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`). `crates/formula-office-crypto` still requires `dataIntegrity`. `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`. |
+| Integrity | `dataIntegrity` HMAC verification **when `<dataIntegrity>` is present** (algorithm documented below). Some real-world producers omit the `<dataIntegrity>` element; in that case `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` will still decrypt `EncryptedPackage` but **skip integrity verification** (and `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`). `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`. |
 
 ### Explicitly unsupported (hard errors)
 

@@ -69,7 +69,7 @@ pub(crate) struct AgileEncryptionInfo {
     pub(crate) flags: u32,
     pub(crate) key_data: AgileKeyData,
     #[allow(dead_code)]
-    pub(crate) data_integrity: AgileDataIntegrity,
+    pub(crate) data_integrity: Option<AgileDataIntegrity>,
     pub(crate) password_key_encryptor: AgilePasswordKeyEncryptor,
 }
 
@@ -554,58 +554,68 @@ pub(crate) fn decrypt_agile_encrypted_package(
         })?;
         let package_key: Zeroizing<Vec<u8>> = Zeroizing::new(package_key_bytes.to_vec());
 
-        // Decrypt the HMAC key/value (dataIntegrity).
+        // Decrypt the HMAC key/value (dataIntegrity), if present.
         //
         // The HMAC key/value are encrypted using the package key, with IVs derived from the keyData
         // salt and fixed block keys.
-        let hash_size = info.key_data.hash_size;
-        if hash_size == 0 {
-            return Err(OfficeCryptoError::InvalidFormat(
-                "keyData hashSize must be non-zero".to_string(),
-            ));
-        }
-        let digest_len = info.key_data.hash_algorithm.digest_len();
-        if hash_size > digest_len {
-            return Err(OfficeCryptoError::InvalidFormat(format!(
-                "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
-                info.key_data.hash_algorithm.as_ooxml_name()
-            )));
-        }
-        let iv_hmac_key = derive_iv(
-            info.key_data.hash_algorithm,
-            &info.key_data.salt,
-            BLOCK_KEY_INTEGRITY_HMAC_KEY,
-            info.key_data.block_size,
-        );
-        let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-            &package_key,
-            &iv_hmac_key,
-            &info.data_integrity.encrypted_hmac_key,
-        )?);
-        let hmac_key_len = std::cmp::min(hash_size, hmac_key_plain.len());
-        if hmac_key_len == 0 {
-            return Err(OfficeCryptoError::InvalidFormat(
-                "decrypted encryptedHmacKey is empty".to_string(),
-            ));
-        }
-        let hmac_key_plain = &hmac_key_plain[..hmac_key_len];
+        //
+        // Some real-world producers omit the `<dataIntegrity>` element. In that case we can still
+        // decrypt the package but cannot validate integrity.
+        let mut hash_size: usize = 0;
+        let mut hmac_key_len: usize = 0;
+        let (hmac_key_plain, expected_hmac) = if let Some(data_integrity) = &info.data_integrity {
+            hash_size = info.key_data.hash_size;
+            if hash_size == 0 {
+                return Err(OfficeCryptoError::InvalidFormat(
+                    "keyData hashSize must be non-zero".to_string(),
+                ));
+            }
+            let digest_len = info.key_data.hash_algorithm.digest_len();
+            if hash_size > digest_len {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
+                    info.key_data.hash_algorithm.as_ooxml_name()
+                )));
+            }
 
-        let iv_hmac_val = derive_iv(
-            info.key_data.hash_algorithm,
-            &info.key_data.salt,
-            BLOCK_KEY_INTEGRITY_HMAC_VALUE,
-            info.key_data.block_size,
-        );
-        let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-            &package_key,
-            &iv_hmac_val,
-            &info.data_integrity.encrypted_hmac_value,
-        )?);
-        let expected_hmac = hmac_value_plain.get(..hash_size).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(
-                "decrypted encryptedHmacValue shorter than hash output".to_string(),
-            )
-        })?;
+            let iv_hmac_key = derive_iv(
+                info.key_data.hash_algorithm,
+                &info.key_data.salt,
+                BLOCK_KEY_INTEGRITY_HMAC_KEY,
+                info.key_data.block_size,
+            );
+            let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+                &package_key,
+                &iv_hmac_key,
+                &data_integrity.encrypted_hmac_key,
+            )?);
+            hmac_key_len = std::cmp::min(hash_size, hmac_key_plain.len());
+            if hmac_key_len == 0 {
+                return Err(OfficeCryptoError::InvalidFormat(
+                    "decrypted encryptedHmacKey is empty".to_string(),
+                ));
+            }
+
+            let iv_hmac_val = derive_iv(
+                info.key_data.hash_algorithm,
+                &info.key_data.salt,
+                BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+                info.key_data.block_size,
+            );
+            let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+                &package_key,
+                &iv_hmac_val,
+                &data_integrity.encrypted_hmac_value,
+            )?);
+            let expected_hmac = hmac_value_plain.get(..hash_size).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "decrypted encryptedHmacValue shorter than hash output".to_string(),
+                )
+            })?;
+            (Some(hmac_key_plain), Some(expected_hmac.to_vec()))
+        } else {
+            (None, None)
+        };
 
         // Decrypt the package data in 4096-byte segments.
         let mut out = Vec::new();
@@ -639,7 +649,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
         }
         out.truncate(expected_len);
 
-        // Validate data integrity (HMAC).
+        // Validate data integrity (HMAC) when `<dataIntegrity>` is present.
         //
         // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
         // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
@@ -650,41 +660,47 @@ pub(crate) fn decrypt_agile_encrypted_package(
         // - HMAC over (8-byte size prefix + plaintext ZIP)
         //
         // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage stream.
-        let computed_hmac_stream_full =
-            compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-        let computed_hmac_stream = computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
-        })?;
-        if !ct_eq(expected_hmac, computed_hmac_stream) {
-            let computed_hmac_ciphertext_full =
-                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext);
-            let computed_hmac_ciphertext = computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
+        if let (Some(hmac_key_plain), Some(expected_hmac)) = (&hmac_key_plain, &expected_hmac) {
+            let hmac_key_plain = &hmac_key_plain[..hmac_key_len];
+
+            let computed_hmac_stream_full =
+                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
+            let computed_hmac_stream = computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
             })?;
-            if !ct_eq(expected_hmac, computed_hmac_ciphertext) {
-                let computed_hmac_plaintext_full =
-                    compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
-                let computed_hmac_plaintext =
-                    computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
+            if !ct_eq(expected_hmac, computed_hmac_stream) {
+                let computed_hmac_ciphertext_full =
+                    compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext);
+                let computed_hmac_ciphertext =
+                    computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
                         OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
                     })?;
-                if !ct_eq(expected_hmac, computed_hmac_plaintext) {
-                    let computed_hmac_header_plus_plaintext_full = compute_hmac_two(
-                        info.key_data.hash_algorithm,
-                        hmac_key_plain,
-                        &encrypted_package[..8],
-                        &out,
-                    );
-                    let computed_hmac_header_plus_plaintext = computed_hmac_header_plus_plaintext_full
-                        .get(..hash_size)
-                        .ok_or_else(|| {
+                if !ct_eq(expected_hmac, computed_hmac_ciphertext) {
+                    let computed_hmac_plaintext_full =
+                        compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
+                    let computed_hmac_plaintext =
+                        computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
                             OfficeCryptoError::InvalidFormat(
                                 "HMAC output shorter than hashSize".to_string(),
                             )
                         })?;
-                    if !ct_eq(expected_hmac, computed_hmac_header_plus_plaintext) {
-                        last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
-                        continue;
+                    if !ct_eq(expected_hmac, computed_hmac_plaintext) {
+                        let computed_hmac_header_plus_plaintext_full = compute_hmac_two(
+                            info.key_data.hash_algorithm,
+                            hmac_key_plain,
+                            &encrypted_package[..8],
+                            &out,
+                        );
+                        let computed_hmac_header_plus_plaintext =
+                            computed_hmac_header_plus_plaintext_full.get(..hash_size).ok_or_else(|| {
+                                OfficeCryptoError::InvalidFormat(
+                                    "HMAC output shorter than hashSize".to_string(),
+                                )
+                            })?;
+                        if !ct_eq(expected_hmac, computed_hmac_header_plus_plaintext) {
+                            last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
+                            continue;
+                        }
                     }
                 }
             }
@@ -971,7 +987,7 @@ fn compute_hmac_two(hash_alg: HashAlgorithm, key: &[u8], a: &[u8], b: &[u8]) -> 
 
 struct AgileDescriptor {
     key_data: AgileKeyData,
-    data_integrity: AgileDataIntegrity,
+    data_integrity: Option<AgileDataIntegrity>,
     password_key_encryptor: AgilePasswordKeyEncryptor,
 }
 
@@ -1180,9 +1196,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
         key_data: key_data.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("missing keyData element".to_string())
         })?,
-        data_integrity: data_integrity.ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("missing dataIntegrity element".to_string())
-        })?,
+        data_integrity,
         password_key_encryptor: password_key_encryptor.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("missing password keyEncryptor".to_string())
         })?,
@@ -1749,10 +1763,10 @@ pub(crate) mod tests {
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
-            data_integrity: AgileDataIntegrity {
+            data_integrity: Some(AgileDataIntegrity {
                 encrypted_hmac_key,
                 encrypted_hmac_value,
-            },
+            }),
             password_key_encryptor: AgilePasswordKeyEncryptor {
                 salt: salt_key_encryptor.to_vec(),
                 block_size,
@@ -1931,10 +1945,10 @@ pub(crate) mod tests {
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
-            data_integrity: AgileDataIntegrity {
+            data_integrity: Some(AgileDataIntegrity {
                 encrypted_hmac_key,
                 encrypted_hmac_value,
-            },
+            }),
             password_key_encryptor: AgilePasswordKeyEncryptor {
                 salt: password_salt,
                 block_size,
@@ -2123,11 +2137,11 @@ pub(crate) mod tests {
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
-            data_integrity: AgileDataIntegrity {
+            data_integrity: Some(AgileDataIntegrity {
                 // Not used: decryption fails before integrity checks.
                 encrypted_hmac_key: Vec::new(),
                 encrypted_hmac_value: Vec::new(),
-            },
+            }),
             password_key_encryptor: AgilePasswordKeyEncryptor {
                 salt: vec![0u8; 16],
                 block_size: 16,
