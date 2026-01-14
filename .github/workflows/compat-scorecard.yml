@@ -135,6 +135,10 @@ jobs:
         env:
           # Prefer rendering the commit we are summarizing, not the workflow_run runner checkout SHA.
           GITHUB_SHA: ${{ steps.runs.outputs.sha }}
+          # Point the scorecard's "Run:" metadata at the Excel-compat run, since that's where the
+          # calc fidelity signal comes from. Corpus run URLs are included in the Inputs section
+          # when present.
+          GITHUB_RUN_ID: ${{ steps.runs.outputs.excel_run_id }}
         run: |
           python tools/compat_scorecard.py \
             --corpus-summary artifacts/corpus/tools/corpus/out/public/summary.json \
