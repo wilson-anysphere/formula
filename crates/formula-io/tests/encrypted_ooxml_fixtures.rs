@@ -266,7 +266,7 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
 
         let parsed = parse_standard_encryption_info(&bytes)
             .unwrap_or_else(|err| panic!("parse {fixture_name} Standard EncryptionInfo: {err}"));
-
+ 
         let expected = StandardEncryptionInfoParams {
             version_major,
             csp_name: Some("Microsoft Enhanced RSA and AES Cryptographic Provider".to_string()),

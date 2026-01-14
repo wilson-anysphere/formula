@@ -71,15 +71,16 @@ fn opens_encrypted_standard_xlsx_fixture() {
 }
 
 #[test]
-fn opens_encrypted_xlsb_fixture() {
+fn rejects_encrypted_xlsb_fixture() {
     let name = "encrypted.xlsb";
     let path = fixture_path(name);
     let pw = fixture_password(name);
 
-    let wb = open_workbook_with_password(&path, Some(pw)).expect("decrypt + open");
+    let err =
+        open_workbook_with_password(&path, Some(pw)).expect_err("expected encrypted xlsb to error");
     assert!(
-        matches!(wb, Workbook::Xlsb(_)),
-        "expected Workbook::Xlsb, got {wb:?}"
+        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
+        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
     );
 
     let workbook = open_workbook_model_with_password(&path, Some(pw)).expect("decrypt + open");

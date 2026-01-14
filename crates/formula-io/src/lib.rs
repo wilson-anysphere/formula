@@ -3321,15 +3321,29 @@ fn decrypt_encrypted_ooxml_package(
             })?;
         offset += 4;
 
-        let encrypted_verifier_hash = encryption_info
-            .get(offset..)
-            .unwrap_or_default()
-            .to_vec();
-
+        // `encryptedVerifierHash` is variable-length:
+        // - RC4: exactly `verifierHashSize` bytes (no padding).
+        // - AES: padded to the next 16-byte block boundary.
+        //
+        // Some producers may include extra bytes after the verifier blob; ignore them by reading
+        // only what is required for the declared `verifierHashSize`.
         const CALG_RC4: u32 = 0x0000_6801;
         const CALG_AES_128: u32 = 0x0000_660E;
         const CALG_AES_192: u32 = 0x0000_660F;
         const CALG_AES_256: u32 = 0x0000_6610;
+        let verifier_hash_len = usize::try_from(verifier_hash_size).unwrap_or(0);
+        let encrypted_hash_len = if alg_id == CALG_RC4 {
+            verifier_hash_len
+        } else {
+            // AES block padding.
+            (verifier_hash_len + 15) / 16 * 16
+        };
+        let encrypted_verifier_hash = encryption_info
+            .get(offset..offset + encrypted_hash_len)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?
+            .to_vec();
 
         if alg_id == CALG_RC4 {
             // --- Standard CryptoAPI RC4 ---------------------------------------------------------
