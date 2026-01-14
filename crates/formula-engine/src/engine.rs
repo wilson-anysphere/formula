@@ -8520,7 +8520,7 @@ impl Engine {
 
         for (sheet_id, sheet_name, addr, formula, phonetic) in formulas {
             let addr_a1 = cell_addr_to_a1(addr);
-            self.set_cell_formula(&sheet_name, &addr_a1, &formula)?;
+            self.set_cell_formula(&sheet_name, &addr_a1, formula.as_ref())?;
             if let Some(phonetic) = phonetic {
                 // Rebuilding the dependency graph recompiles formulas but should not clear
                 // cell-level phonetic metadata (used by `PHONETIC()`).
