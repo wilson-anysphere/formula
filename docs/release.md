@@ -893,7 +893,8 @@ alongside the installers. The file is structured roughly like:
 Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged release** matrix (CI
 enforced; see `docs/desktop-updater-target-mapping.md`):
 
-- **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64` → macOS updater payload (an `.app.tar.gz`).
+- **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64` → macOS updater payload archive
+  (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
 - **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
 - **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
@@ -1304,8 +1305,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     run, and the raw attestation bundles are attached to the draft GitHub Release as
     `provenance-*.intoto.jsonl` (and also uploaded as workflow artifacts `provenance-*`).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-x86_64` (macOS Intel; points at the `.app.tar.gz` updater payload)
-   - `darwin-aarch64` (macOS Apple Silicon; points at the `.app.tar.gz` updater payload)
+   - `darwin-x86_64` (macOS Intel; points at the updater tarball — `*.app.tar.gz` preferred)
+   - `darwin-aarch64` (macOS Apple Silicon; points at the updater tarball — `*.app.tar.gz` preferred)
    - `windows-x86_64` (Windows x64)
    - `windows-aarch64` (Windows ARM64)
    - `linux-x86_64` (Linux x86_64)
