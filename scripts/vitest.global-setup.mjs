@@ -1,5 +1,5 @@
 import { ensureFormulaWasmNodeBuild } from "./build-formula-wasm-node.mjs";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,8 +76,57 @@ function shouldSkipWasmBuildForCurrentRun() {
   }
 
   const needsWasmBuild = resolved.some((abs) => {
-    const normalized = ensureTrailingSep(path.resolve(abs));
-    return overlapsPath(normalized, engineDir) || overlapsPath(normalized, formulaWasmDir);
+    const resolvedAbs = path.resolve(abs);
+    const normalized = ensureTrailingSep(resolvedAbs);
+
+    // The formula-wasm crate itself always requires a wasm build.
+    if (overlapsPath(normalized, formulaWasmDir)) {
+      return true;
+    }
+
+    // Engine tests are a mix of pure unit tests (no wasm) and wasm-backed integration suites.
+    // To keep `vitest run packages/engine/src/foo.test.ts` usable in environments without
+    // wasm-pack, only require the wasm build when we detect a wasm-backed test.
+    if (overlapsPath(normalized, engineDir)) {
+      try {
+        const stat = statSync(resolvedAbs);
+        if (stat.isDirectory()) {
+          // Directories (or ancestor paths like `vitest run packages`) may contain wasm-backed suites;
+          // keep the conservative default.
+          return true;
+        }
+      } catch {
+        // If we can't stat it, keep the conservative default.
+        return true;
+      }
+
+      // File path heuristics: `.wasm.test.ts(x)` is used for suites that load the wasm bundle.
+      const basename = path.basename(resolvedAbs);
+      if (basename.includes(".wasm.test.")) {
+        return true;
+      }
+
+      // Content heuristics: most wasm-backed engine tests load the Node-compatible wasm bundle
+      // using the shared helper `formulaWasmNodeEntryUrl()`.
+      try {
+        const text = readFileSync(resolvedAbs, "utf8");
+        if (
+          text.includes("formulaWasmNodeEntryUrl") ||
+          text.includes("ensureFormulaWasmNodeBuild") ||
+          text.includes("crates/formula-wasm") ||
+          text.includes("pkg-node")
+        ) {
+          return true;
+        }
+      } catch {
+        // If we can't read the file, keep the conservative default.
+        return true;
+      }
+
+      return false;
+    }
+
+    return false;
   });
 
   return !needsWasmBuild;
