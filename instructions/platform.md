@@ -189,6 +189,9 @@ cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
 
 Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`, `core:window:allow-hide`).
 
+CI note: capability permission identifiers are validated against the pinned toolchain by
+`node scripts/check-tauri-permissions.mjs` (or `pnpm -C apps/desktop check:tauri-permissions`).
+
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
