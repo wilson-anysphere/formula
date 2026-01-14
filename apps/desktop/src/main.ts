@@ -8796,35 +8796,6 @@ function handleRibbonCommand(commandId: string): void {
         if (isSpreadsheetEditing() || app.isReadOnly()) return;
         void handleDeleteActiveSheet();
         return;
-      // Legacy ribbon schema ids (Home → Editing → AutoSum menu items). Note that "Sum" (and the
-      // AutoSum dropdown id itself) is now routed through the canonical CommandRegistry command
-      // `edit.autoSum`, so we only handle the remaining non-CommandRegistry variants here.
-      case "home.editing.autoSum.average":
-        app.autoSumAverage();
-        app.focus();
-        return;
-      case "home.editing.autoSum.countNumbers":
-        app.autoSumCountNumbers();
-        app.focus();
-        return;
-      case "home.editing.autoSum.max":
-        app.autoSumMax();
-        app.focus();
-        return;
-      case "home.editing.autoSum.min":
-        app.autoSumMin();
-        app.focus();
-        return;
-      case "edit.fillUp":
-      case "home.editing.fill.up":
-        app.fillUp();
-        app.focus();
-        return;
-      case "edit.fillLeft":
-      case "home.editing.fill.left":
-        app.fillLeft();
-        app.focus();
-        return;
       case "home.editing.fill.series":
         void (async () => {
           if (isSpreadsheetEditing()) {

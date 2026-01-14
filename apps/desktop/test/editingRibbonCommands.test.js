@@ -53,7 +53,22 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
 
   // Canonical editing ids should be registered as builtin commands so ribbon, command palette,
   // and keybindings share the same execution path (via createRibbonActionsFromCommands).
-  const expects = ["edit.autoSum", "edit.fillDown", "edit.fillRight"];
+  const expects = [
+    "edit.autoSum",
+    "edit.fillDown",
+    "edit.fillRight",
+    "edit.fillUp",
+    "edit.fillLeft",
+    // Ribbon schema still uses these ids; they should be registered as builtin aliases so ribbon
+    // and other surfaces share the same execution path.
+    "home.editing.fill.up",
+    "home.editing.fill.left",
+    // Ribbon-specific AutoSum dropdown variants should be registered and dispatched via CommandRegistry.
+    "home.editing.autoSum.average",
+    "home.editing.autoSum.countNumbers",
+    "home.editing.autoSum.max",
+    "home.editing.autoSum.min",
+  ];
   for (const id of expects) {
     assert.match(
       builtins,
