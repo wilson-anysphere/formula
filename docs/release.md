@@ -1257,6 +1257,17 @@ Quick reference (auto-update vs manual install):
 Before validating in-app auto-update behavior, confirm the updater manifest (`latest.json`) is
 wired to the correct **updater-consumed** artifacts:
 
+Note: for end-to-end **in-app updater** testing, prefer installing a prior version using the same
+format the updater will apply:
+
+- **Windows:** install via the **WiX `.msi`** (the updater runs the MSI referenced in `latest.json`).
+  The NSIS `.exe` is shipped for manual install/downgrade and may result in side-by-side installs if
+  you later apply an MSI update.
+- **Linux:** install/run the **`.AppImage`** (the updater payload). `.deb`/`.rpm` are intended for
+  manual install/updates via your package manager.
+- **macOS:** install via the `.dmg` (copy to `/Applications`); the updater downloads the tarball
+  payload and replaces the app bundle.
+
 1. Confirm the Release contains:
    - `latest.json`
    - `latest.json.sig` (signature for `latest.json`)

@@ -471,6 +471,10 @@ chosen from the Release page”):
 - Windows: `.msi` installer referenced in `latest.json` (CI expects the manifest to reference the MSI; NSIS `.exe` is shipped for manual install/downgrade)
 - Linux: `*.AppImage` updater payload (not `.deb`/`.rpm`)
 
+Note: in-app auto-update is primarily supported when the app is installed/run in the same format the
+updater applies (Windows MSI, Linux AppImage). Distro packages (`.deb`/`.rpm`) and NSIS `.exe`
+installers are provided for manual install/downgrade convenience.
+
 For the exact `latest.json.platforms` key names (multi-arch), see `docs/desktop-updater-target-mapping.md`.
 
 ### `plugins.updater`
