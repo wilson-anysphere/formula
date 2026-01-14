@@ -67,6 +67,66 @@ class DocumentControllerStub {
     this._sheetViews.set(sheetId, after);
     this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
   }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} col
+   * @param {number | null} width
+   */
+  setColWidth(sheetId, col, width) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before };
+    const key = String(col);
+    if (width == null) {
+      if (after.colWidths) {
+        delete after.colWidths[key];
+        if (Object.keys(after.colWidths).length === 0) delete after.colWidths;
+      }
+    } else {
+      if (!after.colWidths) after.colWidths = {};
+      after.colWidths[key] = width;
+    }
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number | null} height
+   */
+  setRowHeight(sheetId, row, height) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before };
+    const key = String(row);
+    if (height == null) {
+      if (after.rowHeights) {
+        delete after.rowHeights[key];
+        if (Object.keys(after.rowHeights).length === 0) delete after.rowHeights;
+      }
+    } else {
+      if (!after.rowHeights) after.rowHeights = {};
+      after.rowHeights[key] = height;
+    }
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {string | null} imageId
+   */
+  setSheetBackgroundImageId(sheetId, imageId) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before };
+    if (typeof imageId === "string" && imageId.trim() !== "") {
+      after.backgroundImageId = imageId.trim();
+    } else {
+      delete after.backgroundImageId;
+    }
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
 }
 
 test("remote sheet view updates applied via sheetViewBinder are not echoed back into Yjs by the full binder (prevents undo pollution)", async () => {
@@ -248,6 +308,62 @@ test("local sheet view edits do not produce duplicate Yjs updates when both bind
       1,
       "expected only one binder-origin Yjs update for a local sheet view edit (full binder should no-op)",
     );
+  } finally {
+    doc.off("update", onUpdate);
+    sheetViewBinder.destroy();
+    fullBinder.destroy();
+    undoService.undoManager.destroy();
+    doc.destroy();
+  }
+});
+
+test("local axis + background-image edits do not produce duplicate Yjs updates when both binders are attached", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const binderOrigin = { type: "test:binder-origin" };
+  const undoService = createCollabUndoService({ doc, scope: [sheets], origin: binderOrigin });
+
+  const dc = new DocumentControllerStub();
+  const sheetViewBinder = bindSheetViewToCollabSession({
+    session: /** @type {any} */ ({ doc, sheets, localOrigins: new Set(), isReadOnly: () => false }),
+    documentController: /** @type {any} */ (dc),
+    origin: binderOrigin,
+  });
+  const fullBinder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController: dc,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  let binderOriginUpdates = 0;
+  const onUpdate = (_update, origin) => {
+    if (origin === binderOrigin) binderOriginUpdates += 1;
+  };
+
+  try {
+    await flushAsync(5);
+    undoService.undoManager.clear();
+    doc.on("update", onUpdate);
+
+    const assertSingleUpdate = async (fn, label) => {
+      binderOriginUpdates = 0;
+      fn();
+      await flushAsync(10);
+      assert.equal(binderOriginUpdates, 1, `expected exactly one binder-origin Yjs update for ${label}`);
+    };
+
+    await assertSingleUpdate(() => dc.setColWidth("Sheet1", 0, 120), "setColWidth");
+    await assertSingleUpdate(() => dc.setRowHeight("Sheet1", 10, 55), "setRowHeight");
+    await assertSingleUpdate(() => dc.setSheetBackgroundImageId("Sheet1", "bg.png"), "setSheetBackgroundImageId");
   } finally {
     doc.off("update", onUpdate);
     sheetViewBinder.destroy();
