@@ -161,8 +161,8 @@ mod tests {
         let derived_0 = derive_rc4_key_b(password, &salt, 0, 0, HashAlg::Sha1);
         let derived_40 = derive_rc4_key_b(password, &salt, 40, 0, HashAlg::Sha1);
         assert_eq!(derived_0, derived_40);
-        assert_eq!(derived_0, decode_hex("6ad7dedf2d0000000000000000000000"));
-        assert_eq!(derived_0.len(), 16);
+        assert_eq!(derived_0, decode_hex("6ad7dedf2d"));
+        assert_eq!(derived_0.len(), 5);
     }
 
     #[test]

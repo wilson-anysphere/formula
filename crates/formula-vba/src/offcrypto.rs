@@ -1182,7 +1182,8 @@ mod tests {
 
         let key_0 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 0)
             .expect("should derive sha1 rc4 block key");
-        assert_eq!(hex_lower(&key_0), "6ad7dedf2d0000000000000000000000");
+        assert_eq!(hex_lower(&key_0), "6ad7dedf2d");
+        assert_eq!(key_0.len(), 5);
     }
 
     #[test]

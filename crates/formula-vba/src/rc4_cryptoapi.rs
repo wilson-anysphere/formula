@@ -22,7 +22,7 @@ pub(crate) enum Rc4CryptoApiError {
     Truncated,
     #[error("EncryptedPackage declared plaintext length {0} does not fit into usize")]
     PlaintextLenTooLarge(u64),
-    #[error("unsupported key length {0} (must be <= 20 for SHA-1)")]
+    #[error("unsupported key length {0} (must be 1..=20 for SHA-1)")]
     UnsupportedKeyLength(usize),
     #[error("unsupported hash algorithm")]
     UnsupportedHashAlg,
@@ -115,7 +115,7 @@ impl Rc4CryptoApiDecryptor {
         key_len: usize,
         hash_alg: HashAlg,
     ) -> Result<Self, Rc4CryptoApiError> {
-        if key_len > 20 {
+        if key_len == 0 || key_len > 20 {
             // SHA-1 digest size.
             return Err(Rc4CryptoApiError::UnsupportedKeyLength(key_len));
         }
@@ -190,8 +190,8 @@ impl Rc4CryptoApiDecryptor {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{sha1_digest, HashAlg, Rc4, Rc4CryptoApiDecryptor, CRYPTOAPI_SPIN_COUNT};
+    mod tests {
+        use super::{sha1_digest, HashAlg, Rc4, Rc4CryptoApiDecryptor, CRYPTOAPI_SPIN_COUNT};
 
     const BLOCK_SIZE: usize = 0x200;
 
@@ -257,6 +257,16 @@ mod tests {
             .decrypt_encrypted_package(&bytes)
             .expect_err("expected truncated ciphertext");
         assert!(matches!(err, super::Rc4CryptoApiError::Truncated));
+    }
+
+    #[test]
+    fn rejects_zero_length_key() {
+        let salt: [u8; 16] = (0u8..16u8).collect::<Vec<_>>().try_into().unwrap();
+        let err = match Rc4CryptoApiDecryptor::new("password", &salt, 0, HashAlg::Sha1) {
+            Ok(_) => panic!("expected error"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, super::Rc4CryptoApiError::UnsupportedKeyLength(0)));
     }
 
     fn make_plaintext_pattern(len: usize) -> Vec<u8> {
