@@ -4029,9 +4029,10 @@ export class FormulaBarView {
 const ESCAPE_HTML_RE = /[&<>]/g;
 const ESCAPE_HTML_TEST_RE = /[&<>]/;
 const ESCAPE_HTML_MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
+const ESCAPE_HTML_REPLACER = (ch: string): string => ESCAPE_HTML_MAP[ch] ?? ch;
 
 function escapeHtml(text: string): string {
-  return text.replace(ESCAPE_HTML_RE, (ch) => ESCAPE_HTML_MAP[ch] ?? ch);
+  return text.replace(ESCAPE_HTML_RE, ESCAPE_HTML_REPLACER);
 }
 
 function formatPreview(value: unknown): string {
