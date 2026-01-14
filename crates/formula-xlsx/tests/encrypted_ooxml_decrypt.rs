@@ -118,6 +118,18 @@ fn decrypts_standard_small_fixtures_match_plaintext_bytes() {
 }
 
 #[test]
+fn decrypts_agile_basic_xlsm_fixture_matches_plaintext_bytes() {
+    let plaintext_xlsm = std::fs::read(fixture_path_buf("plaintext-basic.xlsm"))
+        .expect("read plaintext-basic.xlsm fixture bytes");
+    let decrypted_xlsm = decrypt_fixture("agile-basic.xlsm");
+    assert_eq!(
+        decrypted_xlsm, plaintext_xlsm,
+        "decrypted bytes must match plaintext-basic.xlsm for agile-basic.xlsm"
+    );
+    assert!(decrypted_xlsm.starts_with(b"PK"));
+}
+
+#[test]
 fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
     for encrypted in ["agile.xlsx", "standard.xlsx", "agile-large.xlsx", "standard-large.xlsx"] {
         let path = fixture_path_buf(encrypted);
