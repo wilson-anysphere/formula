@@ -267,3 +267,27 @@ fn lex_comma_decimal_locales_accept_canonical_decimal_separator_in_numbers() {
         assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
     }
 }
+
+#[test]
+fn lex_disambiguates_dot_between_decimal_and_thousands_grouping_in_comma_decimal_locales() {
+    // When `.` is also a thousands separator (de-DE/es-ES), it is ambiguous whether `1.234` means
+    // `1234` (grouping) or `1.234` (decimal). We treat it as grouping to match Excel behavior,
+    // while still accepting non-ambiguous decimal patterns like `1.23`.
+    for locale in [LocaleConfig::de_de(), LocaleConfig::es_es()] {
+        let mut opts = ParseOptions::default();
+        opts.locale = locale;
+        let tokens = lex("1.234", &opts).unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == "1234"));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+    }
+
+    // In locales where `.` is not used for thousands grouping (fr-FR uses NBSP), interpret it as a
+    // decimal point.
+    let mut opts = ParseOptions::default();
+    opts.locale = LocaleConfig::fr_fr();
+    let tokens = lex("1.234", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == "1.234"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
