@@ -22,12 +22,12 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
-import { sleep } from './sleep.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
+  sleep,
   resolvePerfHome,
   runOnce as runDesktopOnce,
 } from './desktopStartupUtil.ts';

@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues } from './benchmark.ts';
-import { sleep } from './sleep.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
@@ -12,6 +11,7 @@ import {
   repoRoot,
   resolvePerfHome,
   runOnce as runDesktopOnce,
+  sleep,
 } from './desktopStartupUtil.ts';
 
 type Summary = {

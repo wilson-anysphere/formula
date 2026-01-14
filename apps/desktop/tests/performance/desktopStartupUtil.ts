@@ -4,9 +4,11 @@
 // startup log parsing, env isolation, and env parsing helpers.
 // `processTree.ts` provides a platform-aware process-tree termination helper.
 // `linuxProcUtil.ts` provides Linux `/proc` helpers used for RSS sampling in perf benchmarks.
+// `sleep.ts` provides a shared AbortSignal-aware sleep helper used across perf scripts.
 //
 // Keeping this stable `desktopStartupUtil.ts` entrypoint avoids copy/paste drift across
 // standalone runners + integrated benchmarks.
 export * from './desktopStartupRunnerShared.ts';
 export * from './processTree.ts';
 export * from './linuxProcUtil.ts';
+export * from './sleep.ts';

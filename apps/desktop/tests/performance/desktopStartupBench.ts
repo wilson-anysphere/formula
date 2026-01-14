@@ -50,12 +50,12 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
-import { sleep } from './sleep.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   getProcessRssMbLinux,
   formatPerfPath,
+  sleep,
   buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupArgv,
