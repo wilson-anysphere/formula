@@ -156,4 +156,50 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     app.destroy();
     root.remove();
   });
+
+  it("cuts pictures whose underlying drawing id is a non-numeric string", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    root.focus();
+
+    const write = vi.fn(async () => {});
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const imageId = "img-2";
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    doc.setImage(imageId, { bytes: pngBytes, mimeType: "image/png" });
+
+    // Use a non-numeric drawing id (common in imported docs / some backends).
+    doc.setSheetDrawings(sheetId, [
+      {
+        id: "drawing_1",
+        kind: { type: "image", imageId },
+        anchor: { type: "cell", row: 0, col: 0, size: { width: 10, height: 10 } },
+        zOrder: 0,
+      },
+    ]);
+
+    // Select via the UI-normalized id (which may be a stable hash).
+    const objects = (app as any).listDrawingObjectsForSheet(sheetId) as DrawingObject[];
+    expect(objects).toHaveLength(1);
+    (app as any).selectedDrawingId = objects[0]!.id;
+
+    app.cut();
+    await app.whenIdle();
+
+    expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
+    expect(doc.getSheetDrawings(sheetId)).toEqual([]);
+
+    app.destroy();
+    root.remove();
+  });
 });

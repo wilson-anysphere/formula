@@ -16097,17 +16097,79 @@ export class SpreadsheetApp {
       return translated === "clipboard.cut" ? "Cut" : translated;
     })();
 
+    const sheetId = this.sheetId;
+    const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === selectedId) ?? null;
+    const imageId = selected?.kind.type === "image" ? selected.kind.imageId : null;
+
+    const docAny: any = this.document as any;
+    const deleteDrawing =
+      typeof docAny.deleteDrawing === "function"
+        ? (docAny.deleteDrawing as (sheetId: string, drawingId: string | number, options?: unknown) => void)
+        : null;
+    const getSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    const deleteImage =
+      typeof docAny.deleteImage === "function" ? (docAny.deleteImage as (imageId: string, options?: unknown) => void) : null;
+
+    // `DrawingObject.id` is a UI-only numeric id (stable hash for some sources). When the underlying
+    // DocumentController drawing ids are non-numeric strings, deleting by the UI id would be a no-op.
+    // Map from UI id -> raw drawing ids so cut behaves like the Delete shortcut.
+    const rawIdsToDelete = new Set<string | number>();
+    if (getSheetDrawings) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry !== "object") continue;
+          let uiId: number | null = null;
+          try {
+            uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
+          } catch {
+            uiId = null;
+          }
+          if (uiId !== selectedId) continue;
+          const rawId = (entry as any).id;
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) rawIdsToDelete.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            rawIdsToDelete.add(rawId);
+          }
+        }
+      }
+    }
+    if (rawIdsToDelete.size === 0) rawIdsToDelete.add(selectedId);
+
     this.document.beginBatch({ label });
     try {
-      const docAny = this.document as any;
-      if (typeof docAny.deleteDrawing === "function") {
-        docAny.deleteDrawing(this.sheetId, selectedId, { label });
+      if (deleteDrawing) {
+        for (const rawId of rawIdsToDelete) {
+          try {
+            deleteDrawing.call(docAny, sheetId, rawId, { label });
+          } catch {
+            // ignore
+          }
+        }
       } else if (typeof docAny.setSheetDrawings === "function" && typeof docAny.getSheetDrawings === "function") {
-        const existing = docAny.getSheetDrawings(this.sheetId);
+        const existing = docAny.getSheetDrawings(sheetId);
+        const ids = new Set(Array.from(rawIdsToDelete, (id) => String(id)));
         const next = Array.isArray(existing)
-          ? existing.filter((d: any) => String(d?.id ?? "") !== String(selectedId))
+          ? existing.filter((d: any) => !ids.has(String(d?.id ?? "")))
           : [];
-        docAny.setSheetDrawings(this.sheetId, next, { label });
+        docAny.setSheetDrawings(sheetId, next, { label });
+      }
+
+      if (imageId && deleteImage && !this.isImageReferencedByAnyDrawing(imageId)) {
+        try {
+          deleteImage.call(docAny, imageId, { label });
+        } catch {
+          // ignore
+        }
+        this.drawingOverlay.invalidateImage(imageId);
       }
     } finally {
       this.document.endBatch();
