@@ -63,10 +63,12 @@ Note: after normalization, the JSON will typically contain **fewer entries** tha
 
 #### `es-ES` (Spanish) source requirements
 
-`es-ES` must be backed by an Excel-extracted mapping generated from the **full function catalog**
-(see `shared/functionCatalog.json`). Do **not** replace `sources/es-ES.json` with partial online
-translation tables: those commonly omit large parts of Excel’s function surface area, causing many
-Spanish spellings to degrade to canonical (English) names.
+Like `de-DE` and `fr-FR`, `es-ES` must be backed by an Excel-extracted mapping generated from the
+**full function catalog** (see `shared/functionCatalog.json`).
+
+Do **not** replace `sources/es-ES.json` with partial online translation tables: those commonly omit
+large parts of Excel’s function surface area, causing many Spanish spellings to degrade to canonical
+(English) names via identity-mapping fallback.
 
 If you cannot run the Excel extractor (Windows + Excel desktop required), prefer to **not** touch
 `es-ES` sources rather than committing a partial mapping.
@@ -116,21 +118,56 @@ node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
 ```
 
-Quick verification checklist (especially for `es-ES`):
+#### Verification checklist (function TSVs)
 
-- If you re-extracted from Excel, confirm the extractor ran against the full catalog:
-  - It should print `Wrote <N> translations ...` where `<N>` matches the number of functions in
-    `shared/functionCatalog.json` (before normalization removes identity mappings).
-  - It should not report skipped functions (skipped/missing entries silently fall back to English).
-- `node scripts/generate-locale-function-tsv.js --check` passes.
-  - Note: `--check` only verifies that the committed TSVs match what would be generated from the
-    committed JSON sources; it does **not** prove that the sources are complete (missing entries are
-    silently treated as identity mappings).
-- Spot-check that a few functions known to be localized in Spanish are **not** falling back to
-  English in `crates/formula-engine/src/locale/data/es-ES.tsv`, e.g.:
-  - `SUM` → `SUMA`
-  - `IF` → `SI`
-  - financial functions like `NPV`/`IRR` should also localize (e.g. `NPV` → `VNA`, `IRR` → `TIR`).
+When updating `sources/<locale>.json` (especially `es-ES`) and regenerating `<locale>.tsv`, verify:
+
+1. If you re-extracted from Excel, confirm the extractor ran against the full catalog:
+   - It should print `Wrote <N> translations ...` where `<N>` matches the number of functions in
+     `shared/functionCatalog.json` (before normalization removes identity mappings).
+   - It should not report skipped functions (skipped/missing entries silently fall back to English).
+2. `node scripts/generate-locale-function-tsv.js --check` passes.
+   - Note: `--check` only verifies that the committed TSVs match what would be generated from the
+     committed JSON sources; it does **not** prove that the sources are complete (missing entries are
+     silently treated as identity mappings).
+3. **Sentinel translations are present** (spot-check directly in the TSV).
+   For `es-ES`, these should *not* be identity mappings:
+   - `SUM` → `SUMA`
+   - `IF` → `SI`
+   - `NPV` → `VNA`
+   - `IRR` → `TIR`
+   - `PV` → `VA`
+   - `FV` → `VF`
+   - `PMT` → `PAGO`
+   - `RATE` → `TASA`
+4. **Identity mappings are not suspiciously high.**
+   Missing translations are emitted as `Canonical == Localized`, so a partial source can look
+   “complete” while being mostly English. As a rough heuristic, `es-ES` should have an identity
+   count in the same ballpark as `de-DE` / `fr-FR` (and should not have obvious identity mappings
+   for major function groups like `SUM*`, `IF*`, `COUNT*`, `AVERAGE*`, etc).
+
+   Quick count (Node required):
+
+   ```bash
+   node --input-type=module -e '
+   import fs from "node:fs";
+   for (const locale of ["de-DE","fr-FR","es-ES"]) {
+     const tsv = fs.readFileSync(`crates/formula-engine/src/locale/data/${locale}.tsv`, "utf8");
+     let ident = 0;
+     for (const line of tsv.split(/\r?\n/)) {
+       if (!line || line.startsWith("#")) continue;
+       const [canon, loc] = line.split("\t");
+       if (canon === loc) ident++;
+     }
+     console.log(`${locale}: ${ident} identity mappings`);
+   }'
+   ```
+
+5. **No localized-name collisions.**
+   - `tools/excel-oracle/extract-function-translations.ps1` warns if Excel maps multiple canonical
+     functions to the same localized spelling.
+   - `scripts/generate-locale-function-tsv.js` fails if it detects any collisions (ambiguity breaks
+     localized → canonical lookup).
 
 CI/tests also provide guard rails:
 

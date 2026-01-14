@@ -111,3 +111,7 @@ Verification checklist (especially for `es-ES`):
 
 Important: the extracted spellings reflect the **active Excel UI language**. Install the relevant
 Office language pack and set Excel's display language before extracting.
+
+For `es-ES`, do not rely on third-party translation tables: extract from real Excel and follow the
+verification checklist in `crates/formula-engine/src/locale/data/README.md` (sentinel translations,
+identity-mapping sanity checks, and collision detection).

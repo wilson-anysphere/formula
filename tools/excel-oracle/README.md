@@ -135,6 +135,18 @@ Notes / caveats:
   - `node scripts/generate-locale-function-tsv.js --check`
   - and spot-check that Spanish financial functions like `NPV`/`IRR` localize (e.g. `VNA`/`TIR`).
 
+Verification checklist note (especially `es-ES`):
+
+- Do **not** populate `es-ES` from third-party lists/websites — they are often incomplete/outdated.
+  Always extract from a real Excel install with `extract-function-translations.ps1`.
+- After regenerating `crates/formula-engine/src/locale/data/<locale>.tsv`, spot-check sentinel
+  translations (e.g. Spanish `SUM → SUMA`, `IF → SI`, `NPV → VNA`, `IRR → TIR`, …) and sanity-check
+  that the TSV does not contain a suspiciously large number of identity mappings.
+- Ensure there are no localized-name collisions (the extractor warns; the TSV generator fails).
+
+See `crates/formula-engine/src/locale/data/README.md` for the full locale TSV contract and the
+verification checklist.
+
 ## CI note (Excel availability)
 
 GitHub-hosted Windows runners (for example `windows-2022`) typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.
