@@ -119,6 +119,55 @@ fn index_over_sheet_range_uses_tab_order_after_reorder() {
 }
 
 #[test]
+fn bytecode_sum_over_sheet_range_uses_tab_order_after_reorder_for_error_precedence() {
+    // The bytecode backend expands 3D sheet spans at compile time. Ensure that expansion follows
+    // workbook tab order (not the textual order of the boundary sheets).
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_value("Sheet2", "A1", Value::Error(ErrorKind::Ref))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet3", "A1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    // Ensure the formula is bytecode-compiled so this test covers the bytecode span expander.
+    assert_eq!(
+        engine.bytecode_compile_report(10),
+        Vec::new(),
+        "expected formula to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+
+    // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+
+    // Reordering triggers a dependency-graph rebuild + bytecode recompilation; ensure we are still
+    // on the bytecode backend.
+    assert_eq!(
+        engine.bytecode_compile_report(10),
+        Vec::new(),
+        "expected formula to remain bytecode-compiled after reorder"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
 fn evaluates_sum_over_sheet_range_column_range() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

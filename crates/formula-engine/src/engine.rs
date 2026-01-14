@@ -519,18 +519,17 @@ impl Workbook {
 
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
-    /// This respects the current workbook tab order and supports reversed spans.
+    /// This respects the current workbook tab order. Reversed spans are allowed (e.g.
+    /// `Sheet3:Sheet1`) and refer to the same set of sheets.
     fn sheet_span_ids(&self, start: SheetId, end: SheetId) -> Option<Vec<SheetId>> {
         let start_idx = self.sheet_order_index(start)?;
         let end_idx = self.sheet_order_index(end)?;
-        if start_idx <= end_idx {
-            Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
+        let (start_idx, end_idx) = if start_idx <= end_idx {
+            (start_idx, end_idx)
         } else {
-            let mut out: Vec<SheetId> =
-                self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
-            out.reverse();
-            Some(out)
-        }
+            (end_idx, start_idx)
+        };
+        Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
     }
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
         if !self.sheet_exists(key.sheet) {
@@ -17428,7 +17427,7 @@ mod tests {
         );
         assert_eq!(
             workbook.sheet_span_ids(sheet1, sheet2),
-            Some(vec![sheet1, sheet3, sheet2])
+            Some(vec![sheet2, sheet3, sheet1])
         );
     }
 
