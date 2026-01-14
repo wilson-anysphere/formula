@@ -4,7 +4,7 @@ import { showInputBox, showQuickPick, showToast } from "../../extensions/ui.js";
 import type { Range } from "../../selection/types";
 import { rangeToA1 } from "../../selection/a1";
 
-import { base64ToBytes, bytesToBase64 } from "@formula/collab-encryption";
+import { base64ToBytes, bytesToBase64, isEncryptedCellPayload } from "@formula/collab-encryption";
 import { createEncryptionPolicyFromDoc, type EncryptedRangeManager } from "@formula/collab-encrypted-ranges";
 import { serializeEncryptionKeyExportString, parseEncryptionKeyExportString } from "./keyExportFormat";
 
@@ -42,6 +42,36 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; row: number; col: number }): string | null {
+  try {
+    const cells = session?.cells;
+    if (!cells || typeof cells.get !== "function") return null;
+    const sheetId = String(cell.sheetId ?? "").trim();
+    const row = Number(cell.row);
+    const col = Number(cell.col);
+    if (!sheetId || !Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
+
+    const keys: string[] = [`${sheetId}:${row}:${col}`, `${sheetId}:${row},${col}`];
+    const defaultSheetId = String((session as any)?.defaultSheetId ?? "").trim();
+    if (defaultSheetId && defaultSheetId === sheetId) {
+      keys.push(`r${row}c${col}`);
+    }
+
+    for (const key of keys) {
+      const raw = cells.get(key);
+      if (!raw || typeof raw !== "object" || typeof (raw as any).get !== "function") continue;
+      const enc = (raw as any).get("enc");
+      if (enc == null) continue;
+      if (!isEncryptedCellPayload(enc)) continue;
+      const keyId = String((enc as any).keyId ?? "").trim();
+      if (keyId) return keyId;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 function roleCanEncrypt(role: string | null | undefined): boolean {
@@ -316,8 +346,13 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const sheetId = app.getCurrentSheetId();
       const sheetName = app.getCurrentSheetDisplayName();
       const docId = session.doc.guid;
+      const cell = { sheetId, row: active.row, col: active.col };
+      // Prefer the key id from an existing encrypted payload so callers can export the correct
+      // key even if the encrypted range policy has since changed (e.g. key rotation via
+      // add/remove overrides).
+      const keyIdFromEnc = keyIdFromEncryptedCellPayload(session as any, cell);
       const policy = createEncryptionPolicyFromDoc(session.doc);
-      const keyId = policy.keyIdForCell({ sheetId, row: active.row, col: active.col });
+      const keyId = keyIdFromEnc ?? policy.keyIdForCell(cell);
       if (!keyId) {
         showToast(`The active cell is not inside an encrypted range (${sheetName}).`, "warning");
         return;
