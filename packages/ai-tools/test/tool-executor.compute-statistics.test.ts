@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ToolExecutor } from "../src/executor/tool-executor.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell } from "../src/spreadsheet/a1.js";
+import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 
 describe("ToolExecutor compute_statistics (streaming + distribution measures)", () => {
   it("computes correct results for a mixed dataset (numbers, numeric strings, formulas, non-numeric)", async () => {
@@ -126,5 +127,76 @@ describe("ToolExecutor compute_statistics (streaming + distribution measures)", 
     expect(result.ok).toBe(true);
     if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
     expect(result.data?.statistics.correlation).toBeCloseTo(1, 12);
+  });
+
+  it("short-circuits correlation-only requests for non-2-column ranges without reading the range", async () => {
+    const spreadsheet: any = {
+      readRange: vi.fn(() => {
+        throw new Error("readRange should not be called for invalid correlation ranges");
+      }),
+    };
+    const executor = new ToolExecutor(spreadsheet);
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:C2", measures: ["correlation"] },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics.correlation).toBeNull();
+    expect(spreadsheet.readRange).not.toHaveBeenCalled();
+  });
+
+  it("short-circuits correlation-only requests for non-2-column ranges under DLP REDACT without reading the range (but still counts redactions)", async () => {
+    const spreadsheet: any = {
+      readRange: vi.fn(() => {
+        throw new Error("readRange should not be called for invalid correlation ranges under DLP REDACT");
+      }),
+    };
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(spreadsheet, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: { scope: "cell", documentId: "doc-1", sheetId: "Sheet1", row: 0, col: 1 },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:C2", measures: ["correlation"] },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics.correlation).toBeNull();
+    expect(spreadsheet.readRange).not.toHaveBeenCalled();
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      tool: "compute_statistics",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:C2",
+      redactedCellCount: 1,
+    });
+    expect(event.decision?.decision).toBe("redact");
   });
 });

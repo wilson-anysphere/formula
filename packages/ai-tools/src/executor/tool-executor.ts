@@ -1417,18 +1417,33 @@ export class ToolExecutor {
     const correlationOnly = wantsCorrelation && requested.size === 1;
 
     // Fast-path: correlation is only defined for 2-column ranges. If it's the only requested measure
-    // and the range is not 2 columns wide, avoid reading/scanning the whole range (unless we need to
-    // count redacted cells under DLP REDACT).
-    if (
-      correlationOnly &&
-      !correlationSupported &&
-      (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW)
-    ) {
-      if (dlp) this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
-      return {
-        range: this.formatRangeForUser(range),
-        statistics: { correlation: null }
-      };
+    // and the range is not 2 columns wide, avoid reading/scanning the whole range.
+    if (correlationOnly && !correlationSupported) {
+      if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
+        if (dlp) this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
+        return {
+          range: this.formatRangeForUser(range),
+          statistics: { correlation: null }
+        };
+      }
+
+      if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+        // Preserve DLP audit semantics: count the cells that would have been excluded without
+        // reading the cell values into JS memory.
+        let redactedCellCount = 0;
+        for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex++) {
+          for (let colIndex = range.startCol; colIndex <= range.endCol; colIndex++) {
+            if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+              redactedCellCount++;
+            }
+          }
+        }
+        this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount });
+        return {
+          range: this.formatRangeForUser(range),
+          statistics: { correlation: null }
+        };
+      }
     }
 
     const cells = this.spreadsheet.readRange(range);
