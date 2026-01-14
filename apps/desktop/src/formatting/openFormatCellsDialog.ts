@@ -146,7 +146,16 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   numberSection.appendChild(numberCustomRow);
 
   const syncNumberCustomVisibility = () => {
-    numberCustomRow.style.display = numberSelect.value === "__custom__" ? "" : "none";
+    const isCustom = numberSelect.value === "__custom__";
+    numberCustomRow.style.display = isCustom ? "" : "none";
+    if (isCustom) {
+      // When switching to Custom, move focus to the code field so users can type immediately.
+      try {
+        numberCustomInput.focus();
+      } catch {
+        // ignore (e.g. jsdom)
+      }
+    }
   };
   numberSelect.addEventListener("change", syncNumberCustomVisibility);
   content.appendChild(numberSection);
@@ -556,5 +565,14 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
 
   document.body.appendChild(dialog);
   dialog.showModal();
-  numberSelect.focus();
+  // If the active style is already a custom number format, focus the code field directly.
+  if (numberSelect.value === "__custom__") {
+    try {
+      numberCustomInput.focus();
+    } catch {
+      // ignore (e.g. jsdom)
+    }
+  } else {
+    numberSelect.focus();
+  }
 }
