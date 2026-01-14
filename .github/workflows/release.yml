@@ -865,7 +865,7 @@ jobs:
 
       - name: Install pinned Tauri CLI (cargo tauri)
         if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
-        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
 
       - name: Verify Tauri CLI version
         shell: bash
