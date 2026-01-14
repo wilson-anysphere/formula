@@ -94,34 +94,83 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
     });
 
-    it("detects the dialog API on __TAURI__.dialog (legacy shape)", () => {
-      const open = vi.fn();
-      const save = vi.fn();
-      (globalThis as any).__TAURI__ = { dialog: { open, save } };
+    it("detects the dialog API on __TAURI__.dialog (legacy shape) and preserves method binding", async () => {
+      const dialogApi: any = {};
+      let openThis: any = null;
+      let saveThis: any = null;
+      const open = vi.fn(async function () {
+        openThis = this;
+        return null;
+      });
+      const save = vi.fn(async function () {
+        saveThis = this;
+        return null;
+      });
+      dialogApi.open = open;
+      dialogApi.save = save;
+      (globalThis as any).__TAURI__ = { dialog: dialogApi };
 
       const api = getTauriDialogOrThrow();
-      expect(api.open).toBe(open);
-      expect(api.save).toBe(save);
+      await api.open();
+      await api.save();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(open.mock.calls[0]?.length).toBe(0);
+      expect(save.mock.calls[0]?.length).toBe(0);
+      expect(openThis).toBe(dialogApi);
+      expect(saveThis).toBe(dialogApi);
     });
 
-    it("detects the dialog API on __TAURI__.plugin.dialog (tauri v2 plugin shape)", () => {
-      const open = vi.fn();
-      const save = vi.fn();
-      (globalThis as any).__TAURI__ = { plugin: { dialog: { open, save } } };
+    it("detects the dialog API on __TAURI__.plugin.dialog (tauri v2 plugin shape) and preserves method binding", async () => {
+      const dialogApi: any = {};
+      let openThis: any = null;
+      let saveThis: any = null;
+      const open = vi.fn(async function (options?: Record<string, unknown>) {
+        openThis = this;
+        expect(options).toEqual({ multiple: false });
+        return null;
+      });
+      const save = vi.fn(async function () {
+        saveThis = this;
+        return null;
+      });
+      dialogApi.open = open;
+      dialogApi.save = save;
+      (globalThis as any).__TAURI__ = { plugin: { dialog: dialogApi } };
 
       const api = getTauriDialogOrThrow();
-      expect(api.open).toBe(open);
-      expect(api.save).toBe(save);
+      await api.open({ multiple: false });
+      await api.save();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(openThis).toBe(dialogApi);
+      expect(saveThis).toBe(dialogApi);
     });
 
-    it("detects the dialog API on __TAURI__.plugins.dialog (alternate plugin container shape)", () => {
-      const open = vi.fn();
-      const save = vi.fn();
-      (globalThis as any).__TAURI__ = { plugins: { dialog: { open, save } } };
+    it("detects the dialog API on __TAURI__.plugins.dialog (alternate plugin container shape) and preserves method binding", async () => {
+      const dialogApi: any = {};
+      let openThis: any = null;
+      let saveThis: any = null;
+      const open = vi.fn(async function () {
+        openThis = this;
+        return null;
+      });
+      const save = vi.fn(async function () {
+        saveThis = this;
+        return null;
+      });
+      dialogApi.open = open;
+      dialogApi.save = save;
+      (globalThis as any).__TAURI__ = { plugins: { dialog: dialogApi } };
 
       const api = getTauriDialogOrThrow();
-      expect(api.open).toBe(open);
-      expect(api.save).toBe(save);
+      await api.open();
+      await api.save();
+
+      expect(openThis).toBe(dialogApi);
+      expect(saveThis).toBe(dialogApi);
     });
 
     it("treats partial dialog APIs as unavailable (e.g. open without save)", () => {
@@ -131,42 +180,119 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
     });
 
-    it("exposes open/save-only helpers that do not require the full API surface", () => {
-      const open = vi.fn();
-      (globalThis as any).__TAURI__ = { dialog: { open } };
+    it("exposes open/save-only helpers that do not require the full API surface", async () => {
+      const dialogApi: any = {};
+      let openThis: any = null;
+      const open = vi.fn(async function () {
+        openThis = this;
+        return null;
+      });
+      dialogApi.open = open;
+      (globalThis as any).__TAURI__ = { dialog: dialogApi };
 
-      expect(getTauriDialogOpenOrNull()).toBe(open);
+      const openFn = getTauriDialogOpenOrNull();
+      expect(openFn).not.toBeNull();
+      await openFn!();
+      expect(openThis).toBe(dialogApi);
       expect(getTauriDialogSaveOrNull()).toBeNull();
     });
 
-    it("detects confirm() when available", () => {
-      const confirm = vi.fn();
-      (globalThis as any).__TAURI__ = { dialog: { confirm } };
-      expect(getTauriDialogConfirmOrNull()).toBe(confirm);
+    it("detects confirm() when available and preserves method binding", async () => {
+      const dialogApi: any = {};
+      let confirmThis: any = null;
+      const confirm = vi.fn(async function (message: string, options?: Record<string, unknown>) {
+        confirmThis = this;
+        expect(message).toBe("Hello");
+        expect(options).toEqual({ title: "Formula" });
+        return true;
+      });
+      dialogApi.confirm = confirm;
+      (globalThis as any).__TAURI__ = { dialog: dialogApi };
+
+      const confirmFn = getTauriDialogConfirmOrNull();
+      expect(confirmFn).not.toBeNull();
+      await expect(confirmFn!("Hello", { title: "Formula" })).resolves.toBe(true);
+      expect(confirmThis).toBe(dialogApi);
     });
 
-    it("detects message() (or alert()) when available", () => {
-      const message = vi.fn();
-      (globalThis as any).__TAURI__ = { dialog: { message } };
-      expect(getTauriDialogMessageOrNull()).toBe(message);
+    it("detects message() (or alert()) when available and preserves method binding", async () => {
+      const dialogApi: any = {};
+      let messageThis: any = null;
+      const message = vi.fn(async function (msg: string) {
+        messageThis = this;
+        expect(msg).toBe("Hi");
+      });
+      dialogApi.message = message;
+      (globalThis as any).__TAURI__ = { dialog: dialogApi };
 
-      const alert = vi.fn();
-      (globalThis as any).__TAURI__ = { dialog: { alert } };
-      expect(getTauriDialogMessageOrNull()).toBe(alert);
+      const messageFn = getTauriDialogMessageOrNull();
+      expect(messageFn).not.toBeNull();
+      await messageFn!("Hi");
+      expect(messageThis).toBe(dialogApi);
+      expect(message.mock.calls[0]?.length).toBe(1);
+
+      const dialogApi2: any = {};
+      let alertThis: any = null;
+      const alert = vi.fn(async function (msg: string) {
+        alertThis = this;
+        expect(msg).toBe("Hi");
+      });
+      dialogApi2.alert = alert;
+      (globalThis as any).__TAURI__ = { dialog: dialogApi2 };
+
+      const alertFn = getTauriDialogMessageOrNull();
+      expect(alertFn).not.toBeNull();
+      await alertFn!("Hi");
+      expect(alertThis).toBe(dialogApi2);
+      expect(alert.mock.calls[0]?.length).toBe(1);
     });
 
-    it("detects confirm/message under plugin container shapes too", () => {
-      const confirm = vi.fn();
-      const message = vi.fn();
-      (globalThis as any).__TAURI__ = { plugin: { dialog: { confirm, message } } };
-      expect(getTauriDialogConfirmOrNull()).toBe(confirm);
-      expect(getTauriDialogMessageOrNull()).toBe(message);
+    it("detects confirm/message under plugin container shapes too", async () => {
+      const dialogApi: any = {};
+      let confirmThis: any = null;
+      let messageThis: any = null;
+      const confirm = vi.fn(async function () {
+        confirmThis = this;
+        return true;
+      });
+      const message = vi.fn(async function () {
+        messageThis = this;
+      });
+      dialogApi.confirm = confirm;
+      dialogApi.message = message;
+      (globalThis as any).__TAURI__ = { plugin: { dialog: dialogApi } };
 
-      const confirm2 = vi.fn();
-      const alert2 = vi.fn();
-      (globalThis as any).__TAURI__ = { plugins: { dialog: { confirm: confirm2, alert: alert2 } } };
-      expect(getTauriDialogConfirmOrNull()).toBe(confirm2);
-      expect(getTauriDialogMessageOrNull()).toBe(alert2);
+      const confirmFn = getTauriDialogConfirmOrNull();
+      const messageFn = getTauriDialogMessageOrNull();
+      expect(confirmFn).not.toBeNull();
+      expect(messageFn).not.toBeNull();
+      await confirmFn!("Hello");
+      await messageFn!("Hello");
+      expect(confirmThis).toBe(dialogApi);
+      expect(messageThis).toBe(dialogApi);
+
+      const dialogApi2: any = {};
+      let confirmThis2: any = null;
+      let alertThis2: any = null;
+      const confirm2 = vi.fn(async function () {
+        confirmThis2 = this;
+        return true;
+      });
+      const alert2 = vi.fn(async function () {
+        alertThis2 = this;
+      });
+      dialogApi2.confirm = confirm2;
+      dialogApi2.alert = alert2;
+      (globalThis as any).__TAURI__ = { plugins: { dialog: dialogApi2 } };
+
+      const confirmFn2 = getTauriDialogConfirmOrNull();
+      const alertFn2 = getTauriDialogMessageOrNull();
+      expect(confirmFn2).not.toBeNull();
+      expect(alertFn2).not.toBeNull();
+      await confirmFn2!("Hello");
+      await alertFn2!("Hello");
+      expect(confirmThis2).toBe(dialogApi2);
+      expect(alertThis2).toBe(dialogApi2);
     });
   });
 
@@ -176,43 +302,95 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriEventApiOrThrow()).toThrowError("Tauri event API not available");
     });
 
-    it("returns listen and a nullable emit (emit missing)", () => {
-      const listen = vi.fn(async () => () => {});
-      (globalThis as any).__TAURI__ = { event: { listen } };
+    it("returns listen and a nullable emit (emit missing) and preserves method binding", async () => {
+      const eventApi: any = {};
+      let listenThis: any = null;
+      const handler = vi.fn();
+      const listen = vi.fn(async function (_event: string, _handler: (event: any) => void) {
+        listenThis = this;
+        return () => {};
+      });
+      eventApi.listen = listen;
+      (globalThis as any).__TAURI__ = { event: eventApi };
 
       const api = getTauriEventApiOrThrow();
-      expect(api.listen).toBe(listen);
       expect(api.emit).toBeNull();
+      const unlisten = await api.listen("startup:metrics", handler);
+      expect(typeof unlisten).toBe("function");
+      expect(listenThis).toBe(eventApi);
+      expect(listen).toHaveBeenCalledWith("startup:metrics", handler);
     });
 
-    it("returns listen and emit when both are present", () => {
-      const listen = vi.fn(async () => () => {});
-      const emit = vi.fn();
-      (globalThis as any).__TAURI__ = { event: { listen, emit } };
+    it("returns listen and emit when both are present and preserves method binding", async () => {
+      const eventApi: any = {};
+      let listenThis: any = null;
+      let emitThis: any = null;
+      const handler = vi.fn();
+      const listen = vi.fn(async function () {
+        listenThis = this;
+        return () => {};
+      });
+      const emit = vi.fn(function () {
+        emitThis = this;
+      });
+      eventApi.listen = listen;
+      eventApi.emit = emit;
+      (globalThis as any).__TAURI__ = { event: eventApi };
 
       const api = getTauriEventApiOrThrow();
-      expect(api.listen).toBe(listen);
-      expect(api.emit).toBe(emit);
+      await api.listen("startup:metrics", handler);
+      await api.emit?.("ping");
+      await api.emit?.("ping", { value: 1 });
+      expect(listenThis).toBe(eventApi);
+      expect(emitThis).toBe(eventApi);
+      expect(emit.mock.calls[0]).toEqual(["ping"]);
+      expect(emit.mock.calls[1]).toEqual(["ping", { value: 1 }]);
     });
 
-    it("detects the event API under __TAURI__.plugin.event (legacy shape)", () => {
-      const listen = vi.fn(async () => () => {});
-      const emit = vi.fn();
-      (globalThis as any).__TAURI__ = { plugin: { event: { listen, emit } } };
+    it("detects the event API under __TAURI__.plugin.event (legacy shape)", async () => {
+      const eventApi: any = {};
+      let listenThis: any = null;
+      let emitThis: any = null;
+      const handler = vi.fn();
+      const listen = vi.fn(async function () {
+        listenThis = this;
+        return () => {};
+      });
+      const emit = vi.fn(function () {
+        emitThis = this;
+      });
+      eventApi.listen = listen;
+      eventApi.emit = emit;
+      (globalThis as any).__TAURI__ = { plugin: { event: eventApi } };
 
       const api = getTauriEventApiOrThrow();
-      expect(api.listen).toBe(listen);
-      expect(api.emit).toBe(emit);
+      await api.listen("startup:metrics", handler);
+      await api.emit?.("ping");
+      expect(listenThis).toBe(eventApi);
+      expect(emitThis).toBe(eventApi);
     });
 
-    it("detects the event API under __TAURI__.plugins.event (alternate plugin container shape)", () => {
-      const listen = vi.fn(async () => () => {});
-      const emit = vi.fn();
-      (globalThis as any).__TAURI__ = { plugins: { event: { listen, emit } } };
+    it("detects the event API under __TAURI__.plugins.event (alternate plugin container shape)", async () => {
+      const eventApi: any = {};
+      let listenThis: any = null;
+      let emitThis: any = null;
+      const handler = vi.fn();
+      const listen = vi.fn(async function () {
+        listenThis = this;
+        return () => {};
+      });
+      const emit = vi.fn(function () {
+        emitThis = this;
+      });
+      eventApi.listen = listen;
+      eventApi.emit = emit;
+      (globalThis as any).__TAURI__ = { plugins: { event: eventApi } };
 
       const api = getTauriEventApiOrThrow();
-      expect(api.listen).toBe(listen);
-      expect(api.emit).toBe(emit);
+      await api.listen("startup:metrics", handler);
+      await api.emit?.("ping");
+      expect(listenThis).toBe(eventApi);
+      expect(emitThis).toBe(eventApi);
     });
 
     it("treats throwing nested properties (e.g. event getter) as unavailable", () => {

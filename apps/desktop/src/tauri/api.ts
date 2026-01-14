@@ -105,27 +105,44 @@ function getTauriDialogNamespaceOrNull(): any | null {
 export function getTauriDialogOpenOrNull(): TauriDialogOpen | null {
   const dialog = getTauriDialogNamespaceOrNull();
   const open = safeGetProp(dialog, "open") as TauriDialogOpen | undefined;
-  return typeof open === "function" ? open : null;
+  if (typeof open !== "function") return null;
+  return function (options?: Record<string, unknown>) {
+    // Preserve argument count (some APIs branch on `arguments.length`).
+    if (arguments.length === 0) return open.call(dialog);
+    return open.call(dialog, options);
+  };
 }
 
 export function getTauriDialogSaveOrNull(): TauriDialogSave | null {
   const dialog = getTauriDialogNamespaceOrNull();
   const save = safeGetProp(dialog, "save") as TauriDialogSave | undefined;
-  return typeof save === "function" ? save : null;
+  if (typeof save !== "function") return null;
+  return function (options?: Record<string, unknown>) {
+    if (arguments.length === 0) return save.call(dialog);
+    return save.call(dialog, options);
+  };
 }
 
 export function getTauriDialogConfirmOrNull(): TauriDialogConfirm | null {
   const dialog = getTauriDialogNamespaceOrNull();
   const confirm = safeGetProp(dialog, "confirm") as TauriDialogConfirm | undefined;
-  return typeof confirm === "function" ? confirm : null;
+  if (typeof confirm !== "function") return null;
+  return function (message: string, options?: Record<string, unknown>) {
+    if (arguments.length < 2) return confirm.call(dialog, message);
+    return confirm.call(dialog, message, options);
+  };
 }
 
 export function getTauriDialogMessageOrNull(): TauriDialogMessage | null {
   const dialog = getTauriDialogNamespaceOrNull();
-  const message = (safeGetProp(dialog, "message") ?? safeGetProp(dialog, "alert")) as
+  const messageFn = (safeGetProp(dialog, "message") ?? safeGetProp(dialog, "alert")) as
     | TauriDialogMessage
     | undefined;
-  return typeof message === "function" ? message : null;
+  if (typeof messageFn !== "function") return null;
+  return function (message: string, options?: Record<string, unknown>) {
+    if (arguments.length < 2) return messageFn.call(dialog, message);
+    return messageFn.call(dialog, message, options);
+  };
 }
 
 /**
@@ -161,10 +178,20 @@ export function getTauriEventApiOrNull(): TauriEventApi | null {
   const plugin = safeGetProp(tauri, "plugin");
   const plugins = safeGetProp(tauri, "plugins");
   const eventApi = safeGetProp(tauri, "event") ?? safeGetProp(plugin, "event") ?? safeGetProp(plugins, "event") ?? null;
-  const listen = safeGetProp(eventApi, "listen") as TauriListen | undefined;
-  if (typeof listen !== "function") return null;
-  const emit = safeGetProp(eventApi, "emit") as TauriEmit | undefined;
-  return { listen, emit: typeof emit === "function" ? emit : null };
+  const listenFn = safeGetProp(eventApi, "listen") as TauriListen | undefined;
+  if (typeof listenFn !== "function") return null;
+  const listen: TauriListen = (event: string, handler: (event: any) => void) => {
+    return listenFn.call(eventApi, event, handler);
+  };
+  const emitFn = safeGetProp(eventApi, "emit") as TauriEmit | undefined;
+  const emit: TauriEmit | null =
+    typeof emitFn === "function"
+      ? function (event: string, payload?: any) {
+          if (arguments.length < 2) return emitFn.call(eventApi, event);
+          return emitFn.call(eventApi, event, payload);
+        }
+      : null;
+  return { listen, emit };
 }
 
 export function getTauriEventApiOrThrow(): TauriEventApi {
