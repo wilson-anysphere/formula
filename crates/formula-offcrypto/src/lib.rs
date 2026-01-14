@@ -3623,6 +3623,85 @@ pub fn decrypt_encrypted_package(
     Ok(decrypted)
 }
 
+#[cfg(test)]
+mod decrypt_encrypted_package_limits_tests {
+    use super::*;
+    use crate::test_alloc::MAX_ALLOC;
+    use std::sync::atomic::Ordering;
+
+    fn build_minimal_standard_encryption_info_aes128() -> Vec<u8> {
+        // Build a minimal Standard (CryptoAPI / AES-128 / SHA1) `EncryptionInfo` stream that passes
+        // `parse_encryption_info`. The verifier fields are synthetic; the test asserts we return
+        // `OutputTooLarge` before attempting password verification / decryption.
+        let mut bytes = Vec::new();
+
+        // EncryptionVersionInfo: major=4, minor=2 (Standard) + flags=0.
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        // EncryptionInfo.header_size (EncryptionHeader length).
+        let header_size: u32 = 8 * 4; // 8 DWORDs, no CSP name.
+        bytes.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader (see MS-OFFCRYPTO / ECMA-376).
+        let header_flags: u32 = StandardEncryptionHeaderFlags::F_CRYPTOAPI
+            | StandardEncryptionHeaderFlags::F_AES;
+        bytes.extend_from_slice(&header_flags.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        bytes.extend_from_slice(&CALG_AES_128.to_le_bytes()); // algId
+        bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+        bytes.extend_from_slice(&128u32.to_le_bytes()); // keySize bits
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        // EncryptionVerifier.
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // saltSize
+        bytes.extend_from_slice(&[0u8; 16]); // salt
+        bytes.extend_from_slice(&[0u8; 16]); // encryptedVerifier
+        bytes.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize (SHA1)
+        bytes.extend_from_slice(&[0u8; 32]); // encryptedVerifierHash (SHA1 padded to 32 bytes)
+
+        bytes
+    }
+
+    #[test]
+    fn decrypt_encrypted_package_honors_max_output_size() {
+        let encryption_info = build_minimal_standard_encryption_info_aes128();
+
+        // Attacker-controlled size header; make it extremely large, but avoid having to allocate.
+        let total_size: u64 = 4 * 1024 * 1024 * 1024; // 4GiB
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+
+        let max: u64 = 1024 * 1024; // 1MiB
+        let options = DecryptOptions {
+            verify_integrity: false,
+            limits: DecryptLimits {
+                max_output_size: Some(max),
+                ..Default::default()
+            },
+        };
+
+        // Reset after building test buffers to ensure we only observe allocations during the call.
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let err = decrypt_encrypted_package(&encryption_info, &encrypted_package, "password", options)
+            .expect_err("expected output too large");
+        assert!(
+            matches!(err, OffcryptoError::OutputTooLarge { total_size: got, max: m } if got == total_size && m == max),
+            "expected OutputTooLarge({total_size}, {max}), got {err:?}"
+        );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
+}
+
 /// Decrypt an Agile-encrypted OOXML package (OOXML password protection; MS-OFFCRYPTO 4.4).
 ///
 /// Inputs are the raw bytes of the OLE streams:
