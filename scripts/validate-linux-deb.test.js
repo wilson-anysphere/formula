@@ -166,6 +166,8 @@ function writeDefaultContentsFile(
   tmpDir,
   {
     includeBinary = true,
+    includeLicense = true,
+    includeNotice = true,
     packageName = expectedDebName,
     binaryName = expectedMainBinary,
     includeParquetMimeDefinition = true,
@@ -176,8 +178,8 @@ function writeDefaultContentsFile(
   const add = (path) => lines.push(`-rw-r--r-- root/root 0 2024-01-01 00:00 ${path}`);
   if (includeBinary) add(`./usr/bin/${binaryName}`);
   add("./usr/share/applications/formula.desktop");
-  add(`./usr/share/doc/${packageName}/LICENSE`);
-  add(`./usr/share/doc/${packageName}/NOTICE`);
+  if (includeLicense) add(`./usr/share/doc/${packageName}/LICENSE`);
+  if (includeNotice) add(`./usr/share/doc/${packageName}/NOTICE`);
   if (includeParquetMimeDefinition) {
     add(expectedMimeDefinitionContentsPath);
   }
@@ -259,6 +261,38 @@ test("validate-linux-deb fails when the expected binary path is missing", { skip
   const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /missing expected desktop binary/i);
+});
+
+test("validate-linux-deb fails when LICENSE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp, { includeLicense: false });
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing compliance file/i);
+  assert.match(proc.stderr, /LICENSE/i);
+});
+
+test("validate-linux-deb fails when NOTICE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp, { includeNotice: false });
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing compliance file/i);
+  assert.match(proc.stderr, /NOTICE/i);
 });
 
 test("validate-linux-deb accepts when DEB Version has a Debian revision suffix (-1)", { skip: !hasBash }, () => {
