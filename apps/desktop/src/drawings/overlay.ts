@@ -303,6 +303,9 @@ export class DrawingOverlay {
   private colorTokens: OverlayColorTokens | null = null;
   private orderedObjects: DrawingObject[] = [];
   private orderedObjectsSource: DrawingObject[] | null = null;
+  private chartSurfacePruneSource: DrawingObject[] | null = null;
+  private chartSurfacePruneLength = 0;
+  private readonly chartSurfaceKeep = new Set<string>();
   private themeObserver: MutationObserver | null = null;
   private lastRenderArgs: { objects: DrawingObject[]; viewport: Viewport; options?: { drawObjects?: boolean } } | null = null;
   private readonly pendingImageHydrations = new Map<string, Promise<ImageEntry | undefined>>();
@@ -450,6 +453,23 @@ export class DrawingOverlay {
     const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
     this.renderAbort = abort;
     const signal = abort?.signal;
+
+    const chartRenderer: any = this.chartRenderer as any;
+    if (chartRenderer && typeof chartRenderer.pruneSurfaces === "function") {
+      const sourceChanged =
+        this.chartSurfacePruneSource !== objects || this.chartSurfacePruneLength !== objects.length;
+      if (sourceChanged) {
+        this.chartSurfacePruneSource = objects;
+        this.chartSurfacePruneLength = objects.length;
+        this.chartSurfaceKeep.clear();
+        for (const obj of objects) {
+          if (obj.kind.type !== "chart") continue;
+          const chartId = (obj.kind as any).chartId;
+          if (typeof chartId === "string" && chartId.length > 0) this.chartSurfaceKeep.add(chartId);
+        }
+        chartRenderer.pruneSurfaces(this.chartSurfaceKeep);
+      }
+    }
 
     try {
     const ctx = this.ctx;
@@ -966,6 +986,9 @@ export class DrawingOverlay {
     this.shapeTextCache.clear();
     this.shapeTextCachePruneSource = null;
     this.shapeTextCachePruneLength = 0;
+    this.chartSurfacePruneSource = null;
+    this.chartSurfacePruneLength = 0;
+    this.chartSurfaceKeep.clear();
     // Release any cached drawing object references (spatial index stores objects + rects).
     this.spatialIndex.rebuild([], this.geom, 1);
     this.cssVarStyle = undefined;
