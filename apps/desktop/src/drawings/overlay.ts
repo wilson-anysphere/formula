@@ -572,17 +572,6 @@ export class DrawingOverlay {
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    const withClipRect = (clipRect: Rect, fn: () => void) => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-      ctx.clip();
-      try {
-        fn();
-      } finally {
-        ctx.restore();
-      }
-    };
 
     // Spatial index: compute a small candidate list for the current viewport rather
     // than scanning every drawing on each render.
@@ -646,6 +635,7 @@ export class DrawingOverlay {
     let selectedTransform: DrawingTransform | undefined = undefined;
     const screenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
     const aabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    const localRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
     let selectedDrawRotationHandle = true;
 
     if (drawObjects) {
@@ -769,13 +759,13 @@ export class DrawingOverlay {
             // Image metadata can arrive before the bytes are hydrated into the ImageStore
             // (e.g. collaboration metadata received before IndexedDB hydration). Render a
             // placeholder box so the image remains visible/selectable until bytes load.
-            withClipRect(clipRect, () => {
-              ctx.save();
+            pushClipRect(ctx, clipRect);
+            try {
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 2]);
               if (hasNonIdentityTransform(obj.transform)) {
-                drawTransformedRect(ctx, screenRectScratch, obj.transform!);
+                drawTransformedRect(ctx, screenRectScratch, obj.transform);
               } else {
                 ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
@@ -784,32 +774,40 @@ export class DrawingOverlay {
               ctx.globalAlpha = 0.6;
               ctx.font = "12px sans-serif";
               ctx.fillText("missing image", screenRectScratch.x + 4, screenRectScratch.y + 14);
+            } finally {
               ctx.restore();
-            });
+            }
             continue;
           }
 
           const bitmap = this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
           if (bitmap) {
-            withClipRect(clipRect, () => {
+            pushClipRect(ctx, clipRect);
+            try {
               if (hasNonIdentityTransform(obj.transform)) {
-                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                  ctx.save();
-                  try {
-                    // Clip to the (possibly rotated/flipped) image bounds so we don't
-                    // overdraw neighboring cells when transforms extend beyond the anchor.
-                    ctx.beginPath();
-                    ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
-                    ctx.clip();
-                    ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
-                  } finally {
-                    ctx.restore();
-                  }
-                });
+                pushObjectTransform(ctx, screenRectScratch, obj.transform, localRectScratch);
+                try {
+                  // Clip to the (possibly rotated/flipped) image bounds so we don't
+                  // overdraw neighboring cells when transforms extend beyond the anchor.
+                  ctx.beginPath();
+                  ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
+                  ctx.clip();
+                  ctx.drawImage(
+                    bitmap,
+                    localRectScratch.x,
+                    localRectScratch.y,
+                    localRectScratch.width,
+                    localRectScratch.height,
+                  );
+                } finally {
+                  ctx.restore();
+                }
               } else {
                 ctx.drawImage(bitmap, screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
-            });
+            } finally {
+              ctx.restore();
+            }
             continue;
           }
 
@@ -820,22 +818,20 @@ export class DrawingOverlay {
           const chartId = obj.kind.chartId;
           if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
             let rendered = false;
-            withClipRect(clipRect, () => {
-              ctx.save();
+            pushClipRect(ctx, clipRect);
+            try {
               try {
                 if (hasNonIdentityTransform(obj.transform)) {
-                  withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                    ctx.save();
-                    try {
-                      ctx.beginPath();
-                      ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
-                      ctx.clip();
-                      this.chartRenderer!.renderToCanvas(ctx, chartId, localRect);
-                      rendered = true;
-                    } finally {
-                      ctx.restore();
-                    }
-                  });
+                  pushObjectTransform(ctx, screenRectScratch, obj.transform, localRectScratch);
+                  try {
+                    ctx.beginPath();
+                    ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
+                    ctx.clip();
+                    this.chartRenderer!.renderToCanvas(ctx, chartId, localRectScratch);
+                    rendered = true;
+                  } finally {
+                    ctx.restore();
+                  }
                 } else {
                   ctx.beginPath();
                   ctx.rect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
@@ -845,10 +841,10 @@ export class DrawingOverlay {
                 }
               } catch {
                 rendered = false;
-              } finally {
-                ctx.restore();
               }
-            });
+            } finally {
+              ctx.restore();
+            }
 
             if (rendered) continue;
           }
@@ -885,62 +881,84 @@ export class DrawingOverlay {
           }
 
           if (spec) {
-            withClipRect(clipRect, () => {
+            pushClipRect(ctx, clipRect);
+            try {
               try {
-                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                  drawShape(ctx, localRect, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
-                  if (canRenderText) {
-                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                if (hasNonIdentityTransform(obj.transform)) {
+                  pushObjectTransform(ctx, screenRectScratch, obj.transform, localRectScratch);
+                  try {
+                    drawShape(ctx, localRectScratch, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
+                    if (canRenderText) {
+                      renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                    }
+                  } finally {
+                    ctx.restore();
                   }
-                });
+                } else {
+                  drawShape(ctx, screenRectScratch, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
+                  if (canRenderText) {
+                    renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                  }
+                }
                 rendered = true;
               } catch {
                 rendered = false;
               }
-            });
+            } finally {
+              ctx.restore();
+            }
             if (rendered) continue;
           }
 
           // If we couldn't render the shape geometry but we did successfully parse text,
           // still render the text within the anchored bounds (and skip placeholders).
           if (canRenderText) {
-            withClipRect(clipRect, () => {
-              withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                ctx.save();
+            pushClipRect(ctx, clipRect);
+            try {
+              if (hasNonIdentityTransform(obj.transform)) {
+                pushObjectTransform(ctx, screenRectScratch, obj.transform, localRectScratch);
                 try {
                   ctx.beginPath();
-                  ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                  ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
                   ctx.clip();
-                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                  renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
                 } finally {
                   ctx.restore();
                 }
-              });
-            });
+              } else {
+                ctx.beginPath();
+                ctx.rect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
+                ctx.clip();
+                renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+              }
+            } finally {
+              ctx.restore();
+            }
             continue;
           }
 
           // Shape parsed but has no text: keep an empty bounds placeholder (no label).
           if (textParsed) {
-            withClipRect(clipRect, () => {
-              ctx.save();
+            pushClipRect(ctx, clipRect);
+            try {
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 2]);
               if (hasNonIdentityTransform(obj.transform)) {
-                drawTransformedRect(ctx, screenRectScratch, obj.transform!);
+                drawTransformedRect(ctx, screenRectScratch, obj.transform);
               } else {
                 ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
+            } finally {
               ctx.restore();
-            });
+            }
             continue;
           }
         }
 
         // Placeholder rendering for shapes/charts/unknown.
-        withClipRect(clipRect, () => {
-          ctx.save();
+        pushClipRect(ctx, clipRect);
+        try {
           const rawXml =
             // Some integration layers still pass through snake_case from the Rust model.
             (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
@@ -956,7 +974,7 @@ export class DrawingOverlay {
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 2]);
           if (hasNonIdentityTransform(obj.transform)) {
-            drawTransformedRect(ctx, screenRectScratch, obj.transform!);
+            drawTransformedRect(ctx, screenRectScratch, obj.transform);
           } else {
             ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
           }
@@ -973,8 +991,9 @@ export class DrawingOverlay {
                 ? graphicFramePlaceholderLabel(rawXml) ?? obj.kind.type
                 : obj.kind.type;
           ctx.fillText(placeholderLabel, screenRectScratch.x + 4, screenRectScratch.y + 14);
+        } finally {
           ctx.restore();
-        });
+        }
       }
     }
 
@@ -1189,7 +1208,7 @@ function intersects(a: Rect, b: Rect): boolean {
   );
 }
 
-function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): transform is DrawingTransform {
   if (!transform) return false;
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
@@ -1223,26 +1242,53 @@ function rectToAabb(rect: Rect, transform: DrawingTransform, out?: Rect): Rect {
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
-  const visitCorner = (dx: number, dy: number) => {
-    let x = dx;
-    let y = dy;
-    if (transform.flipH) x = -x;
-    if (transform.flipV) y = -y;
-    // Forward transform: scale(flip) then rotate(theta).
-    const tx = x * cos - y * sin;
-    const ty = x * sin + y * cos;
-    const wx = cx + tx;
-    const wy = cy + ty;
-    if (wx < minX) minX = wx;
-    if (wx > maxX) maxX = wx;
-    if (wy < minY) minY = wy;
-    if (wy > maxY) maxY = wy;
-  };
+  // Corner 1: (-hw, -hh)
+  let x = -hw;
+  let y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  let wx = cx + (x * cos - y * sin);
+  let wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
-  visitCorner(-hw, -hh);
-  visitCorner(hw, -hh);
-  visitCorner(hw, hh);
-  visitCorner(-hw, hh);
+  // Corner 2: (hw, -hh)
+  x = hw;
+  y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  // Corner 3: (hw, hh)
+  x = hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
+
+  // Corner 4: (-hw, hh)
+  x = -hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  wx = cx + (x * cos - y * sin);
+  wy = cy + (x * sin + y * cos);
+  if (wx < minX) minX = wx;
+  if (wx > maxX) maxX = wx;
+  if (wy < minY) minY = wy;
+  if (wy > maxY) maxY = wy;
 
   const target = out ?? { x: 0, y: 0, width: 0, height: 0 };
   target.x = minX;
@@ -1254,32 +1300,34 @@ function rectToAabb(rect: Rect, transform: DrawingTransform, out?: Rect): Rect {
 
 function getAabbForObject(rect: Rect, transform: DrawingTransform | undefined, out?: Rect): Rect {
   if (!hasNonIdentityTransform(transform)) return rect;
-  return rectToAabb(rect, transform!, out);
+  return rectToAabb(rect, transform, out);
 }
 
-function withObjectTransform(
+function pushClipRect(ctx: CanvasRenderingContext2D, clipRect: Rect): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+  ctx.clip();
+}
+
+function pushObjectTransform(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
-  transform: DrawingTransform | undefined,
-  fn: (localRect: Rect) => void,
+  transform: DrawingTransform,
+  out: Rect,
 ): void {
-  if (!hasNonIdentityTransform(transform)) {
-    fn(rect);
-    return;
-  }
-
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
 
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(degToRad(transform!.rotationDeg));
-  ctx.scale(transform!.flipH ? -1 : 1, transform!.flipV ? -1 : 1);
-  try {
-    fn({ x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height });
-  } finally {
-    ctx.restore();
-  }
+  ctx.rotate(degToRad(transform.rotationDeg));
+  ctx.scale(transform.flipH ? -1 : 1, transform.flipV ? -1 : 1);
+
+  out.x = -rect.width / 2;
+  out.y = -rect.height / 2;
+  out.width = rect.width;
+  out.height = rect.height;
 }
 
 function drawTransformedRect(ctx: CanvasRenderingContext2D, rect: Rect, transform: DrawingTransform): void {
@@ -1332,7 +1380,7 @@ function drawSelection(
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
   if (hasNonIdentityTransform(transform)) {
-    drawTransformedRect(ctx, rect, transform!);
+    drawTransformedRect(ctx, rect, transform);
   } else {
     ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
   }
