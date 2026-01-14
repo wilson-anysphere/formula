@@ -5386,22 +5386,23 @@ if (
           throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
         }
       }
-
+ 
       const doc = app.getDocument();
       const wasActive = app.getCurrentSheetId() === sheetId;
       const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
-      const sheetOrder = workbookSheetStore.listAll().map((s) => s.name);
-
+      const allSheets = workbookSheetStore.listAll();
+      const sheetOrder = allSheets.map((s) => s.name);
+      const nextActiveId = wasActive ? pickAdjacentVisibleSheetId(allSheets, sheetId) : null;
+ 
       // Update sheet metadata to enforce workbook invariants (e.g. last-sheet guard) and drive UI
       // reconciliation. The workbook sync bridge will persist the structural change to the native backend.
       workbookSheetStore.remove(sheetId);
       if (wasActive) {
-        const next =
-          workbookSheetStore.listVisible().at(0)?.id ??
-          workbookSheetStore.listAll().at(0)?.id ??
-          app.getCurrentSheetId();
-        if (next && next !== sheetId) {
+        const fallback = workbookSheetStore.listVisible().at(0)?.id ?? workbookSheetStore.listAll().at(0)?.id ?? null;
+        const next = nextActiveId ?? fallback;
+        if (next && next !== sheetId && app.getCurrentSheetId() !== next) {
           app.activateSheet(next);
+          restoreFocusAfterSheetNavigation();
         }
       }
 
