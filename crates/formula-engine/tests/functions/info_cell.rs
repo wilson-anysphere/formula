@@ -2282,6 +2282,8 @@ fn cell_address_quotes_sheet_names_when_needed() {
     engine.set_cell_value("My Sheet", "A1", 1.0).unwrap();
     engine.set_cell_value("A1", "A1", 1.0).unwrap();
     engine.set_cell_value("O'Brien", "A1", 1.0).unwrap();
+    engine.set_cell_value("TRUE", "A1", 1.0).unwrap();
+    engine.set_cell_value("FALSE", "A1", 1.0).unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"address\",'My Sheet'!A1)")
@@ -2291,6 +2293,12 @@ fn cell_address_quotes_sheet_names_when_needed() {
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "B3", "=CELL(\"address\",'O''Brien'!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"address\",'TRUE'!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=CELL(\"address\",'FALSE'!A1)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -2306,6 +2314,14 @@ fn cell_address_quotes_sheet_names_when_needed() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "B3"),
         Value::Text("'O''Brien'!$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B4"),
+        Value::Text("'TRUE'!$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B5"),
+        Value::Text("'FALSE'!$A$1".to_string())
     );
 }
 

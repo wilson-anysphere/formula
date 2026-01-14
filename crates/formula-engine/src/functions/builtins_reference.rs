@@ -455,7 +455,11 @@ fn quote_sheet_name(name: &str) -> String {
     let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
         && matches!(name.chars().nth(1), Some('0'..='9' | '['));
     let looks_like_a1 = crate::eval::parse_a1(name).is_ok();
+    // The formula lexer treats TRUE/FALSE as booleans rather than identifiers; quoting is required
+    // to disambiguate sheet names that match those keywords.
+    let is_reserved = name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE");
     let needs_quote = starts_like_number
+        || is_reserved
         || starts_like_r1c1
         || looks_like_a1
         || name.chars().any(|c| !is_ident_cont_char(c));
