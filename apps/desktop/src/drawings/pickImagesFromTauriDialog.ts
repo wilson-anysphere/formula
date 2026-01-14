@@ -7,7 +7,11 @@ type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unkn
 
 function getTauriDialogOpen(): TauriDialogOpen | null {
   const tauri = (globalThis as any).__TAURI__;
-  const dialog = (tauri?.dialog ?? tauri?.plugin?.dialog) as unknown;
+  // Support multiple legacy shapes (kept in sync with `src/tauri/api.ts`):
+  // - `__TAURI__.dialog.*`
+  // - `__TAURI__.plugin.dialog.*`
+  // - `__TAURI__.plugins.dialog.*`
+  const dialog = (tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog) as unknown;
   const open = (dialog as any)?.open as unknown;
   return typeof open === "function" ? (open as TauriDialogOpen) : null;
 }

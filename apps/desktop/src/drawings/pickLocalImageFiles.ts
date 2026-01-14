@@ -19,7 +19,8 @@ export interface PickLocalImageFilesOptions {
 export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): Promise<File[]> {
   const tauriDialogOpenAvailable =
     typeof (globalThis as any).__TAURI__?.dialog?.open === "function" ||
-    typeof (globalThis as any).__TAURI__?.plugin?.dialog?.open === "function";
+    typeof (globalThis as any).__TAURI__?.plugin?.dialog?.open === "function" ||
+    typeof (globalThis as any).__TAURI__?.plugins?.dialog?.open === "function";
   const tauriInvokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
 
   // Desktop/Tauri: prefer the native dialog + backend file reads so we can work with

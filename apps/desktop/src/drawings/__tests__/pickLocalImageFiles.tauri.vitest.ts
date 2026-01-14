@@ -71,5 +71,34 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(files[0]!.type).toBe("image/jpeg");
     expect(files[0]!.size).toBe(fileSize);
   });
-});
 
+  it("supports __TAURI__.plugins.dialog.open", async () => {
+    const calls: Array<{ cmd: string; args: any }> = [];
+
+    const open = vi.fn(async () => ["/tmp/c.webp"]);
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "stat_file") return { size_bytes: 2 };
+      if (cmd === "read_binary_file") {
+        // eslint-disable-next-line no-undef
+        return Buffer.from([9, 10]).toString("base64");
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { plugins: { dialog: { open } }, core: { invoke } };
+
+    const files = await pickLocalImageFiles({ multiple: true });
+
+    expect(open).toHaveBeenCalledTimes(1);
+    const filters = (open.mock.calls[0]?.[0] as any)?.filters ?? [];
+    expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+
+    expect(calls.map((c) => c.cmd)).toEqual(["stat_file", "read_binary_file"]);
+    expect(files).toHaveLength(1);
+    expect(files[0]!.name).toBe("c.webp");
+    expect(files[0]!.type).toBe("image/webp");
+    expect(files[0]!.size).toBe(2);
+  });
+});
