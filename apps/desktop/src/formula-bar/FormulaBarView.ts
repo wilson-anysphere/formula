@@ -2467,9 +2467,12 @@ export class FormulaBarView {
     // fires (often emitting a `select` event in between). Capture whether a full
     // reference token was selected at pointer-down time so `#onTextareaClick()` can
     // reliably implement Excel-style click-to-select / click-again-to-edit toggling.
-    const start = this.textarea.selectionStart ?? this.textarea.value.length;
-    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
-    this.model.updateDraft(this.textarea.value, start, end);
+    // Clicking within the textarea doesn't change its value; avoid reading `textarea.value`
+    // (which can allocate a large string) on this hot interaction path.
+    const draftLen = this.model.draft.length;
+    const start = this.textarea.selectionStart ?? draftLen;
+    const end = this.textarea.selectionEnd ?? draftLen;
+    this.model.updateDraft(this.model.draft, start, end);
     this.#mouseDownSelectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
   }
 
@@ -2478,10 +2481,12 @@ export class FormulaBarView {
 
     const prevSelectedReferenceIndex = this.#mouseDownSelectedReferenceIndex ?? this.#selectedReferenceIndex;
     this.#mouseDownSelectedReferenceIndex = null;
-    const value = this.textarea.value;
-    const start = this.textarea.selectionStart ?? value.length;
-    const end = this.textarea.selectionEnd ?? value.length;
-    this.model.updateDraft(value, start, end);
+    // Clicking within the textarea doesn't change its value; avoid reading `textarea.value`
+    // (which can allocate a large string) on this hot interaction path.
+    const draftLen = this.model.draft.length;
+    const start = this.textarea.selectionStart ?? draftLen;
+    const end = this.textarea.selectionEnd ?? draftLen;
+    this.model.updateDraft(this.model.draft, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
 
     const isFormulaEditing = isFormulaText(this.model.draft);
@@ -2497,7 +2502,7 @@ export class FormulaBarView {
           this.#selectedReferenceIndex = null;
         } else {
           this.textarea.setSelectionRange(active.start, active.end);
-          this.model.updateDraft(this.textarea.value, active.start, active.end);
+          this.model.updateDraft(this.model.draft, active.start, active.end);
           this.#selectedReferenceIndex = activeIndex;
         }
       }
