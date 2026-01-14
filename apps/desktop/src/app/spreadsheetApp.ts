@@ -3394,59 +3394,73 @@ export class SpreadsheetApp {
   private scheduleChartContentRefresh(payload?: any): void {
     if (this.disposed) return;
     if (!this.uiReady) return;
-    // A pending full refresh will render chart content anyway.
-    if (this.renderScheduled && this.pendingRenderMode === "full") return;
+    // A pending refresh will render chart content anyway.
+    if (this.renderScheduled) return;
     if (this.chartContentRefreshScheduled) return;
-    const visibleCharts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
-    if (visibleCharts.length === 0) return;
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (charts.length === 0) return;
 
-    // Avoid expensive chart data refreshes unless the incoming deltas could affect the visible charts.
-    // This keeps high-frequency external edits (e.g. collaborative typing elsewhere) from forcing
-    // chart data rescans on every frame.
-    if (payload) {
-      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-      if (deltas.length === 0) return;
-
-      type RangeRect = { startRow: number; endRow: number; startCol: number; endCol: number };
-      const rangesBySheet = new Map<string, RangeRect[]>();
-      for (const chart of visibleCharts) {
-        for (const ser of chart.series ?? []) {
-          const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
-          for (const rangeRef of refs) {
-            if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
-            const parsed = parseA1Range(rangeRef);
-            if (!parsed) continue;
-            const resolvedSheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : chart.sheetId;
-            if (!resolvedSheetId) continue;
-            let list = rangesBySheet.get(resolvedSheetId);
-            if (!list) {
-              list = [];
-              rangesBySheet.set(resolvedSheetId, list);
-            }
-            list.push({ startRow: parsed.startRow, endRow: parsed.endRow, startCol: parsed.startCol, endCol: parsed.endCol });
-          }
-        }
+    // In non-engine modes (or multi-sheet), formula charts can change due to edits outside their
+    // direct ranges. If we see a recalc event, conservatively mark formula-containing charts as
+    // dirty so their cached series data will refresh on the next render.
+    if (payload?.recalc) {
+      const sheetCount = (this.document as any)?.model?.sheets?.size;
+      const useEngineCache =
+        (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+      const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
+      if (!hasWasmEngine || !useEngineCache) {
+        this.markFormulaChartsDirty();
       }
-
-      const affects = deltas.some((delta: any) => {
-        const sheetId = String(delta?.sheetId ?? "");
-        const row = Number(delta?.row);
-        const col = Number(delta?.col);
-        if (!Number.isInteger(row) || row < 0) return false;
-        if (!Number.isInteger(col) || col < 0) return false;
-
-        const ranges = rangesBySheet.get(sheetId);
-        if (!ranges) return false;
-        for (const range of ranges) {
-          if (row < range.startRow || row > range.endRow) continue;
-          if (col < range.startCol || col > range.endCol) continue;
-          return true;
-        }
-        return false;
-      });
-
-      if (!affects) return;
     }
+
+    if (this.dirtyChartIds.size === 0) return;
+
+    if (!this.sharedGrid) {
+      // Chart rect computations depend on frozen pane geometry; keep legacy caches current.
+      this.ensureViewportMappingCurrent();
+    }
+
+    const intersects = (
+      a: { x: number; y: number; width: number; height: number },
+      b: { x: number; y: number; width: number; height: number },
+    ): boolean => {
+      return !(
+        a.x + a.width < b.x ||
+        b.x + b.width < a.x ||
+        a.y + a.height < b.y ||
+        b.y + b.height < a.y
+      );
+    };
+
+    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    const { frozenRows, frozenCols } = this.getFrozen();
+
+    const hasVisibleDirtyChart = charts.some((chart) => {
+      if (!this.dirtyChartIds.has(chart.id)) return false;
+
+      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      if (!rect) return false;
+
+      const chartRect = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+
+      const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+      const inFrozenRows = fromRow < frozenRows;
+      const inFrozenCols = fromCol < frozenCols;
+      const pane =
+        inFrozenRows && inFrozenCols
+          ? layout.paneRects.topLeft
+          : inFrozenRows && !inFrozenCols
+            ? layout.paneRects.topRight
+            : !inFrozenRows && inFrozenCols
+              ? layout.paneRects.bottomLeft
+              : layout.paneRects.bottomRight;
+
+      if (pane.width <= 0 || pane.height <= 0) return false;
+      return intersects(chartRect, pane);
+    });
+
+    if (!hasVisibleDirtyChart) return;
 
     this.chartContentRefreshScheduled = true;
 
