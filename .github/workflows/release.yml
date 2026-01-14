@@ -1043,6 +1043,7 @@ jobs:
             --clobber
 
       - name: Build desktop bundles (macOS universal, dry run)
+        id: tauri_dryrun_macos
         if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
@@ -1053,6 +1054,22 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
+
+      - name: Attest build provenance (macOS dry run artifacts)
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true' && steps.tauri_dryrun_macos.outcome == 'success'
+        id: provenance_macos_dryrun
+        continue-on-error: true
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: ${{ join(fromJson(steps.tauri_dryrun_macos.outputs.artifactPaths), '\n') }}
+
+      - name: Upload provenance bundle (workflow artifact, macOS dry run)
+        if: steps.provenance_macos_dryrun.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: ${{ steps.provenance_macos_dryrun.outputs.bundle-path }}
+          if-no-files-found: warn
 
       - name: Validate macOS bundle (DMG, Info.plist, codesign/notarization)
         # Always run on macOS so unsigned fork/dry-run builds still validate bundle structure.
@@ -1325,6 +1342,7 @@ jobs:
             --clobber
 
       - name: Build desktop bundles (dry run)
+        id: tauri_dryrun_non_macos
         if: runner.os != 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
@@ -1335,6 +1353,22 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
+
+      - name: Attest build provenance (dry run artifacts)
+        if: runner.os != 'macOS' && needs.preflight.outputs.upload != 'true' && steps.tauri_dryrun_non_macos.outcome == 'success'
+        id: provenance_non_macos_dryrun
+        continue-on-error: true
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: ${{ join(fromJson(steps.tauri_dryrun_non_macos.outputs.artifactPaths), '\n') }}
+
+      - name: Upload provenance bundle (workflow artifact, dry run)
+        if: steps.provenance_non_macos_dryrun.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: ${{ steps.provenance_non_macos_dryrun.outputs.bundle-path }}
+          if-no-files-found: warn
 
       - name: Package Windows debug symbols (PDB)
         if: runner.os == 'Windows'
