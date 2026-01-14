@@ -337,21 +337,22 @@ export class CellStructuralConflictMonitor {
     /** @type {Set<string>} */
     const addedIds = new Set();
     for (const [opId, change] of event.changes.keys.entries()) {
+      const id = String(opId);
       if (change.action === "delete") {
-        this._opRecords.delete(opId);
-        if (this._localOpIds.has(opId)) {
-          this._localOpIds.delete(opId);
-          localDeletes.push(opId);
+        this._opRecords.delete(id);
+        if (this._localOpIds.has(id)) {
+          this._localOpIds.delete(id);
+          localDeletes.push(id);
         }
         continue;
       }
   
       if (change.action !== "add") continue;
       sawAdd = true;
-      addedIds.add(String(opId));
-      const record = this._ops.get(opId);
+      addedIds.add(id);
+      const record = this._ops.get(id);
       if (!record) continue;
-      this._ingestOpRecord(record, opId);
+      this._ingestOpRecord(record, id);
     }
 
     if (localDeletes.length > 0 && this._localOpQueue.length > 0) {
