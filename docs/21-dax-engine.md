@@ -432,6 +432,7 @@ Public helper APIs on `FilterContext` that are useful when calling the engine fr
 - `FilterContext::set_column_equals(table, column, value)`
 - `FilterContext::set_column_in(table, column, values)`
 - `FilterContext::clear_column_filter_public(table, column)`
+- `FilterContext::clear_table_filters_public(table)`
 
 Filters combine with **AND** semantics:
 
@@ -564,10 +565,11 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    - The second argument must be a target column reference
 
 9. Table expressions (row filters): any supported **physical** table expression (including a bare
-   `TableName`)  
-   The table expression is evaluated and must produce a `TableResult::Physical` (a base table + row
-   indices). Its resulting row set becomes an explicit `row_filter` for that table (intersected with
-   any existing row filter).
+    `TableName`)  
+    The table expression is evaluated and must produce a **physical** table result (`TableResult::Physical`,
+    `TableResult::PhysicalAll`, or `TableResult::PhysicalMask`) — i.e. a base table plus a set of visible
+    rows. Its resulting row set becomes an explicit `row_filter` for that table (intersected with any
+    existing row filter).
 
    Examples:
    - `FILTER(Fact, Fact[Amount] > 0)`
@@ -977,8 +979,10 @@ This is not an exhaustive list, but the most common contributor-facing constrain
     `add_calculated_column_definition(...)` to register metadata without re-evaluating.
 - **Table semantics**
   - Table expressions evaluate to either:
-    - `TableResult::Physical` (a base table name + row indices), or
-    - `TableResult::Virtual` (materialized rows with explicit `(table, column)` lineage).
+    - `TableResult::Physical { table, rows, visible_cols }` (sparse physical row set)
+    - `TableResult::PhysicalAll { table, row_count, visible_cols }` (all physical rows; avoids allocating)
+    - `TableResult::PhysicalMask { table, mask, visible_cols }` (dense physical row bitmap)
+    - `TableResult::Virtual { columns, rows }` (materialized rows with explicit `(table, column)` lineage).
   - `SUMMARIZE`/`SUMMARIZECOLUMNS` return virtual tables of grouping columns only (no computed columns).
   - `SUMMARIZE` currently requires a physical base table argument.
   - `CALCULATE` table filter arguments must currently be physical tables (virtual tables are rejected).
