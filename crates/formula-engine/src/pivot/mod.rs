@@ -205,6 +205,15 @@ impl PivotCache {
             let mut base = header.display_string();
             base = base.trim().to_string();
 
+            // Best-effort canonicalization for Data Model-style DAX identifiers in cache headers.
+            //
+            // Pivot caches may store Data Model column captions either in quoted DAX form
+            // (`'Sales Table'[Region]`) or in the unquoted display-string form (`Sales Table[Region]`).
+            // Normalize quoted forms so `PivotFieldRef::DataModelColumn` can resolve against both.
+            if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(&base) {
+                base = PivotFieldRef::DataModelColumn { table, column }.display_string();
+            }
+
             if base.is_empty() {
                 blank_counter += 1;
                 base = format!("Column{blank_counter}");

@@ -170,6 +170,63 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provid
 }
 
 #[test]
+fn bytecode_indirect_dynamic_external_range_ref_compiles_and_evaluates_via_provider() {
+    struct Provider {
+        calls: AtomicUsize,
+    }
+
+    impl Provider {
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if sheet != "[Book.xlsx]Sheet1" || addr.col != 0 {
+                return None;
+            }
+            match addr.row {
+                0 => Some(Value::Number(1.0)),
+                1 => Some(Value::Number(2.0)),
+                _ => None,
+            }
+        }
+    }
+
+    let mut engine = Engine::new();
+    let provider = Arc::new(Provider {
+        calls: AtomicUsize::new(0),
+    });
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_bytecode_enabled(true);
+
+    engine
+        .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1:A2")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(INDIRECT(B1))")
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected dynamic INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    );
+}
+
+#[test]
 fn bytecode_sum_over_external_range_compiles_and_uses_reference_semantics() {
     // Excel quirk: SUM over references ignores logicals/text stored in cells.
     struct Provider;
