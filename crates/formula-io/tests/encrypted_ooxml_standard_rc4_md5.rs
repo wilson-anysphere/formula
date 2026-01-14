@@ -64,14 +64,9 @@ fn derive_rc4_key_md5(h: &[u8], block: u32, key_len: usize) -> Vec<u8> {
     hasher.update(block.to_le_bytes());
     let digest = hasher.finalize();
 
-    if key_len == 5 {
-        // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
-        let mut padded = vec![0u8; 16];
-        padded[..5].copy_from_slice(&digest[..5]);
-        padded
-    } else {
-        digest[..key_len].to_vec()
-    }
+    // MS-OFFCRYPTO Standard RC4 uses `keyLen = keySize/8` bytes directly (40-bit => 5 bytes),
+    // *without* padding to 16 bytes.
+    digest[..key_len].to_vec()
 }
 
 fn encrypt_rc4_cryptoapi_md5(h: &[u8], key_len: usize, plaintext: &[u8]) -> Vec<u8> {
