@@ -3739,7 +3739,8 @@ export class DocumentController {
     } else if (mimeTypeRaw === null) {
       mimeType = null;
     } else if (typeof mimeTypeRaw === "string") {
-      mimeType = mimeTypeRaw;
+      const trimmed = mimeTypeRaw.trim();
+      mimeType = trimmed.length > 0 ? trimmed : null;
     } else {
       throw new Error("Image mimeType must be a string or null");
     }
@@ -6452,7 +6453,10 @@ export class DocumentController {
 
     const parseMimeType = (raw) => {
       if (raw === null) return null;
-      if (typeof raw === "string") return raw;
+      if (typeof raw === "string") {
+        const trimmed = raw.trim();
+        return trimmed ? trimmed : null;
+      }
       return null;
     };
 

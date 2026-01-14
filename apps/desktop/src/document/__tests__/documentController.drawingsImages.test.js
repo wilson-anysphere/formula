@@ -107,9 +107,34 @@ test("change event includes sheetViewDeltas (drawings) + imageDeltas", () => {
 test("getImageBlob trims mimeType before constructing the Blob", () => {
   const doc = new DocumentController();
   doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: " image/png " });
+  assert.equal(doc.getImage("img1")?.mimeType, "image/png");
   const blob = doc.getImageBlob("img1");
   assert.ok(blob);
   assert.equal(blob.type, "image/png");
+});
+
+test("applyState trims mimeType strings when loading images", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [],
+        },
+      ],
+      images: [{ id: "img1", mimeType: " image/png ", bytesBase64: "AQID" }],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.equal(doc.getImage("img1")?.mimeType, "image/png");
 });
 
 test("drawing helpers support numeric ids (overlay-compatible)", () => {
