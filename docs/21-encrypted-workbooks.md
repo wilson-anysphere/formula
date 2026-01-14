@@ -253,10 +253,10 @@ At a high level, opening a password-encrypted OOXML workbook is:
    - For the exact HMAC target bytes and IV derivation rules (common source of bugs), see
      [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 6. **Hand off to the normal workbook readers**
-    - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
-      existing `.xlsx`/`.xlsm` readers as if it were an unencrypted file.
-      - Note: decrypted `.xlsb` packages contain `xl/workbook.bin`; `formula-io` routes them through
-        the `.xlsb` open path.
+   - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
+     existing `.xlsx`/`.xlsm` readers as if it were an unencrypted file.
+     - Note: decrypted `.xlsb` packages contain `xl/workbook.bin`; route them through the `.xlsb`
+       reader (`formula-xlsb` / `formula-io`’s `Workbook::Xlsb` open path).
 
 Security requirements for this flow:
 
@@ -437,11 +437,11 @@ match open_workbook(path) {
              },
          ) {
             Ok(workbook) => {
-                 // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
-                 // Agile (4.4) and Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb`
-                 // when the password is correct.
-                 let _ = workbook;
-             }
+                // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
+                // Agile (4.4) and Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb`
+                // when the password is correct.
+                let _ = workbook;
+            }
             Err(Error::InvalidPassword { .. }) => {
                 // Wrong password (or integrity mismatch, or unsupported encrypted format in this
                 // layer).
@@ -546,10 +546,10 @@ Encrypted workbook handling should distinguish at least these cases:
 
 4. **Unsupported decrypted workbook kind** (decryption succeeded, but the decrypted payload is not a
    workbook type we can open in this path)
-   - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (rare; indicates the decrypted
-     payload is not a supported spreadsheet package in this path).
-   - UI action: explain limitation and suggest re-saving as `.xlsx`/`.xlsm` (or another supported
-     format) in Excel.
+   - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (rare; currently not expected
+     for `.xlsx`/`.xlsm`/`.xlsb`; indicates the decrypted payload is not a supported workbook package).
+   - UI action: ask the user to confirm the file is a spreadsheet and re-save as
+     `.xlsx`/`.xlsm`/`.xlsb` (or provide an unencrypted copy).
 
 5. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
    - Surface as: a dedicated “corrupt encrypted container” error (future); today this may surface

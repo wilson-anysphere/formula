@@ -176,8 +176,7 @@ At the `formula-io` layer, callers should branch on the error variant (not strin
 - `UnsupportedOoxmlEncryption` / `UnsupportedEncryption` — encrypted workbook detected, but the
   scheme or build configuration doesn’t support decrypting it
 - `UnsupportedEncryptedWorkbookKind` — workbook decrypted successfully, but the decrypted workbook
-  type is not supported in this encrypted-open path (rare; indicates the decrypted payload is not a
-  supported spreadsheet package in this path)
+  type is not supported in this encrypted-open path (rare; currently not expected for `.xlsx`/`.xlsm`/`.xlsb`)
 - `EncryptedWorkbook` — legacy `.xls` encryption detected (BIFF `FILEPASS`); retry via the password
   APIs (`open_workbook_with_password` / `open_workbook_model_with_password`)
 

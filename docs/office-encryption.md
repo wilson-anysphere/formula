@@ -40,10 +40,11 @@ callers can decide whether to prompt for a password vs report “unsupported enc
   - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface
     `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
     `EncryptionInfo` versions).
-- With `formula-io/encrypted-workbooks`, the password-aware open APIs can decrypt and open Agile
+  - With `formula-io/encrypted-workbooks`, the password-aware open APIs can decrypt and open Agile
     (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`
     workbooks in memory.
     - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
+    - Decrypted packages containing `xl/workbook.bin` are routed to the XLSB open path.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
