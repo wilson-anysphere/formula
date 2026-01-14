@@ -97,6 +97,22 @@ fn sheet_reports_external_sheet_number_when_order_available() {
 }
 
 #[test]
+fn sheet_reports_external_sheet_number_using_nfkc_case_insensitive_matching() {
+    let provider = Arc::new(TestExternalProvider::default());
+    // Use the Kelvin sign (U+212A) to ensure we match Excel's NFKC sheet name semantics.
+    provider.set_sheet_order("Book.xlsx", vec!["Kelvin".to_string()]);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]KELVIN!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+}
+
+#[test]
 fn sheet_returns_na_for_external_sheet_when_order_unavailable() {
     let provider = Arc::new(TestExternalProvider::default());
 

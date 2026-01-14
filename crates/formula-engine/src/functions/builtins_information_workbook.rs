@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use crate::eval::CompiledExpr;
 use crate::eval::split_external_sheet_key;
 use crate::functions::information::workbook as workbook_info;
@@ -7,7 +5,8 @@ use crate::functions::{
     ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId, ThreadSafety,
     ValueType, Volatility,
 };
-use crate::value::{cmp_case_insensitive, ErrorKind, Value};
+use crate::value::{ErrorKind, Value};
+use formula_model::sheet_name_eq_case_insensitive;
 
 inventory::submit! {
     FunctionSpec {
@@ -28,7 +27,7 @@ fn external_sheet_index(ctx: &dyn FunctionContext, sheet_key: &str) -> Option<us
     let order = ctx.external_sheet_order(workbook)?;
     order
         .iter()
-        .position(|s| cmp_case_insensitive(s, sheet) == Ordering::Equal)
+        .position(|s| sheet_name_eq_case_insensitive(s, sheet))
 }
 
 fn sheet_number_value(ctx: &dyn FunctionContext, sheet_id: &SheetId) -> Value {
@@ -77,7 +76,7 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
                 let order = order.as_ref().expect("checked is_none above");
                 let idx = match order
                     .iter()
-                    .position(|s| cmp_case_insensitive(s, sheet) == Ordering::Equal)
+                    .position(|s| sheet_name_eq_case_insensitive(s, sheet))
                 {
                     Some(idx) => idx,
                     None => return Value::Error(ErrorKind::NA),
