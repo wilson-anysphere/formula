@@ -72,8 +72,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // - a decimal literal that starts with `.`, e.g. `.5`
   const rgbColor = /\brgb(a)?\s*\(\s*(?:\d|\.\d)/gi;
   // Same logic for hsl()/hsla(). Require a numeric channel so we don't match parsing helpers like
-  // `hsl()` in comments, regex literals, or `hsl(var(--foo))`.
-  const hslColor = /\bhsl(a)?\s*\(\s*(?:\d|\.\d)/gi;
+  // `hsl()` in comments, regex literals, or `hsl(var(--foo))`. Include an optional sign so
+  // hardcoded hues like `hsl(-30deg ...)` can't slip through.
+  const hslColor = /\bhsl(a)?\s*\(\s*(?:[+-]?(?:\d|\.\d))/gi;
 
   // CSS also supports named colors (`crimson`, `red`, etc). These are disallowed in core UI;
   // use tokens instead (e.g. `var(--error)`), except for a few safe keywords.
