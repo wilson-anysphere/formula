@@ -144,8 +144,8 @@ Notes / caveats:
   - Note: after normalization, the committed `sources/<locale>.json` will typically contain fewer
     entries than `shared/functionCatalog.json`, since identity mappings are omitted.
 - After extracting, regenerate + verify with:
-  - `node scripts/generate-locale-function-tsv.js`
-  - `node scripts/generate-locale-function-tsv.js --check`
+  - `node scripts/generate-locale-function-tsv.js` (or `pnpm generate:locale-function-tsv`)
+  - `node scripts/generate-locale-function-tsv.js --check` (or `pnpm check:locale-function-tsv`)
   - and spot-check that Spanish financial functions like `NPV`/`IRR` localize (e.g. `VNA`/`TIR`).
 - Optional (recommended when touching locale data): run the Rust guard-rail tests:
   - `bash scripts/cargo_agent.sh test -p formula-engine --test locale_function_tsv_completeness`
