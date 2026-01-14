@@ -10,7 +10,7 @@ use formula_engine::pivot::{PivotFieldType, PivotSchema, PivotValue};
 use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{
     canonicalize_formula, get_locale_info, lex_formula, localize_formula, parse_formula_partial,
-    rewrite_formulas_for_copy_delta, WasmWorkbook, DEFAULT_SHEET,
+    rewrite_formulas_for_copy_delta, supported_locale_ids, WasmWorkbook, DEFAULT_SHEET,
 };
 
 #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
@@ -55,6 +55,17 @@ fn to_js_value<T: serde::Serialize>(value: &T) -> JsValue {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .expect("failed to serialize JS value")
+}
+
+fn assert_unknown_locale_error_includes_supported_locale_ids_list(message: &str) {
+    let supported_js = supported_locale_ids();
+    let supported: Vec<String> = serde_wasm_bindgen::from_value(supported_js)
+        .expect("supportedLocaleIds() should return a string[]");
+    let expected = format!("Supported locale ids: {}", supported.join(", "));
+    assert!(
+        message.contains(&expected),
+        "expected unknown-locale error message to contain the exact supportedLocaleIds list.\nexpected substring: {expected:?}\ngot: {message:?}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -403,14 +414,7 @@ fn lex_formula_rejects_unknown_locale_id_option() {
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
     assert!(message.contains("unknown localeId: xx-XX"));
-    assert!(
-        message.contains("Supported locale ids"),
-        "expected actionable locale message, got {message:?}"
-    );
-    assert!(
-        message.contains("en-US"),
-        "expected supported locale ids list to include en-US, got {message:?}"
-    );
+    assert_unknown_locale_error_includes_supported_locale_ids_list(&message);
 }
 
 #[wasm_bindgen_test]
@@ -650,10 +654,7 @@ fn canonicalize_formula_rejects_unknown_locale_id_with_supported_list() {
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
     assert!(message.contains("unknown localeId: xx-XX"));
-    assert!(
-        message.contains("Supported locale ids"),
-        "expected actionable locale message, got {message:?}"
-    );
+    assert_unknown_locale_error_includes_supported_locale_ids_list(&message);
 }
 
 #[wasm_bindgen_test]
@@ -732,14 +733,7 @@ fn parse_formula_partial_rejects_unknown_locale_id_option() {
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
     assert!(message.contains("unknown localeId: xx-XX"));
-    assert!(
-        message.contains("Supported locale ids"),
-        "expected actionable locale message, got {message:?}"
-    );
-    assert!(
-        message.contains("en-US"),
-        "expected supported locale ids list to include en-US, got {message:?}"
-    );
+    assert_unknown_locale_error_includes_supported_locale_ids_list(&message);
 }
 
 #[wasm_bindgen_test]
