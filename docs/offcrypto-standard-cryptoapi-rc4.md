@@ -230,6 +230,21 @@ RC4(key=CryptoAPI padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphe
 These ciphertexts differ, demonstrating why a **raw 5-byte RC4 key is not CryptoAPI-compatible**
 when `KeySize == 40`.
 
+### 56-bit RC4 key truncation example
+
+Using the same parameters as above but with `KeySize = 56` bits (`key_size_bytes = 7`):
+
+```text
+block 0 rc4_key =
+  6ad7dedf2da351
+
+block 1 rc4_key =
+  2ed4e8825cd48a
+```
+
+This is a straight truncation of the 128-bit keys: it uses the **first 7 bytes** of the
+`SHA1(H || LE32(block))` digest.
+
 ### MD5 (`CALG_MD5`)
 
 Some Standard/CryptoAPI files use `CALG_MD5` instead of `CALG_SHA1` for the fixed-spin password
@@ -256,6 +271,16 @@ block 1 rc4_key =
 
 RC4(key=block0, plaintext="Hello, RC4 CryptoAPI!") ciphertext =
   425dd9c8165e1216065e53eb586e897b5e85a07a6d
+```
+
+For the same MD5 parameters but `KeySize = 56` bits (`key_size_bytes = 7`), the per-block keys are:
+
+```text
+block 0 rc4_key =
+  69badcae244868
+
+block 1 rc4_key =
+  6f4d502ab37700
 ```
 
 ## CryptoAPI constants (for parsing `EncryptionHeader`)
