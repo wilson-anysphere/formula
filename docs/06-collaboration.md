@@ -350,6 +350,7 @@ Desktop encryption commands (Command Palette):
   - If the `keyId` is already used by an existing encrypted range but the key is not imported, the UI refuses to generate a new key for that id (import the key first or choose a different id).
   - If the `keyId` already appears in existing encrypted cell payloads (even if the encrypted-range metadata was removed), the UI refuses to generate a new key for that id unless the key is already imported.
   - If the encrypted range metadata is unreadable (unsupported `metadata.encryptedRanges` schema), the UI aborts early to avoid generating/storing orphaned key material.
+  - If a new key is generated/stored but adding the encrypted range fails, the UI best-effort deletes the new key (when it can verify the key id was previously missing) to avoid orphaned key material.
 - `collab.removeEncryptedRange` — remove encrypted range *metadata* overlapping the current selection.
   - Note: removing a range does **not** decrypt cells that already have an `enc` payload.
   - If multiple ranges overlap, the desktop UI can remove a single chosen range or all overlaps.
