@@ -523,6 +523,7 @@ export const enUS = {
   "queryEditor.addStep.op.addColumn": "Add Column",
   "queryEditor.addStep.op.fillDown": "Fill Down",
   "queryEditor.addStep.op.replaceValues": "Replace Values",
+  "queryEditor.addStep.op.unpivot": "Unpivot Columns",
   "queryEditor.addStep.op.groupBy.count": "Count Rows",
   "queryEditor.addStep.schemaRequired": "Preview schema required to use this operation.",
   "queryEditor.addStep.schemaRequiredHint": "Preview schema required for some operations.",

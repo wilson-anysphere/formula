@@ -84,6 +84,7 @@ describe("AddStepMenu", () => {
       "Change Type",
       "Split Column",
       "Group By",
+      "Unpivot Columns",
       "Fill Down",
       "Replace Values",
       "Add Column",
@@ -138,6 +139,36 @@ describe("AddStepMenu", () => {
     });
 
     expect(onAddStep).toHaveBeenCalledWith({ type: "addColumn", name: "Custom 1", formula: "[Region]" });
+  });
+
+  it("constructs a minimally-valid unpivot operation", async () => {
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Unpivot Columns").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({
+      type: "unpivot",
+      columns: ["Region"],
+      nameColumn: "Attribute",
+      valueColumn: "Value",
+    });
   });
 
   it("generates a unique Rename Column newName when a conflicting name already exists", async () => {

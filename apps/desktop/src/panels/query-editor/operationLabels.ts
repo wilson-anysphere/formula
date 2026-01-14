@@ -76,6 +76,10 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
       const col = typeof op.column === "string" ? op.column : null;
       return `${t("queryEditor.addStep.op.replaceValues")}${formatDetails(col)}`;
     }
+    case "unpivot": {
+      const cols = joinNames(op.columns);
+      return `${t("queryEditor.addStep.op.unpivot")}${formatDetails(cols)}`;
+    }
     case "distinctRows": {
       const cols = joinNames(op.columns ?? null);
       return `${t("queryEditor.addStep.op.removeDuplicates")}${formatDetails(cols)}`;

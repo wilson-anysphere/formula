@@ -184,6 +184,17 @@ export function AddStepMenu(props: {
             },
           }),
           schemaItem({
+            id: "unpivot",
+            label: t("queryEditor.addStep.op.unpivot"),
+            create: () => {
+              const nameColumn = uniqueName("Attribute", usedColumnNames);
+              const used = new Set(usedColumnNames);
+              used.add(nameColumn);
+              const valueColumn = uniqueName("Value", used);
+              return { type: "unpivot", columns: [firstColumnName], nameColumn, valueColumn };
+            },
+          }),
+          schemaItem({
             id: "fillDown",
             label: t("queryEditor.addStep.op.fillDown"),
             create: () => ({ type: "fillDown", columns: [firstColumnName] }),
