@@ -560,9 +560,9 @@ function main() {
   // ---- macOS: Info.plist contains CFBundleURLSchemes -> formula, and CFBundleDocumentTypes includes xlsx.
   try {
     const plist = readFileSync(infoPlistPath, "utf8");
-    const schemeBlock = extractPlistArrayBlock(plist, "CFBundleURLSchemes");
-    const schemeRe = new RegExp(`<string>\\s*${REQUIRED_SCHEME}\\s*<\\/string>`, "i");
-    if (!schemeBlock || !schemeRe.test(schemeBlock)) {
+    const schemeBlocks = extractAllPlistArrayBlocks(plist, "CFBundleURLSchemes");
+    const schemeRe = new RegExp(`<string>\\s*${escapeRegExp(REQUIRED_SCHEME)}\\s*<\\/string>`, "i");
+    if (schemeBlocks.length === 0 || !schemeBlocks.some((block) => schemeRe.test(block))) {
       errBlock("Missing macOS URL scheme registration (Info.plist)", [
         "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleURLSchemes including:",
         `  - ${REQUIRED_SCHEME}`,

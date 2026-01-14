@@ -259,6 +259,44 @@ test("fails when macOS Info.plist does not declare the formula:// URL scheme", (
   assert.match(proc.stderr, /Info\.plist/i);
 });
 
+test("passes when macOS Info.plist declares multiple URL schemes and includes formula (not necessarily first)", () => {
+  const config = baseConfig();
+  const extsXml = requiredFileExtensions.map((ext) => `        <string>${ext}</string>`).join("\n");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>wrong</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>formula</string>
+      </array>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+${extsXml}
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
+`;
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("fails when tauri.conf.json deep-link schemes do not include formula", () => {
   const config = baseConfig();
   config.plugins["deep-link"].desktop.schemes = ["wrong"];
