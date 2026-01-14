@@ -71,6 +71,77 @@ fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
         RawString { hashes: usize },
     }
 
+    fn is_ascii_hexdigit(b: u8) -> bool {
+        matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+    }
+
+    fn consume_char_literal(src: &str, bytes: &[u8], start: usize) -> Option<usize> {
+        if bytes.get(start) != Some(&b'\'') {
+            return None;
+        }
+        let mut j = start + 1;
+        if j >= bytes.len() {
+            return None;
+        }
+        // Char literals can't span lines; treat lifetimes (no closing `'`) as normal code.
+        if matches!(bytes[j], b'\n' | b'\r') {
+            return None;
+        }
+
+        let j_end = if bytes[j] == b'\\' {
+            let esc = *bytes.get(j + 1)?;
+            match esc {
+                b'\\' | b'\'' | b'"' | b'n' | b'r' | b't' | b'0' => j + 2,
+                b'x' => {
+                    let h1 = *bytes.get(j + 2)?;
+                    let h2 = *bytes.get(j + 3)?;
+                    if is_ascii_hexdigit(h1) && is_ascii_hexdigit(h2) {
+                        j + 4
+                    } else {
+                        return None;
+                    }
+                }
+                b'u' => {
+                    if bytes.get(j + 2) != Some(&b'{') {
+                        return None;
+                    }
+                    let mut k = j + 3;
+                    let mut saw_digit = false;
+                    while k < bytes.len() {
+                        let b = bytes[k];
+                        if b == b'}' {
+                            break;
+                        }
+                        if !is_ascii_hexdigit(b) {
+                            return None;
+                        }
+                        saw_digit = true;
+                        k += 1;
+                    }
+                    if k >= bytes.len() || bytes[k] != b'}' || !saw_digit {
+                        return None;
+                    }
+                    k + 1
+                }
+                _ => return None,
+            }
+        } else {
+            // Reject empty literals.
+            if bytes[j] == b'\'' {
+                return None;
+            }
+            let ch = src[j..].chars().next()?;
+            j += ch.len_utf8();
+            j
+        };
+
+        if bytes.get(j_end) == Some(&b'\'') {
+            Some(j_end + 1)
+        } else {
+            None
+        }
+    }
+
     let mut mode = Mode::Code;
     let mut depth: i32 = 1;
     let mut i = open_brace + 1;
@@ -91,6 +162,15 @@ fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
                             continue;
                         }
                         _ => {}
+                    }
+                }
+
+                // Char literals can contain braces via unicode escapes (`'\u{...}'`). Ignore braces
+                // inside those literals.
+                if bytes[i] == b'\'' {
+                    if let Some(next) = consume_char_literal(src, bytes, i) {
+                        i = next;
+                        continue;
                     }
                 }
 
@@ -270,8 +350,9 @@ fn extract_brace_block_ignores_braces_in_strings_and_comments() {
   let _a = "{ braces in string }";
   let _b = r#"raw { braces }"#;
   let _c = br#"raw bytes { braces }"#;
+  let _d = '\u{7B}'; // { braces in char escape }
   /* nested { block { comment } } */
-  if true { let _d = 1; }
+  if true { let _e = 1; }
 }
 "##;
 
@@ -281,9 +362,10 @@ fn extract_brace_block_ignores_braces_in_strings_and_comments() {
     assert!(block.contains(r#"let _a = "{ braces in string }";"#));
     assert!(block.contains("let _b = r#\"raw { braces }\"#;"));
     assert!(block.contains("let _c = br#\"raw bytes { braces }\"#;"));
+    assert!(block.contains(r#"let _d = '\u{7B}';"#));
     assert!(block.contains(r#"/* nested { block { comment } } */"#));
     assert!(
-        block.contains("if true { let _d = 1; }"),
+        block.contains("if true { let _e = 1; }"),
         "expected nested code braces to still be counted"
     );
     assert!(
