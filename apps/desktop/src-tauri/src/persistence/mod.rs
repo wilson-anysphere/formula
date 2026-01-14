@@ -17,12 +17,14 @@ use formula_model::{
     CellValue as ModelCellValue, DefinedNameScope, Style, Workbook as ModelWorkbook,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::io::Cursor;
+use std::collections::{HashMap, HashSet};
+use std::io::{Cursor, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 pub fn autosave_db_path_for_workbook(path: &str) -> Option<PathBuf> {
     let proj = ProjectDirs::from("com", "formula", "Formula")?;
@@ -401,70 +403,52 @@ pub fn build_xlsx_from_storage(
             formula_model::DateSystem::Excel1904
         );
 
-    if wants_vba
+    // Repack in a streaming-friendly way to avoid `XlsxPackage::from_bytes` inflating every ZIP
+    // entry (which can be prohibitively memory-intensive for large exports).
+    //
+    // We generate the workbook from the model (streaming ZIP writer) and then optionally apply
+    // preserved parts / VBA payloads / content type tweaks via a streaming ZIP rewrite.
+    let needs_repack_overrides = wants_vba
         || wants_preserved_drawings
         || wants_preserved_pivots
         || wants_power_query
-        || wants_macro_strip
         || wants_content_type_enforcement
-        || needs_date_system_update
-    {
-        let mut pkg = formula_xlsx::XlsxPackage::from_bytes_limited(
+        || needs_date_system_update;
+
+    if needs_repack_overrides {
+        let part_overrides = build_export_part_overrides_from_subset_package(
             &bytes,
-            formula_xlsx::XlsxPackageLimits::default(),
+            workbook_meta,
+            workbook_kind,
+            needs_date_system_update,
+            xlsx_date_system,
+            wants_vba,
+            wants_vba_signature,
+        )?;
+
+        if !part_overrides.is_empty() {
+            let mut cursor = Cursor::new(Vec::new());
+            formula_xlsx::patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy(
+                Cursor::new(bytes),
+                &mut cursor,
+                &formula_xlsx::WorkbookCellPatches::default(),
+                &part_overrides,
+                formula_xlsx::RecalcPolicy::default(),
+            )
+            .context("apply export part overrides (streaming)")?;
+            bytes = cursor.into_inner();
+        }
+    }
+
+    if wants_macro_strip {
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::strip_vba_project_streaming_with_kind(
+            Cursor::new(bytes),
+            &mut cursor,
+            workbook_kind,
         )
-        .context("parse generated xlsx")?;
-
-        if wants_vba {
-            pkg.set_part(
-                "xl/vbaProject.bin",
-                workbook_meta
-                    .vba_project_bin
-                    .clone()
-                    .expect("checked is_some"),
-            );
-        }
-        if wants_vba_signature {
-            pkg.set_part(
-                "xl/vbaProjectSignature.bin",
-                workbook_meta
-                    .vba_project_signature_bin
-                    .clone()
-                    .expect("checked is_some"),
-            );
-        }
-
-        if let Some(preserved) = workbook_meta.preserved_drawing_parts.as_ref() {
-            pkg.apply_preserved_drawing_parts(preserved)
-                .context("apply preserved drawing parts")?;
-        }
-
-        if let Some(preserved) = workbook_meta.preserved_pivot_parts.as_ref() {
-            pkg.apply_preserved_pivot_parts(preserved)
-                .context("apply preserved pivot parts")?;
-        }
-
-        match workbook_meta.power_query_xml.as_ref() {
-            Some(bytes) => pkg.set_part("xl/formula/power-query.xml", bytes.clone()),
-            None => {
-                pkg.parts_map_mut().remove("xl/formula/power-query.xml");
-            }
-        }
-
-        if wants_macro_strip {
-            pkg.remove_vba_project()
-                .context("strip macros for macro-free export")?;
-        }
-
-        pkg.enforce_workbook_kind(workbook_kind)
-            .context("enforce workbook content type")?;
-
-        if needs_date_system_update {
-            pkg.set_workbook_date_system(xlsx_date_system)
-                .context("set workbook date system")?;
-        }
-
-        bytes = pkg.write_to_bytes().context("repack xlsx package")?;
+        .context("strip macros for macro-free export (streaming)")?;
+        bytes = cursor.into_inner();
     }
 
     if extension
@@ -490,6 +474,216 @@ pub fn write_xlsx_from_storage(
     let bytes = build_xlsx_from_storage(storage, workbook_id, workbook_meta, path)?;
     write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {path:?}"))?;
     Ok(bytes)
+}
+
+fn build_export_part_overrides_from_subset_package(
+    base_bytes: &[u8],
+    workbook_meta: &AppWorkbook,
+    workbook_kind: formula_xlsx::WorkbookKind,
+    needs_date_system_update: bool,
+    xlsx_date_system: formula_xlsx::DateSystem,
+    wants_vba: bool,
+    wants_vba_signature: bool,
+) -> anyhow::Result<HashMap<String, formula_xlsx::PartOverride>> {
+    fn zip_part_names(bytes: &[u8]) -> anyhow::Result<HashSet<String>> {
+        let mut cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(&mut cursor).context("open xlsx zip archive")?;
+        let mut names = HashSet::new();
+        for i in 0..archive.len() {
+            let file = archive.by_index(i).context("read zip entry")?;
+            if file.is_dir() {
+                continue;
+            }
+            let name = file.name();
+            let canonical = name.strip_prefix('/').unwrap_or(name);
+            names.insert(canonical.to_string());
+        }
+        Ok(names)
+    }
+
+    fn read_required_part(bytes: &[u8], name: &str) -> anyhow::Result<Vec<u8>> {
+        formula_xlsx::read_part_from_reader(Cursor::new(bytes), name)
+            .with_context(|| format!("read {name} from generated workbook"))?
+            .with_context(|| format!("missing required {name} part"))
+    }
+
+    let base_part_names = zip_part_names(base_bytes).context("list base workbook part names")?;
+
+    // Build a "subset" XLSX package containing only the parts we need to mutate. This keeps memory
+    // proportional to the number of touched parts (and avoids inflating all worksheets).
+    let mut subset_parts: Vec<(String, Vec<u8>)> = Vec::new();
+    subset_parts.push((
+        "[Content_Types].xml".to_string(),
+        read_required_part(base_bytes, "[Content_Types].xml")?,
+    ));
+    subset_parts.push((
+        "xl/workbook.xml".to_string(),
+        read_required_part(base_bytes, "xl/workbook.xml")?,
+    ));
+    subset_parts.push((
+        "xl/_rels/workbook.xml.rels".to_string(),
+        read_required_part(base_bytes, "xl/_rels/workbook.xml.rels")?,
+    ));
+
+    let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
+    let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
+    if wants_preserved_drawings || wants_preserved_pivots {
+        let worksheet_parts = formula_xlsx::worksheet_parts_from_reader(Cursor::new(base_bytes))
+            .context("resolve worksheet parts for preserved part application")?;
+
+        let resolve_sheet = |preserved_name: &str, preserved_index: usize| {
+            worksheet_parts
+                .iter()
+                .find(|p| sheet_name_eq_case_insensitive(&p.name, preserved_name))
+                .or_else(|| worksheet_parts.get(preserved_index))
+        };
+
+        let mut needed_sheet_parts: HashSet<String> = HashSet::new();
+
+        if let Some(preserved) = workbook_meta.preserved_drawing_parts.as_ref() {
+            for (sheet_name, entry) in &preserved.sheet_drawings {
+                if entry.drawings.is_empty() {
+                    continue;
+                }
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+            for (sheet_name, entry) in &preserved.sheet_pictures {
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+            for (sheet_name, entry) in &preserved.sheet_ole_objects {
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+            for (sheet_name, entry) in &preserved.sheet_controls {
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+            for (sheet_name, entry) in &preserved.sheet_drawing_hfs {
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+        }
+
+        if let Some(preserved) = workbook_meta.preserved_pivot_parts.as_ref() {
+            for (sheet_name, entry) in &preserved.sheet_pivot_tables {
+                if let Some(info) = resolve_sheet(sheet_name, entry.sheet_index) {
+                    needed_sheet_parts.insert(info.worksheet_part.clone());
+                }
+            }
+        }
+
+        for worksheet_part in needed_sheet_parts {
+            let xml = read_required_part(base_bytes, &worksheet_part)?;
+            subset_parts.push((worksheet_part.clone(), xml));
+
+            let rels_part = formula_xlsx::openxml::rels_part_name(&worksheet_part);
+            let rels_xml = read_required_part(base_bytes, &rels_part)?;
+            subset_parts.push((rels_part, rels_xml));
+        }
+    }
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in subset_parts {
+        zip.start_file(&name, options)
+            .with_context(|| format!("start subset zip entry {name}"))?;
+        zip.write_all(&bytes)
+            .with_context(|| format!("write subset zip entry {name}"))?;
+    }
+    let subset_bytes = zip
+        .finish()
+        .context("finalize subset xlsx zip")?
+        .into_inner();
+
+    let mut pkg =
+        formula_xlsx::XlsxPackage::from_bytes(&subset_bytes).context("parse subset xlsx package")?;
+
+    if wants_vba {
+        pkg.set_part(
+            "xl/vbaProject.bin",
+            workbook_meta
+                .vba_project_bin
+                .clone()
+                .expect("checked is_some"),
+        );
+    }
+    if wants_vba_signature {
+        pkg.set_part(
+            "xl/vbaProjectSignature.bin",
+            workbook_meta
+                .vba_project_signature_bin
+                .clone()
+                .expect("checked is_some"),
+        );
+    }
+
+    if let Some(preserved) = workbook_meta.preserved_drawing_parts.as_ref() {
+        pkg.apply_preserved_drawing_parts(preserved)
+            .context("apply preserved drawing parts")?;
+    }
+
+    if let Some(preserved) = workbook_meta.preserved_pivot_parts.as_ref() {
+        pkg.apply_preserved_pivot_parts(preserved)
+            .context("apply preserved pivot parts")?;
+    }
+
+    match workbook_meta.power_query_xml.as_ref() {
+        Some(bytes) => pkg.set_part("xl/formula/power-query.xml", bytes.clone()),
+        None => {
+            pkg.parts_map_mut().remove("xl/formula/power-query.xml");
+        }
+    }
+
+    // Enforce workbook kind by patching the workbook override in `[Content_Types].xml`.
+    let content_types = pkg
+        .part("[Content_Types].xml")
+        .ok_or_else(|| anyhow::anyhow!("subset package is missing [Content_Types].xml"))?;
+    if let Some(updated) = formula_xlsx::rewrite_content_types_workbook_kind(content_types, workbook_kind)
+        .context("rewrite workbook kind in [Content_Types].xml")?
+    {
+        pkg.set_part("[Content_Types].xml", updated);
+    }
+
+    if needs_date_system_update {
+        pkg.set_workbook_date_system(xlsx_date_system)
+            .context("set workbook date system")?;
+    }
+
+    let repacked_subset = pkg
+        .write_to_bytes()
+        .context("repack subset xlsx package")?;
+    let repacked_pkg = formula_xlsx::XlsxPackage::from_bytes(&repacked_subset)
+        .context("parse repacked subset package")?;
+
+    let mut part_overrides: HashMap<String, formula_xlsx::PartOverride> = HashMap::new();
+    for (name, bytes) in repacked_pkg.parts() {
+        let canonical = name.strip_prefix('/').unwrap_or(name).to_string();
+        let override_op = if base_part_names.contains(&canonical) {
+            formula_xlsx::PartOverride::Replace(bytes.to_vec())
+        } else {
+            formula_xlsx::PartOverride::Add(bytes.to_vec())
+        };
+        part_overrides.insert(canonical, override_op);
+    }
+
+    // Ensure we handle removals deterministically (and match the previous behavior) even if the
+    // part isn't present in the generated workbook.
+    if workbook_meta.power_query_xml.is_none() {
+        part_overrides.insert(
+            "xl/formula/power-query.xml".to_string(),
+            formula_xlsx::PartOverride::Remove,
+        );
+    }
+
+    Ok(part_overrides)
 }
 
 fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook) {
