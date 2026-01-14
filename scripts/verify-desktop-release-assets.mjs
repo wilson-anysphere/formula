@@ -225,7 +225,17 @@ const EXPECTED_TARGETS = {
     os: "macos",
     arch: "universal",
     installerExts: [".dmg", ".pkg"],
-    updaterPlatformKeys: ["darwin-universal", "macos-universal"],
+    // Formula's release workflow produces a single universal macOS updater archive, but Tauri's
+    // updater target at runtime is still per-arch. We therefore expect the universal archive to
+    // appear under BOTH `darwin-x86_64` and `darwin-aarch64` keys in `latest.json.platforms`.
+    //
+    // `darwin-universal` may also be present if tauri-action's `updaterJsonKeepUniversal` is enabled.
+    updaterPlatformKeys: [
+      "darwin-x86_64",
+      "darwin-aarch64",
+      "darwin-universal",
+      "macos-universal",
+    ],
     // Some universal builds ship a single installer that omits the arch token (because the
     // installer itself is universal). This is allowed only when `--expect-macos-universal` is set.
     allowMissingArchInInstallerName: true,
