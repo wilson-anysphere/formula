@@ -493,6 +493,17 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
             reason: "saltSize must be non-zero".to_string(),
         });
     }
+
+    // `spinCount` is attacker-controlled; enforce limits before decoding any (potentially large)
+    // base64 fields so we can fail fast on malicious inputs.
+    let spin_count = parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?;
+    if spin_count > decrypt_opts.max_spin_count {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count,
+            max: decrypt_opts.max_spin_count,
+        });
+    }
+
     let key_encryptor_salt_value =
         decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", parse_opts)?;
     if key_encryptor_salt_value.len() != key_encryptor_salt_size as usize {
@@ -504,14 +515,6 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
                 key_encryptor_salt_value.len(),
                 key_encryptor_salt_size
             ),
-        });
-    }
-
-    let spin_count = parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?;
-    if spin_count > decrypt_opts.max_spin_count {
-        return Err(OffCryptoError::SpinCountTooLarge {
-            spin_count,
-            max: decrypt_opts.max_spin_count,
         });
     }
 

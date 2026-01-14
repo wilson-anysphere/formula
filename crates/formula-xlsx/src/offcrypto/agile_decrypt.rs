@@ -1109,9 +1109,19 @@ fn parse_password_key_encryptor(
     warnings: Option<&mut Vec<OffCryptoWarning>>,
 ) -> Result<PasswordKeyEncryptor> {
     validate_cipher_settings(node)?;
+
+    // `spinCount` is attacker-controlled; enforce limits before decoding any base64 attributes so we
+    // can fail fast on malicious inputs.
+    let spin_count = parse_u32_attr(node, "spinCount")?;
+    if spin_count > decrypt_opts.max_spin_count {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count,
+            max: decrypt_opts.max_spin_count,
+        });
+    }
+
     let salt_value = parse_base64_attr(node, "saltValue", parse_opts)?;
     let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
-    let spin_count = parse_u32_attr(node, "spinCount")?;
     let block_size = parse_usize_attr(node, "blockSize")?;
     let key_bits = parse_usize_attr(node, "keyBits")?;
     let hash_size = parse_usize_attr(node, "hashSize")?;
@@ -1120,13 +1130,6 @@ fn parse_password_key_encryptor(
     let encrypted_verifier_hash_value =
         parse_base64_attr(node, "encryptedVerifierHashValue", parse_opts)?;
     let encrypted_key_value = parse_base64_attr(node, "encryptedKeyValue", parse_opts)?;
-
-    if spin_count > decrypt_opts.max_spin_count {
-        return Err(OffCryptoError::SpinCountTooLarge {
-            spin_count,
-            max: decrypt_opts.max_spin_count,
-        });
-    }
 
     let salt_size = parse_usize_attr(node, "saltSize")?;
     if salt_size == 0 {

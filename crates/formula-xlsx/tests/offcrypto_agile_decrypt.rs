@@ -282,6 +282,54 @@ fn agile_decrypt_rejects_spin_count_above_default_max() {
 }
 
 #[test]
+fn agile_decrypt_checks_spin_count_before_decoding_password_salt() {
+    // If `spinCount` is above the configured max, we should fail fast without attempting to decode
+    // other (possibly malformed) base64 fields.
+    //
+    // This guards against inputs that combine an oversized `spinCount` (CPU DoS) with malformed
+    // blobs intended to trigger additional work during parse.
+    let valid = BASE64.encode([0u8; 16]);
+    let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+           blockSize="16" keyBits="128" hashSize="20" saltSize="16" />
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltValue="!!!!" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                      spinCount="{spin_count}" blockSize="16" keyBits="128" hashSize="20" saltSize="16"
+                      encryptedVerifierHashInput="{valid}"
+                      encryptedVerifierHashValue="{valid}"
+                      encryptedKeyValue="{valid}" />
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&0u32.to_le_bytes());
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw")
+        .expect_err("expected SpinCountTooLarge");
+    assert!(
+        matches!(
+            err,
+            OffCryptoError::SpinCountTooLarge {
+                spin_count: s,
+                max
+            } if s == spin_count && max == DEFAULT_MAX_SPIN_COUNT
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn agile_decrypt_allows_overriding_max_spin_count() {
     let invalid = BASE64.encode([0u8; 15]); // 15 % 16 != 0
     let valid = BASE64.encode([0u8; 16]);
