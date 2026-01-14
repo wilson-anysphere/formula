@@ -140,6 +140,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     "color",
     "fill",
     "filter",
+    "backdrop-filter",
     "outline",
     "outline-color",
     "stroke",
@@ -149,27 +150,27 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   ]);
   const jsStyleColor = new RegExp(
     // style objects + style literals (e.g. `style={{ color: "red" }}`)
-    String.raw`\b(?:accentColor|background|backgroundColor|backgroundImage|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|fillStyle|filter|outline|outlineColor|stroke|strokeStyle|textDecoration|textDecorationColor|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\b(?:accentColor|background|backgroundColor|backgroundImage|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|fillStyle|filter|backdropFilter|outline|outlineColor|stroke|strokeStyle|textDecoration|textDecorationColor|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const domStyleColor = new RegExp(
     // DOM style assignments (e.g. `el.style.color = "red"`)
-    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const domStyleStyleBracketColor = new RegExp(
     // DOM style assignments via bracket access to the `style` property (e.g. `el["style"].color = "red"`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\.(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\.(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const domStyleStyleBracketBracketColor = new RegExp(
     // DOM style assignments via bracket access to `style` + bracket notation (e.g. `el["style"]["color"] = "red"`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const domStyleBracketColor = new RegExp(
     // DOM style assignments via bracket notation (e.g. `el.style["color"] = "red"`)
-    String.raw`\.style\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\.style\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const canvasStyleColor = new RegExp(
