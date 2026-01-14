@@ -63,6 +63,23 @@ test("run_limited clears RUSTUP_TOOLCHAIN for rustc invocations", { skip: !hasBa
   }
 });
 
+test("run_limited clears RUSTUP_TOOLCHAIN even for non-Rust commands (indirect cargo safety)", { skip: !hasBash }, () => {
+  const proc = spawnSync(
+    "bash",
+    [runLimitedPath, "--no-as", "--no-cpu", "--", "bash", "-lc", 'echo "RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN-}"'],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        RUSTUP_TOOLCHAIN: "stable",
+      },
+    },
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(proc.stdout.trim(), "RUSTUP_TOOLCHAIN=");
+});
+
 test("xvfb-run-safe clears RUSTUP_TOOLCHAIN for rustc invocations", { skip: !hasBash }, () => {
   const { tmpDir, binDir } = makeFakeTools();
   try {
@@ -86,3 +103,33 @@ test("xvfb-run-safe clears RUSTUP_TOOLCHAIN for rustc invocations", { skip: !has
   }
 });
 
+test(
+  "xvfb-run-safe clears RUSTUP_TOOLCHAIN even for non-Rust commands (indirect cargo safety)",
+  { skip: !hasBash },
+  () => {
+    const { tmpDir, binDir } = makeFakeTools();
+    try {
+      const proc = spawnSync(
+        "bash",
+        [xvfbSafePath, "bash", "-lc", 'echo "RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN-}"'],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            // Ensure xvfb-run-safe doesn't try to launch Xvfb; it will see xdpyinfo succeed and
+            // exec the wrapped command directly.
+            DISPLAY: ":99",
+            CI: "",
+            RUSTUP_TOOLCHAIN: "stable",
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      assert.equal(proc.status, 0, proc.stderr);
+      assert.equal(proc.stdout.trim(), "RUSTUP_TOOLCHAIN=");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  },
+);
