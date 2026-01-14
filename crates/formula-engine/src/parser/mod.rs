@@ -2576,10 +2576,11 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::QuotedIdent(name) => {
-                let name = name.clone();
+                let raw = name.clone();
                 self.next();
+                let (workbook, name) = split_external_sheet_name(&raw);
                 Expr::NameRef(NameRef {
-                    workbook: None,
+                    workbook,
                     sheet: None,
                     name,
                 })
@@ -4291,6 +4292,20 @@ mod tests {
                 assert_eq!(r.workbook.as_deref(), Some("AddIn"));
                 assert_eq!(r.sheet, None);
                 assert_eq!(r.name, "MyAddinConst");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn partial_parse_splits_external_workbook_prefix_in_quoted_name_refs() {
+        let parsed = parse_formula_partial("='[Book.xlsx]MyName'", ParseOptions::default());
+        assert!(parsed.error.is_none(), "unexpected parse error: {:?}", parsed.error);
+        match &parsed.ast.expr {
+            Expr::NameRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some("Book.xlsx"));
+                assert_eq!(r.sheet, None);
+                assert_eq!(r.name, "MyName");
             }
             other => panic!("expected NameRef, got {other:?}"),
         }

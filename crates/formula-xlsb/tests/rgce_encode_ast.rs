@@ -394,6 +394,27 @@ fn ast_encoder_encodes_namex_reference() {
 }
 
 #[test]
+fn ast_encoder_encodes_namex_reference_for_addin_const() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
+    let wb = XlsbWorkbook::open(path).expect("open xlsb");
+    let ctx = wb.workbook_context();
+
+    let encoded = encode_rgce_with_context_ast(
+        "='[AddIn]MyAddinConst'",
+        ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // PtgNameX(ixti=0, nameIndex=2)
+    assert_eq!(encoded.rgce, vec![0x39, 0x00, 0x00, 0x02, 0x00]);
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, ctx).expect("decode");
+    assert_eq!(decoded, "'[AddIn]MyAddinConst'");
+}
+
+#[test]
 fn ast_encoder_encodes_workbook_defined_name_function_call_via_ptgname() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyLambda", 1);
