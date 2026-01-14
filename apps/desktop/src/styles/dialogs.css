@@ -217,6 +217,12 @@ dialog.custom-sort-dialog::backdrop {
   background: var(--bg-hover);
 }
 
+.organize-sheets-dialog__close:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
 .organize-sheets-dialog__list {
   display: flex;
   flex-direction: column;
@@ -280,6 +286,12 @@ dialog.custom-sort-dialog::backdrop {
   background: var(--bg-hover);
 }
 
+.organize-sheets-dialog__actions button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
 .organize-sheets-dialog__actions button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -292,6 +304,12 @@ dialog.custom-sort-dialog::backdrop {
   padding: 6px 8px;
   background: var(--bg-primary);
   color: var(--text-primary);
+}
+
+.organize-sheets-dialog__rename-input:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .organize-sheets-dialog__error {
