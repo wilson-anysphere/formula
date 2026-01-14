@@ -9,7 +9,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use formula_engine::pivot::{PivotFieldType, PivotSchema, PivotValue};
 use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{
-    canonicalize_formula, lex_formula, localize_formula, parse_formula_partial,
+    canonicalize_formula, get_locale_info, lex_formula, localize_formula, parse_formula_partial,
     rewrite_formulas_for_copy_delta, WasmWorkbook, DEFAULT_SHEET,
 };
 
@@ -498,7 +498,15 @@ fn canonicalize_formula_normalizes_locale_id_variants() {
 
     // JS callers may provide OS/browser locale spellings or case/whitespace variants. Ensure the
     // wasm public API remains compatible with the engine's locale-id normalization rules.
-    for locale_id in ["de_DE.UTF-8", "de_DE", "  de-DE  ", "DE-de", "de"] {
+    for locale_id in [
+        "de_DE.UTF-8",
+        "de_DE.UTF-8@euro",
+        "de_DE@euro",
+        "de_DE",
+        "  de-DE  ",
+        "DE-de",
+        "de",
+    ] {
         let canonical = canonicalize_formula(localized, locale_id, None).unwrap();
         assert_eq!(
             canonical, expected,
@@ -510,8 +518,13 @@ fn canonicalize_formula_normalizes_locale_id_variants() {
 #[wasm_bindgen_test]
 fn set_locale_accepts_normalized_locale_ids_and_aliases() {
     // POSIX-like locale tags should work (normalization drops the encoding/modifier suffix).
-    let mut wb = WasmWorkbook::new();
-    assert!(wb.set_locale("de_DE.UTF-8".to_string()));
+    for locale_id in ["de_DE.UTF-8", "de_DE.UTF-8@euro", "de_DE@euro"] {
+        let mut wb = WasmWorkbook::new();
+        assert!(
+            wb.set_locale(locale_id.to_string()),
+            "expected set_locale to accept POSIX locale id variant {locale_id:?}"
+        );
+    }
 
     // Aliases (added in Task 456).
     let mut failures = Vec::new();
@@ -525,6 +538,43 @@ fn set_locale_accepts_normalized_locale_ids_and_aliases() {
         failures.is_empty(),
         "expected set_locale to accept locale aliases: {failures:?}"
     );
+}
+
+#[wasm_bindgen_test]
+fn canonicalize_formula_accepts_locale_aliases() {
+    // Ensure canonicalizeFormula accepts the same alias forms as the engine's locale
+    // normalization (not just workbook.setLocale).
+    for locale_id in ["C", "POSIX"] {
+        let canonical = canonicalize_formula("=1+2", locale_id, None).unwrap();
+        assert_eq!(
+            canonical, "=1+2",
+            "expected canonicalize_formula to accept locale alias {locale_id:?}"
+        );
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocaleInfo {
+    locale_id: String,
+}
+
+#[wasm_bindgen_test]
+fn get_locale_info_accepts_chinese_script_locale_ids() {
+    // When the region is missing, BCP-47 script subtags should resolve to the engine's canonical
+    // region defaults.
+    for (locale_id, expected_canonical) in [("zh-Hant", "zh-TW"), ("zh-Hans", "zh-CN")] {
+        let info_js = get_locale_info(locale_id).unwrap();
+        let info: LocaleInfo = serde_wasm_bindgen::from_value(info_js).unwrap();
+        assert_eq!(
+            info.locale_id, expected_canonical,
+            "expected get_locale_info({locale_id:?}) to canonicalize to {expected_canonical:?}"
+        );
+
+        // Also ensure other public APIs accept these locale ids.
+        let canonical = canonicalize_formula("=1+2", locale_id, None).unwrap();
+        assert_eq!(canonical, "=1+2");
+    }
 }
 
 #[wasm_bindgen_test]
