@@ -6,6 +6,7 @@ use formula_office_crypto::{
 };
 
 const SUMMARY_INFORMATION: &str = "\u{0005}SummaryInformation";
+const LEADING_SLASH_STREAM: &str = "LeadingSlashStream";
 
 fn has_stream(entries: &formula_office_crypto::OleEntries, name: &str) -> bool {
     entries.streams.iter().any(|s| {
@@ -66,6 +67,13 @@ fn encrypt_package_to_ole_with_entries_preserves_extra_ole_streams_and_storages(
         .write_all(b"nested stream payload")
         .expect("write foo/bar.txt");
 
+    // Some OLE writers include a leading slash in root entry names. Ensure extraction + preservation
+    // normalizes these correctly.
+    ole.create_stream(&format!("/{LEADING_SLASH_STREAM}"))
+        .expect("create leading slash stream")
+        .write_all(b"leading slash payload")
+        .expect("write leading slash stream");
+
     let encrypted_with_extra = ole.into_inner().into_inner();
     assert!(is_encrypted_ooxml_ole(&encrypted_with_extra));
 
@@ -84,6 +92,7 @@ fn encrypt_package_to_ole_with_entries_preserves_extra_ole_streams_and_storages(
     assert!(has_stream(&entries, SUMMARY_INFORMATION));
     assert!(has_storage(&entries, "foo"));
     assert!(has_stream(&entries, "foo/bar.txt"));
+    assert!(has_stream(&entries, LEADING_SLASH_STREAM));
 
     // Re-encrypt with the preserved entries copied into the new container.
     let rewrapped = encrypt_package_to_ole_with_entries(plaintext, password, opts, Some(&entries))
@@ -96,6 +105,8 @@ fn encrypt_package_to_ole_with_entries_preserves_extra_ole_streams_and_storages(
     assert_eq!(summary, b"dummy summary information bytes");
     let nested = read_stream_best_effort(&mut out_ole, "foo/bar.txt");
     assert_eq!(nested, b"nested stream payload");
+    let leading_slash = read_stream_best_effort(&mut out_ole, LEADING_SLASH_STREAM);
+    assert_eq!(leading_slash, b"leading slash payload");
 
     // Sanity check: decrypting should yield the original plaintext ZIP bytes.
     let decrypted = decrypt_encrypted_package_ole(&rewrapped, password).expect("decrypt rewrapped");
