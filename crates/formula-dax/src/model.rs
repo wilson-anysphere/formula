@@ -530,6 +530,52 @@ impl UnmatchedFactRows {
         }
     }
 
+    pub(crate) fn retain(&mut self, mut f: impl FnMut(&usize) -> bool) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| f(row)),
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                let mut new_count = 0usize;
+                for (word_idx, word) in bits.iter_mut().enumerate() {
+                    let mut w = *word;
+                    let mut new_word = 0u64;
+                    while w != 0 {
+                        let tz = w.trailing_zeros() as usize;
+                        let row = word_idx * 64 + tz;
+                        if row >= *len {
+                            break;
+                        }
+                        if f(&row) {
+                            new_word |= 1u64 << tz;
+                            new_count += 1;
+                        }
+                        w &= w - 1;
+                    }
+                    *word = new_word;
+                }
+
+                let sparse_to_dense_threshold = *len / 64;
+                if new_count <= sparse_to_dense_threshold {
+                    let mut rows = Vec::with_capacity(new_count);
+                    for (word_idx, &word) in bits.iter().enumerate() {
+                        let mut w = word;
+                        while w != 0 {
+                            let tz = w.trailing_zeros() as usize;
+                            let row = word_idx * 64 + tz;
+                            if row >= *len {
+                                break;
+                            }
+                            rows.push(row);
+                            w &= w - 1;
+                        }
+                    }
+                    *self = UnmatchedFactRows::Sparse(rows);
+                } else {
+                    *count = new_count;
+                }
+            }
+        }
+    }
+
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {
