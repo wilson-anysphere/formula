@@ -146,18 +146,33 @@ jobs:
             cargo build -p desktop --bin formula-desktop --features desktop --release --locked
           fi
 
-      - name: Run desktop startup benchmark (5 runs)
-        id: startup
+      - name: Run desktop startup benchmark (cold, 5 runs)
+        id: startup-cold
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p perf-artifacts
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --mode cold \
             --full \
             --runs 5 \
             --timeout-ms 20000 \
-            --json perf-artifacts/desktop-startup-metrics.json \
-            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup.log
+            --json perf-artifacts/desktop-startup-metrics-cold.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-cold.log
+
+      - name: Run desktop startup benchmark (warm, 5 runs)
+        id: startup-warm
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --mode warm \
+            --full \
+            --runs 5 \
+            --timeout-ms 20000 \
+            --json perf-artifacts/desktop-startup-metrics-warm.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-warm.log
 
       - name: Run idle memory benchmark (3 runs)
         shell: bash
@@ -189,9 +204,11 @@ jobs:
             }
           }
           
-          const startupPath = path.resolve("perf-artifacts/desktop-startup-metrics.json");
+          const startupColdPath = path.resolve("perf-artifacts/desktop-startup-metrics-cold.json");
+          const startupWarmPath = path.resolve("perf-artifacts/desktop-startup-metrics-warm.json");
           const memoryPath = path.resolve("perf-artifacts/desktop-memory-metrics.json");
-          const startup = readJsonMaybe(startupPath);
+          const startupCold = readJsonMaybe(startupColdPath);
+          const startupWarm = readJsonMaybe(startupWarmPath);
           const idleMemory = readJsonMaybe(memoryPath);
           
           const merged = {
@@ -202,7 +219,8 @@ jobs:
               arch: process.env.RUNNER_ARCH || null,
               name: process.env.RUNNER_NAME || null,
             },
-            startup,
+            startupCold,
+            startupWarm,
             idleMemory,
           };
           
@@ -226,19 +244,34 @@ jobs:
           lines.push("| Metric | p50 | p95 | Notes |");
           lines.push("|---|---:|---:|---|");
           
-          if (startup?.summary) {
-            const s = startup.summary;
+          if (startupCold?.summary) {
+            const s = startupCold.summary;
             lines.push(
-              `| startup.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+              `| startup.cold.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
             );
             lines.push(
-              `| startup.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+              `| startup.cold.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
             );
             lines.push(
-              `| startup.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+              `| startup.cold.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
             );
           } else {
-            lines.push("| startup | n/a | n/a | missing desktop-startup-metrics.json |");
+            lines.push("| startup.cold | n/a | n/a | missing desktop-startup-metrics-cold.json |");
+          }
+
+          if (startupWarm?.summary) {
+            const s = startupWarm.summary;
+            lines.push(
+              `| startup.warm.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+            lines.push(
+              `| startup.warm.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+            );
+            lines.push(
+              `| startup.warm.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+          } else {
+            lines.push("| startup.warm | n/a | n/a | missing desktop-startup-metrics-warm.json |");
           }
           
           if (idleMemory?.summary) {
