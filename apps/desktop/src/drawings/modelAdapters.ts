@@ -802,12 +802,16 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       const row = readNumber(pick(cellValue, ["row"]), "Drawing.anchor.from.cell.row");
       const col = readNumber(pick(cellValue, ["col"]), "Drawing.anchor.from.cell.col");
       const offsetValue = pick(fromValue, ["offset"]);
-      const offset: CellOffset = isRecord(offsetValue)
-        ? {
-            xEmu: resolveOffsetEmuMaybeFrom(offsetValue, "x") ?? resolveOffsetEmu("x"),
-            yEmu: resolveOffsetEmuMaybeFrom(offsetValue, "y") ?? resolveOffsetEmu("y"),
-          }
-        : { xEmu: resolveOffsetEmu("x"), yEmu: resolveOffsetEmu("y") };
+      const offset: CellOffset = {
+        xEmu:
+          (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "x") : undefined) ??
+          resolveOffsetEmuMaybeFrom(fromValue, "x") ??
+          resolveOffsetEmu("x"),
+        yEmu:
+          (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "y") : undefined) ??
+          resolveOffsetEmuMaybeFrom(fromValue, "y") ??
+          resolveOffsetEmu("y"),
+      };
       return { type: "oneCell", from: { cell: { row, col }, offset }, size: resolvedSize };
     }
     case "absolute": {
@@ -830,12 +834,10 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
         const row = readNumber(pick(cellValue, ["row"]), `${context}.cell.row`);
         const col = readNumber(pick(cellValue, ["col"]), `${context}.cell.col`);
         const offsetValue = pick(point, ["offset"]);
-        const offset: CellOffset = isRecord(offsetValue)
-          ? {
-              xEmu: resolveOffsetEmuMaybeFrom(offsetValue, "x") ?? 0,
-              yEmu: resolveOffsetEmuMaybeFrom(offsetValue, "y") ?? 0,
-            }
-          : { xEmu: 0, yEmu: 0 };
+        const offset: CellOffset = {
+          xEmu: (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "x") : undefined) ?? resolveOffsetEmuMaybeFrom(point, "x") ?? 0,
+          yEmu: (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "y") : undefined) ?? resolveOffsetEmuMaybeFrom(point, "y") ?? 0,
+        };
         return { cell: { row, col }, offset };
       };
 
