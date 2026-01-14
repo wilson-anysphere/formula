@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
@@ -707,6 +708,8 @@ fn build_parts(
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
     let has_existing_styles_part = parts.contains_key(&styles_part_name);
+    let rewrote_conditional_formatting_dxfs =
+        !cf_dxfs.global_dxfs.is_empty() && (is_new || !has_existing_styles_part);
     let should_write_styles_part = is_new
         || !style_to_xf.is_empty()
         || has_existing_styles_part
@@ -716,7 +719,7 @@ fn build_parts(
         // Only rewrite the `<dxfs>` table when we control the entire styles.xml payload (new
         // documents, or when synthesizing a missing styles part). This avoids dropping unknown dxf
         // content from existing workbooks (we only model a subset of differential formatting).
-        if !cf_dxfs.global_dxfs.is_empty() && (is_new || !has_existing_styles_part) {
+        if rewrote_conditional_formatting_dxfs {
             styles_editor
                 .styles_part_mut()
                 .set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
@@ -1085,27 +1088,31 @@ fn build_parts(
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
-        // `write_worksheet_xml` already serializes conditional formatting for synthesized sheet
-        // parts. Only run the streaming rewrite for existing worksheets (where we need to inject
-        // `<conditionalFormatting>` blocks into preserved XML that previously had none).
-        if conditional_formatting_changed && !is_new_sheet {
-            // `CfRule.dxf_id` indexes into the per-worksheet `conditional_formatting_dxfs` vector.
-            // In SpreadsheetML, `cfRule/@dxfId` indexes into the *workbook-global* `<dxfs>` table in
-            // `xl/styles.xml`. When we insert conditional formatting into an existing worksheet via
-            // the streaming XML rewriter, we must remap those indices to the aggregated global
-            // table.
-            let mut rules = sheet.conditional_formatting_rules.clone();
-            for rule in &mut rules {
-                rule.dxf_id = rule
-                    .dxf_id
-                    .and_then(|local| local_to_global_dxf.and_then(|m| m.get(local as usize).copied()));
-            }
-            sheet_xml =
-                crate::conditional_formatting::update_worksheet_conditional_formatting_xml_with_seed(
-                    &sheet_xml,
-                    &rules,
-                    sheet_meta.sheet_id as u128,
-                )?;
+        // `write_worksheet_xml` may have already serialized conditional formatting when
+        // synthesizing new sheet XML. Only run the streaming rewriter when the current XML still
+        // lacks conditional formatting blocks.
+        if conditional_formatting_changed && !sheet_xml.contains("conditionalFormatting") {
+            let rules: Cow<'_, [CfRule]> = if rewrote_conditional_formatting_dxfs {
+                // `CfRule.dxf_id` indexes into the per-worksheet `conditional_formatting_dxfs`
+                // vector. In SpreadsheetML, `cfRule/@dxfId` indexes into the *workbook-global*
+                // `<dxfs>` table in `xl/styles.xml`. When we control the global dxfs table, remap
+                // the per-sheet indices accordingly.
+                let mut owned = sheet.conditional_formatting_rules.clone();
+                for rule in &mut owned {
+                    rule.dxf_id = rule.dxf_id.and_then(|local| {
+                        local_to_global_dxf.and_then(|map| map.get(local as usize).copied())
+                    });
+                }
+                Cow::Owned(owned)
+            } else {
+                Cow::Borrowed(&sheet.conditional_formatting_rules)
+            };
+
+            sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml_with_seed(
+                &sheet_xml,
+                rules.as_ref(),
+                sheet_meta.sheet_id as u128,
+            )?;
         }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
