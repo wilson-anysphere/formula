@@ -2,9 +2,8 @@
 # Source: Curated from Microsoft Excel (es-ES) error literal spellings.
 #
 # Note: Spanish Excel error literals can use leading inverted punctuation (e.g. `#¡VALOR!`,
-# `#¿NOMBRE?`). The formula engine does not currently accept these spellings when parsing localized
-# formulas, so `src/locale/registry.rs` intentionally does not translate them yet; we still record
-# the real Excel spellings here as upstream truth.
+# `#¿NOMBRE?`). The formula engine's lexer supports these spellings, and `src/locale/registry.rs`
+# maps them for localized formula round-tripping.
 #NULL!	#NULL!
 #DIV/0!	#DIV/0!
 #VALUE!	#¡VALOR!

@@ -503,6 +503,27 @@ fn canonicalize_and_localize_error_literals() {
         locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
         fr
     );
+
+    // Spanish (Spain) uses leading inverted punctuation.
+    let es_value_variants = ["=#¡VALOR!", "=#¡valor!", "=#¡VaLoR!"];
+    for src in es_value_variants {
+        let canon = locale::canonicalize_formula(src, &locale::ES_ES).unwrap();
+        assert_eq!(canon, "=#VALUE!");
+        assert_eq!(
+            locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+            "=#¡VALOR!"
+        );
+    }
+
+    let es_name_variants = ["=#¿NOMBRE?", "=#¿nombre?", "=#¿NoMbRe?"];
+    for src in es_name_variants {
+        let canon = locale::canonicalize_formula(src, &locale::ES_ES).unwrap();
+        assert_eq!(canon, "=#NAME?");
+        assert_eq!(
+            locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+            "=#¿NOMBRE?"
+        );
+    }
 }
 
 #[test]

@@ -306,7 +306,11 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
     // For TSV format + generation workflow, see `src/locale/data/README.md`.
-    error_literal_map: &[("#GETTING_DATA", "#OBTENIENDO_DATOS")],
+    error_literal_map: &[
+        ("#VALUE!", "#¡VALOR!"),
+        ("#NAME?", "#¿NOMBRE?"),
+        ("#GETTING_DATA", "#OBTENIENDO_DATOS"),
+    ],
     functions: &ES_ES_FUNCTIONS,
 };
 
