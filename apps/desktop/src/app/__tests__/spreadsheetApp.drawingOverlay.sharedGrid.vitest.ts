@@ -74,6 +74,25 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function dispatchPointerEvent(
+  target: EventTarget,
+  type: string,
+  opts: { clientX: number; clientY: number; pointerId?: number; button?: number },
+): void {
+  const pointerId = opts.pointerId ?? 1;
+  const button = opts.button ?? 0;
+  const base = { bubbles: true, cancelable: true, clientX: opts.clientX, clientY: opts.clientY, pointerId, button };
+  const event =
+    typeof (globalThis as any).PointerEvent === "function"
+      ? new (globalThis as any).PointerEvent(type, base)
+      : (() => {
+          const e = new MouseEvent(type, base);
+          Object.assign(e, { pointerId });
+          return e;
+        })();
+  target.dispatchEvent(event);
+}
+
 describe("SpreadsheetApp drawing overlay (shared grid)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -547,14 +566,18 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       expect(selectionCanvas).not.toBeNull();
 
       // Row/col headers are 48px/24px in SpreadsheetApp; click inside the drawing just under them.
-      const event = new PointerEvent("pointerdown", {
-        bubbles: true,
-        cancelable: true,
+      dispatchPointerEvent(selectionCanvas!, "pointerdown", {
         clientX: 48 + 5,
         clientY: 24 + 5,
+        pointerId: 1,
         button: 0,
       });
-      selectionCanvas!.dispatchEvent(event);
+      dispatchPointerEvent(selectionCanvas!, "pointerup", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 1,
+        button: 0,
+      });
 
       expect(selectSpy).toHaveBeenCalledWith(1);
 

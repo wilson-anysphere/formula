@@ -144,7 +144,11 @@ export class DrawingInteractionController {
         if (handle) {
           this.stopPointerEvent(e);
           this.activeRect = rect;
-          this.element.setPointerCapture(e.pointerId);
+          try {
+            this.element.setPointerCapture(e.pointerId);
+          } catch {
+            // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+          }
           this.resizing = {
             id: selectedObject.id,
             handle,
@@ -169,7 +173,11 @@ export class DrawingInteractionController {
 
     this.stopPointerEvent(e);
     this.activeRect = rect;
-    this.element.setPointerCapture(e.pointerId);
+    try {
+      this.element.setPointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
     const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
     if (handle) {
       this.resizing = {
@@ -288,7 +296,11 @@ export class DrawingInteractionController {
     this.dragging = null;
     this.resizing = null;
     this.activeRect = null;
-    this.element.releasePointerCapture(e.pointerId);
+    try {
+      this.element.releasePointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
     this.updateCursor(x, y);
   };
 
