@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Ensure CI/release workflows install the same Rust toolchain as rust-toolchain.toml.
 #
+# This script also validates any optional local tooling pin in `mise.toml` (if present) so
+# developers using mise install the same Rust release as CI/release.
+#
 # Rationale:
 # - rust-toolchain.toml is the single "intended" Rust version for the repo.
 # - GitHub Actions workflows install Rust via dtolnay/rust-toolchain pinned to a commit SHA
@@ -238,6 +241,42 @@ for workflow in "${workflow_files[@]}"; do
     }
   ' "$workflow" || fail=1
 done
+
+# Optional local tooling pin: mise.toml
+#
+# `mise.toml` is not required in all environments (Rust is primarily managed via rustup), but when
+# present it should stay aligned with the repo's pinned toolchain.
+mise_file="mise.toml"
+if [ -f "${mise_file}" ]; then
+  mise_rust_line="$(grep -E '^[[:space:]]*rust[[:space:]]*=' "${mise_file}" | head -n 1 || true)"
+  if [ -n "${mise_rust_line}" ]; then
+    mise_rust="${mise_rust_line#*=}"
+    mise_rust="${mise_rust%%#*}"
+    mise_rust="${mise_rust#"${mise_rust%%[![:space:]]*}"}"
+    mise_rust="${mise_rust%"${mise_rust##*[![:space:]]}"}"
+    if [[ "${mise_rust}" == \"*\" ]]; then
+      mise_rust="${mise_rust#\"}"
+      mise_rust="${mise_rust%\"}"
+    elif [[ "${mise_rust}" == \'*\' ]]; then
+      mise_rust="${mise_rust#\'}"
+      mise_rust="${mise_rust%\'}"
+    fi
+    mise_rust="${mise_rust#v}"
+    mise_rust="${mise_rust#V}"
+
+    if ! [[ "${mise_rust}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "mise.toml rust tool version must be patch-pinned (X.Y.Z); found rust=${mise_rust}" >&2
+      fail=1
+    elif [ "${mise_rust}" != "${channel}" ]; then
+      echo "Rust toolchain pin mismatch between rust-toolchain.toml and mise.toml:" >&2
+      echo "  rust-toolchain.toml: channel=${channel}" >&2
+      echo "  mise.toml:           rust=${mise_rust}" >&2
+      echo "" >&2
+      echo "Fix: update mise.toml rust pin to ${channel} (or update rust-toolchain.toml)." >&2
+      fail=1
+    fi
+  fi
+fi
 
 if [ "$fail" -ne 0 ]; then
   exit 1
