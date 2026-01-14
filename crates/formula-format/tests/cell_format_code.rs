@@ -47,3 +47,15 @@ fn cell_format_code_classifies_thousands_separated_numbers_as_n() {
     // No grouping => fixed classification.
     assert_eq!(cell_format_code(Some("0.00")), "F2");
 }
+
+#[test]
+fn cell_format_code_ignores_commas_in_literals_escapes_and_brackets() {
+    // Commas inside quoted literals are not thousands separators.
+    assert_eq!(cell_format_code(Some(r#"0","0"#)), "F0");
+
+    // Escaped commas are rendered literally and should not count as grouping.
+    assert_eq!(cell_format_code(Some(r#"0\,00"#)), "F0");
+
+    // Commas inside bracket tokens should be ignored for grouping detection.
+    assert_eq!(cell_format_code(Some("[foo,bar]0.00")), "F2");
+}
