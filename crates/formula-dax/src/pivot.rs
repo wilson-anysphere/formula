@@ -2,14 +2,15 @@ use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::model::{normalize_ident, Cardinality, RelationshipPathDirection, RowSet};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
-use crate::{DaxEngine, DataModel, Value};
+use crate::{DataModel, DaxEngine, Value};
 #[cfg(feature = "pivot-model")]
 use formula_model::pivots::PivotValue;
+use formula_columnar::BitVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
 
 /// A group-by column used by the pivot engine.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -332,7 +333,11 @@ fn cmp_value(a: &Value, b: &Value) -> Ordering {
             // overall ordering remains total (important because group keys are collected from hash
             // maps/sets).
             let ord = cmp_text_case_insensitive(a, b);
-            if ord != Ordering::Equal { ord } else { a.cmp(b) }
+            if ord != Ordering::Equal {
+                ord
+            } else {
+                a.cmp(b)
+            }
         }
         (Value::Boolean(a), Value::Boolean(b)) => a.cmp(b),
         (Value::Blank, Value::Blank) => Ordering::Equal,
@@ -402,7 +407,9 @@ struct RelatedHop<'a> {
 }
 
 enum GroupKeyAccessor<'a> {
-    Base { idx: usize },
+    Base {
+        idx: usize,
+    },
     RelatedPath {
         hops: Vec<RelatedHop<'a>>,
         to_column_idx: usize,
@@ -477,14 +484,14 @@ fn build_group_key_accessors<'a>(
                 .table(&rel_info.rel.to_table)
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
-             hops.push(RelatedHop {
-                  relationship_idx: rel_idx,
-                  from_idx,
-                  to_table_key: rel_info.to_table_key.as_str(),
-                  to_index: &rel_info.to_index,
-                  to_table: to_table_ref,
-              });
-         }
+            hops.push(RelatedHop {
+                relationship_idx: rel_idx,
+                from_idx,
+                to_table_key: rel_info.to_table_key.as_str(),
+                to_index: &rel_info.to_index,
+                to_table: to_table_ref,
+            });
+        }
 
         let to_table_ref = model
             .table(&col.table)
@@ -595,31 +602,6 @@ fn requires_many_to_many_grouping(
     }
 
     Ok(false)
-}
-
-fn insert_cartesian_key_positions(
-    positions: &[Vec<usize>],
-    values: &[Vec<Vec<Value>>],
-    idx: usize,
-    key: &mut Vec<Value>,
-    out: &mut HashSet<Vec<Value>>,
-) {
-    if idx == positions.len() {
-        out.insert(key.clone());
-        return;
-    }
-
-    for tuple in values.get(idx).into_iter().flatten() {
-        for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
-            key[*pos] = value.clone();
-        }
-        insert_cartesian_key_positions(positions, values, idx + 1, key, out);
-    }
-
-    // Restore the slice to blank for the next tuple.
-    for pos in &positions[idx] {
-        key[*pos] = Value::Blank;
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1178,7 +1160,7 @@ fn plan_pivot_expr(
                     .ok_or_else(|| DaxError::UnknownColumn {
                         table: table.clone(),
                         column: column.clone(),
-                })?;
+                    })?;
                 let kind = match name.to_ascii_uppercase().as_str() {
                     "SUM" => AggregationKind::Sum,
                     "MIN" => AggregationKind::Min,
@@ -1201,13 +1183,19 @@ fn plan_pivot_expr(
                 if normalize_ident(table) != normalize_ident(base_table_name) {
                     return Ok(None);
                 }
-                let idx = base_table.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = base_table
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 let count_rows = ensure_agg(AggregationKind::CountRows, None, agg_specs, agg_map);
-                let count_non_blank =
-                    ensure_agg(AggregationKind::CountNonBlank, Some(idx), agg_specs, agg_map);
+                let count_non_blank = ensure_agg(
+                    AggregationKind::CountNonBlank,
+                    Some(idx),
+                    agg_specs,
+                    agg_map,
+                );
                 Ok(Some(PlannedExpr::Binary {
                     op: BinaryOp::Subtract,
                     left: Box::new(PlannedExpr::AggRef(count_rows)),
@@ -1404,7 +1392,9 @@ fn pivot_columnar_groups_with_measure_eval(
 }
 
 enum StarSchemaGroupKeyAccessor<'a> {
-    Base { key_pos: usize },
+    Base {
+        key_pos: usize,
+    },
     Related {
         fk_key_pos: usize,
         to_index: &'a HashMap<Value, RowSet>,
@@ -2089,148 +2079,139 @@ fn pivot_row_scan_many_to_many(
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
 
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
-    #[derive(Clone)]
-    enum GroupSpec<'a> {
-        Base { idxs: Vec<usize> },
-        Related {
-            hops: Vec<RelatedHop<'a>>,
-            to_column_idxs: Vec<usize>,
-        },
+    #[derive(Default)]
+    struct PathNode<'a> {
+        columns: Vec<(usize, usize)>,
+        children: Vec<(RelatedHop<'a>, PathNode<'a>)>,
     }
 
-    // Group columns that share an identical relationship path so we preserve row-level correlation
-    // between columns coming from the same related table. Without this, we would take the cartesian
-    // product of per-column value sets and could generate invalid group keys like
-    // (Category="A", Color="Blue") when the only related rows are (A,Red) and (B,Blue).
-    let mut group_positions: Vec<Vec<usize>> = Vec::new();
-    let mut group_specs: Vec<GroupSpec<'_>> = Vec::new();
-    let mut related_groups: HashMap<Vec<usize>, usize> = HashMap::new();
-    let mut base_positions: Vec<usize> = Vec::new();
-    let mut base_idxs: Vec<usize> = Vec::new();
+    fn child_node_mut<'a, 'm>(
+        node: &'m mut PathNode<'a>,
+        hop: &RelatedHop<'a>,
+    ) -> &'m mut PathNode<'a> {
+        if let Some(idx) = node
+            .children
+            .iter()
+            .position(|(h, _)| h.relationship_idx == hop.relationship_idx)
+        {
+            return &mut node.children[idx].1;
+        }
 
+        node.children.push((*hop, PathNode::default()));
+        let idx = node.children.len().saturating_sub(1);
+        &mut node.children[idx].1
+    }
+
+    fn next_rows_for_hop(
+        table: &crate::model::Table,
+        row: usize,
+        hop: &RelatedHop<'_>,
+        row_sets: Option<&HashMap<String, BitVec>>,
+    ) -> Vec<usize> {
+        let key = table
+            .value_by_idx(row, hop.from_idx)
+            .unwrap_or(Value::Blank);
+        if key.is_blank() {
+            return Vec::new();
+        }
+        let Some(to_row_set) = hop.to_index.get(&key) else {
+            return Vec::new();
+        };
+        let allowed = row_sets.and_then(|sets| sets.get(hop.to_table_key));
+        let mut rows: Vec<usize> = Vec::new();
+        to_row_set.for_each_row(|to_row| {
+            if allowed
+                .map(|set| to_row < set.len() && set.get(to_row))
+                .unwrap_or(true)
+            {
+                rows.push(to_row);
+            }
+        });
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
+    fn collect_keys_for_node<'a>(
+        node: &PathNode<'a>,
+        table: &crate::model::Table,
+        rows: &[usize],
+        key_template: Vec<Value>,
+        row_sets: Option<&HashMap<String, BitVec>>,
+    ) -> DaxResult<Vec<Vec<Value>>> {
+        let mut results: Vec<Vec<Value>> = Vec::new();
+        let row_opts: Vec<Option<usize>> = if rows.is_empty() {
+            vec![None]
+        } else {
+            rows.iter().copied().map(Some).collect()
+        };
+
+        for row_opt in row_opts {
+            let mut key = key_template.clone();
+            for (pos, col_idx) in &node.columns {
+                key[*pos] = match row_opt {
+                    Some(row) => table.value_by_idx(row, *col_idx).unwrap_or(Value::Blank),
+                    None => Value::Blank,
+                };
+            }
+
+            let mut partials = vec![key];
+            for (hop, child) in &node.children {
+                let child_rows = row_opt
+                    .map(|row| next_rows_for_hop(table, row, hop, row_sets))
+                    .unwrap_or_default();
+
+                let mut next: Vec<Vec<Value>> = Vec::new();
+                for partial in partials {
+                    next.extend(collect_keys_for_node(
+                        child,
+                        hop.to_table,
+                        &child_rows,
+                        partial,
+                        row_sets,
+                    )?);
+                }
+                partials = next;
+                if partials.is_empty() {
+                    break;
+                }
+            }
+
+            results.extend(partials);
+        }
+
+        Ok(results)
+    }
+
+    // Build a trie of relationship paths so group keys stay correlated across snowflake hops.
+    let mut root: PathNode<'_> = PathNode::default();
     for (pos, accessor) in group_key_accessors.iter().enumerate() {
         match accessor {
-            GroupKeyAccessor::Base { idx } => {
-                base_positions.push(pos);
-                base_idxs.push(*idx);
-            }
+            GroupKeyAccessor::Base { idx } => root.columns.push((pos, *idx)),
             GroupKeyAccessor::RelatedPath {
                 hops,
                 to_column_idx,
             } => {
-                let path_key: Vec<usize> = hops.iter().map(|h| h.relationship_idx).collect();
-                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
-                    let idx = group_specs.len();
-                    group_positions.push(Vec::new());
-                    group_specs.push(GroupSpec::Related {
-                        hops: hops.clone(),
-                        to_column_idxs: Vec::new(),
-                    });
-                    idx
-                });
-
-                group_positions[group_idx].push(pos);
-                let GroupSpec::Related { to_column_idxs, .. } = &mut group_specs[group_idx] else {
-                    unreachable!("group_specs/group_positions stay in sync for related groups")
-                };
-                to_column_idxs.push(*to_column_idx);
+                let mut node = &mut root;
+                for hop in hops {
+                    node = child_node_mut(node, hop);
+                }
+                node.columns.push((pos, *to_column_idx));
             }
         }
     }
 
-    if !base_positions.is_empty() {
-        group_positions.insert(0, base_positions);
-        group_specs.insert(0, GroupSpec::Base { idxs: base_idxs });
-    }
-
-    let mut group_values: Vec<Vec<Vec<Value>>> = (0..group_specs.len()).map(|_| Vec::new()).collect();
-    let mut key_buf: Vec<Value> = vec![Value::Blank; group_by.len()];
-    let mut unique_tuples: HashSet<Vec<Value>> = HashSet::new();
-
+    let blank_key = vec![Value::Blank; group_by.len()];
     let mut process_row = |row: usize| -> DaxResult<()> {
-        for (out, spec) in group_values.iter_mut().zip(group_specs.iter()) {
-            out.clear();
-            match spec {
-                GroupSpec::Base { idxs } => {
-                    let mut tuple = Vec::with_capacity(idxs.len());
-                    for idx in idxs {
-                        tuple.push(table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank));
-                    }
-                    out.push(tuple);
-                }
-                GroupSpec::Related {
-                    hops,
-                    to_column_idxs,
-                } => {
-                    // Walk the relationship path, expanding many-to-many matches into multiple
-                    // candidate rows.
-                    let mut current_table = table_ref;
-                    let mut current_rows: Vec<usize> = vec![row];
-                    for hop in hops {
-                        let allowed = row_sets
-                            .as_ref()
-                            .and_then(|sets| sets.get(hop.to_table_key));
-                        let mut next_rows: HashSet<usize> = HashSet::new();
-                        for &current_row in &current_rows {
-                            let key = current_table
-                                .value_by_idx(current_row, hop.from_idx)
-                                .unwrap_or(Value::Blank);
-                            if key.is_blank() {
-                                continue;
-                            }
-                            let Some(to_row_set) = hop.to_index.get(&key) else {
-                                continue;
-                            };
-                            to_row_set.for_each_row(|to_row| {
-                                if allowed
-                                    .map(|set| to_row < set.len() && set.get(to_row))
-                                    .unwrap_or(true)
-                                {
-                                    next_rows.insert(to_row);
-                                }
-                            });
-                        }
-
-                        if next_rows.is_empty() {
-                            current_rows.clear();
-                            break;
-                        }
-
-                        current_table = hop.to_table;
-                        current_rows = next_rows.into_iter().collect();
-                    }
-
-                    if current_rows.is_empty() {
-                        out.push(vec![Value::Blank; to_column_idxs.len()]);
-                        continue;
-                    }
-
-                    unique_tuples.clear();
-                    for &to_row in &current_rows {
-                        let mut tuple = Vec::with_capacity(to_column_idxs.len());
-                        for col_idx in to_column_idxs {
-                            tuple.push(
-                                current_table
-                                    .value_by_idx(to_row, *col_idx)
-                                    .unwrap_or(Value::Blank),
-                            );
-                        }
-                        unique_tuples.insert(tuple);
-                    }
-
-                    if unique_tuples.is_empty() {
-                        out.push(vec![Value::Blank; to_column_idxs.len()]);
-                    } else {
-                        out.extend(unique_tuples.drain());
-                    }
-                }
-            }
+        for key in collect_keys_for_node(
+            &root,
+            table_ref,
+            std::slice::from_ref(&row),
+            blank_key.clone(),
+            row_sets.as_ref(),
+        )? {
+            seen.insert(key);
         }
-
-        for v in &mut key_buf {
-            *v = Value::Blank;
-        }
-        insert_cartesian_key_positions(&group_positions, &group_values, 0, &mut key_buf, &mut seen);
         Ok(())
     };
 
@@ -2399,10 +2380,7 @@ pub fn pivot_crosstab_with_options(
 
         row_keys.insert(row_key.clone());
         col_keys.insert(col_key.clone());
-        cells
-            .entry(row_key)
-            .or_default()
-            .insert(col_key, values);
+        cells.entry(row_key).or_default().insert(col_key, values);
     }
 
     let mut row_keys: Vec<Vec<Value>> = row_keys.into_iter().collect();
@@ -2622,14 +2600,23 @@ mod tests {
     #[test]
     fn cmp_value_text_sort_is_case_insensitive_with_case_sensitive_tiebreak() {
         // Primary comparison should be case-insensitive (Excel-like), so "a" sorts before "B".
-        assert_eq!(cmp_value(&Value::from("a"), &Value::from("B")), Ordering::Less);
+        assert_eq!(
+            cmp_value(&Value::from("a"), &Value::from("B")),
+            Ordering::Less
+        );
 
         // Tiebreak should be case-sensitive to keep ordering total/deterministic.
-        assert_eq!(cmp_value(&Value::from("B"), &Value::from("b")), Ordering::Less);
+        assert_eq!(
+            cmp_value(&Value::from("B"), &Value::from("b")),
+            Ordering::Less
+        );
 
         let mut values = vec![Value::from("b"), Value::from("a"), Value::from("B")];
         values.sort_by(cmp_value);
-        assert_eq!(values, vec![Value::from("a"), Value::from("B"), Value::from("b")]);
+        assert_eq!(
+            values,
+            vec![Value::from("a"), Value::from("B"), Value::from("b")]
+        );
     }
 
     #[test]
@@ -2744,8 +2731,22 @@ mod tests {
         ];
         let group_by = vec![GroupByColumn::new("Fact", "Key")];
 
-        let result_a = pivot(&model_a, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
-        let result_b = pivot(&model_b, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+        let result_a = pivot(
+            &model_a,
+            "Fact",
+            &group_by,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .unwrap();
+        let result_b = pivot(
+            &model_b,
+            "Fact",
+            &group_by,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .unwrap();
 
         assert_eq!(result_a, result_b);
         assert_eq!(
@@ -2864,7 +2865,10 @@ mod tests {
 
         let mut star_model = DataModel::new();
         star_model
-            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .add_table(crate::Table::from_columnar(
+                "Customers",
+                customers.finalize(),
+            ))
             .unwrap();
         star_model
             .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
@@ -2882,22 +2886,19 @@ mod tests {
                 enforce_referential_integrity: true,
             })
             .unwrap();
-        star_model.add_measure("Total", "SUM(Sales[Amount])").unwrap();
+        star_model
+            .add_measure("Total", "SUM(Sales[Amount])")
+            .unwrap();
 
         let measures = vec![PivotMeasure::new("Total", "[Total]").unwrap()];
         let group_by = vec![GroupByColumn::new("Customers", "Region")];
         let filter = FilterContext::empty();
 
         let start = Instant::now();
-        let planned_scan = pivot_planned_row_group_by(
-            &star_model,
-            "Sales",
-            &group_by,
-            &measures,
-            &filter,
-        )
-        .unwrap()
-        .unwrap();
+        let planned_scan =
+            pivot_planned_row_group_by(&star_model, "Sales", &group_by, &measures, &filter)
+                .unwrap()
+                .unwrap();
         let planned_elapsed = start.elapsed();
 
         let start = Instant::now();
@@ -2971,7 +2972,10 @@ mod tests {
 
         let mut model = DataModel::new();
         model
-            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .add_table(crate::Table::from_columnar(
+                "Customers",
+                customers.finalize(),
+            ))
             .unwrap();
         model
             .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
@@ -2996,8 +3000,12 @@ mod tests {
             .add_measure("Avg Amount", "AVERAGE(Sales[Amount])")
             .unwrap();
         model.add_measure("Rows", "COUNTROWS(Sales)").unwrap();
-        model.add_measure("Count Numbers", "COUNT(Sales[Amount])").unwrap();
-        model.add_measure("Count NonBlank", "COUNTA(Sales[Amount])").unwrap();
+        model
+            .add_measure("Count Numbers", "COUNT(Sales[Amount])")
+            .unwrap();
+        model
+            .add_measure("Count NonBlank", "COUNTA(Sales[Amount])")
+            .unwrap();
         model
             .add_measure("Blank Amounts", "COUNTBLANK(Sales[Amount])")
             .unwrap();
@@ -3109,7 +3117,10 @@ mod tests {
 
         let mut model = DataModel::new();
         model
-            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .add_table(crate::Table::from_columnar(
+                "Customers",
+                customers.finalize(),
+            ))
             .unwrap();
         model
             .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
@@ -3172,10 +3183,10 @@ mod tests {
                 &["USERELATIONSHIP(Sales[CustomerId2], Customers[CustomerId])"],
             )
             .unwrap();
-        let Some(result) = pivot_columnar_star_schema_group_by(
-            &model, "Sales", &group_by, &measures, &filter,
-        )
-        .unwrap() else {
+        let Some(result) =
+            pivot_columnar_star_schema_group_by(&model, "Sales", &group_by, &measures, &filter)
+                .unwrap()
+        else {
             panic!("expected star-schema fast path to run");
         };
         assert_eq!(
@@ -3272,7 +3283,8 @@ mod tests {
             .add_measure("Total (0 if blank)", "IF(ISBLANK([Total]), 0, [Total])")
             .unwrap();
 
-        let measures = vec![PivotMeasure::new("Total (0 if blank)", "[Total (0 if blank)]").unwrap()];
+        let measures =
+            vec![PivotMeasure::new("Total (0 if blank)", "[Total (0 if blank)]").unwrap()];
         let group_by = vec![GroupByColumn::new("Fact", "Group")];
         let filter = FilterContext::empty();
 

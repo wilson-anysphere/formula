@@ -1,6 +1,6 @@
 use formula_dax::{
-    pivot, Cardinality, CrossFilterDirection, DaxEngine, FilterContext, GroupByColumn, PivotMeasure,
-    Relationship, RowContext, Table, Value,
+    pivot, Cardinality, CrossFilterDirection, DaxEngine, FilterContext, GroupByColumn,
+    PivotMeasure, Relationship, RowContext, Table, Value,
 };
 
 fn build_many_to_many_model() -> formula_dax::DataModel {
@@ -50,7 +50,9 @@ fn build_many_to_many_multi_attr_model() -> formula_dax::DataModel {
     // Duplicate ProductId rows create a many-to-many relationship between Orders and Products.
     // Include multiple attributes to ensure group-by combinations stay correlated per related row.
     let mut products = Table::new("Products", vec!["ProductId", "Category", "Color"]);
-    products.push_row(vec![1.into(), "A".into(), "Red".into()]).unwrap();
+    products
+        .push_row(vec![1.into(), "A".into(), "Red".into()])
+        .unwrap();
     products
         .push_row(vec![1.into(), "B".into(), "Blue".into()])
         .unwrap();
@@ -67,6 +69,64 @@ fn build_many_to_many_multi_attr_model() -> formula_dax::DataModel {
             to_table: "Products".into(),
             to_column: "ProductId".into(),
             cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+}
+
+fn build_many_to_many_snowflake_model() -> formula_dax::DataModel {
+    let mut model = formula_dax::DataModel::new();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "ProductId", "Amount"]);
+    orders
+        .push_row(vec![1.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![2.into(), 2.into(), 20.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    // Duplicate ProductId rows create a many-to-many relationship between Orders and Products.
+    // Each product row points to exactly one category.
+    let mut products = Table::new("Products", vec!["ProductId", "Category"]);
+    products.push_row(vec![1.into(), "A".into()]).unwrap();
+    products.push_row(vec![1.into(), "B".into()]).unwrap();
+    products.push_row(vec![2.into(), "C".into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    // Snowflake: category -> department.
+    let mut categories = Table::new("Categories", vec!["Category", "Dept"]);
+    categories.push_row(vec!["A".into(), "D1".into()]).unwrap();
+    categories.push_row(vec!["B".into(), "D2".into()]).unwrap();
+    categories.push_row(vec!["C".into(), "D3".into()]).unwrap();
+    model.add_table(categories).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Products".into(),
+            from_table: "Orders".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "Category".into(),
+            to_table: "Categories".into(),
+            to_column: "Category".into(),
+            cardinality: Cardinality::OneToMany,
             cross_filter_direction: CrossFilterDirection::Single,
             is_active: true,
             enforce_referential_integrity: true,
@@ -197,4 +257,72 @@ fn summarizecolumns_many_to_many_expands_and_preserves_correlation() {
         )
         .unwrap();
     assert_eq!(value, Value::from(3_i64));
+}
+
+#[test]
+fn summarize_many_to_many_preserves_correlation_across_snowflake_tables() {
+    let model = build_many_to_many_snowflake_model();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Orders, Products[Category], Categories[Dept]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // Expect (A,D1), (B,D2), (C,D3). Incorrect cartesian-product expansion would generate
+    // spurious combinations like (A,D2).
+    assert_eq!(value, Value::from(3_i64));
+}
+
+#[test]
+fn summarizecolumns_many_to_many_preserves_correlation_across_snowflake_tables() {
+    let model = build_many_to_many_snowflake_model();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Orders[OrderId], Products[Category], Categories[Dept]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(3_i64));
+}
+
+#[test]
+fn pivot_many_to_many_preserves_correlation_across_snowflake_tables() {
+    let model = build_many_to_many_snowflake_model();
+
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Orders[Amount])").unwrap()];
+    let group_by = vec![
+        GroupByColumn::new("Products", "Category"),
+        GroupByColumn::new("Categories", "Dept"),
+    ];
+
+    let result = pivot(
+        &model,
+        "Orders",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.columns,
+        vec!["Products[Category]", "Categories[Dept]", "Total Amount"]
+    );
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("A"), Value::from("D1"), 10.0.into()],
+            vec![Value::from("B"), Value::from("D2"), 10.0.into()],
+            vec![Value::from("C"), Value::from("D3"), 20.0.into()],
+        ]
+    );
 }
