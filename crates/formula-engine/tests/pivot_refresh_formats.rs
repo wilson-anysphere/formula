@@ -84,6 +84,7 @@ fn refresh_pivot_writes_dates_as_serial_numbers_and_sets_date_format() {
                     columns: false,
                 },
             },
+            apply_number_formats: true,
             last_output_range: None,
             needs_refresh: true,
         });
@@ -145,6 +146,7 @@ fn refresh_pivot_applies_value_field_number_format() {
                 columns: false,
             },
         },
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -203,6 +205,7 @@ fn refresh_pivot_applies_percent_format_for_percent_show_as_when_no_explicit_for
                 columns: false,
             },
         },
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -217,4 +220,118 @@ fn refresh_pivot_applies_percent_format_for_percent_show_as_when_no_explicit_for
     assert_ne!(style_id, 0);
     let style = engine.style_table().get(style_id).unwrap();
     assert_eq!(style.number_format.as_deref(), Some("0.00%"));
+}
+
+#[test]
+fn refresh_pivot_does_not_apply_value_field_number_format_when_apply_number_formats_false() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "Region").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Sales").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "East").unwrap();
+    engine.set_cell_value("Sheet1", "B2", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", "East").unwrap();
+    engine.set_cell_value("Sheet1", "B3", 150.0).unwrap();
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B3")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: Some("$#,##0.00".to_string()),
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        },
+        apply_number_formats: false,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    let style_id = engine
+        .get_cell_style_id("Sheet1", "E2")
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(style_id, 0);
+}
+
+#[test]
+fn refresh_pivot_does_not_apply_percent_format_when_apply_number_formats_false() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "Region").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Sales").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "East").unwrap();
+    engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", "West").unwrap();
+    engine.set_cell_value("Sheet1", "B3", 3.0).unwrap();
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Pct of Total".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B3")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOfGrandTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        },
+        apply_number_formats: false,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    let style_id = engine
+        .get_cell_style_id("Sheet1", "E2")
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(style_id, 0);
 }

@@ -48,12 +48,21 @@ pub struct PivotTableDefinition {
     pub source: PivotSource,
     pub destination: PivotDestination,
     pub config: PivotConfig,
+    /// Whether to apply number formats from value fields when rendering pivot output.
+    ///
+    /// In XLSX, this corresponds to `pivotTableDefinition@applyNumberFormats` (defaulting to true).
+    #[serde(default = "default_true")]
+    pub apply_number_formats: bool,
     /// Last output footprint written into the destination sheet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_output_range: Option<Range>,
     /// If true, the pivot output may no longer match the sheet contents (e.g. an overlapping edit).
     #[serde(default)]
     pub needs_refresh: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl PivotTableDefinition {
@@ -606,7 +615,10 @@ pub(crate) fn refresh_pivot(
             col: def.destination.cell.col,
         },
         &def.config,
-        &PivotApplyOptions::default(),
+        &PivotApplyOptions {
+            apply_number_formats: def.apply_number_formats,
+            ..PivotApplyOptions::default()
+        },
     );
 
     let mut style_cache: HashMap<String, u32> = HashMap::new();

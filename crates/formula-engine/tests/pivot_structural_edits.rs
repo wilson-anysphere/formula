@@ -69,6 +69,7 @@ fn insert_rows_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -121,6 +122,7 @@ fn insert_cols_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -171,6 +173,7 @@ fn move_range_updates_pivot_source_and_refresh_reads_from_moved_location() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });

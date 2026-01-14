@@ -65,6 +65,7 @@ fn pivot_shrinking_clears_stale_cells() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -105,6 +106,7 @@ fn pivot_refresh_after_shrink_does_not_clear_cells_outside_latest_output() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -128,4 +130,3 @@ fn pivot_refresh_after_shrink_does_not_clear_cells_outside_latest_output() {
         Value::Text("Note".to_string())
     );
 }
-
