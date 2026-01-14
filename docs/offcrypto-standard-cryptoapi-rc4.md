@@ -115,6 +115,14 @@ rc4_key = h_block[0..key_size_bytes]   // truncate to key size
 
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
 
+**40-bit note:** CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit RC4 key with the low
+40 bits set and the remaining 88 bits zero. Concretely, when `keySize == 40` (`key_size_bytes == 5`),
+the RC4 key bytes passed into the RC4 KSA are:
+
+```text
+rc4_key = h_block[0..5] || 0x00 * 11   // 16 bytes total
+```
+
 ## Password verification (EncryptionVerifier)
 
 Standard CryptoAPI stores a verifier to check whether the derived key is correct before attempting

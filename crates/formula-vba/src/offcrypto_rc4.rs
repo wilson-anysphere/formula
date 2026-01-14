@@ -46,7 +46,11 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
 /// H = Hash(salt || password_utf16le)
 /// for i in 0..50000:
 ///   H = Hash(LE32(i) || H)
-/// key_b = Hash(H || LE32(block_index))[0 .. keySize/8]
+/// h_block = Hash(H || LE32(block_index))
+/// if keySize == 40:
+///   rc4_key = h_block[0..5] || 0x00 * 11   // 16 bytes total
+/// else:
+///   rc4_key = h_block[0 .. keySize/8]
 /// ```
 pub(crate) fn derive_rc4_key_b(
     password: &str,
@@ -81,7 +85,17 @@ pub(crate) fn derive_rc4_key_b(
     buf.extend_from_slice(&h);
     buf.extend_from_slice(&block_index.to_le_bytes());
     let block_hash = hash(hash_alg, &buf);
-    block_hash.into_iter().take(key_len).collect()
+
+    // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the low 40 bits set
+    // and the remaining 88 bits zero. Using the raw 5-byte key changes RC4 KSA and yields the wrong
+    // keystream.
+    if key_len == 5 {
+        let mut out: Vec<u8> = block_hash.into_iter().take(5).collect();
+        out.resize(16, 0);
+        out
+    } else {
+        block_hash.into_iter().take(key_len).collect()
+    }
 }
 
 #[cfg(test)]
@@ -134,16 +148,17 @@ mod tests {
     }
 
     #[test]
-    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_40_truncates() {
+    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_40_pads_to_16_bytes() {
         let password = "password";
         let salt: [u8; 16] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
             0x0E, 0x0F,
         ];
 
-        // 40-bit key size => first 5 bytes of SHA1(H || LE32(block)).
+        // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
         let derived = derive_rc4_key_b(password, &salt, 40, 0, HashAlg::Sha1);
-        assert_eq!(derived.len(), 5, "expected 5-byte RC4 key");
-        assert_eq!(derived, decode_hex("6ad7dedf2d"));
+        assert_eq!(derived, decode_hex("6ad7dedf2d0000000000000000000000"));
+        assert_eq!(derived.len(), 16);
+        assert!(derived[5..].iter().all(|b| *b == 0));
     }
 }
