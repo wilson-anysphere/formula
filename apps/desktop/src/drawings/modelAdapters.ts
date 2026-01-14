@@ -375,7 +375,9 @@ function convertModelAnchorPoint(model: unknown, context: string): AnchorPoint {
 export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
   const { tag, value } = unwrapPossiblyTaggedEnum(modelAnchorJson, "Anchor", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`Anchor.${tag} must be an object`);
-  const normalized = normalizeEnumTag(tag);
+  let normalized = normalizeEnumTag(tag);
+  // Back-compat: tolerate tags that include the DrawingML element name suffix (e.g. `OneCellAnchor`).
+  if (normalized.endsWith("anchor")) normalized = normalized.slice(0, -"anchor".length);
 
   switch (normalized) {
     case "onecell": {
