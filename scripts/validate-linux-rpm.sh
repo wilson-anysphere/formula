@@ -222,9 +222,10 @@ validate_desktop_mime_associations_extracted() {
 
   local tmpdir
   tmpdir="$(mktemp -d)"
-  # Avoid referencing a local variable in the trap body (bash + set -u can evaluate traps
-  # after locals are torn down). Expand the path at trap installation time.
-  trap 'rm -rf "'"${tmpdir}"'"' RETURN
+  # RETURN traps apply to the entire call stack (they fire again when the caller returns).
+  # Expand the tmpdir value at trap installation time, and clear the trap after the first
+  # invocation so we don't re-run cleanup after the function returns.
+  trap "rm -rf \"${tmpdir}\" >/dev/null 2>&1 || true; trap - RETURN" RETURN
 
   note "Static desktop integration validation (extract RPM payload): ${rpm_path}"
 
@@ -520,6 +521,8 @@ validate_container() {
   # validates runtime deps/installability rather than signature policy.
   container_cmd+=$'dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpms/*.rpm\n'
   container_cmd+=$'test -x /usr/bin/formula-desktop\n'
+  container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
+  container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
   container_cmd+=$'\n'
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'

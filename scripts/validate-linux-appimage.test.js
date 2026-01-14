@@ -33,6 +33,8 @@ function writeFakeAppImage(
     withXlsxMime = true,
     withMimeTypeEntry = true,
     execLine = `${expectedMainBinaryName} %U`,
+    withLicense = true,
+    withNotice = true,
     appImageVersion = expectedVersion,
     desktopEntryVersion = "",
   } = {},
@@ -74,8 +76,8 @@ echo "${expectedMainBinaryName} stub"
 BIN
   chmod +x squashfs-root/usr/bin/${expectedMainBinaryName}
 
-  echo "LICENSE stub" > squashfs-root/usr/share/doc/${expectedMainBinaryName}/LICENSE
-  echo "NOTICE stub" > squashfs-root/usr/share/doc/${expectedMainBinaryName}/NOTICE
+  ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/LICENSE' : ":"}
+  ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/NOTICE' : ":"}
 
   ${desktopBlock}
   exit 0
@@ -152,6 +154,28 @@ test("validate-linux-appimage fails when .desktop lacks a MimeType entry", { ski
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /MimeType=/i);
+});
+
+test("validate-linux-appimage fails when LICENSE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, withLicense: false, withNotice: true, appImageVersion: expectedVersion });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing compliance file/i);
+  assert.match(proc.stderr, /LICENSE/i);
+});
+
+test("validate-linux-appimage fails when NOTICE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, withLicense: true, withNotice: false, appImageVersion: expectedVersion });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing compliance file/i);
+  assert.match(proc.stderr, /NOTICE/i);
 });
 
 test("validate-linux-appimage fails when X-AppImage-Version does not match tauri.conf.json", { skip: !hasBash }, () => {

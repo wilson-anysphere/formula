@@ -122,42 +122,6 @@ exit 0
   chmodSync(cpioPath, 0o755);
 }
 
-function writeFakeRpmExtractTools(binDir, { withMimeType = true } = {}) {
-  const rpm2cpioScript = `#!/usr/bin/env bash
-set -euo pipefail
-# The validator only uses rpm2cpio as part of a pipe into cpio; the test fakes
-# extraction by implementing a fake cpio that writes the desired files.
-exit 0
-`;
-  const rpm2cpioPath = join(binDir, "rpm2cpio");
-  writeFileSync(rpm2cpioPath, rpm2cpioScript, { encoding: "utf8" });
-  chmodSync(rpm2cpioPath, 0o755);
-
-  const desktopLines = [
-    "[Desktop Entry]",
-    "Name=Formula",
-    "Exec=formula-desktop %U",
-    ...(withMimeType
-      ? ["MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"]
-      : []),
-  ];
-
-  const cpioScript = `#!/usr/bin/env bash
-set -euo pipefail
-# Drain stdin so pipes don't break unexpectedly.
-cat >/dev/null || true
-
-mkdir -p usr/share/applications
-cat > usr/share/applications/formula.desktop <<'DESKTOP'
-${desktopLines.join("\n")}
-DESKTOP
-exit 0
-`;
-  const cpioPath = join(binDir, "cpio");
-  writeFileSync(cpioPath, cpioScript, { encoding: "utf8" });
-  chmodSync(cpioPath, 0o755);
-}
-
 function runValidator({ cwd, rpmArg, fakeListFile, fakeMode, fakeVersion, fakeName }) {
   const proc = spawnSync(
     "bash",
@@ -187,7 +151,6 @@ test(
     const binDir = join(tmp, "bin");
     mkdirSync(binDir, { recursive: true });
     writeFakeRpmTool(binDir);
-    writeFakeRpmExtractTools(binDir);
 
     // Fake RPM artifact (contents unused by the validator; it calls our fake rpm tool).
     writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
@@ -198,8 +161,8 @@ test(
       [
         "/usr/bin/formula-desktop",
         "/usr/share/applications/formula.desktop",
-        "/usr/share/doc/formula-desktop/LICENSE",
-        "/usr/share/doc/formula-desktop/NOTICE",
+        `/usr/share/doc/${expectedRpmName}/LICENSE`,
+        `/usr/share/doc/${expectedRpmName}/NOTICE`,
       ].join("\n"),
       { encoding: "utf8" },
     );
@@ -220,7 +183,6 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
   writeFakeRpmTool(binDir);
-  writeFakeRpmExtractTools(binDir);
 
   writeFileSync(join(tmp, "Formula-1.rpm"), "not-a-real-rpm", { encoding: "utf8" });
   writeFileSync(join(tmp, "Formula-2.rpm"), "not-a-real-rpm", { encoding: "utf8" });
@@ -231,8 +193,8 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
     [
       "/usr/bin/formula-desktop",
       "/usr/share/applications/formula.desktop",
-      "/usr/share/doc/formula-desktop/LICENSE",
-      "/usr/share/doc/formula-desktop/NOTICE",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
     { encoding: "utf8" },
   );
@@ -269,6 +231,54 @@ test("validate-linux-rpm fails when no .desktop file exists under /usr/share/app
   const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /missing expected \.desktop file/i);
+});
+
+test("validate-linux-rpm fails when LICENSE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing compliance file/i);
+  assert.match(proc.stderr, /LICENSE/i);
+});
+
+test("validate-linux-rpm fails when NOTICE is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing compliance file/i);
+  assert.match(proc.stderr, /NOTICE/i);
 });
 
 test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash }, () => {
