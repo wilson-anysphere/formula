@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/ci/linux-package-install-smoke.sh [deb|rpm|all]
+ usage: scripts/ci/linux-package-install-smoke.sh [deb|rpm|all]
 
 Installs the built Linux desktop packages into clean containers and validates that
 the installed binary has no missing shared libraries and that compliance artifacts
@@ -20,14 +20,20 @@ Environment variables:
   DOCKER_PLATFORM          Optional docker --platform override (default: host architecture)
   FORMULA_DEB_SMOKE_IMAGE  Ubuntu image to use (default: ubuntu:24.04)
   FORMULA_RPM_SMOKE_IMAGE  RPM-based image to use (default: fedora:40; supports openSUSE too)
+  FORMULA_TAURI_CONF_PATH  Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing)
 EOF
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
+TAURI_CONF_PATH="${FORMULA_TAURI_CONF_PATH:-${repo_root}/apps/desktop/src-tauri/tauri.conf.json}"
+if [[ "${TAURI_CONF_PATH}" != /* ]]; then
+  TAURI_CONF_PATH="${repo_root}/${TAURI_CONF_PATH}"
+fi
+
 read_main_binary_name() {
-  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local conf="${TAURI_CONF_PATH}"
   local val=""
   if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
     val="$(
@@ -53,7 +59,7 @@ PY
 }
 
 read_tauri_identifier() {
-  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local conf="${TAURI_CONF_PATH}"
   local val=""
   if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
     val="$(
@@ -72,14 +78,11 @@ PY
       node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); (conf.identifier ?? "").trim()' "${conf}" 2>/dev/null || true
     )"
   fi
-  if [[ -z "${val}" ]]; then
-    val="app.formula.desktop"
-  fi
   printf '%s\n' "${val}"
 }
 
 read_deep_link_schemes() {
-  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local conf="${TAURI_CONF_PATH}"
   local val=""
   if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
     val="$(
@@ -158,9 +161,76 @@ NODE
   printf '%s\n' "${val}"
 }
 
+read_parquet_association() {
+  local conf="${TAURI_CONF_PATH}"
+  local val=""
+  if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
+    val="$(
+      python3 - "${conf}" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+
+assocs = conf.get("bundle", {}).get("fileAssociations", [])
+
+def has_parquet(a):
+    if not isinstance(a, dict):
+        return False
+    mt = a.get("mimeType")
+    if isinstance(mt, str) and mt.strip().lower() == "application/vnd.apache.parquet":
+        return True
+    exts = a.get("ext")
+    if isinstance(exts, str):
+        exts = [exts]
+    if isinstance(exts, list):
+        for e in exts:
+            if isinstance(e, str) and e.strip().lower().lstrip(".") == "parquet":
+                return True
+    return False
+
+print("1" if any(has_parquet(a) for a in assocs) else "0")
+PY
+    )"
+  elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
+    val="$(
+      node - <<'NODE' "${conf}" 2>/dev/null || true
+const fs = require("node:fs");
+const confPath = process.argv[2];
+const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
+const assocs = conf?.bundle?.fileAssociations ?? [];
+const hasParquet = (a) => {
+  if (!a || typeof a !== "object") return false;
+  const mt = a.mimeType;
+  if (typeof mt === "string" && mt.trim().toLowerCase() === "application/vnd.apache.parquet") return true;
+  const ext = a.ext;
+  const exts = typeof ext === "string" ? [ext] : Array.isArray(ext) ? ext : [];
+  return exts.some((v) => typeof v === "string" && v.trim().toLowerCase().replace(/^\./, "") === "parquet");
+};
+process.stdout.write(assocs.some(hasParquet) ? "1" : "0");
+NODE
+    )"
+  fi
+  if [[ -z "${val}" ]]; then
+    if [[ -f "${conf}" ]] && grep -q 'application/vnd.apache.parquet' "${conf}"; then
+      val="1"
+    else
+      val="0"
+    fi
+  fi
+  printf '%s\n' "${val}"
+}
+
 MAIN_BINARY_NAME="$(read_main_binary_name)"
 TAURI_IDENTIFIER="$(read_tauri_identifier)"
 DEEP_LINK_SCHEMES="$(read_deep_link_schemes)"
+PARQUET_ASSOCIATION="$(read_parquet_association)"
+
+if [[ "${PARQUET_ASSOCIATION}" -eq 1 && -z "${TAURI_IDENTIFIER}" ]]; then
+  echo "linux-package-install-smoke: Parquet file association configured but tauri.conf.json identifier is missing/empty (required for /usr/share/mime/packages/<identifier>.xml)" >&2
+  exit 1
+fi
 
 if [[ "${TAURI_IDENTIFIER}" == */* || "${TAURI_IDENTIFIER}" == *\\* ]]; then
   echo "::error::linux-package-install-smoke: invalid tauri identifier (contains path separators): ${TAURI_IDENTIFIER}" >&2
@@ -336,13 +406,15 @@ deb_smoke_test_dir() {
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
+    -e "FORMULA_EXPECT_PARQUET_ASSOCIATION=${PARQUET_ASSOCIATION}" \
     -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
-      ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      ident="${FORMULA_TAURI_IDENTIFIER:-}"
+      parquet="${FORMULA_EXPECT_PARQUET_ASSOCIATION:-0}"
       schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
@@ -355,19 +427,25 @@ deb_smoke_test_dir() {
       test -f "/usr/share/doc/${bin}/LICENSE"
       test -f "/usr/share/doc/${bin}/NOTICE"
 
-      # Validate that installer-time MIME integration ran successfully.
+      # Validate that installer-time MIME integration ran successfully (when Parquet is configured).
       #
       # Many distros do not ship a Parquet glob by default, so the package ships a
       # shared-mime-info definition under /usr/share/mime/packages and relies on the
       # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
-      test -f "${mime_xml}"
-      grep -F "application/vnd.apache.parquet" "${mime_xml}"
-      grep -F "*.parquet" "${mime_xml}"
-      if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
-        echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
-        echo "Parquet-related globs2 lines:" >&2
-        grep -n parquet /usr/share/mime/globs2 || true
-        exit 1
+      if [[ "${parquet}" == "1" ]]; then
+        if [[ -z "${ident}" ]]; then
+          echo "Missing FORMULA_TAURI_IDENTIFIER (required for Parquet shared-mime-info XML path)" >&2
+          exit 1
+        fi
+        test -f "${mime_xml}"
+        grep -F "application/vnd.apache.parquet" "${mime_xml}"
+        grep -F "*.parquet" "${mime_xml}"
+        if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
+          echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
+          echo "Parquet-related globs2 lines:" >&2
+          grep -n parquet /usr/share/mime/globs2 || true
+          exit 1
+        fi
       fi
 
       desktop_files=(/usr/share/applications/*.desktop)
@@ -419,7 +497,9 @@ deb_smoke_test_dir() {
         fi
       done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
-      grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+      if [[ "${parquet}" == "1" ]]; then
+        grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+      fi
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
@@ -454,12 +534,14 @@ rpm_smoke_test_dir() {
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
+    -e "FORMULA_EXPECT_PARQUET_ASSOCIATION=${PARQUET_ASSOCIATION}" \
     -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
-      ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      ident="${FORMULA_TAURI_IDENTIFIER:-}"
+      parquet="${FORMULA_EXPECT_PARQUET_ASSOCIATION:-0}"
       schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
@@ -486,15 +568,21 @@ rpm_smoke_test_dir() {
       test -f "/usr/share/doc/${bin}/LICENSE"
       test -f "/usr/share/doc/${bin}/NOTICE"
 
-      # Validate that installer-time MIME integration ran successfully.
-      test -f "${mime_xml}"
-      grep -F "application/vnd.apache.parquet" "${mime_xml}"
-      grep -F "*.parquet" "${mime_xml}"
-      if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
-        echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
-        echo "Parquet-related globs2 lines:" >&2
-        grep -n parquet /usr/share/mime/globs2 || true
-        exit 1
+      # Validate that installer-time MIME integration ran successfully (when Parquet is configured).
+      if [[ "${parquet}" == "1" ]]; then
+        if [[ -z "${ident}" ]]; then
+          echo "Missing FORMULA_TAURI_IDENTIFIER (required for Parquet shared-mime-info XML path)" >&2
+          exit 1
+        fi
+        test -f "${mime_xml}"
+        grep -F "application/vnd.apache.parquet" "${mime_xml}"
+        grep -F "*.parquet" "${mime_xml}"
+        if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
+          echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
+          echo "Parquet-related globs2 lines:" >&2
+          grep -n parquet /usr/share/mime/globs2 || true
+          exit 1
+        fi
       fi
 
       desktop_files=(/usr/share/applications/*.desktop)
@@ -546,7 +634,9 @@ rpm_smoke_test_dir() {
         fi
       done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
-      grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+      if [[ "${parquet}" == "1" ]]; then
+        grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+      fi
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
