@@ -6,6 +6,10 @@ const AGILE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/agile-large.xlsx"
 ));
+const AGILE_EMPTY_PASSWORD_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/agile-empty-password.xlsx"
+));
 const AGILE_PLAINTEXT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
@@ -47,13 +51,24 @@ fn assert_decrypted_zip_contains_workbook(decrypted: &[u8]) {
             break;
         }
     }
-    assert!(has_workbook, "expected decrypted ZIP to contain xl/workbook.*");
+    assert!(
+        has_workbook,
+        "expected decrypted ZIP to contain xl/workbook.*"
+    );
 }
 
 #[test]
 fn decrypts_agile_encrypted_package() {
     let decrypted = decrypt_encrypted_package(AGILE_FIXTURE, "password").expect("decrypt agile");
     assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_agile_empty_password_encrypted_package() {
+    let decrypted = decrypt_encrypted_package(AGILE_EMPTY_PASSWORD_FIXTURE, "")
+        .expect("decrypt agile (empty password)");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
 
@@ -107,8 +122,8 @@ fn wrong_password_returns_invalid_password() {
         "expected InvalidPassword, got {err:?}"
     );
 
-    let err =
-        decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "wrong").expect_err("expected error");
+    let err = decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "wrong")
+        .expect_err("expected error");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
@@ -124,8 +139,8 @@ fn wrong_password_returns_invalid_password() {
 
 #[test]
 fn decrypts_agile_unicode_excel_fixture() {
-    let decrypted =
-        decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "pässwörd🔒").expect("decrypt agile");
+    let decrypted = decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "pässwörd🔒")
+        .expect("decrypt agile");
     assert_eq!(decrypted.as_slice(), AGILE_UNICODE_EXCEL_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
@@ -147,8 +162,8 @@ fn agile_unicode_excel_password_different_normalization_fails() {
 
 #[test]
 fn decrypts_standard_unicode_fixture() {
-    let decrypted =
-        decrypt_encrypted_package(STANDARD_UNICODE_FIXTURE, "pässwörd🔒").expect("decrypt standard");
+    let decrypted = decrypt_encrypted_package(STANDARD_UNICODE_FIXTURE, "pässwörd🔒")
+        .expect("decrypt standard");
     assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
