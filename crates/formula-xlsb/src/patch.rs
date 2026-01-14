@@ -694,8 +694,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            patch_value_cell(
+                            patch_cell_st(
                                 &mut writer,
+                                payload,
                                 col,
                                 style_out,
                                 edit,
@@ -2086,6 +2087,89 @@ fn patch_value_cell<W: io::Write>(
             writer.write_u32(style)?;
             writer.write_utf16_string(s)?;
         }
+    }
+    Ok(())
+}
+
+fn patch_cell_st<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
+) -> Result<(), Error> {
+    // `BrtCellSt` stores inline strings. Most producers use the standard "wide string" layout:
+    //
+    //   [cch:u32][flags:u8][utf16 chars...][optional rich/phonetic blocks]
+    //
+    // but some emit a simplified form without the flags byte when no extras are present:
+    //
+    //   [cch:u32][utf16 chars...]
+    //
+    // When patching an existing inline string cell, preserve the original layout class so
+    // round-trip diffs stay minimal.
+    let CellValue::Text(text) = &edit.new_value else {
+        return patch_value_cell(writer, col, style, edit, existing);
+    };
+    if edit.shared_string_index.is_some() {
+        // Caller explicitly requested a shared string reference; defer to the generic writer.
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
+
+    // Detect whether the original record used the "simple" inline string encoding. The
+    // simplified form is byte-for-byte:
+    //   [col:u32][style:u32][cch:u32][utf16 chars...]
+    let existing_cch = read_u32(payload, 8)? as usize;
+    let existing_utf16_len = existing_cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let expected_simple_len = 12usize
+        .checked_add(existing_utf16_len)
+        .ok_or(Error::UnexpectedEof)?;
+
+    if payload.len() == expected_simple_len {
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
+
+    // Flagged wide-string layout: parse to determine the original flags and whether rich /
+    // phonetic blocks were present.
+    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
+    let flags_u8 = ws.flags as u8;
+
+    let desired_cch = text.encode_utf16().count();
+    let desired_cch_u32 = u32::try_from(desired_cch).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "string is too large",
+        ))
+    })?;
+    let desired_utf16_len = desired_cch_u32
+        .checked_mul(2)
+        .ok_or(Error::UnexpectedEof)?;
+
+    // [col:u32][style:u32] + [cch:u32][flags:u8][utf16...] + optional empty rich/phonetic blocks.
+    let mut payload_len = 13u32
+        .checked_add(desired_utf16_len)
+        .ok_or(Error::UnexpectedEof)?;
+    if ws.flags & FLAG_RICH != 0 {
+        payload_len = payload_len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    }
+    if ws.flags & FLAG_PHONETIC != 0 {
+        payload_len = payload_len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    }
+
+    write_record_header_preserving_varints(writer, biff12::CELL_ST, payload_len, existing)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_u32(desired_cch_u32)?;
+    writer.write_raw(&[flags_u8])?;
+    for unit in text.encode_utf16() {
+        writer.write_raw(&unit.to_le_bytes())?;
+    }
+    if ws.flags & FLAG_RICH != 0 {
+        writer.write_u32(0)?; // cRun
+    }
+    if ws.flags & FLAG_PHONETIC != 0 {
+        writer.write_u32(0)?; // cb
     }
     Ok(())
 }

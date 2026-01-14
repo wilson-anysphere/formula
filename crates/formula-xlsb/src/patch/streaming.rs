@@ -564,8 +564,9 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                         } else {
                             super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(
+                            super::patch_cell_st(
                                 &mut writer,
+                                &payload,
                                 col,
                                 style_out,
                                 edit,
