@@ -77,9 +77,10 @@ Note on version gating in helper APIs:
 
 - Most parsers in this repo treat Standard as **`versionMinor == 2`** with `versionMajor ∈ {2,3,4}`.
 - Some convenience APIs are intentionally scoped:
-  - `formula_offcrypto::decrypt_standard_ooxml_from_bytes` performs **native** Standard (CryptoAPI /
-    AES) decryption and rejects non-Standard inputs (Agile / Extensible) with
-    `UnsupportedEncryption` before attempting any password verification.
+  - `formula_offcrypto::decrypt_standard_ooxml_from_bytes` performs Standard-only decryption and will
+    reject non-Standard inputs (Agile / Extensible) with
+    `OffcryptoError::UnsupportedEncryption { encryption_type: ... }` before attempting any password
+    verification.
 - For best compatibility across Standard variants (non-default hashes/algorithms), prefer
   `crates/formula-office-crypto`’s decryptor.
 
