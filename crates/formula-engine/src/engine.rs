@@ -17635,16 +17635,17 @@ fn walk_calc_expr(
         lexical_scopes: &mut Vec<HashSet<String>>,
         implicit_intersection: bool,
     ) {
-        let insert_cell = |precedents: &mut HashSet<Precedent>, sheet_id: SheetId, addr: CellAddr| {
-            if sheet_id == current_cell.sheet && addr == current_cell.addr {
-                return;
-            }
-            precedents.insert(Precedent::Cell(CellId::new(
-                sheet_id_for_graph(sheet_id),
-                addr.row,
-                addr.col,
-            )));
-        };
+        let insert_cell =
+            |precedents: &mut HashSet<Precedent>, sheet_id: SheetId, addr: CellAddr| {
+                if sheet_id == current_cell.sheet && addr == current_cell.addr {
+                    return;
+                }
+                precedents.insert(Precedent::Cell(CellId::new(
+                    sheet_id_for_graph(sheet_id),
+                    addr.row,
+                    addr.col,
+                )));
+            };
 
         match expr {
             Expr::NameRef(nref) => {
@@ -17738,9 +17739,10 @@ fn walk_calc_expr(
                         .then(|| cur)
                 };
 
-                if let (Some(selected), Some(sheets)) =
-                    (selected, resolve_sheet_span(sheet, current_cell.sheet, workbook))
-                {
+                if let (Some(selected), Some(sheets)) = (
+                    selected,
+                    resolve_sheet_span(sheet, current_cell.sheet, workbook),
+                ) {
                     for sheet_id in sheets {
                         insert_cell(precedents, sheet_id, selected);
                     }
@@ -20122,9 +20124,7 @@ mod tests {
             )
             .unwrap();
 
-        engine
-            .set_cell_formula("Sheet1", "B1", "=1")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=1").unwrap();
         engine
             .set_cell_formula("Sheet1", "A1", "=FORMULATEXT(X)")
             .unwrap();
@@ -20134,9 +20134,7 @@ mod tests {
             Value::Text("=1".to_string())
         );
 
-        engine
-            .set_cell_formula("Sheet1", "B1", "=2")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=2").unwrap();
         assert!(
             engine.is_dirty("Sheet1", "A1"),
             "updating the referenced formula should mark FORMULATEXT dependents dirty"
