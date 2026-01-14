@@ -34,9 +34,13 @@ impl PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
             PivotFieldRef::DataModelColumn { table, column } => {
+                let column = escape_dax_bracket_identifier(column);
                 Cow::Owned(format!("{table}[{column}]"))
             }
-            PivotFieldRef::DataModelMeasure(measure) => Cow::Owned(format!("[{measure}]")),
+            PivotFieldRef::DataModelMeasure(measure) => {
+                let measure = escape_dax_bracket_identifier(measure);
+                Cow::Owned(format!("[{measure}]"))
+            }
         }
     }
 
