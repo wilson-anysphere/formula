@@ -452,6 +452,9 @@ export function registerDesktopCommands(params: {
       commandId,
       title,
       () => {
+        // `executeCellsStructuralRibbonCommand` only checks `app.isEditing()`. Respect the
+        // caller-provided `isEditing` override (e.g. split view secondary editor state) here.
+        if (isEditingFn()) return;
         executeCellsStructuralRibbonCommand(app, commandId);
       },
       { category: commandCategoryEditing, icon: null, keywords },
