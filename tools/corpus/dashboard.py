@@ -14,7 +14,9 @@ from typing import Any
 from .triage import (
     _PRIVACY_PRIVATE,
     _PRIVACY_PUBLIC,
+    _anonymized_display_name,
     _load_known_function_names,
+    _redact_uri_like_in_text,
     _redact_run_url,
     _sha256_text,
     infer_round_trip_failure_kind,
@@ -107,6 +109,55 @@ def _load_reports(reports_dir: Path) -> list[dict[str, Any]]:
     for path in sorted(reports_dir.glob("*.json")):
         reports.append(json.loads(path.read_text(encoding="utf-8")))
     return reports
+
+
+def _redact_report(report: dict[str, Any], *, privacy_mode: str) -> dict[str, Any]:
+    """Redact sensitive strings in a single report (for dashboard output only)."""
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return report
+
+    # Make a shallow copy so we don't mutate caller-owned objects unexpectedly.
+    out = dict(report)
+
+    name = out.get("display_name")
+    if not isinstance(name, str):
+        name = ""
+    sha = out.get("sha256")
+    if not isinstance(sha, str) or not sha:
+        sha = _sha256_text(name)
+    out["display_name"] = _anonymized_display_name(sha256=sha, original_name=name or "workbook.xlsx")
+
+    functions = out.get("functions")
+    if isinstance(functions, dict):
+        redacted: dict[str, int] = {}
+        for fn, cnt in functions.items():
+            if not isinstance(fn, str) or not fn:
+                continue
+            if isinstance(cnt, bool) or not isinstance(cnt, int):
+                continue
+            key = _redact_function_name(fn, privacy_mode=privacy_mode)
+            redacted[key] = redacted.get(key, 0) + int(cnt)
+        out["functions"] = redacted
+
+    # Defense in depth: when analyzing a triage directory generated in `privacy-mode=public`,
+    # avoid leaking custom namespaces/domains embedded in diff paths.
+    steps = out.get("steps")
+    if isinstance(steps, dict):
+        diff_step = steps.get("diff")
+        if isinstance(diff_step, dict):
+            details = diff_step.get("details")
+            if isinstance(details, dict):
+                top = details.get("top_differences")
+                if isinstance(top, list):
+                    for entry in top:
+                        if not isinstance(entry, dict):
+                            continue
+                        path = entry.get("path")
+                        if isinstance(path, str) and path:
+                            entry["path"] = _redact_uri_like_in_text(path)
+
+    return out
 
 
 def _percentile(sorted_values: list[float], p: float) -> float:
@@ -1186,6 +1237,8 @@ def main() -> int:
 
     reports_dir = triage_dir / "reports"
     reports = _load_reports(reports_dir)
+    if args.privacy_mode == _PRIVACY_PRIVATE:
+        reports = [_redact_report(r, privacy_mode=args.privacy_mode) for r in reports]
     summary = _compute_summary(reports)
 
     # If the dashboard is generated outside of CI (e.g. from a downloaded artifact), GitHub env
