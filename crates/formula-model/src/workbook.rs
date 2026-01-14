@@ -488,6 +488,7 @@ impl Workbook {
                 .rewrite_table_references(&table_renames);
         }
 
+        let mut defined_name_id_renames: Vec<(DefinedNameId, DefinedNameId)> = Vec::new();
         let scoped_names: Vec<DefinedName> = self
             .defined_names
             .iter()
@@ -498,8 +499,10 @@ impl Workbook {
             let mut next_id = self.next_defined_name_id;
             let mut duplicated = Vec::with_capacity(scoped_names.len());
             for mut name in scoped_names {
+                let old_id = name.id;
                 name.id = next_id;
                 next_id = next_id.wrapping_add(1);
+                defined_name_id_renames.push((old_id, name.id));
                 name.scope = DefinedNameScope::Sheet(new_sheet_id);
                 name.xlsx_local_sheet_id = None;
                 name.refers_to =
@@ -529,6 +532,7 @@ impl Workbook {
             &target_name,
             &table_renames,
             &table_id_renames,
+            &defined_name_id_renames,
         );
         self.duplicate_pivot_charts_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
         self.duplicate_slicers_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
@@ -567,6 +571,7 @@ impl Workbook {
         new_sheet_name: &str,
         table_renames: &[(String, String)],
         table_id_renames: &[(u32, u32)],
+        defined_name_id_renames: &[(DefinedNameId, DefinedNameId)],
     ) -> HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId> {
         let pivots_to_duplicate: Vec<PivotTableModel> = self
             .pivot_tables
@@ -585,6 +590,8 @@ impl Workbook {
             HashMap::with_capacity(pivots_to_duplicate.len());
         let mut used_names = collect_pivot_table_names(&self.pivot_tables);
         let table_id_map: HashMap<u32, u32> = table_id_renames.iter().copied().collect();
+        let defined_name_id_map: HashMap<DefinedNameId, DefinedNameId> =
+            defined_name_id_renames.iter().copied().collect();
 
         for pivot in pivots_to_duplicate {
             let mut duplicated = pivot.clone();
@@ -646,9 +653,20 @@ impl Workbook {
                         }
                     }
                 },
-                PivotSource::NamedRange { .. } => {
-                    // Intentional: keep named-range sources referencing the original defined name,
-                    // mirroring Excel behavior for workbook-scoped names.
+                PivotSource::NamedRange { name } => match name {
+                    crate::pivots::DefinedNameIdentifier::Id(id) => {
+                        if let Some(new_id) = defined_name_id_map.get(id).copied() {
+                            *id = new_id;
+                            source_changed = true;
+                        } else {
+                            // Keep workbook-scoped (and unresolved) defined-name sources
+                            // referencing the original name, mirroring Excel behavior.
+                        }
+                    }
+                    crate::pivots::DefinedNameIdentifier::Name(_) => {
+                        // Preserve unresolved/name-based references; we can't reliably infer scope
+                        // when only given a string.
+                    }
                 }
                 PivotSource::DataModel { .. } => {}
             }

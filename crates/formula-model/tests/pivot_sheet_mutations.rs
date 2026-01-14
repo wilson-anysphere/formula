@@ -37,12 +37,24 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         part_path: None,
     });
 
-    // Named-range source used to document/lock in our duplication behavior.
+    // Workbook-scoped named-range source used to document/lock in our duplication behavior.
     let name_id = wb
         .create_defined_name(
             DefinedNameScope::Workbook,
             "MyData",
             "=Sheet1!$A$1:$A$10",
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+
+    // Sheet-scoped named-range source should be rewritten to point at the duplicated defined name.
+    let local_name_id = wb
+        .create_defined_name(
+            DefinedNameScope::Sheet(sheet1),
+            "LocalData",
+            "=Sheet1!$B$1:$B$10",
             None,
             false,
             None,
@@ -121,6 +133,28 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         cache_id: Some(cache_name_id),
     });
 
+    let cache_local_name_id = uuid::Uuid::from_u128(4);
+    wb.pivot_caches.push(PivotCacheModel {
+        id: cache_local_name_id,
+        source: PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Id(local_name_id),
+        },
+        needs_refresh: false,
+    });
+    wb.pivot_tables.push(PivotTableModel {
+        id: uuid::Uuid::from_u128(14),
+        name: "PivotTable4".to_string(),
+        source: PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Id(local_name_id),
+        },
+        destination: PivotDestination::Cell {
+            sheet_id: sheet1,
+            cell: CellRef::from_a1("D30").unwrap(),
+        },
+        config: PivotConfig::default(),
+        cache_id: Some(cache_local_name_id),
+    });
+
     wb.pivot_charts.push(PivotChartModel {
         id: uuid::Uuid::from_u128(21),
         name: "PivotChart1".to_string(),
@@ -139,10 +173,10 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
     let copied_table_id = wb.sheet(copied_sheet).unwrap().tables[0].id;
     assert_ne!(copied_table_id, 1);
 
-    // We duplicated 3 pivots on the source sheet.
-    assert_eq!(wb.pivot_tables.len(), 6);
-    // Two sources were rewritten (range + table), so we allocate 2 new caches.
-    assert_eq!(wb.pivot_caches.len(), 5);
+    // We duplicated 4 pivots on the source sheet.
+    assert_eq!(wb.pivot_tables.len(), 8);
+    // Three sources were rewritten (range + table + sheet-scoped name), so we allocate 3 new caches.
+    assert_eq!(wb.pivot_caches.len(), 7);
 
     let p1_copy = wb
         .pivot_tables
@@ -213,7 +247,7 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
             cell: CellRef::from_a1("D20").unwrap()
         }
     );
-    // Named-range sources are not rewritten during sheet duplication.
+    // Workbook-scoped named-range sources are not rewritten during sheet duplication.
     assert_eq!(p3_copy.cache_id, Some(cache_name_id));
     assert_eq!(
         p3_copy.source,
@@ -221,6 +255,39 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
             name: DefinedNameIdentifier::Id(name_id)
         }
     );
+
+    let local_name_copy_id = wb
+        .get_defined_name(DefinedNameScope::Sheet(copied_sheet), "LocalData")
+        .expect("expected duplicated sheet-scoped name")
+        .id;
+    assert_ne!(local_name_copy_id, local_name_id);
+    let p4_copy = wb
+        .pivot_tables
+        .iter()
+        .find(|p| p.name == "PivotTable4 (2)")
+        .expect("expected duplicated PivotTable4");
+    assert_eq!(
+        p4_copy.destination,
+        PivotDestination::Cell {
+            sheet_id: copied_sheet,
+            cell: CellRef::from_a1("D30").unwrap()
+        }
+    );
+    let p4_copy_cache_id = p4_copy.cache_id.expect("expected cache id");
+    assert_ne!(p4_copy_cache_id, cache_local_name_id);
+    assert_eq!(
+        p4_copy.source,
+        PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Id(local_name_copy_id)
+        }
+    );
+    let p4_cache = wb
+        .pivot_caches
+        .iter()
+        .find(|c| c.id == p4_copy_cache_id)
+        .expect("expected duplicated cache for PivotTable4");
+    assert!(p4_cache.needs_refresh);
+    assert_eq!(p4_cache.source, p4_copy.source);
 
     assert_eq!(wb.pivot_charts.len(), 2);
     let chart_copy = wb
