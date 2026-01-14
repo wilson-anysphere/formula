@@ -562,6 +562,70 @@ describe("sync-server reserved root guard disconnect UX", () => {
     });
   });
 
+  it("re-enables branch manager mutations after reconnect when using an injected store", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws);
+    const session = new FakeSessionWithSyncState({
+      doc: new Y.Doc({ guid: "doc-injected-branch-store" }),
+      provider,
+      connected: true,
+      synced: true,
+    }) as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const injectedBranchStoreFactory = vi.fn(() => ({}));
+
+    await act(async () => {
+      root.render(
+        <CollabBranchManagerPanel session={session} sheetNameResolver={null} createBranchStore={injectedBranchStoreFactory} />,
+      );
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector("input") instanceof HTMLInputElement);
+    });
+
+    const inputBefore = container.querySelector("input") as HTMLInputElement | null;
+    expect(inputBefore).toBeInstanceOf(HTMLInputElement);
+    expect(inputBefore?.disabled).toBe(false);
+
+    await act(async () => {
+      ws.emitClose(1008, "reserved root mutation");
+      session.setSyncState({ connected: false, synced: false });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    const inputAfterDisconnect = container.querySelector("input") as HTMLInputElement | null;
+    expect(inputAfterDisconnect).toBeInstanceOf(HTMLInputElement);
+    expect(inputAfterDisconnect?.disabled).toBe(true);
+
+    await act(async () => {
+      session.setSyncState({ connected: true, synced: true });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector("input") instanceof HTMLInputElement);
+    });
+
+    const inputAfterReconnect = container.querySelector("input") as HTMLInputElement | null;
+    expect(inputAfterReconnect).toBeInstanceOf(HTMLInputElement);
+    expect(inputAfterReconnect?.disabled).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("can install the reserved-root-guard monitor outside of React (e.g. global toasts)", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
