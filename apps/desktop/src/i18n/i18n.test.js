@@ -33,6 +33,26 @@ test("theme command strings are localizable", () => {
   assert.equal(t("command.view.theme.light"), "السمة: فاتح");
 });
 
+test("formatting command strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("command.format.toggleBold"), "Bold");
+  assert.equal(t("command.format.toggleItalic"), "Italic");
+  assert.equal(t("command.format.toggleUnderline"), "Underline");
+  assert.equal(t("command.format.toggleStrikethrough"), "Strikethrough");
+
+  setLocale("de-DE");
+  assert.equal(t("command.format.toggleBold"), "Fett");
+  assert.equal(t("command.format.toggleItalic"), "Kursiv");
+  assert.equal(t("command.format.toggleUnderline"), "Unterstreichen");
+  assert.equal(t("command.format.toggleStrikethrough"), "Durchgestrichen");
+
+  setLocale("ar");
+  assert.equal(t("command.format.toggleBold"), "غامق");
+  assert.equal(t("command.format.toggleItalic"), "مائل");
+  assert.equal(t("command.format.toggleUnderline"), "تسطير");
+  assert.equal(t("command.format.toggleStrikethrough"), "يتوسطه خط");
+});
+
 test("ribbon label strings are localizable", () => {
   setLocale("en-US");
   assert.equal(t("ribbon.label.mixed"), "Mixed");
