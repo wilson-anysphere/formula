@@ -488,10 +488,10 @@ Terminology:
 Algorithm (as implemented):
 
 ```text
-H0 = SHA1(pw)
-H  = SHA1(salt || H0)
+// `Hash` is typically SHA-1 (AlgIDHash=CALG_SHA1), but some producers may use MD5.
+H = Hash(salt || pw)
 for i in 0..50000:
-  H = SHA1(LE32(i) || H)
+  H = Hash(LE32(i) || H)
 
 // Per-block RC4 key (`keyLen` is `KeySizeBits / 8` from the CryptoAPI header, e.g. 16 for 128-bit,
 // 5 for 40-bit). Note the 40-bit CryptoAPI quirk:
@@ -499,7 +499,7 @@ for i in 0..50000:
 // CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit (16-byte) RC4 key with the low 40 bits
 // set and the remaining 88 bits zero. Using a raw 5-byte RC4 key changes RC4 KSA and yields the
 // wrong keystream.
-H_block = SHA1(H || LE32(blockIndex))
+H_block = Hash(H || LE32(blockIndex))
 key_material = H_block[0..keyLen]
 if KeySizeBits == 40:
   K_block = key_material || 0x00 * 11    // 16 bytes total
