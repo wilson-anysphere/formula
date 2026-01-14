@@ -159,6 +159,8 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     String.raw`\b(?:fillStyle|strokeStyle)\b\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
+  const styleCssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
+  const setAttributeStyleAssignment = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
     String.raw`\.style\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
@@ -229,26 +231,62 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         }
       }
     } else {
-      const match =
-        jsStyleColor.exec(stripped) ??
-        domStyleColor.exec(stripped) ??
-        canvasStyleColor.exec(stripped) ??
-        setPropertyStyleColor.exec(stripped) ??
-        setAttributeColor.exec(stripped) ??
-        jsxAttributeColor.exec(stripped) ??
-        jsxAttributeColorExpr.exec(stripped);
-      jsStyleColor.lastIndex = 0;
-      domStyleColor.lastIndex = 0;
-      canvasStyleColor.lastIndex = 0;
-      setPropertyStyleColor.lastIndex = 0;
-      setAttributeColor.lastIndex = 0;
-      jsxAttributeColor.lastIndex = 0;
-      jsxAttributeColorExpr.lastIndex = 0;
-      named = match?.groups?.color ?? null;
-      if (named) {
-        namedIndex = (match?.index ?? 0) + (match?.[0]?.indexOf(named) ?? 0);
-        const prop = match?.groups?.prop;
-        namedContext = prop ? `setProperty(${prop})` : "named-color";
+      // First, check CSS style strings assigned to style attributes / cssText.
+      for (const { re, kind } of [
+        { re: styleCssTextAssignment, kind: "style.cssText" },
+        { re: setAttributeStyleAssignment, kind: "setAttribute(style)" },
+      ]) {
+        re.lastIndex = 0;
+        let match;
+        while ((match = re.exec(stripped))) {
+          const value = match.groups?.value ?? "";
+          if (!value) continue;
+          const strippedCss = stripCssNonSemanticText(value);
+          for (const decl of strippedCss.matchAll(cssDeclaration)) {
+            const prop = decl?.groups?.prop?.toLowerCase() ?? "";
+            const declValue = decl?.groups?.value ?? "";
+            if (!prop) continue;
+            const isCustomProp = prop.startsWith("--");
+            if (!isCustomProp && !cssColorProps.has(prop)) continue;
+            const colorMatch = namedColorTokenRe.exec(declValue);
+            namedColorTokenRe.lastIndex = 0;
+            if (colorMatch?.groups?.color) {
+              named = colorMatch.groups.color;
+              const matchStart = match.index ?? 0;
+              const matchText = match[0] ?? "";
+              const valueOffset = matchText.indexOf(value);
+              const valueStart = (decl.index ?? 0) + (decl[0]?.length ?? 0) - declValue.length;
+              namedIndex = matchStart + (valueOffset >= 0 ? valueOffset : 0) + valueStart + (colorMatch.index ?? 0);
+              namedContext = `${kind}: ${prop}`;
+              break;
+            }
+          }
+          if (named) break;
+        }
+        re.lastIndex = 0;
+        if (named) break;
+      }
+
+      if (!named) {
+        for (const { re, kind } of [
+          { re: jsStyleColor, kind: "style object" },
+          { re: domStyleColor, kind: "style assignment" },
+          { re: canvasStyleColor, kind: "canvas style" },
+          { re: setPropertyStyleColor, kind: "style.setProperty" },
+          { re: setAttributeColor, kind: "setAttribute" },
+          { re: jsxAttributeColor, kind: "jsx attribute" },
+          { re: jsxAttributeColorExpr, kind: "jsx attribute expr" },
+        ]) {
+          re.lastIndex = 0;
+          const match = re.exec(stripped);
+          re.lastIndex = 0;
+          named = match?.groups?.color ?? null;
+          if (!named) continue;
+          namedIndex = (match?.index ?? 0) + (match?.[0]?.indexOf(named) ?? 0);
+          const prop = match?.groups?.prop;
+          namedContext = prop ? `${kind}(${prop})` : kind;
+          break;
+        }
       }
     }
     if (named && !allowedColorKeywords.has(named.toLowerCase())) {
