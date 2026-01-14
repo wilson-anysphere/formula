@@ -1,4 +1,6 @@
-use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD};
+use base64::engine::general_purpose::{
+    STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD,
+};
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use md5::Md5;
@@ -75,6 +77,11 @@ pub(crate) struct AgileKeyData {
     pub(crate) block_size: usize,
     pub(crate) key_bits: usize,
     pub(crate) hash_algorithm: HashAlgorithm,
+    /// Hash output size in bytes (`hashSize` attribute).
+    ///
+    /// For standard producers this matches `hash_algorithm.digest_len()`, but we keep it explicit
+    /// to correctly ignore AES block padding when comparing verifier/HMAC digests.
+    pub(crate) hash_size: usize,
     pub(crate) cipher_algorithm: String,
     pub(crate) cipher_chaining: String,
 }
@@ -94,6 +101,8 @@ pub(crate) struct AgilePasswordKeyEncryptor {
     pub(crate) key_bits: usize,
     pub(crate) spin_count: u32,
     pub(crate) hash_algorithm: HashAlgorithm,
+    /// Hash output size in bytes (`hashSize` attribute).
+    pub(crate) hash_size: usize,
     pub(crate) cipher_algorithm: String,
     pub(crate) cipher_chaining: String,
     pub(crate) encrypted_verifier_hash_input: Vec<u8>,
@@ -230,11 +239,18 @@ pub(crate) fn decrypt_agile_encrypted_package(
                 )
             })?;
 
-        let verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(
+        let verifier_hash_full: Zeroizing<Vec<u8>> = Zeroizing::new(
             info.password_key_encryptor
                 .hash_algorithm
                 .digest(verifier_hash_input_slice),
         );
+        let verifier_hash = verifier_hash_full
+            .get(..info.password_key_encryptor.hash_size)
+            .ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "hash output shorter than encryptedKey hashSize".to_string(),
+                )
+            })?;
 
         let verifier_value_key = derive_agile_key(
             info.password_key_encryptor.hash_algorithm,
@@ -256,14 +272,14 @@ pub(crate) fn decrypt_agile_encrypted_package(
             &info.password_key_encryptor.encrypted_verifier_hash_value,
         )?);
         let expected_hash_slice = verifier_hash_value_plain
-            .get(..verifier_hash.len())
+            .get(..info.password_key_encryptor.hash_size)
             .ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat(
-                    "decrypted verifierHashValue shorter than hash".to_string(),
+                    "decrypted verifierHashValue shorter than encryptedKey hashSize".to_string(),
                 )
             })?;
 
-        if !ct_eq(expected_hash_slice, verifier_hash.as_slice()) {
+        if !ct_eq(expected_hash_slice, verifier_hash) {
             // Don't overwrite a prior integrity failure with InvalidPassword; if we successfully
             // validated the password for one IV scheme but can't decrypt/verify, prefer returning
             // an integrity/scheme error.
@@ -303,7 +319,19 @@ pub(crate) fn decrypt_agile_encrypted_package(
         //
         // The HMAC key/value are encrypted using the package key, with IVs derived from the keyData
         // salt and fixed block keys.
+        let hash_size = info.key_data.hash_size;
+        if hash_size == 0 {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "keyData hashSize must be non-zero".to_string(),
+            ));
+        }
         let digest_len = info.key_data.hash_algorithm.digest_len();
+        if hash_size > digest_len {
+            return Err(OfficeCryptoError::InvalidFormat(format!(
+                "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
+                info.key_data.hash_algorithm.as_ooxml_name()
+            )));
+        }
         let iv_hmac_key = derive_iv(
             info.key_data.hash_algorithm,
             &info.key_data.salt,
@@ -315,7 +343,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
             &iv_hmac_key,
             &info.data_integrity.encrypted_hmac_key,
         )?);
-        let hmac_key_len = std::cmp::min(digest_len, hmac_key_plain.len());
+        let hmac_key_len = std::cmp::min(hash_size, hmac_key_plain.len());
         if hmac_key_len == 0 {
             return Err(OfficeCryptoError::InvalidFormat(
                 "decrypted encryptedHmacKey is empty".to_string(),
@@ -334,7 +362,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
             &iv_hmac_val,
             &info.data_integrity.encrypted_hmac_value,
         )?);
-        let expected_hmac = hmac_value_plain.get(..digest_len).ok_or_else(|| {
+        let expected_hmac = hmac_value_plain.get(..hash_size).ok_or_else(|| {
             OfficeCryptoError::InvalidFormat(
                 "decrypted encryptedHmacValue shorter than hash output".to_string(),
             )
@@ -377,9 +405,12 @@ pub(crate) fn decrypt_agile_encrypted_package(
         //
         // MS-OFFCRYPTO: dataIntegrity HMAC is computed over the **exact EncryptedPackage stream
         // bytes as stored** (size header + ciphertext + any stored padding).
-        let computed_hmac =
+        let computed_hmac_full =
             compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-        if !ct_eq(expected_hmac, &computed_hmac) {
+        let computed_hmac = computed_hmac_full.get(..hash_size).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
+        })?;
+        if !ct_eq(expected_hmac, computed_hmac) {
             last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
             continue;
         }
@@ -410,6 +441,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let key_bytes = opts.key_bits / 8;
     let block_size = 16usize;
     let hash_alg = opts.hash_algorithm;
+    let hash_size = hash_alg.digest_len();
 
     let pw_utf16 = password_to_utf16le(password);
 
@@ -430,9 +462,9 @@ pub(crate) fn encrypt_agile_encrypted_package(
 
     // See `decrypt_agile_encrypted_package`: password-key-encryptor fields use `saltValue`
     // as the IV (truncated to blockSize).
-    let verifier_iv = salt_key_encryptor
-        .get(..block_size)
-        .ok_or_else(|| OfficeCryptoError::InvalidFormat("saltValue shorter than blockSize".to_string()))?;
+    let verifier_iv = salt_key_encryptor.get(..block_size).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("saltValue shorter than blockSize".to_string())
+    })?;
 
     // Encrypt verifierHashInput.
     let key_vhi = derive_agile_key(
@@ -516,12 +548,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
-  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashAlgorithm="{hash_alg_name}" hashSize="{hash_size}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
   <dataIntegrity encryptedHmacKey="{enc_hmac_key_b64}" encryptedHmacValue="{enc_hmac_value_b64}"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
       <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
-        saltSize="16" blockSize="16" keyBits="{key_bits}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
+        saltSize="16" blockSize="16" keyBits="{key_bits}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" hashSize="{hash_size}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
         <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
         <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
         <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
@@ -532,6 +564,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bits = opts.key_bits,
         spin_count = opts.spin_count,
         hash_alg_name = hash_alg.as_ooxml_name(),
+        hash_size = hash_size,
         salt_key_data_b64 = salt_key_data_b64,
         salt_key_encryptor_b64 = salt_key_encryptor_b64,
         enc_vhi_b64 = enc_vhi_b64,
@@ -669,8 +702,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                     }
                     b"encryptedKey" if in_password_key_encryptor => {
                         in_encrypted_key = true;
-                        tmp_password_attrs =
-                            Some(parse_password_key_encryptor_attrs(&e, &reader)?);
+                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e, &reader)?);
 
                         // Some producers (e.g. `ms_offcrypto_writer`) encode the verifier/key
                         // blobs as base64 attributes on the `<encryptedKey/>` element instead of
@@ -719,6 +751,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                             key_bits: attrs.key_bits,
                             spin_count: attrs.spin_count,
                             hash_algorithm: attrs.hash_algorithm,
+                            hash_size: attrs.hash_size,
                             cipher_algorithm: attrs.cipher_algorithm,
                             cipher_chaining: attrs.cipher_chaining,
                             encrypted_verifier_hash_input: vhi.ok_or_else(|| {
@@ -776,6 +809,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                         key_bits: attrs.key_bits,
                         spin_count: attrs.spin_count,
                         hash_algorithm: attrs.hash_algorithm,
+                        hash_size: attrs.hash_size,
                         cipher_algorithm: attrs.cipher_algorithm,
                         cipher_chaining: attrs.cipher_chaining,
                         encrypted_verifier_hash_input,
@@ -884,6 +918,7 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
     let mut block_size: Option<usize> = None;
     let mut key_bits: Option<usize> = None;
     let mut hash_algorithm: Option<HashAlgorithm> = None;
+    let mut hash_size: Option<usize> = None;
     let mut cipher_algorithm: Option<String> = None;
     let mut cipher_chaining: Option<String> = None;
 
@@ -913,6 +948,11 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
             b"hashAlgorithm" => {
                 hash_algorithm = Some(HashAlgorithm::from_name(value.as_ref())?);
             }
+            b"hashSize" => {
+                hash_size = Some(value.parse::<usize>().map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("invalid hashSize".to_string())
+                })?);
+            }
             b"cipherAlgorithm" => {
                 cipher_algorithm = Some(value.as_ref().to_string());
             }
@@ -923,6 +963,15 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
         }
     }
 
+    let hash_algorithm = hash_algorithm.ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("keyData missing hashAlgorithm".to_string())
+    })?;
+    let hash_size = hash_size.unwrap_or_else(|| hash_algorithm.digest_len());
+    if hash_size == 0 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "keyData hashSize must be non-zero".to_string(),
+        ));
+    }
     Ok(AgileKeyData {
         salt: salt_value.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("keyData missing saltValue".to_string())
@@ -933,9 +982,8 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
         key_bits: key_bits.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("keyData missing keyBits".to_string())
         })?,
-        hash_algorithm: hash_algorithm.ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("keyData missing hashAlgorithm".to_string())
-        })?,
+        hash_algorithm,
+        hash_size,
         cipher_algorithm: cipher_algorithm.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("keyData missing cipherAlgorithm".to_string())
         })?,
@@ -961,9 +1009,7 @@ fn parse_data_integrity_attrs<B: std::io::BufRead>(
         match key {
             b"encryptedHmacKey" => {
                 encrypted_hmac_key = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
-                    OfficeCryptoError::InvalidFormat(
-                        "invalid base64 encryptedHmacKey".to_string(),
-                    )
+                    OfficeCryptoError::InvalidFormat("invalid base64 encryptedHmacKey".to_string())
                 })?);
             }
             b"encryptedHmacValue" => {
@@ -1003,24 +1049,24 @@ fn parse_encrypted_key_value_attrs<B: std::io::BufRead>(
         })?;
         match key {
             b"encryptedVerifierHashInput" => {
-                encrypted_verifier_hash_input = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
-                    OfficeCryptoError::InvalidFormat(
-                        "invalid base64 encryptedVerifierHashInput".to_string(),
-                    )
-                })?);
+                encrypted_verifier_hash_input =
+                    Some(decode_b64_attr(value.as_ref()).map_err(|_| {
+                        OfficeCryptoError::InvalidFormat(
+                            "invalid base64 encryptedVerifierHashInput".to_string(),
+                        )
+                    })?);
             }
             b"encryptedVerifierHashValue" => {
-                encrypted_verifier_hash_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
-                    OfficeCryptoError::InvalidFormat(
-                        "invalid base64 encryptedVerifierHashValue".to_string(),
-                    )
-                })?);
+                encrypted_verifier_hash_value =
+                    Some(decode_b64_attr(value.as_ref()).map_err(|_| {
+                        OfficeCryptoError::InvalidFormat(
+                            "invalid base64 encryptedVerifierHashValue".to_string(),
+                        )
+                    })?);
             }
             b"encryptedKeyValue" => {
                 encrypted_key_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
-                    OfficeCryptoError::InvalidFormat(
-                        "invalid base64 encryptedKeyValue".to_string(),
-                    )
+                    OfficeCryptoError::InvalidFormat("invalid base64 encryptedKeyValue".to_string())
                 })?);
             }
             _ => {}
@@ -1041,6 +1087,7 @@ struct AgilePasswordAttrs {
     key_bits: usize,
     spin_count: u32,
     hash_algorithm: HashAlgorithm,
+    hash_size: usize,
     cipher_algorithm: String,
     cipher_chaining: String,
 }
@@ -1054,6 +1101,7 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
     let mut key_bits: Option<usize> = None;
     let mut spin_count: Option<u32> = None;
     let mut hash_algorithm: Option<HashAlgorithm> = None;
+    let mut hash_size: Option<usize> = None;
     let mut cipher_algorithm: Option<String> = None;
     let mut cipher_chaining: Option<String> = None;
 
@@ -1088,6 +1136,11 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
             b"hashAlgorithm" => {
                 hash_algorithm = Some(HashAlgorithm::from_name(value.as_ref())?);
             }
+            b"hashSize" => {
+                hash_size = Some(value.parse::<usize>().map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("invalid hashSize".to_string())
+                })?);
+            }
             b"cipherAlgorithm" => {
                 cipher_algorithm = Some(value.as_ref().to_string());
             }
@@ -1098,6 +1151,15 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
         }
     }
 
+    let hash_algorithm = hash_algorithm.ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("encryptedKey missing hashAlgorithm".to_string())
+    })?;
+    let hash_size = hash_size.unwrap_or_else(|| hash_algorithm.digest_len());
+    if hash_size == 0 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "encryptedKey hashSize must be non-zero".to_string(),
+        ));
+    }
     Ok(AgilePasswordAttrs {
         salt: salt_value.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("encryptedKey missing saltValue".to_string())
@@ -1111,9 +1173,8 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
         spin_count: spin_count.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("encryptedKey missing spinCount".to_string())
         })?,
-        hash_algorithm: hash_algorithm.ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("encryptedKey missing hashAlgorithm".to_string())
-        })?,
+        hash_algorithm,
+        hash_size,
         cipher_algorithm: cipher_algorithm.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("encryptedKey missing cipherAlgorithm".to_string())
         })?,
@@ -1371,6 +1432,7 @@ pub(crate) mod tests {
                 block_size,
                 key_bits,
                 hash_algorithm: hash_alg,
+                hash_size: digest_len,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
@@ -1384,6 +1446,7 @@ pub(crate) mod tests {
                 key_bits,
                 spin_count,
                 hash_algorithm: hash_alg,
+                hash_size: digest_len,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
                 encrypted_verifier_hash_input: enc_vhi,
@@ -1422,16 +1485,20 @@ pub(crate) mod tests {
             block_size,
         );
 
-        let wrong_enc_vhi = aes_cbc_encrypt(&key_vhi, &wrong_iv_vhi, &verifier_hash_input_plain)
-            .expect("enc vhi");
-        let wrong_enc_vhv = aes_cbc_encrypt(&key_vhv, &wrong_iv_vhv, &verifier_hash_value_plain)
-            .expect("enc vhv");
+        let wrong_enc_vhi =
+            aes_cbc_encrypt(&key_vhi, &wrong_iv_vhi, &verifier_hash_input_plain).expect("enc vhi");
+        let wrong_enc_vhv =
+            aes_cbc_encrypt(&key_vhv, &wrong_iv_vhv, &verifier_hash_value_plain).expect("enc vhv");
         let wrong_enc_kv =
             aes_cbc_encrypt(&key_kv, &wrong_iv_kv, &package_key_plain).expect("enc key");
 
         let mut wrong_info = info.clone();
-        wrong_info.password_key_encryptor.encrypted_verifier_hash_input = wrong_enc_vhi;
-        wrong_info.password_key_encryptor.encrypted_verifier_hash_value = wrong_enc_vhv;
+        wrong_info
+            .password_key_encryptor
+            .encrypted_verifier_hash_input = wrong_enc_vhi;
+        wrong_info
+            .password_key_encryptor
+            .encrypted_verifier_hash_value = wrong_enc_vhv;
         wrong_info.password_key_encryptor.encrypted_key_value = wrong_enc_kv;
 
         let out = decrypt_agile_encrypted_package(
@@ -1524,12 +1591,9 @@ pub(crate) mod tests {
             BLOCK_KEY_INTEGRITY_HMAC_KEY,
             block_size,
         );
-        let encrypted_hmac_key = aes_cbc_encrypt(
-            &package_key_plain,
-            &iv_hmac_key,
-            &hmac_key_plain_padded,
-        )
-        .expect("enc hmac key");
+        let encrypted_hmac_key =
+            aes_cbc_encrypt(&package_key_plain, &iv_hmac_key, &hmac_key_plain_padded)
+                .expect("enc hmac key");
 
         let iv_hmac_val = derive_iv(
             hash_alg,
@@ -1537,12 +1601,9 @@ pub(crate) mod tests {
             BLOCK_KEY_INTEGRITY_HMAC_VALUE,
             block_size,
         );
-        let encrypted_hmac_value = aes_cbc_encrypt(
-            &package_key_plain,
-            &iv_hmac_val,
-            &hmac_value_plain_padded,
-        )
-        .expect("enc hmac value");
+        let encrypted_hmac_value =
+            aes_cbc_encrypt(&package_key_plain, &iv_hmac_val, &hmac_value_plain_padded)
+                .expect("enc hmac value");
 
         let info = AgileEncryptionInfo {
             version_major: 4,
@@ -1553,6 +1614,7 @@ pub(crate) mod tests {
                 block_size,
                 key_bits,
                 hash_algorithm: hash_alg,
+                hash_size: digest_len,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
@@ -1566,6 +1628,7 @@ pub(crate) mod tests {
                 key_bits,
                 spin_count,
                 hash_algorithm: hash_alg,
+                hash_size: digest_len,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
                 encrypted_verifier_hash_input: enc_vhi,
@@ -1600,6 +1663,7 @@ pub(crate) mod tests {
                 block_size: 16,
                 key_bits: 256,
                 hash_algorithm: HashAlgorithm::Sha512,
+                hash_size: 64,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
@@ -1614,6 +1678,7 @@ pub(crate) mod tests {
                 key_bits: 256,
                 spin_count,
                 hash_algorithm: HashAlgorithm::Sha512,
+                hash_size: 64,
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
                 encrypted_verifier_hash_input: Vec::new(),

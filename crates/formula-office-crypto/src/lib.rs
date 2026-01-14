@@ -106,7 +106,12 @@ pub fn decrypt_encrypted_package_ole_with_options(
     let mut encrypted_package = Vec::new();
     open_stream_case_tolerant(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
 
-    decrypt_encrypted_package_streams_with_options(&encryption_info, &encrypted_package, password, opts)
+    decrypt_encrypted_package_streams_with_options(
+        &encryption_info,
+        &encrypted_package,
+        password,
+        opts,
+    )
 }
 
 /// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
@@ -195,7 +200,8 @@ fn decrypt_encrypted_package_streams_with_options(
     match header.kind {
         util::EncryptionInfoKind::Agile => {
             let info = agile::parse_agile_encryption_info(encryption_info, &header)?;
-            let out = agile::decrypt_agile_encrypted_package(&info, encrypted_package, password, opts)?;
+            let out =
+                agile::decrypt_agile_encrypted_package(&info, encrypted_package, password, opts)?;
             validate_decrypted_package(&out)?;
             Ok(out)
         }
@@ -235,11 +241,9 @@ fn open_stream_case_tolerant<R: Read + std::io::Seek>(
             let with_leading_slash = format!("/{name}");
             match ole.open_stream(&with_leading_slash) {
                 Ok(s) => Ok(s),
-                Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => {
-                    Err(OfficeCryptoError::InvalidFormat(format!(
-                        "missing OLE stream {name}: {err2}"
-                    )))
-                }
+                Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => Err(
+                    OfficeCryptoError::InvalidFormat(format!("missing OLE stream {name}: {err2}")),
+                ),
                 Err(err2) => Err(OfficeCryptoError::InvalidFormat(format!(
                     "failed to open OLE stream {name}: {err1}; {err2}"
                 ))),
@@ -451,29 +455,29 @@ mod tests {
             (
                 0u32,
                 [
-                    0x6a, 0xd7, 0xde, 0xdf, 0x2d, 0xa3, 0x51, 0x4b, 0x1d, 0x85, 0xea, 0xbe,
-                    0xe0, 0x69, 0xd4, 0x7d,
+                    0x6a, 0xd7, 0xde, 0xdf, 0x2d, 0xa3, 0x51, 0x4b, 0x1d, 0x85, 0xea, 0xbe, 0xe0,
+                    0x69, 0xd4, 0x7d,
                 ],
             ),
             (
                 1u32,
                 [
-                    0x2e, 0xd4, 0xe8, 0x82, 0x5c, 0xd4, 0x8a, 0xa4, 0xa4, 0x79, 0x94, 0xcd,
-                    0xa7, 0x41, 0x5b, 0x4a,
+                    0x2e, 0xd4, 0xe8, 0x82, 0x5c, 0xd4, 0x8a, 0xa4, 0xa4, 0x79, 0x94, 0xcd, 0xa7,
+                    0x41, 0x5b, 0x4a,
                 ],
             ),
             (
                 2u32,
                 [
-                    0x9c, 0xe5, 0x7d, 0x06, 0x99, 0xbe, 0x39, 0x38, 0x95, 0x1f, 0x47, 0xfa,
-                    0x94, 0x93, 0x61, 0xdb,
+                    0x9c, 0xe5, 0x7d, 0x06, 0x99, 0xbe, 0x39, 0x38, 0x95, 0x1f, 0x47, 0xfa, 0x94,
+                    0x93, 0x61, 0xdb,
                 ],
             ),
             (
                 3u32,
                 [
-                    0xe6, 0x5b, 0x26, 0x43, 0xea, 0xba, 0x38, 0x15, 0xa3, 0x7a, 0x61, 0x15,
-                    0x9f, 0x13, 0x78, 0x40,
+                    0xe6, 0x5b, 0x26, 0x43, 0xea, 0xba, 0x38, 0x15, 0xa3, 0x7a, 0x61, 0x15, 0x9f,
+                    0x13, 0x78, 0x40,
                 ],
             ),
         ];
@@ -491,7 +495,9 @@ mod tests {
             password,
             StandardKeyDerivation::Rc4,
         );
-        let key_40 = deriver_40.derive_key_for_block(0).expect("derive 40-bit key");
+        let key_40 = deriver_40
+            .derive_key_for_block(0)
+            .expect("derive 40-bit key");
         assert_eq!(key_40.as_slice(), &[0x6a, 0xd7, 0xde, 0xdf, 0x2d]);
     }
 
@@ -534,6 +540,7 @@ mod tests {
                 block_size: 16,
                 key_bits: 128,
                 hash_algorithm: HashAlgorithm::Sha256,
+                hash_size: HashAlgorithm::Sha256.digest_len(),
                 cipher_algorithm: String::new(),
                 cipher_chaining: String::new(),
             },
@@ -547,6 +554,7 @@ mod tests {
                 key_bits: 128,
                 spin_count: 0,
                 hash_algorithm: HashAlgorithm::Sha256,
+                hash_size: HashAlgorithm::Sha256.digest_len(),
                 cipher_algorithm: String::new(),
                 cipher_chaining: String::new(),
                 encrypted_verifier_hash_input: Vec::new(),
