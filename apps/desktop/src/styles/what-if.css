@@ -30,12 +30,6 @@
   width: min(420px, calc(100vw - (var(--space-6) * 2)));
   max-height: min(640px, calc(100vh - (var(--space-6) * 2)));
   overflow: auto;
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
-  padding: var(--space-5);
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-  box-sizing: border-box;
 }
 
 .what-if-dialog-overlay {
@@ -47,10 +41,6 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
-}
-
-.what-if-dialog * {
-  box-sizing: border-box;
 }
 
 .what-if-dialog__header {

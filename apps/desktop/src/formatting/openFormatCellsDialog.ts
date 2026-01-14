@@ -119,7 +119,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   }
 
   const dialog = document.createElement("dialog");
-  dialog.className = "format-cells-dialog";
+  dialog.className = "dialog format-cells-dialog";
   dialog.dataset.testid = "format-cells-dialog";
   markKeybindingBarrier(dialog);
 

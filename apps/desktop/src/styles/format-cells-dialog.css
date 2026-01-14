@@ -8,16 +8,7 @@
 dialog.format-cells-dialog {
   width: min(720px, 92vw);
   max-height: min(720px, 86vh);
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
   padding: 0;
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-  box-shadow: var(--dialog-shadow);
-}
-
-dialog.format-cells-dialog::backdrop {
-  background: var(--dialog-backdrop);
 }
 
 .format-cells-dialog__header {
