@@ -1090,9 +1090,10 @@ mod tests {
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
         let block = 0u32.to_le_bytes();
         let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
-        let mut key = h_final[..5].to_vec();
-        key.resize(16, 0);
-        assert_eq!(key.as_slice(), expected_key);
+        let key_40bit = h_final[..5].to_vec();
+        let mut key_padded = key_40bit.clone();
+        key_padded.resize(16, 0);
+        assert_eq!(key_padded.as_slice(), expected_key);
 
         // Encrypt verifier || verifier_hash using RC4 (symmetric).
         let mut plaintext = Vec::new();
@@ -1100,7 +1101,15 @@ mod tests {
         plaintext.extend_from_slice(&verifier_hash);
 
         let mut ciphertext = plaintext.clone();
-        rc4_apply_keystream(&key, &mut ciphertext).unwrap();
+        rc4_apply_keystream(&key_40bit, &mut ciphertext).unwrap();
+        // CryptoAPI 40-bit RC4 uses a padded 16-byte key; applying RC4 with the derived 5-byte key
+        // should match applying RC4 with the explicit padded key.
+        let mut ciphertext_padded = plaintext.clone();
+        rc4_apply_keystream(&key_padded, &mut ciphertext_padded).unwrap();
+        assert_eq!(
+            ciphertext, ciphertext_padded,
+            "RC4 40-bit key must be treated as 16-byte padded key"
+        );
 
         let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
         let encrypted_verifier_hash = ciphertext[16..].to_vec();
