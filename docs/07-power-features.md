@@ -1564,6 +1564,10 @@ Validation + edge cases (Rust behavior):
       - The engine will treat invalid addresses as `#REF!`.
       - Because decision variables are read **strictly** at construction time, an invalid variable address will typically surface as a `SolverError("cell Sheet!<addr> is not numeric (value: #REF!)")` during `EngineSolverModel::new`.
       - Invalid objective/constraint addresses are read as `NaN` and then handled by the solver’s non-finite penalties.
+    - Note: `EngineSolverModel` does **not** validate that a sheet exists at construction time:
+      - For reads, the engine treats a missing sheet as blank; this is coerced to `0` for numeric reads.
+      - When the solver writes decision variables via `engine.set_cell_value(...)`, the engine will create missing sheets on demand.
+      - A WASM binding should generally treat missing sheets as an error for consistency with other `formula-wasm` APIs.
     - A future `formula-wasm` binding will likely mirror `goalSeek` and accept A1 addresses without `Sheet!` prefixes, using a separate `sheet` field as the default sheet.
   - Numeric coercion:
     - Decision variables are read **strictly** at construction time:
