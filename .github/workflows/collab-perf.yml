@@ -42,6 +42,10 @@ on:
           - canonical
           - legacy
           - rxc
+      timeout_ms:
+        description: "PERF_TIMEOUT_MS (internal wait/test timeout)"
+        required: true
+        default: "600000"
 
 concurrency:
   group: collab-perf-${{ github.ref }}
@@ -57,6 +61,7 @@ env:
   PERF_BATCH_SIZE: ${{ inputs.batch_size }}
   PERF_COLS: ${{ inputs.cols }}
   PERF_KEY_ENCODING: ${{ inputs.key_encoding }}
+  PERF_TIMEOUT_MS: ${{ inputs.timeout_ms }}
   # Keep the node:test runner conservative for perf stability.
   FORMULA_NODE_TEST_CONCURRENCY: "1"
 
@@ -106,4 +111,3 @@ jobs:
           path: |
             binder-perf.log
             session-binder-perf.log
-
