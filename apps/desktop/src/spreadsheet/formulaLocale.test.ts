@@ -25,6 +25,12 @@ describe("formulaLocale", () => {
     expect(normalizeFormulaLocaleId("fr-FR")).toBe("fr-FR");
     expect(normalizeFormulaLocaleId("es-ES")).toBe("es-ES");
 
+    // Trim whitespace and treat `-` / `_` as equivalent (common OS spellings).
+    expect(normalizeFormulaLocaleId("  de-DE  ")).toBe("de-DE");
+    expect(normalizeFormulaLocaleId("de_DE")).toBe("de-DE");
+    // Match case-insensitively.
+    expect(normalizeFormulaLocaleId("DE-de")).toBe("de-DE");
+
     // POSIX locale IDs with encoding/modifier suffix.
     expect(normalizeFormulaLocaleId("de_DE.UTF-8")).toBe("de-DE");
     expect(normalizeFormulaLocaleId("de_DE@euro")).toBe("de-DE");
@@ -42,7 +48,9 @@ describe("formulaLocale", () => {
 
     // The engine treats `en-GB` as an alias for the canonical formula locale.
     expect(normalizeFormulaLocaleId("en-GB")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en-UK")).toBe("en-US");
     expect(normalizeFormulaLocaleId("en-AU")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en-NZ")).toBe("en-US");
 
     // Ignore BCP-47 variants/extensions.
     expect(normalizeFormulaLocaleId("fr-FR-u-nu-latn")).toBe("fr-FR");
@@ -62,6 +70,7 @@ describe("formulaLocale", () => {
 
     // POSIX "C locale" aliases.
     expect(normalizeFormulaLocaleId("C")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("C.UTF-8")).toBe("en-US");
     expect(normalizeFormulaLocaleId("POSIX")).toBe("en-US");
 
     // Unknown locales stay unknown.
