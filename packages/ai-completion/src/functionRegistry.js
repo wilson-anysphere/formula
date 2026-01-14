@@ -2329,6 +2329,34 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CODE",
+    description: "Returns a numeric code for the first character in a text string.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "UNICODE",
+    description: "Returns the Unicode (UTF-8) code point for the first character in a text string.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "CHAR",
+    description: "Returns the character specified by a number.",
+    args: [
+      { name: "number", type: "number" },
+    ],
+  },
+  {
+    name: "UNICHAR",
+    description: "Returns the Unicode character referenced by the given numeric value.",
+    args: [
+      { name: "number", type: "number" },
+    ],
+  },
+  {
     name: "VALUE",
     description: "Converts a text string that represents a number to a number.",
     args: [
@@ -3024,6 +3052,13 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "number", type: "range" },
       { name: "decimals", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "BAHTTEXT",
+    description: "Converts a number to Thai text.",
+    args: [
+      { name: "number", type: "range" },
     ],
   },
   {

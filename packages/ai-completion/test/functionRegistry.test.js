@@ -62,6 +62,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getFunction("REPT")?.args?.[1]?.name, "number_times", "Expected REPT arg2 to be number_times");
   assert.ok(registry.isRangeArg("DOLLAR", 0), "Expected DOLLAR number to be a range");
   assert.ok(registry.getFunction("DOLLAR")?.args?.[1]?.optional, "Expected DOLLAR decimals to be optional");
+  assert.ok(registry.isRangeArg("BAHTTEXT", 0), "Expected BAHTTEXT number to be a range");
   assert.ok(registry.isRangeArg("FIXED", 0), "Expected FIXED number to be a range");
   assert.equal(registry.getArgType("FIXED", 2), "boolean", "Expected FIXED no_commas to be boolean");
 
@@ -85,6 +86,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("FIND", 1), "Expected FIND within_text to be a range");
   assert.ok(registry.isRangeArg("FINDB", 1), "Expected FINDB within_text to be a range");
   assert.ok(registry.isRangeArg("EXACT", 0), "Expected EXACT text1 to be a range");
+  assert.ok(registry.isRangeArg("CODE", 0), "Expected CODE text to be a range");
+  assert.ok(registry.isRangeArg("UNICODE", 0), "Expected UNICODE text to be a range");
+  assert.equal(registry.getArgType("CHAR", 0), "number", "Expected CHAR number to be a number");
+  assert.equal(registry.getArgType("UNICHAR", 0), "number", "Expected UNICHAR number to be a number");
   assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
   assert.ok(registry.isRangeArg("DECIMAL", 0), "Expected DECIMAL text to be a range");
   assert.equal(registry.getArgType("CONVERT", 1), "string", "Expected CONVERT from_unit to be string-like");
