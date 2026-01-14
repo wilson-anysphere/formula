@@ -149,6 +149,22 @@ describe("createDefaultAIAuditStore", () => {
     expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open errors (onerror)', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        const request: any = { error: new Error("indexedDB.open failed") };
+        // Trigger the `onerror` callback after the store has attached handlers.
+        Promise.resolve().then(() => request.onerror?.());
+        return request;
+      }
+    };
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb", bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open is blocked', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
