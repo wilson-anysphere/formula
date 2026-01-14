@@ -62,6 +62,24 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 10 }]);
   });
 
+  it("drops column-list operations that are empty after validation", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "removeColumns", columns: [] },
+          { type: "selectColumns", columns: [] },
+          { type: "fillDown", columns: [] },
+          { type: "take", count: 1 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("x", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "take", count: 1 }]);
+  });
+
   it("drops filterRows comparisons that are missing required values", async () => {
     chatMock.mockResolvedValue({
       message: {

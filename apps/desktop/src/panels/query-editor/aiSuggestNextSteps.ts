@@ -248,14 +248,18 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
     case "removeColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "removeColumns", columns: dedupePreserveOrder(columns) };
+      const deduped = dedupePreserveOrder(columns);
+      if (deduped.length === 0) return null;
+      if (deduped.some((c) => !allowedColumns.has(c))) return null;
+      return { type: "removeColumns", columns: deduped };
     }
     case "selectColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "selectColumns", columns: dedupePreserveOrder(columns) };
+      const deduped = dedupePreserveOrder(columns);
+      if (deduped.length === 0) return null;
+      if (deduped.some((c) => !allowedColumns.has(c))) return null;
+      return { type: "selectColumns", columns: deduped };
     }
     case "renameColumn": {
       const oldName = (value as { oldName?: unknown }).oldName;
@@ -283,8 +287,10 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
     case "fillDown": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "fillDown", columns: dedupePreserveOrder(columns) };
+      const deduped = dedupePreserveOrder(columns);
+      if (deduped.length === 0) return null;
+      if (deduped.some((c) => !allowedColumns.has(c))) return null;
+      return { type: "fillDown", columns: deduped };
     }
     case "replaceValues": {
       const column = (value as { column?: unknown }).column;
