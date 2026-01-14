@@ -16,7 +16,7 @@ pub mod agile;
 pub mod standard;
 
 use core::fmt;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
@@ -2105,37 +2105,7 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
             OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {err}"))
         })?;
 
-    let mut encryption_info = Vec::new();
-    {
-        let mut stream = match ole.open_stream("EncryptionInfo") {
-            Ok(stream) => stream,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                // Some CFB implementations treat stream paths as absolute and require a leading `/`.
-                // Be permissive and try both.
-                match ole.open_stream("/EncryptionInfo") {
-                    Ok(stream) => stream,
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                        return Err(OffcryptoError::InvalidStructure(
-                            "missing `EncryptionInfo` stream".to_string(),
-                        ));
-                    }
-                    Err(err) => {
-                        return Err(OffcryptoError::InvalidStructure(format!(
-                            "failed to open `EncryptionInfo`: {err}"
-                        )));
-                    }
-                }
-            }
-            Err(err) => {
-                return Err(OffcryptoError::InvalidStructure(format!(
-                    "failed to open `EncryptionInfo`: {err}"
-                )));
-            }
-        };
-        stream
-            .read_to_end(&mut encryption_info)
-            .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptionInfo`: {e}")))?;
-    }
+    let encryption_info = read_stream_from_ole(&mut ole, "EncryptionInfo")?;
 
     // `EncryptionInfo` parsing for Agile (4.4) expects a full XML payload. For this
     // Standard-only decryptor we can short-circuit purely from the version header so that:
@@ -2186,35 +2156,7 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     let key = make_key_from_password(password, &verifier.salt, header.key_size_bits)?;
     verify_password(&key, &verifier.encrypted_verifier, &verifier.encrypted_verifier_hash)?;
 
-    let mut encrypted_package = Vec::new();
-    {
-        let mut stream = match ole.open_stream("EncryptedPackage") {
-            Ok(stream) => stream,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                match ole.open_stream("/EncryptedPackage") {
-                    Ok(stream) => stream,
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                        return Err(OffcryptoError::InvalidStructure(
-                            "missing `EncryptedPackage` stream".to_string(),
-                        ));
-                    }
-                    Err(err) => {
-                        return Err(OffcryptoError::InvalidStructure(format!(
-                            "failed to open `EncryptedPackage`: {err}"
-                        )));
-                    }
-                }
-            }
-            Err(err) => {
-                return Err(OffcryptoError::InvalidStructure(format!(
-                    "failed to open `EncryptedPackage`: {err}"
-                )));
-            }
-        };
-        stream
-            .read_to_end(&mut encrypted_package)
-            .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptedPackage`: {e}")))?;
-    }
+    let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
 
     decrypt_encrypted_package_ecb(&key, &encrypted_package)
 }
@@ -2875,30 +2817,24 @@ fn read_ole_stream(raw_ole: &[u8], stream: &'static str) -> Result<Vec<u8>, Offc
     let mut ole = cfb::CompoundFile::open(cursor).map_err(|e| {
         OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}"))
     })?;
+    read_stream_from_ole(&mut ole, stream)
+}
 
-    let mut s = match ole.open_stream(stream) {
+fn read_stream_from_ole<F: Read + Seek>(
+    ole: &mut cfb::CompoundFile<F>,
+    stream: &'static str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let mut s = match open_stream_best_effort(ole, stream) {
         Ok(s) => s,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            // Some writers store streams with a leading `/` even at the root; be permissive.
-            let with_slash = format!("/{stream}");
-            match ole.open_stream(&with_slash) {
-                Ok(s) => s,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(OffcryptoError::InvalidStructure(format!(
-                        "missing `{stream}` stream"
-                    )));
-                }
-                Err(err) => {
-                    return Err(OffcryptoError::InvalidStructure(format!(
-                        "failed to open `{stream}`: {err}"
-                    )));
-                }
-            }
+            return Err(OffcryptoError::InvalidStructure(format!(
+                "missing `{stream}` stream"
+            )));
         }
         Err(err) => {
             return Err(OffcryptoError::InvalidStructure(format!(
                 "failed to open `{stream}`: {err}"
-            )))
+            )));
         }
     };
 
@@ -2907,6 +2843,57 @@ fn read_ole_stream(raw_ole: &[u8], stream: &'static str) -> Result<Vec<u8>, Offc
         OffcryptoError::InvalidStructure(format!("failed to read `{stream}`: {e}"))
     })?;
     Ok(buf)
+}
+
+fn open_stream_best_effort<F: Seek>(
+    ole: &mut cfb::CompoundFile<F>,
+    name: &str,
+) -> Result<cfb::Stream<F>, std::io::Error> {
+    let want = name.trim_start_matches('/');
+
+    if let Ok(s) = ole.open_stream(want) {
+        return Ok(s);
+    }
+    let with_slash = format!("/{want}");
+    if let Ok(s) = ole.open_stream(&with_slash) {
+        return Ok(s);
+    }
+
+    // Case-insensitive fallback: walk the directory tree and match stream paths.
+    let mut found_path: Option<String> = None;
+    let mut found_normalized: Option<String> = None;
+    for entry in ole.walk() {
+        if !entry.is_stream() {
+            continue;
+        }
+        let path = entry.path().to_string_lossy().to_string();
+        let normalized = path.trim_start_matches('/').to_string();
+        if normalized.eq_ignore_ascii_case(want) {
+            found_path = Some(path);
+            found_normalized = Some(normalized);
+            break;
+        }
+    }
+
+    if let Some(normalized) = found_normalized {
+        if let Ok(s) = ole.open_stream(&normalized) {
+            return Ok(s);
+        }
+        let with_slash = format!("/{normalized}");
+        if let Ok(s) = ole.open_stream(&with_slash) {
+            return Ok(s);
+        }
+        if let Some(path) = found_path {
+            if let Ok(s) = ole.open_stream(&path) {
+                return Ok(s);
+            }
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("stream not found: `{want}`"),
+    ))
 }
 
 #[cfg(test)]
