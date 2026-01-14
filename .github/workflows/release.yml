@@ -2804,6 +2804,28 @@ jobs:
             echo "::warning::No provenance-*.intoto.jsonl attestation bundles found on the draft release."
           fi
 
+          expected_provenance_assets=(
+            "provenance-universal-apple-darwin.intoto.jsonl"
+            "provenance-x86_64-unknown-linux-gnu.intoto.jsonl"
+            "provenance-aarch64-unknown-linux-gnu.intoto.jsonl"
+            "provenance-x86_64-pc-windows-msvc.intoto.jsonl"
+            "provenance-aarch64-pc-windows-msvc.intoto.jsonl"
+          )
+
+          missing_provenance_assets=()
+          for expected in "${expected_provenance_assets[@]}"; do
+            if ! printf '%s\n' "${asset_names[@]}" | grep -qx "${expected}"; then
+              missing_provenance_assets+=("${expected}")
+            fi
+          done
+
+          if ((${#missing_provenance_assets[@]} > 0)); then
+            echo "::warning::Missing expected provenance bundle asset(s) (best-effort generation; see workflow logs):"
+            for missing in "${missing_provenance_assets[@]}"; do
+              echo "::warning:: - ${missing}"
+            done
+          fi
+
           bucket_for() {
             local name="$1"
             local base="$name"
