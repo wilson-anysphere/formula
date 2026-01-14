@@ -18,6 +18,8 @@ Options:
 
 Environment:
   GITHUB_TOKEN          GitHub token with actions:read permission
+  GITHUB_API_URL        GitHub API base URL (default: https://api.github.com)
+  GITHUB_SERVER_URL     GitHub server base URL for links (default: https://github.com)
 `);
 }
 
@@ -120,9 +122,13 @@ async function githubGetJson(url, opts) {
   }
 
   if (!res.ok) {
+    const extraHelp =
+      res.status === 403
+        ? `\n\nHint: if this is running in GitHub Actions, ensure the job grants GITHUB_TOKEN \"actions: read\" permission.`
+        : "";
     fatal(
       formatGitHubError(
-        `GitHub API request failed (${res.status} ${res.statusText}) for ${url}.`,
+        `GitHub API request failed (${res.status} ${res.statusText}) for ${url}.${extraHelp}`,
         json,
       ),
     );
