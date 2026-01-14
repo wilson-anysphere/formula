@@ -4,9 +4,14 @@ use formula_model::SheetNameError;
 #[test]
 fn sheet_lifecycle_by_id_rename_reorder_delete() {
     let mut engine = Engine::new();
-    engine.ensure_sheet("Sheet1");
-    engine.ensure_sheet("Sheet2");
-    engine.ensure_sheet("Sheet3");
+    // Use stable sheet keys that differ from display names so renames invalidate lookups by the
+    // old display name (Excel semantics) without changing stable keys.
+    engine.ensure_sheet("sheet1_key");
+    engine.ensure_sheet("sheet2_key");
+    engine.ensure_sheet("sheet3_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
+    engine.set_sheet_display_name("sheet3_key", "Sheet3");
 
     let sheet1_id = engine.sheet_id("Sheet1").expect("Sheet1 id");
     let sheet2_id = engine.sheet_id("Sheet2").expect("Sheet2 id");

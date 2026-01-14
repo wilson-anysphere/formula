@@ -15,17 +15,17 @@ fn range(a1: &str) -> Range {
     Range::from_a1(a1).unwrap()
 }
 
-fn seed_sales_data(engine: &mut Engine) {
-    engine.set_cell_value("Sheet1", "A1", "Region").unwrap();
-    engine.set_cell_value("Sheet1", "B1", "Sales").unwrap();
-    engine.set_cell_value("Sheet1", "A2", "East").unwrap();
-    engine.set_cell_value("Sheet1", "B2", 100.0).unwrap();
-    engine.set_cell_value("Sheet1", "A3", "East").unwrap();
-    engine.set_cell_value("Sheet1", "B3", 150.0).unwrap();
-    engine.set_cell_value("Sheet1", "A4", "West").unwrap();
-    engine.set_cell_value("Sheet1", "B4", 200.0).unwrap();
-    engine.set_cell_value("Sheet1", "A5", "West").unwrap();
-    engine.set_cell_value("Sheet1", "B5", 250.0).unwrap();
+fn seed_sales_data(engine: &mut Engine, sheet: &str) {
+    engine.set_cell_value(sheet, "A1", "Region").unwrap();
+    engine.set_cell_value(sheet, "B1", "Sales").unwrap();
+    engine.set_cell_value(sheet, "A2", "East").unwrap();
+    engine.set_cell_value(sheet, "B2", 100.0).unwrap();
+    engine.set_cell_value(sheet, "A3", "East").unwrap();
+    engine.set_cell_value(sheet, "B3", 150.0).unwrap();
+    engine.set_cell_value(sheet, "A4", "West").unwrap();
+    engine.set_cell_value(sheet, "B4", 200.0).unwrap();
+    engine.set_cell_value(sheet, "A5", "West").unwrap();
+    engine.set_cell_value(sheet, "B5", 250.0).unwrap();
 }
 
 fn sum_sales_by_region_config() -> PivotConfig {
@@ -66,7 +66,8 @@ fn sales_source_as_pivot_values() -> Vec<Vec<PivotValue>> {
 #[test]
 fn pivot_sheet_rename_and_delete_update_pivot_metadata_and_prevent_resurrection() {
     let mut engine = Engine::new();
-    seed_sales_data(&mut engine);
+    seed_sales_data(&mut engine, "sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
 
     let cfg = sum_sales_by_region_config();
     let pivot_id = engine.add_pivot_table(PivotTableDefinition {

@@ -63,10 +63,14 @@ fn sheet_order_can_change_without_changing_sheet_ids() {
 #[test]
 fn sheet_rename_updates_name_mapping_and_formula_text() {
     let mut engine = Engine::new();
-    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    // Use stable sheet keys that differ from display names so we can assert that renaming the
+    // display name makes the old name unresolvable.
+    engine.set_cell_value("sheet1_key", "A1", 1.0).unwrap();
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
     engine
-        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .set_cell_formula("sheet2_key", "A1", "=Sheet1!A1")
         .unwrap();
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
 
     let id1 = engine.sheet_id("Sheet1").unwrap();
     assert!(engine.rename_sheet("Sheet1", "Renamed"));

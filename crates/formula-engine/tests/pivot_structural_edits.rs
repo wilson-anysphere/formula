@@ -258,7 +258,11 @@ fn move_range_updates_pivot_source_and_refresh_reads_from_moved_location() {
 #[test]
 fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet() {
     let mut engine = Engine::new();
-    seed_sales_data(&mut engine);
+    // Use a stable sheet key that differs from the user-visible display name so we can assert that
+    // renaming the display name makes the old name unresolvable (and so a stale pivot definition
+    // would incorrectly resurrect it via `ensure_sheet`).
+    seed_sales_data_on(&mut engine, "sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
 
     let pivot_id = engine.add_pivot_table(PivotTableDefinition {
         id: 0,
