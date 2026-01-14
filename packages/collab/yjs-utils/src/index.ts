@@ -640,7 +640,13 @@ export function yjsValueToJson(value: any): any {
   if (value && typeof value === "object") {
     const yArr = getYArray(value);
     if (yArr) {
-      return yArr.toArray().map((item: any) => yjsValueToJson(item));
+      // `yArr.toArray()` allocates a fresh JS array. Mutate it in-place to avoid
+      // the additional array allocation that `.map()` would create.
+      const out = yArr.toArray();
+      for (let i = 0; i < out.length; i += 1) {
+        out[i] = yjsValueToJson(out[i]);
+      }
+      return out;
     }
 
     const yMap = getYMap(value);
