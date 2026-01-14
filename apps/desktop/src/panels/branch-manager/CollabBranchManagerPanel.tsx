@@ -236,7 +236,9 @@ export function CollabBranchManagerPanel({
       <div className="collab-branch-manager">
         {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
         {banner}
-        <div className="collab-panel__message">Loading branches…</div>
+        <div role="status" className="collab-panel__message">
+          {t("branchManager.loading")}
+        </div>
       </div>
     );
   }

@@ -124,6 +124,7 @@ export const enUS = {
     "The sync server closed the collaboration connection because the reserved root guard is enabled on the sync server (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). In-doc versioning/branching stores (YjsVersionStore/YjsBranchStore) won't work, so Version History and Branch Manager actions are disabled. To use these features, disable SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED on the sync server or configure an out-of-doc store (ApiVersionStore/SQLite).",
   "branchManager.title": "Branches",
   "branchManager.current": "Current",
+  "branchManager.loading": "Loading branches…",
   "branchManager.compressionFallbackWarning":
     "Branch payload compression is unavailable in this environment. Falling back to JSON payloads; large branch commits may fail to sync.",
   "branchManager.permissionWarning": "Branch operations require owner/admin permissions.",
