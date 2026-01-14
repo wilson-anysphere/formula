@@ -245,10 +245,16 @@ The desktop binder can enforce permissions and masking at the UI projection laye
 - Optionally, per-cell formatting for masked cells can also be suppressed with `maskCellFormat: true` (defaults to `false`; clears the per-cell `styleId` to `0` when a cell is masked due to permissions or missing encryption keys).
 - Disallowed edits are rejected and reverted (optionally surfaced via `onEditRejected`).
 
-The binder accepts either:
+The binder accepts permission info either as:
 
 - a function: `permissions(cell) -> { canRead, canEdit }`, or
 - a role-based object: `{ role, restrictions, userId }`
+
+In addition (legacy / composition):
+
+- `canReadCell(cell) -> boolean` and `canEditCell(cell) -> boolean` can also be provided as separate callbacks.
+- If both `permissions` *and* `canReadCell`/`canEditCell` are provided, they are **ANDed** (all checks must allow).
+  This is used by `bindCollabSessionToDocumentController` to combine role/range rules with encryption invariants.
 
 Note the naming difference:
 
