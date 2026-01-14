@@ -21336,6 +21336,15 @@ export class SpreadsheetApp {
         await this.copySelectedDrawingToClipboard();
         return;
       }
+      // When a chart is selected, treat clipboard shortcuts as object-level operations (like
+      // drawings) rather than falling back to copying the active cell range.
+      //
+      // Note: unlike images, chart clipboard integration isn't implemented yet. Returning early
+      // avoids surprising (and potentially destructive) behavior like cutting cell contents while
+      // a chart is selected.
+      if (this.selectedChartId != null) {
+        return;
+      }
 
       const range = this.getClipboardCopyRange();
       const rowCount = Math.max(0, range.endRow - range.startRow + 1);
@@ -22028,6 +22037,11 @@ export class SpreadsheetApp {
       const sheetId = this.sheetId;
       if (this.selectedDrawingId != null) {
         await this.cutSelectedDrawingToClipboard();
+        return;
+      }
+      // See `copySelectionToClipboard` for rationale: charts are object-level selections, so we
+      // should not cut the active cell range while a chart is selected.
+      if (this.selectedChartId != null) {
         return;
       }
 
