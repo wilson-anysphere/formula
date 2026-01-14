@@ -75,6 +75,7 @@ function createRoot(): HTMLElement {
 
 describe("SpreadsheetApp edit rejection toasts", () => {
   let priorGridMode: string | undefined;
+  let mockedNow = 0;
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -89,6 +90,14 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     process.env.DESKTOP_GRID_MODE = "legacy";
 
     document.body.innerHTML = "";
+
+    // `showCollabEditRejectedToast` throttles identical messages based on `Date.now()`. These
+    // tests recreate `#toast-root` per case, so advance time between toast invocations to avoid
+    // cross-test throttling hiding the warning.
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      mockedNow += 2_000;
+      return mockedNow;
+    });
 
     const toastRoot = document.createElement("div");
     toastRoot.id = "toast-root";
