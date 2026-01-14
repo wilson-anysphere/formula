@@ -304,6 +304,36 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("uses Shift+Enter to commit (and does not accept) when the dropdown is open", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=VLO", { reason: "enter", shift: true });
+    expect(view.model.isEditing).toBe(false);
+    // Should not accept completion when Shift+Enter is used for commit/navigation semantics.
+    expect(view.model.activeCell.input).toBe("=VLO");
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
   it("accepts with Enter (and does not commit the edit)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
