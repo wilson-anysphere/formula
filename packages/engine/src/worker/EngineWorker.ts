@@ -204,6 +204,16 @@ export class EngineWorker {
     this.port.close?.();
   }
 
+  /**
+   * Simple liveness check for the worker transport.
+   *
+   * This RPC is independent of any loaded workbook and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async ping(options?: RpcOptions): Promise<string> {
+    return (await this.invoke("ping", {}, options)) as string;
+  }
+
   async newWorkbook(options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("newWorkbook", {}, options);

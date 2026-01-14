@@ -77,6 +77,16 @@ class MockWorker implements WorkerLike {
 
       if (msg.type === "request") {
         const req = msg as RpcRequest;
+        if (req.method === "ping") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: "pong"
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
         if (req.method === "setCells") {
           const response: WorkerOutboundMessage = {
             type: "response",
@@ -191,6 +201,22 @@ class MockWorker implements WorkerLike {
 }
 
 describe("EngineWorker RPC", () => {
+  it("supports ping RPC requests", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const result = await engine.ping();
+    expect(result).toBe("pong");
+
+    const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
+    expect(requests[0]?.method).toBe("ping");
+    expect(requests[0]?.params).toEqual({});
+  });
+
   it("batches consecutive setCell calls into a single setCells request", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
