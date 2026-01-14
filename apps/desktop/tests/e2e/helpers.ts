@@ -1,5 +1,10 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+// Playwright's desktop e2e suite uses a 60s per-test timeout (see `apps/desktop/playwright.config.ts`).
+// Keep the default `__formulaApp` readiness wait slightly below that so failures surface the rich
+// diagnostics from these helpers instead of tripping the global timeout first.
+const DEFAULT_APP_READY_TIMEOUT_MS = 55_000;
+
 type DesktopReadyOptions = {
   /**
    * Whether to call `__formulaApp.whenIdle()` after `__formulaApp` is available.
@@ -163,7 +168,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       // (e.g. if a long-lived request prevents the event from firing).
       await page.goto(path, { waitUntil: "domcontentloaded" });
       const appReadyTimeout =
-        typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000;
+        typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : DEFAULT_APP_READY_TIMEOUT_MS;
       const appReadyPromise = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, {
         timeout: appReadyTimeout,
       });
@@ -390,9 +395,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
-  // Keep this below Playwright's default per-test timeout (60s) so we have room to surface
-  // useful diagnostics instead of hitting the global test timeout first.
-  const appReadyTimeout = 55_000;
+  const appReadyTimeout = DEFAULT_APP_READY_TIMEOUT_MS;
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const requestStart = requestFailures.length;
