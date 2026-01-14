@@ -412,6 +412,7 @@ This guardrail enforces:
   - `com.apple.security.cs.allow-jit` (WKWebView/JavaScriptCore JIT)
   - `com.apple.security.cs.allow-unsigned-executable-memory` (WKWebView/JavaScriptCore executable JIT memory)
   - `com.apple.security.network.client` (outbound network; updater + HTTPS)
+  - If `com.apple.security.app-sandbox` is enabled, `com.apple.security.network.server` is also required (Formula runs a loopback HTTP listener for OAuth redirects).
 - Forbidden entitlements (should not be enabled for Developer ID distribution unless there is a concrete, justified need):
   - `com.apple.security.get-task-allow`
   - `com.apple.security.cs.disable-library-validation`
