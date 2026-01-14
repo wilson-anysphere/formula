@@ -3098,8 +3098,13 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
     Ok(Some((decrypted, preserved)))
 }
 fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> {
-    // Most XLSX/ZIP containers start with `PK`.
-    if encrypted_package.starts_with(b"PK") {
+    // Most XLSX/ZIP containers start with the local-file-header signature `PK\x03\x04`.
+    //
+    // Note: encrypted OOXML `EncryptedPackage` streams begin with a u64le plaintext size prefix, so
+    // checking only for the two-byte `PK` prefix can false-positive when the low bytes of the size
+    // happen to match `PK`.
+    const ZIP_LOCAL_FILE_HEADER: &[u8] = b"PK\x03\x04";
+    if encrypted_package.starts_with(ZIP_LOCAL_FILE_HEADER) {
         return Some(encrypted_package);
     }
 
@@ -3113,7 +3118,7 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
         let declared_len = parse_encrypted_package_original_size(encrypted_package)?;
         let declared_len = usize::try_from(declared_len).ok()?;
         let rest = &encrypted_package[8..];
-        if rest.starts_with(b"PK") {
+        if rest.starts_with(ZIP_LOCAL_FILE_HEADER) {
             return Some(&rest[..declared_len.min(rest.len())]);
         }
     }

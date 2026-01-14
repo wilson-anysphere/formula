@@ -310,6 +310,47 @@ fn encrypted_ooxml_plaintext_xlsb_payload_opens() {
 }
 
 #[test]
+fn encrypted_package_size_prefix_starting_with_pk_is_not_treated_as_plaintext_zip() {
+    // Regression test: `EncryptedPackage` always begins with a u64le plaintext size prefix.
+    // If those low bytes happen to be `PK` (0x4b50), we must not misclassify the stream as a
+    // plaintext ZIP payload and attempt to open it directly.
+    //
+    // `0x0000_0000_0000_4b50` => little-endian prefix bytes: `PK\0\0...`.
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&0x4b50u64.to_le_bytes());
+    encrypted_package.extend_from_slice(&[0u8; 16]);
+
+    let bytes = encrypted_ooxml_bytes_with_encrypted_package(&encrypted_package);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("pkprefix.xlsx");
+    std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+    let err = open_workbook_with_password(&path, Some("password")).expect_err("expected error");
+    assert!(
+        !matches!(err, Error::OpenXlsx { .. }),
+        "expected encryption-related error (not OpenXlsx from misclassified ZIP), got {err:?}"
+    );
+
+    if cfg!(feature = "encrypted-workbooks") {
+        assert!(
+            matches!(
+                err,
+                Error::InvalidPassword { .. }
+                    | Error::UnsupportedOoxmlEncryption { .. }
+                    | Error::DecryptOoxml { .. }
+            ),
+            "expected InvalidPassword, UnsupportedOoxmlEncryption, or DecryptOoxml, got {err:?}"
+        );
+    } else {
+        assert!(
+            matches!(err, Error::UnsupportedEncryption { .. }),
+            "expected UnsupportedEncryption when encrypted-workbooks feature is disabled, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn opens_real_encrypted_ooxml_fixtures_with_password() {
     let fixtures = [
         ("encryption/encrypted_agile.xlsx", "password"),
@@ -330,8 +371,7 @@ fn opens_real_encrypted_ooxml_fixtures_with_password() {
         }
 
         if cfg!(feature = "encrypted-workbooks") {
-            let wb =
-                open_workbook_with_password(&path, Some(password)).expect("open encrypted workbook");
+            let wb = open_workbook_with_password(&path, Some(password)).expect("open encrypted workbook");
             // For OOXML workbooks, `formula-io` opens both `.xlsx` and `.xlsm` as an `Xlsx` package.
             assert!(
                 matches!(wb, Workbook::Xlsx(_)),
