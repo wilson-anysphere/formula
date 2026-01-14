@@ -262,6 +262,36 @@ impl FilterValue {
     }
 }
 
+impl From<f64> for FilterValue {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+
+impl From<bool> for FilterValue {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+
+impl From<Arc<str>> for FilterValue {
+    fn from(value: Arc<str>) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<String> for FilterValue {
+    fn from(value: String) -> Self {
+        Self::String(Arc::<str>::from(value))
+    }
+}
+
+impl From<&str> for FilterValue {
+    fn from(value: &str) -> Self {
+        Self::String(Arc::<str>::from(value))
+    }
+}
+
 /// A small predicate AST that can be evaluated column-wise against a [`ColumnarTable`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilterExpr {
@@ -304,8 +334,12 @@ impl FilterExpr {
         Self::Not(Box::new(self))
     }
 
-    pub fn cmp(col: usize, op: CmpOp, value: FilterValue) -> Self {
-        Self::Cmp { col, op, value }
+    pub fn cmp(col: usize, op: CmpOp, value: impl Into<FilterValue>) -> Self {
+        Self::Cmp {
+            col,
+            op,
+            value: value.into(),
+        }
     }
 
     pub fn cmp_string_ci(col: usize, op: CmpOp, value: impl Into<Arc<str>>) -> Self {
