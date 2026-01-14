@@ -1261,9 +1261,10 @@ tmpdir_rpm="$(mktemp -d)"
 python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
 ```
 
-CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
-check on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable
-`FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the Linux check while disabling the non-Linux ones.
+CI note: the release workflow runs this check on Linux (and, by default, macOS/Windows) **after** the Tauri build step, reusing the
+already-built artifacts (`--no-build`). If you need to temporarily skip the check on macOS/Windows (e.g. a hosted-runner regression makes
+it flaky), set the GitHub Actions variable `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the Linux check while disabling the
+non-Linux ones.
 
 ## 6) Installer/bundle artifact size reporting + size gate (tagged releases enforced)
 

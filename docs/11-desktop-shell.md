@@ -367,9 +367,9 @@ pnpm -C apps/desktop check:coi
 
 This check validates `globalThis.crossOriginIsolated`, `SharedArrayBuffer` availability, and that a basic Web Worker can start (to catch CSP / asset-protocol regressions that would break the Pyodide worker backend).
 
-Release CI runs this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip it on macOS/Windows
-(e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the
-Linux check while disabling the non-Linux ones.
+Release CI runs this check on Linux (and, by default, macOS/Windows) **after** the Tauri build step, reusing the already-built artifacts
+(`--no-build`). If you need to temporarily skip it on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions
+variable `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the Linux check while disabling the non-Linux ones.
 
 To validate `asset://` (i.e. `convertFileSrc`) resources still load under COEP, the repo also includes:
 
