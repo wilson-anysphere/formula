@@ -2,6 +2,10 @@
   "source": "Microsoft Excel function translation tables (es-ES).",
   "translations": {
     "AVERAGE": "PROMEDIO",
+    "AVERAGEIF": "PROMEDIO.SI",
+    "AVERAGEIFS": "PROMEDIO.SI.CONJUNTO",
+    "COUNTIF": "CONTAR.SI",
+    "COUNTIFS": "CONTAR.SI.CONJUNTO",
     "CUBEKPIMEMBER": "MIEMBROKPI.CUBO",
     "CUBEMEMBER": "MIEMBRO.CUBO",
     "CUBEMEMBERPROPERTY": "PROPIEDAD.MIEMBRO.CUBO",
@@ -10,9 +14,22 @@
     "CUBESETCOUNT": "CONTAR.CONJUNTO.CUBO",
     "CUBEVALUE": "VALOR.CUBO",
     "FALSE": "FALSO",
+    "HLOOKUP": "BUSCARH",
     "IF": "SI",
+    "IFERROR": "SI.ERROR",
+    "IFNA": "SI.ND",
+    "IFS": "SI.CONJUNTO",
+    "INDEX": "INDICE",
+    "INDIRECT": "INDIRECTO",
+    "MATCH": "COINCIDIR",
+    "OFFSET": "DESREF",
     "SEQUENCE": "SECUENCIA",
     "SUM": "SUMA",
-    "TRUE": "VERDADERO"
+    "SUMIF": "SUMAR.SI",
+    "SUMIFS": "SUMAR.SI.CONJUNTO",
+    "TODAY": "HOY",
+    "TRUE": "VERDADERO",
+    "VLOOKUP": "BUSCARV",
+    "XLOOKUP": "BUSCARX"
   }
 }
