@@ -338,6 +338,104 @@ describe("Selection Pane panel", () => {
     expect(Array.isArray(raw)).toBe(true);
     expect(raw.some((drawing: any) => String(drawing?.id) === "2")).toBe(false);
 
+    // Escape should return focus to the grid surface (without clearing selection state).
+    await act(async () => {
+      paneRoot!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(sheetRoot);
+
+    await act(async () => {
+      unmountRibbon?.();
+      panelBodyRenderer.cleanup([]);
+    });
+    app.destroy();
+    sheetRoot.remove();
+  });
+
+  it("Delete key deletes selected drawing even when an action button is focused", async () => {
+    const [{ createPanelBodyRenderer }, { PanelIds }, { mountRibbon }] = await Promise.all([
+      import("../../panelBodyRenderer.js"),
+      import("../../panelRegistry.js"),
+      import("../../../ribbon/index.js"),
+    ]);
+
+    const sheetRoot = createRoot();
+    const app = new SpreadsheetApp(sheetRoot, {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    });
+
+    const drawings: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+      {
+        id: 2,
+        kind: { type: "image", imageId: "img_2" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 1,
+      },
+    ];
+
+    const sheetId = app.getCurrentSheetId();
+    (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
+
+    const panelBody = document.createElement("div");
+    document.body.appendChild(panelBody);
+
+    const panelBodyRenderer = createPanelBodyRenderer({
+      getDocumentController: () => app.getDocument(),
+      getSpreadsheetApp: () => app,
+    });
+
+    const ribbonRoot = document.createElement("div");
+    document.body.appendChild(ribbonRoot);
+
+    let unmountRibbon: (() => void) | null = null;
+    await act(async () => {
+      unmountRibbon = mountRibbon(
+        ribbonRoot,
+        {
+          onCommand: (commandId: string) => {
+            if (commandId !== "pageLayout.arrange.selectionPane") return;
+            panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+          },
+        },
+        { initialTabId: "pageLayout" },
+      );
+    });
+
+    const commandButton = ribbonRoot.querySelector<HTMLButtonElement>('button[data-command-id="pageLayout.arrange.selectionPane"]');
+    expect(commandButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      commandButton!.click();
+    });
+
+    const item2 = panelBody.querySelector<HTMLElement>('[data-testid="selection-pane-item-2"]');
+    expect(item2).toBeInstanceOf(HTMLElement);
+    await act(async () => {
+      item2!.click();
+    });
+    expect(app.getSelectedDrawingId()).toBe(2);
+
+    const bringForward2 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-2"]');
+    expect(bringForward2).toBeInstanceOf(HTMLButtonElement);
+    bringForward2!.focus();
+    expect(document.activeElement).toBe(bringForward2);
+
+    await act(async () => {
+      bringForward2!.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    });
+
+    const raw = (app.getDocument() as any).getSheetDrawings(sheetId);
+    expect(Array.isArray(raw)).toBe(true);
+    expect(raw.some((drawing: any) => String(drawing?.id) === "2")).toBe(false);
+
     await act(async () => {
       unmountRibbon?.();
       panelBodyRenderer.cleanup([]);

@@ -19,6 +19,7 @@ type SelectionPaneApp = {
   bringSelectedDrawingForward?(): void;
   sendSelectedDrawingBackward?(): void;
   getCurrentSheetId?(): string;
+  focus?(): void;
 };
 
 function DrawingKindIcon({ kind }: { kind: DrawingObject["kind"]["type"] }) {
@@ -151,10 +152,13 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (items.length === 0) return;
-      // Only handle keys when the Selection Pane root itself is focused.
-      // (If a per-row action button is focused, allow normal Tab navigation and avoid
-      // hijacking keyboard interactions.)
-      if (e.target !== e.currentTarget) return;
+      // For most interactions, only handle keys when the Selection Pane root itself is focused.
+      // (If a per-row action button is focused, allow normal Tab navigation and avoid hijacking
+      // arrow-key navigation, etc.)
+      //
+      // Exception: some keys should behave like global Selection Pane commands even when a child
+      // element is focused (e.g. Delete should delete the selected object, not the active cell).
+      const rootHasFocus = e.target === e.currentTarget;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const currentIndex = selectedId == null ? -1 : items.findIndex(({ obj }) => obj.id === selectedId);
@@ -171,15 +175,19 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
 
       switch (e.key) {
         case "ArrowDown":
+          if (!rootHasFocus) return;
           selectIndex(currentIndex < 0 ? 0 : Math.min(currentIndex + 1, items.length - 1));
           return;
         case "ArrowUp":
+          if (!rootHasFocus) return;
           selectIndex(currentIndex < 0 ? items.length - 1 : Math.max(currentIndex - 1, 0));
           return;
         case "Home":
+          if (!rootHasFocus) return;
           selectIndex(0);
           return;
         case "End":
+          if (!rootHasFocus) return;
           selectIndex(items.length - 1);
           return;
         case "Delete":
@@ -189,6 +197,14 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
           e.preventDefault();
           e.stopPropagation();
           app.deleteDrawingById(selectedId);
+          return;
+        }
+        case "Escape": {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof app.focus === "function") {
+            app.focus();
+          }
           return;
         }
         default:
