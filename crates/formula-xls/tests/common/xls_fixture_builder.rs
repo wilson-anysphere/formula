@@ -285,7 +285,10 @@ fn build_many_malformed_selection_records_workbook_stream(
     globals
 }
 
-fn build_many_malformed_selection_records_sheet_stream(xf_cell: u16, record_count: usize) -> Vec<u8> {
+fn build_many_malformed_selection_records_sheet_stream(
+    xf_cell: u16,
+    record_count: usize,
+) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
@@ -1770,17 +1773,16 @@ pub fn build_page_setup_flags_nopls_fixture_xls() -> Vec<u8> {
     let sheet_stream = build_page_setup_flags_sheet_stream(
         16,
         setup_record_with_grbit(
-            9,                  // iPaperSize (ignored due to fNoPls)
-            80,                 // iScale (ignored due to fNoPls)
-            0,                  // iFitWidth
-            0,                  // iFitHeight
+            9,                   // iPaperSize (ignored due to fNoPls)
+            80,                  // iScale (ignored due to fNoPls)
+            0,                   // iFitWidth
+            0,                   // iFitHeight
             SETUP_GRBIT_F_NOPLS, // fNoPls=1, fPortrait=0 (landscape)
-            0.5,                // numHdr (non-default)
-            0.6,                // numFtr (non-default)
+            0.5,                 // numHdr (non-default)
+            0.6,                 // numFtr (non-default)
         ),
     );
-    let workbook_stream =
-        build_single_sheet_workbook_stream("PageSetupNoPls", &sheet_stream, 1252);
+    let workbook_stream = build_single_sheet_workbook_stream("PageSetupNoPls", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1840,13 +1842,13 @@ pub fn build_page_setup_flags_noorient_fixture_xls() -> Vec<u8> {
     let sheet_stream = build_page_setup_flags_sheet_stream(
         16,
         setup_record_with_grbit(
-            9,                     // A4
-            80,                    // iScale=80%
-            0,                     // iFitWidth
-            0,                     // iFitHeight
+            9,                      // A4
+            80,                     // iScale=80%
+            0,                      // iFitWidth
+            0,                      // iFitHeight
             SETUP_GRBIT_F_NOORIENT, // fNoOrient=1, fPortrait=0 (landscape)
-            0.5,                   // numHdr (non-default)
-            0.6,                   // numFtr (non-default)
+            0.5,                    // numHdr (non-default)
+            0.6,                    // numFtr (non-default)
         ),
     );
     let workbook_stream =
@@ -2379,12 +2381,12 @@ fn build_custom_paper_size_sheet_stream(xf_cell: u16, paper_size: u16) -> Vec<u8
         RECORD_SETUP,
         &setup_record(
             paper_size, // iPaperSize (custom/unmappable)
-            100,  // iScale
-            0,    // iFitWidth
-            0,    // iFitHeight
-            false, // portrait (keep model default)
-            0.3,  // header margin (default)
-            0.3,  // footer margin (default)
+            100,        // iScale
+            0,          // iFitWidth
+            0,          // iFitHeight
+            false,      // portrait (keep model default)
+            0.3,        // header margin (default)
+            0.3,        // footer margin (default)
         ),
     );
 
@@ -3438,7 +3440,15 @@ pub fn build_url_hyperlink_embedded_nul_fixture_xls() -> Vec<u8> {
 pub fn build_url_hyperlink_char_count_len_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_hyperlink_workbook_stream(
         "UrlLenChars",
-        hlink_external_url_len_as_char_count(0, 0, 0, 0, "https://example.com", "Example", "Tooltip"),
+        hlink_external_url_len_as_char_count(
+            0,
+            0,
+            0,
+            0,
+            "https://example.com",
+            "Example",
+            "Tooltip",
+        ),
     );
 
     let cursor = Cursor::new(Vec::new());
@@ -8152,9 +8162,8 @@ fn build_shared_formula_area3d_mixed_flags_workbook_stream() -> Vec<u8> {
     let sheet1_offset = globals.len();
     globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
-    globals.extend_from_slice(&build_shared_area3d_shared_formula_mixed_flags_sheet_stream(
-        xf_cell,
-    ));
+    globals
+        .extend_from_slice(&build_shared_area3d_shared_formula_mixed_flags_sheet_stream(xf_cell));
 
     globals
 }
@@ -11657,6 +11666,78 @@ fn build_shared_formula_master_not_top_left_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_shared_formula_sheet_scoped_name_sanitization_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import).
+    // - Sheet 1: `Ref`, with a **shared formula** in A1:A2 whose shared rgce is `PtgName` pointing
+    //   at a sheet-scoped defined name on `Bad:Name`.
+    //
+    // This exercises BIFF-decoded shared formula rendering that must resolve:
+    // - sheet-scoped `PtgName` indices (NAME record order), and
+    // - sheet prefixes using the final imported (sanitized) sheet name.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records.
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Bad:Name", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // Sheet-scoped defined name on `Bad:Name` (itab=1, since itab-1 is BIFF sheet index).
+    //
+    // The rgce payload is arbitrary for this fixture; we use a simple 2D `PtgRef` to A1.
+    let name_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // row = 0
+        0x00, 0x00, // col = 0 (absolute)
+    ];
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record(
+            "LocalName",
+            /*itab*/ 1,
+            /*hidden*/ false,
+            None,
+            &name_rgce,
+        ),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 ------------------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_ptgname_shrfmla_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_calc_settings_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -11965,7 +12046,13 @@ fn build_array_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(base_row, base_col, xf_cell, 0.0, &ptg_exp(base_row, base_col)),
+        &formula_cell(
+            base_row,
+            base_col,
+            xf_cell,
+            0.0,
+            &ptg_exp(base_row, base_col),
+        ),
     );
 
     // ARRAY record stores the formula token stream for the whole group.
@@ -12304,6 +12391,53 @@ fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // decoded text is `Bad_Name!A1`.
     let col_rel_flags: u16 = 0xC000; // rowRel + colRel bits set; col index = 0 (A)
     let shared_rgce = ptg_ref3d(0, 0, col_rel_flags);
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 0, 0, &shared_rgce),
+    );
+
+    // Second cell in the shared range: A2 formula record containing PtgExp(A1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 0, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_ptgname_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 1) (A1:A2)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared formula anchor: A1 formula token stream is PtgExp(A1), followed by SHRFMLA containing
+    // the shared rgce.
+    //
+    // Set FORMULA.grbit.fShrFmla (0x0008) so parsers recognize the shared-formula membership.
+    let grbit_shared: u16 = 0x0008;
+    let ptgexp = ptg_exp(0, 0);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(0, 0, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
+
+    // Shared rgce: `PtgName` referencing NAME record index 1 (LocalName, sheet-scoped to Bad:Name).
+    let shared_rgce = ptg_name(1);
     push_record(
         &mut sheet,
         RECORD_SHRFMLA,
@@ -13258,6 +13392,26 @@ pub fn build_shared_formula_ptgarea_row_oob_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where a sheet name is invalid and will be sanitized by the
+/// importer, and a **shared formula** (SHRFMLA + PtgExp) references a *sheet-scoped* defined name
+/// via `PtgName`.
+///
+/// This validates that BIFF-decoded worksheet formulas have access to workbook NAME metadata and
+/// render the sheet prefix using the final imported (sanitized) sheet name.
+pub fn build_shared_formula_sheet_scoped_name_sanitization_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_scoped_name_sanitization_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a merged region (`A1:B1`) and a hyperlink anchored to
 /// a single cell within the merged region.
 ///
@@ -13783,7 +13937,7 @@ fn hlink_external_url_len_as_char_count(
     out.extend_from_slice(&CLSID_URL_MONIKER);
     let mut url_utf16: Vec<u16> = url.encode_utf16().collect();
     url_utf16.push(0); // NUL terminator
-    // Length field stored as code unit count rather than byte length.
+                       // Length field stored as code unit count rather than byte length.
     out.extend_from_slice(&(url_utf16.len() as u32).to_le_bytes());
     for code_unit in url_utf16 {
         out.extend_from_slice(&code_unit.to_le_bytes());
@@ -16710,7 +16864,11 @@ fn build_sst_phonetic_sheet_stream(xf_general: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
     // A1: LABELSST referencing the first SST entry (index 0).
-    push_record(&mut sheet, RECORD_LABELSST, &labelsst_cell(0, 0, xf_general, 0));
+    push_record(
+        &mut sheet,
+        RECORD_LABELSST,
+        &labelsst_cell(0, 0, xf_general, 0),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
@@ -16897,12 +17055,12 @@ struct CryptoApiFilepassRecord {
 fn build_filepass_record_rc4_cryptoapi(password: &str) -> CryptoApiFilepassRecord {
     // Deterministic salt/verifier so the generated fixture is stable and diffable.
     let salt: [u8; 16] = [
-        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC,
-        0xAD, 0xAE, 0xAF,
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+        0xAF,
     ];
     let verifier: [u8; 16] = [
-        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C,
-        0x2D, 0x1E, 0x0F,
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E,
+        0x0F,
     ];
 
     let verifier_hash = sha1_bytes(&[&verifier]);
@@ -16938,8 +17096,7 @@ fn build_filepass_record_rc4_cryptoapi(password: &str) -> CryptoApiFilepassRecor
     encryption_verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes()); // SaltSize
     encryption_verifier.extend_from_slice(&salt);
     encryption_verifier.extend_from_slice(&encrypted_verifier);
-    encryption_verifier
-        .extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes()); // VerifierHashSize
+    encryption_verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes()); // VerifierHashSize
     encryption_verifier.extend_from_slice(&encrypted_verifier_hash);
 
     // EncryptionInfo.
@@ -16984,8 +17141,8 @@ fn patch_boundsheet_offsets_for_inserted_prefix(workbook_stream: &mut [u8], delt
     let mut offset = 0usize;
     while offset + 4 <= workbook_stream.len() {
         let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
-            as usize;
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
         let data_start = offset + 4;
         let data_end = data_start + len;
         assert!(
@@ -17018,7 +17175,10 @@ fn encrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream: &[u8], password:
     // Insert FILEPASS after the workbook globals BOF record.
     assert!(workbook_stream.len() >= 4, "workbook stream too short");
     let record_id = u16::from_le_bytes([workbook_stream[0], workbook_stream[1]]);
-    assert_eq!(record_id, RECORD_BOF, "expected workbook stream to start with BOF");
+    assert_eq!(
+        record_id, RECORD_BOF,
+        "expected workbook stream to start with BOF"
+    );
     let bof_len = u16::from_le_bytes([workbook_stream[2], workbook_stream[3]]) as usize;
     let bof_end = 4 + bof_len;
     assert!(bof_end <= workbook_stream.len(), "truncated BOF record");

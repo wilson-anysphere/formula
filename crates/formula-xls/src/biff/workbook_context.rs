@@ -20,7 +20,7 @@ const RECORD_NAME: u16 = 0x0018;
 
 /// Workbook-global tables required to decode BIFF8 `rgce` streams.
 #[derive(Debug, Clone, Default)]
-pub(super) struct BiffWorkbookContextTables {
+pub(crate) struct BiffWorkbookContextTables {
     pub(super) codepage: u16,
     pub(super) supbooks: Vec<supbook::SupBookInfo>,
     pub(super) externsheet: Vec<externsheet::ExternSheetEntry>,
@@ -33,7 +33,7 @@ pub(super) struct BiffWorkbookContextTables {
 }
 
 impl BiffWorkbookContextTables {
-    pub(super) fn rgce_decode_context<'a>(
+    pub(crate) fn rgce_decode_context<'a>(
         &'a self,
         sheet_names: &'a [String],
     ) -> rgce::RgceDecodeContext<'a> {
@@ -45,6 +45,10 @@ impl BiffWorkbookContextTables {
             defined_names: &self.defined_names,
         }
     }
+
+    pub(crate) fn drain_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
+    }
 }
 
 /// Best-effort parse of workbook-global rgce decode context (SUPBOOK, EXTERNSHEET, and NAME order
@@ -52,7 +56,7 @@ impl BiffWorkbookContextTables {
 ///
 /// This helper never hard-fails on malformed workbook-global tables: parse errors are surfaced as
 /// warnings and the returned context contains empty/partial tables.
-pub(super) fn build_biff_workbook_context_tables(
+pub(crate) fn build_biff_workbook_context_tables(
     workbook_stream: &[u8],
     biff: BiffVersion,
     codepage: u16,
@@ -104,24 +108,26 @@ pub(super) fn build_biff_workbook_context_tables(
         }
 
         match record.record_id {
-            RECORD_NAME => match defined_names::parse_biff8_name_record(&record, codepage, sheet_names)
-            {
-                Ok(raw) => {
-                    out.defined_names.push(rgce::DefinedNameMeta {
-                        name: raw.name.clone(),
-                        scope_sheet: raw.scope_sheet,
-                    });
-                    out.name_records.push(Some(raw));
+            RECORD_NAME => {
+                match defined_names::parse_biff8_name_record(&record, codepage, sheet_names) {
+                    Ok(raw) => {
+                        out.defined_names.push(rgce::DefinedNameMeta {
+                            name: raw.name.clone(),
+                            scope_sheet: raw.scope_sheet,
+                        });
+                        out.name_records.push(Some(raw));
+                    }
+                    Err(err) => {
+                        out.warnings
+                            .push(format!("failed to parse NAME record: {err}"));
+                        out.defined_names.push(rgce::DefinedNameMeta {
+                            name: "#NAME?".to_string(),
+                            scope_sheet: None,
+                        });
+                        out.name_records.push(None);
+                    }
                 }
-                Err(err) => {
-                    out.warnings.push(format!("failed to parse NAME record: {err}"));
-                    out.defined_names.push(rgce::DefinedNameMeta {
-                        name: "#NAME?".to_string(),
-                        scope_sheet: None,
-                    });
-                    out.name_records.push(None);
-                }
-            },
+            }
             records::RECORD_EOF => break,
             _ => {}
         }
@@ -173,7 +179,8 @@ mod tests {
         // Truncated description: flags + only 2 bytes ("AB"), but header says 5 chars.
         let bad_desc_partial: Vec<u8> = [vec![0u8], b"AB".to_vec()].concat();
 
-        let bad_record_payload = [bad_header, bad_name_str, rgce.clone(), bad_desc_partial].concat();
+        let bad_record_payload =
+            [bad_header, bad_name_str, rgce.clone(), bad_desc_partial].concat();
 
         // Second NAME record: valid.
         let good_name = "Good";
@@ -244,4 +251,3 @@ mod tests {
         assert_eq!(decoded.text, "1");
     }
 }
-
