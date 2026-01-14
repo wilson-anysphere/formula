@@ -91,6 +91,11 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
     /\.drawing-layer\s*\{[\s\S]*?z-index:\s*var\(--grid-z-drawings-overlay,\s*var\(--grid-z-drawing-overlay,\s*3\)\)\s*;/,
   );
 
+  // Auditing highlights are painted on a dedicated overlay canvas.
+  assert.match(css, /\.grid-canvas--auditing\s*\{/);
+  assert.match(css, /\.grid-canvas--auditing\s*\{[^}]*pointer-events:\s*none\s*;/);
+  assert.match(css, /\.grid-canvas--auditing\s*\{[\s\S]*?z-index:\s*var\(--grid-z-auditing-overlay,\s*1\)\s*;/);
+
   // Shared grid drawings overlay canvases (split view) are also non-interactive.
   assert.match(css, /\.grid-canvas--drawings\s*\{[^}]*pointer-events:\s*none\s*;/);
   // Back-compat: allow overriding the older `--grid-z-drawing-overlay` token.
@@ -111,6 +116,7 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
   assert.match(css, /\.grid-canvas--selection\s*\{[\s\S]*?z-index:\s*var\(--grid-z-selection-overlay,\s*4\)\s*;/);
 
   // Shared-grid overlay stacking is driven via CSS variables + semantic classes.
+  assert.match(css, /--grid-z-auditing-overlay\s*:/);
   assert.match(css, /--grid-z-chart-overlay\s*:/);
   assert.match(css, /--grid-z-drawings-overlay\s*:/);
   // Back-compat alias (older selectors used singular `drawing`).

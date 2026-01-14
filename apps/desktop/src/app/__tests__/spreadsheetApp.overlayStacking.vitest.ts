@@ -111,6 +111,7 @@ function zIndexNumber(value: string): number {
 function expectOverlayZOrder(root: HTMLElement): void {
   const drawingLayer = root.querySelector(".drawing-layer");
   const chartLayer = root.querySelector(".grid-canvas--chart");
+  const auditingLayer = root.querySelector(".grid-canvas--auditing");
   const selectionLayer = root.querySelector(".grid-canvas--selection");
   const chartSelectionLayer = root.querySelector(".chart-selection-canvas");
   const outlineLayer = root.querySelector(".outline-layer");
@@ -120,6 +121,7 @@ function expectOverlayZOrder(root: HTMLElement): void {
 
   expect(drawingLayer).toBeTruthy();
   expect(chartLayer).toBeTruthy();
+  expect(auditingLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
   expect(chartSelectionLayer).toBeTruthy();
   expect(outlineLayer).toBeTruthy();
@@ -129,6 +131,7 @@ function expectOverlayZOrder(root: HTMLElement): void {
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
   const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
+  const auditingZ = zIndexNumber(getComputedStyle(auditingLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
   const chartSelectionZ = zIndexNumber(getComputedStyle(chartSelectionLayer as Element).zIndex);
   const outlineZ = zIndexNumber(getComputedStyle(outlineLayer as Element).zIndex);
@@ -137,11 +140,13 @@ function expectOverlayZOrder(root: HTMLElement): void {
   const editorZ = zIndexNumber(getComputedStyle(cellEditor as Element).zIndex);
 
   // Overlay stacking (low → high):
+  //   - auditing highlights (z=1)
   //   - chart canvas (z=2)
   //   - drawings/images overlay (z=3)
   //   - selection + chart selection handles + outline (z=4)
   //   - scrollbars (z=5)
   //   - cell editor (z=10)
+  expect(auditingZ).toBe(1);
   expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(selectionZ).toBe(4);
@@ -151,6 +156,7 @@ function expectOverlayZOrder(root: HTMLElement): void {
   expect(hScrollbarZ).toBe(5);
   expect(editorZ).toBe(10);
 
+  expect(auditingZ).toBeLessThan(chartZ);
   expect(chartZ).toBeLessThan(drawingZ);
   expect(drawingZ).toBeLessThan(selectionZ);
   expect(chartSelectionZ).toBeGreaterThanOrEqual(selectionZ);
@@ -174,24 +180,29 @@ function expectOverlayZOrder(root: HTMLElement): void {
 function expectPresenceOverlayZOrder(root: HTMLElement): void {
   const drawingLayer = root.querySelector(".drawing-layer");
   const chartLayer = root.querySelector(".grid-canvas--chart");
+  const auditingLayer = root.querySelector(".grid-canvas--auditing");
   const presenceLayer = root.querySelector(".grid-canvas--presence");
   const selectionLayer = root.querySelector(".grid-canvas--selection");
 
   expect(drawingLayer).toBeTruthy();
   expect(chartLayer).toBeTruthy();
+  expect(auditingLayer).toBeTruthy();
   expect(presenceLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
   const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
+  const auditingZ = zIndexNumber(getComputedStyle(auditingLayer as Element).zIndex);
   const presenceZ = zIndexNumber(getComputedStyle(presenceLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
 
+  expect(auditingZ).toBe(1);
   expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(presenceZ).toBe(4);
   expect(selectionZ).toBe(4);
 
+  expect(auditingZ).toBeLessThan(chartZ);
   expect(chartZ).toBeLessThan(drawingZ);
   expect(drawingZ).toBeLessThan(presenceZ);
   expect(presenceZ).toBeLessThanOrEqual(selectionZ);

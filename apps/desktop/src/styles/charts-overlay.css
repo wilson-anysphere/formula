@@ -32,6 +32,17 @@
   z-index: var(--grid-z-drawings-overlay, var(--grid-z-drawing-overlay, 3));
 }
 
+/* Auditing arrows/highlights are painted on their own overlay canvas. */
+.grid-canvas--auditing {
+  pointer-events: none;
+  /*
+    Keep auditing overlays above cell content but below charts/drawings so they don't
+    obscure objects anchored to the grid.
+  */
+  z-index: 1;
+  z-index: var(--grid-z-auditing-overlay, 1);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Shared-grid overlay stacking                                                */
 /* -------------------------------------------------------------------------- */
@@ -45,6 +56,7 @@
 */
 .grid-root {
   /* CanvasGridRenderer uses z-index 0/1/2 for its base/content/selection canvases. */
+  --grid-z-auditing-overlay: 1;
   --grid-z-chart-overlay: 2;
   --grid-z-drawings-overlay: 3;
   /* Back-compat alias (older selectors used singular `drawing`). */
@@ -56,6 +68,7 @@
 /*
   Grid overlay stacking (low → high):
     - cells (CanvasGridRenderer base/content canvases: z=0/1)
+    - auditing highlights (z=1)
     - chart canvas (z=2)
     - drawings/images canvas (z=3)
     - selection + outline (z=4)
