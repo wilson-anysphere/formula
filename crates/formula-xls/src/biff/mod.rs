@@ -19,6 +19,7 @@ mod comments;
 pub(crate) mod defined_names;
 pub(crate) mod externsheet;
 pub(crate) mod formulas;
+pub(crate) mod print_settings;
 pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
@@ -34,10 +35,10 @@ pub(crate) use globals::{
     parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
 };
 pub(crate) use defined_names::parse_biff_defined_names;
+pub(crate) use print_settings::parse_biff_sheet_print_settings;
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_hyperlinks,
-    parse_biff_sheet_merged_cells, parse_biff_sheet_print_settings, parse_biff_sheet_protection,
-    parse_biff_sheet_row_col_properties,
+    parse_biff_sheet_merged_cells, parse_biff_sheet_protection, parse_biff_sheet_row_col_properties,
     parse_biff_sheet_view_state, SheetRowColProperties,
 };
 pub(crate) use sort::parse_biff_sheet_sort_state;

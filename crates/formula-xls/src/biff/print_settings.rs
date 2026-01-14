@@ -14,9 +14,11 @@ const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 
 // SETUP grbit flags.
-// The BIFF spec defines a bit indicating landscape orientation. In BIFF8, bit 1
-// corresponds to landscape when set.
-const SETUP_GRBIT_LANDSCAPE: u16 = 0x0002;
+//
+// In BIFF8, SETUP.grbit bit 1 is `fPortrait`:
+// - 0 => landscape
+// - 1 => portrait
+const SETUP_GRBIT_PORTRAIT: u16 = 0x0002;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BiffSheetPrintSettings {
@@ -169,10 +171,10 @@ fn parse_setup_record(page_setup: &mut PageSetup, data: &[u8], offset: usize, wa
     }
 
     if let Some(grbit) = grbit {
-        page_setup.orientation = if (grbit & SETUP_GRBIT_LANDSCAPE) != 0 {
-            Orientation::Landscape
-        } else {
+        page_setup.orientation = if (grbit & SETUP_GRBIT_PORTRAIT) != 0 {
             Orientation::Portrait
+        } else {
+            Orientation::Landscape
         };
     }
 

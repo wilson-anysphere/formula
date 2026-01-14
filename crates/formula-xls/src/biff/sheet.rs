@@ -4,9 +4,12 @@ use formula_model::{
     autofilter::{
         FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState,
     },
-    CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, Orientation, OutlinePr, PageSetup, Range,
-    Scaling, SheetPane, SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, OutlinePr, Range, SheetPane,
+    SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
+
+#[cfg(test)]
+use formula_model::{Orientation, PageSetup, Scaling};
 
 use super::records;
 use super::strings;
@@ -111,10 +114,18 @@ const RECORD_SELECTION: u16 = 0x001D;
 // Print/page setup records (worksheet substream).
 // - SETUP: [MS-XLS 2.4.296]
 // - LEFTMARGIN/RIGHTMARGIN/TOPMARGIN/BOTTOMMARGIN: [MS-XLS 2.4.128] etc.
+//
+// NOTE: Production code uses `biff::print_settings` for page setup parsing. The legacy parser
+// below is kept only for unit tests of BIFF record semantics.
+#[cfg(test)]
 const RECORD_SETUP: u16 = 0x00A1;
+#[cfg(test)]
 const RECORD_LEFTMARGIN: u16 = 0x0026;
+#[cfg(test)]
 const RECORD_RIGHTMARGIN: u16 = 0x0027;
+#[cfg(test)]
 const RECORD_TOPMARGIN: u16 = 0x0028;
+#[cfg(test)]
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 
 // Manual page breaks (worksheet substream).
@@ -283,6 +294,7 @@ pub(crate) struct BiffSheetProtection {
     pub(crate) warnings: Vec<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BiffSheetPrintSettings {
     pub(crate) page_setup: PageSetup,
@@ -822,6 +834,7 @@ fn parse_vertical_page_breaks_record(
 ///
 /// This scan is resilient to malformed records: payload-level parse failures are surfaced as
 /// warnings and otherwise ignored.
+#[cfg(test)]
 pub(crate) fn parse_biff_sheet_print_settings(
     workbook_stream: &[u8],
     start: usize,
