@@ -134,3 +134,82 @@ fn parse_absolute_anchor_picture_drawing_part() {
     ));
     assert!(workbook.images.get(&ImageId::new("image1.png")).is_some());
 }
+
+#[test]
+fn parse_absolute_anchor_picture_drawing_part_from_archive() {
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+    let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:absoluteAnchor>
+    <xdr:pos x="10" y="20"/>
+    <xdr:ext cx="30" cy="40"/>
+    <xdr:pic>
+      <xdr:nvPicPr>
+        <xdr:cNvPr id="1" name="Picture 1"/>
+        <xdr:cNvPicPr/>
+      </xdr:nvPicPr>
+      <xdr:blipFill>
+        <a:blip r:embed="rId1"/>
+        <a:stretch><a:fillRect/></a:stretch>
+      </xdr:blipFill>
+      <xdr:spPr>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+      </xdr:spPr>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:absoluteAnchor>
+</xdr:wsDr>"#;
+
+    let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="../media/image1.png"/>
+</Relationships>"#;
+
+    let options =
+        FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    zip.start_file("xl/drawings/drawing1.xml", options)
+        .expect("start drawing");
+    zip.write_all(drawing_xml.as_bytes())
+        .expect("write drawing xml");
+    zip.start_file("xl/drawings/_rels/drawing1.xml.rels", options)
+        .expect("start rels");
+    zip.write_all(rels_xml.as_bytes()).expect("write rels xml");
+    zip.start_file("xl/media/image1.png", options)
+        .expect("start image");
+    zip.write_all(b"fake png bytes").expect("write image");
+    let bytes = zip.finish().expect("finish zip").into_inner();
+
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
+    let mut workbook = formula_model::Workbook::new();
+    let drawing = DrawingPart::parse_from_archive(
+        0,
+        "xl/drawings/drawing1.xml",
+        &mut archive,
+        &mut workbook,
+    )
+    .expect("parse drawing part from archive");
+
+    assert_eq!(drawing.objects.len(), 1);
+    assert_eq!(
+        drawing.objects[0].anchor,
+        Anchor::Absolute {
+            pos: CellOffset::new(10, 20),
+            ext: EmuSize::new(30, 40),
+        }
+    );
+    assert!(matches!(
+        &drawing.objects[0].kind,
+        DrawingObjectKind::Image { image_id } if image_id == &ImageId::new("image1.png")
+    ));
+    assert!(workbook.images.get(&ImageId::new("image1.png")).is_some());
+}
