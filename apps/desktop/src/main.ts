@@ -2457,6 +2457,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.number.numberFormat.ariaLabel": t("quickPick.numberFormat.placeholder"),
       "view.appearance.theme": themeLabel,
       "view.appearance.theme.ariaLabel": t("quickPick.theme.placeholder"),
+      // Common formatting toggles: use localized command titles for icon-only button tooltips/aria labels.
+      "format.toggleBold": t("command.format.toggleBold"),
+      "format.toggleItalic": t("command.format.toggleItalic"),
+      "format.toggleUnderline": t("command.format.toggleUnderline"),
+      "format.toggleStrikethrough": t("command.format.toggleStrikethrough"),
       // Localize dropdown menu item labels (schema labels are currently English-only).
       "format.numberFormat.general": t("command.format.numberFormat.general"),
       "format.numberFormat.number": t("command.format.numberFormat.number"),
