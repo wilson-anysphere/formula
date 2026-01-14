@@ -217,6 +217,59 @@ describe("engine.worker resilience", () => {
     channel1.port1.close();
     channel2.port1.close();
   });
+
+  it("does not deliver responses from an in-flight request to a new port after re-init", async () => {
+    await loadWorkerModule();
+
+    let resolveInit: (() => void) | null = null;
+    (globalThis as any).__ENGINE_WORKER_DELAY_INIT_PROMISE__ = new Promise<void>((resolve) => {
+      resolveInit = resolve;
+    });
+
+    const delayedWasmModuleUrl = new URL("./fixtures/mockWasmWorkbookDelayedInit.mjs", import.meta.url).href;
+    const fastWasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+
+    const channel1 = createMockChannel();
+    workerGlobal.dispatchMessage({
+      type: "init",
+      port: channel1.port2 as unknown as MessagePort,
+      wasmModuleUrl: delayedWasmModuleUrl,
+    } satisfies InitMessage);
+    await waitForMessage(channel1.port1, (msg) => msg.type === "ready");
+
+    // Start an in-flight request that will block while the wasm module init is delayed.
+    channel1.port1.postMessage({ type: "request", id: 1, method: "ping", params: {} } satisfies RpcRequest);
+
+    const channel2 = createMockChannel();
+    workerGlobal.dispatchMessage({
+      type: "init",
+      port: channel2.port2 as unknown as MessagePort,
+      wasmModuleUrl: fastWasmModuleUrl,
+    } satisfies InitMessage);
+    await waitForMessage(channel2.port1, (msg) => msg.type === "ready");
+
+    // New connection should close the old port so it doesn't leak handles.
+    expect(channel1.port2.closed).toBe(true);
+
+    // Ensure the new port is functional.
+    const response2 = await sendRequest(channel2.port1, { type: "request", id: 2, method: "ping", params: {} });
+    expect((response2 as RpcResponseOk).ok).toBe(true);
+
+    // Release the delayed init; the old request may resume execution, but must not respond on the
+    // new port (generation guards should drop it).
+    resolveInit?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const unexpected = await Promise.race([
+      waitForMessage(channel2.port1, (msg) => msg.type === "response" && msg.id === 1),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50)),
+    ]);
+    expect(unexpected).toBe("timeout");
+
+    delete (globalThis as any).__ENGINE_WORKER_DELAY_INIT_PROMISE__;
+    channel1.port1.close();
+    channel2.port1.close();
+  });
 });
 
 const previousSelf = (globalThis as any).self;

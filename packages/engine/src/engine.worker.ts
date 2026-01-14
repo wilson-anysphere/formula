@@ -172,6 +172,7 @@ type WasmModule = {
 
 let port: MessagePort | null = null;
 let portListener: ((event: MessageEvent<unknown>) => void) | null = null;
+let transportGeneration = 0;
 let wasmModuleUrl: string | null = null;
 let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
@@ -378,8 +379,14 @@ function getWasmModule(moduleUrl: string): Promise<WasmModule> {
   return wasmModulePromise;
 }
 
-async function ensureWorkbook(moduleUrl: string): Promise<WasmWorkbookInstance> {
+async function ensureWorkbook(moduleUrl: string, generation: number): Promise<WasmWorkbookInstance> {
   const mod = await getWasmModule(moduleUrl);
+  // `ensureWorkbook` can be awaiting while a new init message arrives. Do not create/replace the
+  // workbook instance for a stale generation; callers will bail out and the new init will perform
+  // its own hydration.
+  if (generation !== transportGeneration) {
+    throw new Error("stale engine worker generation");
+  }
   if (!workbook) {
     workbook = new mod.WasmWorkbook();
   }
@@ -407,7 +414,10 @@ function consumeCancellation(id: number): boolean {
   return true;
 }
 
-async function handleRequest(message: WorkerInboundMessage): Promise<void> {
+async function handleRequest(message: WorkerInboundMessage, generation: number): Promise<void> {
+  if (generation !== transportGeneration) {
+    return;
+  }
   if (message.type === "cancel") {
     trackCancellation((message as RpcCancel).id);
     return;
@@ -416,7 +426,8 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
   const req = message as RpcRequest;
   const id = req.id;
 
-  if (!wasmModuleUrl) {
+  const moduleUrl = wasmModuleUrl;
+  if (!moduleUrl) {
     postMessageToMain({
       type: "response",
       id,
@@ -433,7 +444,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
   }
 
   try {
-    const mod = await getWasmModule(wasmModuleUrl);
+    const mod = await getWasmModule(moduleUrl);
+    if (generation !== transportGeneration) {
+      return;
+    }
 
     if (consumeCancellation(id)) {
       markRequestCompleted(id);
@@ -599,7 +613,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
         break;
       default:
         {
-          const wb = await ensureWorkbook(wasmModuleUrl);
+          const wb = await ensureWorkbook(moduleUrl, generation);
+          if (generation !== transportGeneration) {
+            return;
+          }
 
           if (consumeCancellation(id)) {
             markRequestCompleted(id);
@@ -1157,6 +1174,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       return;
     }
 
+    if (generation !== transportGeneration) {
+      return;
+    }
     postMessageToMain({ type: "response", id, ok: true, result });
     markRequestCompleted(id);
   } catch (err) {
@@ -1166,6 +1186,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       return;
     }
 
+    if (generation !== transportGeneration) {
+      return;
+    }
     postMessageToMain({
       type: "response",
       id,
@@ -1204,6 +1227,7 @@ function resetTransportForInit(): void {
   // environments) can dispatch multiple init messages into the same module instance. Tear down any
   // prior MessagePort/listeners so old ports don't leak and old cancellation state can't poison the
   // new connection.
+  transportGeneration += 1;
   const existing = port;
   const existingListener = portListener;
   port = null;
@@ -1254,7 +1278,12 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
   wasmModuleUrl = msg.wasmModuleUrl;
   wasmBinaryUrl = msg.wasmBinaryUrl ?? null;
 
+  const generation = transportGeneration;
   const listener = (inner: MessageEvent<unknown>) => {
+    // If the worker is re-initialized, ignore any queued messages from the previous port.
+    if (generation !== transportGeneration) {
+      return;
+    }
     const inbound = inner.data;
     if (!isWorkerInboundMessage(inbound)) {
       return;
@@ -1274,10 +1303,13 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
 
     // Serialize request processing to avoid interleaving workbook mutations.
     requestQueue = requestQueue
-      .then(() => handleRequest(inbound))
+      .then(() => handleRequest(inbound, generation))
       .catch(() => {
         // `handleRequest` should catch and respond to all errors, but if something
         // escapes we don't want to wedge the queue (or leak pending request ids).
+        if (generation !== transportGeneration) {
+          return;
+        }
         try {
           markRequestCompleted((inbound as any).id);
         } catch {
