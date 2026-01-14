@@ -2037,11 +2037,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          deb="$(find apps/desktop/src-tauri/target target -type f -path '*/release/bundle/deb/*.deb' -print 2>/dev/null | head -n 1 || true)"
+          # Prefer predictable globs over `find` to avoid traversing large Cargo target directories.
+          # Also support alternative Cargo output roots (apps/desktop/target and CARGO_TARGET_DIR).
+          shopt -s nullglob
+          roots=()
+          if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+            roots+=("${CARGO_TARGET_DIR}")
+          fi
+          roots+=("apps/desktop/src-tauri/target" "apps/desktop/target" "target")
+
+          debs=()
+          for root in "${roots[@]}"; do
+            [[ -d "${root}" ]] || continue
+            debs+=("${root}"/release/bundle/deb/*.deb)
+            debs+=("${root}"/*/release/bundle/deb/*.deb)
+          done
+          if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
+          shopt -u nullglob
+
+          deb="${debs[0]:-}"
           if [[ -z "${deb}" ]]; then
-            echo "::error::Could not find a .deb under apps/desktop/src-tauri/target/**/release/bundle/deb" >&2
-            find apps/desktop/src-tauri/target -maxdepth 10 -type f -name '*.deb' -print | head -n 20 || true
-            find target -maxdepth 10 -type f -name '*.deb' -print | head -n 20 || true
+            echo "::error::Could not find a .deb under any target root (expected **/release/bundle/deb/*.deb)" >&2
+            echo "Searched roots:" >&2
+            printf '  - %s\n' "${roots[@]}" >&2
             exit 1
           fi
 
@@ -2050,11 +2068,21 @@ jobs:
           dpkg-deb -x "${deb}" "${tmpdir_deb}"
           python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
 
-          rpm_path="$(find apps/desktop/src-tauri/target target -type f -path '*/release/bundle/rpm/*.rpm' -print 2>/dev/null | head -n 1 || true)"
+          shopt -s nullglob
+          rpms=()
+          for root in "${roots[@]}"; do
+            [[ -d "${root}" ]] || continue
+            rpms+=("${root}"/release/bundle/rpm/*.rpm)
+            rpms+=("${root}"/*/release/bundle/rpm/*.rpm)
+          done
+          if ((${#rpms[@]} > 0)); then mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u); fi
+          shopt -u nullglob
+
+          rpm_path="${rpms[0]:-}"
           if [[ -z "${rpm_path}" ]]; then
-            echo "::error::Could not find a .rpm under apps/desktop/src-tauri/target/**/release/bundle/rpm" >&2
-            find apps/desktop/src-tauri/target -maxdepth 10 -type f -name '*.rpm' -print | head -n 20 || true
-            find target -maxdepth 10 -type f -name '*.rpm' -print | head -n 20 || true
+            echo "::error::Could not find a .rpm under any target root (expected **/release/bundle/rpm/*.rpm)" >&2
+            echo "Searched roots:" >&2
+            printf '  - %s\n' "${roots[@]}" >&2
             exit 1
           fi
 
