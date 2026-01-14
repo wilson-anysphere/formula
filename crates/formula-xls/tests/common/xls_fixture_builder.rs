@@ -16376,6 +16376,18 @@ fn build_shared_formula_ptgarean_shrfmla_only_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("SharedAreaN_ShrFmlaOnly", &sheet, 1252)
 }
 
+fn build_shared_formula_ptgrefn_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgrefn_row_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedRefN_RowOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
+fn build_shared_formula_ptgarean_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgarean_row_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedAreaN_RowOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
 fn build_shared_formula_ptgrefn3d_shrfmla_only_workbook_stream() -> Vec<u8> {
     // Workbook with two sheets:
     // - Sheet1 contains numeric inputs in A1:A3.
@@ -16486,6 +16498,126 @@ fn build_shared_formula_ptgarean3d_shrfmla_only_workbook_stream() -> Vec<u8> {
     globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
     globals.extend_from_slice(&build_shared_formula_ptgarean3d_shrfmla_only_sheet_stream(xf_cell));
+
+    globals
+}
+
+fn build_shared_formula_ptgrefn3d_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    // Workbook with two sheets:
+    // - Sheet1 contains numeric inputs in A1:A3.
+    // - SharedRefN3D_RowOOB_ShrFmlaOnly defines a shared formula (stored only in SHRFMLA) for B1:B2
+    //   that uses `PtgRefN3d` relative offsets. The first cell's reference shifts out-of-bounds in
+    //   the row direction and should decode as `#REF!`.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Sheet1", "SharedRefN3D_RowOOB_ShrFmlaOnly"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables required by 3D formula tokens. Use a single internal SUPBOOK so
+    // `ixti=0` refers to Sheet1.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0: Sheet1 ---------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_sheet1_a1_a3_number_sheet_stream(xf_cell));
+
+    // -- Sheet 1: SharedRefN3D_RowOOB_ShrFmlaOnly --------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(
+        &build_shared_formula_ptgrefn3d_row_oob_shrfmla_only_sheet_stream(xf_cell),
+    );
+
+    globals
+}
+
+fn build_shared_formula_ptgarean3d_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    // Workbook with two sheets:
+    // - Sheet1 contains numeric inputs in A1:A3.
+    // - SharedAreaN3D_RowOOB_ShrFmla defines a shared formula (stored only in SHRFMLA) for B1:B2
+    //   that uses `PtgAreaN3d` relative offsets. The first cell's area shifts out-of-bounds in the
+    //   row direction and should decode as `#REF!`.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Sheet1", "SharedAreaN3D_RowOOB_ShrFmla"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables required by 3D formula tokens. Use a single internal SUPBOOK so
+    // `ixti=0` refers to Sheet1.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0: Sheet1 ---------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_sheet1_a1_a3_number_sheet_stream(xf_cell));
+
+    // -- Sheet 1: SharedAreaN3D_RowOOB_ShrFmla ------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(
+        &build_shared_formula_ptgarean3d_row_oob_shrfmla_only_sheet_stream(xf_cell),
+    );
 
     globals
 }
@@ -16676,6 +16808,50 @@ fn build_shared_formula_ptgrefn_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u
     sheet
 }
 
+fn build_shared_formula_ptgrefn_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
+    //
+    // The shared rgce uses `PtgRefN` offsets relative to the cell containing the formula:
+    // - row_off = -1 (up)
+    // - col_off = -1 (left)
+    //
+    // Expected decoded formulas:
+    // - B1: `#REF!+1` (row -1 is out of bounds)
+    // - B2: `A1+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in column A so the in-bounds follower formula has a meaningful ref.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // row_off = -1
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off=-1 + row+col relative bits
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 1, 1, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_shared_formula_ptgarean_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
     //
@@ -16715,6 +16891,56 @@ fn build_shared_formula_ptgarean_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<
         v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col1
         v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col2
         // SUM(...)
+        v.push(0x22); // PtgFuncVar
+        v.push(1); // argc=1
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // iftab=4 (SUM)
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 1, 1, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarean_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
+    //
+    // The shared rgce uses `PtgAreaN` offsets relative to the cell containing the formula:
+    // - rows: [-1, 0]
+    // - cols: [-1, -1] (left column only)
+    //
+    // Expected decoded formulas:
+    // - B1: `SUM(#REF!)+1` (row -1 is out of bounds)
+    // - B2: `SUM(A1:A2)+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in column A so the in-bounds follower formula has a meaningful area.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0)); // A2
+
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x2D); // PtgAreaN
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // row1_off = -1
+        v.extend_from_slice(&0u16.to_le_bytes()); // row2_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col1_off = -1 + row+col relative
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col2_off = -1 + row+col relative
         v.push(0x22); // PtgFuncVar
         v.push(1); // argc=1
         v.extend_from_slice(&0x0004u16.to_le_bytes()); // iftab=4 (SUM)
@@ -16800,6 +17026,52 @@ fn build_shared_formula_ptgrefn3d_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec
     sheet
 }
 
+fn build_shared_formula_ptgrefn3d_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
+    //
+    // The shared rgce uses `PtgRefN3d` offsets relative to the cell containing the formula:
+    // - ixti = 0 => Sheet1
+    // - row_off = -1 (up)
+    // - col_off = -1 (left)
+    //
+    // Expected decoded formulas:
+    // - B1: `#REF!+1` (row -1 is out of bounds)
+    // - B2: `Sheet1!A1+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&2u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&2u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x3E); // PtgRefN3d
+        v.extend_from_slice(&0u16.to_le_bytes()); // ixti=0 => Sheet1
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // row_off=-1
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off=-1 + row+col relative bits
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 1, 1, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_shared_formula_ptgarean3d_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
     //
@@ -16834,6 +17106,57 @@ fn build_shared_formula_ptgarean3d_shrfmla_only_sheet_stream(xf_cell: u16) -> Ve
         v.extend_from_slice(&0u16.to_le_bytes()); // ixti=0 => Sheet1
         v.extend_from_slice(&0u16.to_le_bytes()); // row1_off = 0
         v.extend_from_slice(&1u16.to_le_bytes()); // row2_off = +1
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col1_off = -1 + row+col relative
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col2_off = -1 + row+col relative
+        v.push(0x22); // PtgFuncVar
+        v.push(1); // argc=1
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // iftab=4 (SUM)
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 1, 1, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarean3d_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B1:B2 (no FORMULA records).
+    //
+    // The shared rgce uses `PtgAreaN3d` offsets relative to the cell containing the formula:
+    // - ixti = 0 => Sheet1
+    // - rows: [-1, 0]
+    // - cols: [-1, -1] (left column only)
+    //
+    // Expected decoded formulas:
+    // - B1: `SUM(#REF!)+1` (row -1 is out of bounds)
+    // - B2: `SUM(Sheet1!A1:A2)+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&2u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&2u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x3F); // PtgAreaN3d
+        v.extend_from_slice(&0u16.to_le_bytes()); // ixti=0 => Sheet1
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // row1_off = -1
+        v.extend_from_slice(&0u16.to_le_bytes()); // row2_off = 0
         v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col1_off = -1 + row+col relative
         v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col2_off = -1 + row+col relative
         v.push(0x22); // PtgFuncVar
@@ -17002,9 +17325,41 @@ pub fn build_shared_formula_ptgrefn_shrfmla_only_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
+/// `PtgRefN` relative offsets that shift out-of-bounds for the first cell in the range.
+pub fn build_shared_formula_ptgrefn_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgrefn_row_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
 /// `PtgAreaN` relative offsets (no per-cell materialization required).
 pub fn build_shared_formula_ptgarean_shrfmla_only_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgarean_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
+/// `PtgAreaN` relative offsets that shift out-of-bounds for the first cell in the range.
+pub fn build_shared_formula_ptgarean_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarean_row_oob_shrfmla_only_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -17034,9 +17389,41 @@ pub fn build_shared_formula_ptgrefn3d_shrfmla_only_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
+/// `PtgRefN3d` relative offsets that shift out-of-bounds for the first cell in the range.
+pub fn build_shared_formula_ptgrefn3d_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgrefn3d_row_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
 /// `PtgAreaN3d` relative offsets (no per-cell materialization required).
 pub fn build_shared_formula_ptgarean3d_shrfmla_only_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgarean3d_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream uses
+/// `PtgAreaN3d` relative offsets that shift out-of-bounds for the first cell in the range.
+pub fn build_shared_formula_ptgarean3d_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarean3d_row_oob_shrfmla_only_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
