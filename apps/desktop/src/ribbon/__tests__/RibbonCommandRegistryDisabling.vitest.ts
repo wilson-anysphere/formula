@@ -149,6 +149,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => {
+      // Avoid JSX in a `.ts` test file (esbuild treats `.ts` as non-JSX).
       root.render(React.createElement(Ribbon, { actions: {}, schema }));
     });
 
