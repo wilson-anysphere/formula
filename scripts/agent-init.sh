@@ -3,6 +3,12 @@
 # Source this at the start of each agent session: . scripts/agent-init.sh
 # (bash/zsh also support: source scripts/agent-init.sh)
 
+# Note: if you run this script directly (`bash scripts/agent-init.sh`), it cannot modify the
+# environment of your current shell. We still run, but emit a warning so it's harder to miss.
+if [ "${0##*/}" = "agent-init.sh" ]; then
+  echo "warning: scripts/agent-init.sh is meant to be sourced ('. scripts/agent-init.sh'); executing it won't update your current shell" >&2
+fi
+
 _formula_errexit_was_set=0
 case $- in
   *e*) _formula_errexit_was_set=1 ;;

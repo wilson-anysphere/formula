@@ -40,6 +40,28 @@ function runSh(command) {
   return { stdout: proc.stdout.trim(), stderr: proc.stderr.trim() };
 }
 
+test('agent-init warns when executed instead of sourced', { skip: !hasBash }, () => {
+  const proc = spawnSync(
+    'bash',
+    [
+      '-lc',
+      [
+        // Prevent agent-init from spawning Xvfb during this test.
+        'export DISPLAY=:99',
+        'bash scripts/agent-init.sh >/dev/null',
+      ].join(' && '),
+    ],
+    { encoding: 'utf8', cwd: repoRoot },
+  );
+  if (proc.error) throw proc.error;
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(
+    proc.stderr,
+    /warning: scripts\/agent-init\.sh is meant to be sourced/,
+    `expected a warning on stderr; got: ${proc.stderr}`,
+  );
+});
+
 test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
   const cargoHome = runBash(
     [
