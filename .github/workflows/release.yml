@@ -1655,7 +1655,7 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/ci/check-appimage.sh
 
-      - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
+      - name: Validate produced AppImage desktop integration (.desktop + file associations + deep links)
         if: runner.os == 'Linux'
         run: bash scripts/validate-linux-appimage.sh
 
