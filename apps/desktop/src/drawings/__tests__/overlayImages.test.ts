@@ -138,6 +138,63 @@ describe("DrawingOverlay images", () => {
     expect(drawCalls[1]!.args[0]).toBe(bitmap2);
   });
 
+  it("does not prefetch offscreen images", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images = createImageStore({
+      img1: { id: "img1", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+      img2: { id: "img2", bytes: new Uint8Array([4, 5, 6]), mimeType: "image/png" },
+    });
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const getMock = vi.fn((entry: ImageEntry) => Promise.resolve({ tag: entry.id } as unknown as ImageBitmap));
+    (overlay as any).bitmapCache = { get: getMock };
+
+    const visible = createImageObject({ id: 1, imageId: "img1", zOrder: 0, x: 5, y: 7 });
+    const offscreen = createImageObject({ id: 2, imageId: "img2", zOrder: 1, x: 500, y: 7 });
+
+    await overlay.render([visible, offscreen], viewport);
+
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock.mock.calls[0]?.[0]?.id).toBe("img1");
+
+    const drawCalls = calls.filter((call) => call.method === "drawImage");
+    expect(drawCalls).toHaveLength(1);
+  });
+
+  it("dedupes prefetch work for repeated imageIds", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images = createImageStore({
+      img1: { id: "img1", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+    });
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const control = createTrackedThenable<ImageBitmap>({ onThen: () => {} });
+    const getMock = vi.fn(() => control.thenable);
+    (overlay as any).bitmapCache = { get: getMock };
+
+    const obj1 = createImageObject({ id: 1, imageId: "img1", zOrder: 0, x: 5, y: 7 });
+    const obj2 = createImageObject({ id: 2, imageId: "img1", zOrder: 1, x: 15, y: 17 });
+
+    const renderPromise = overlay.render([obj1, obj2], viewport);
+
+    expect(getMock).toHaveBeenCalledTimes(1);
+
+    const bitmap = { tag: "bitmap1" } as unknown as ImageBitmap;
+    control.resolve(bitmap);
+    await renderPromise;
+
+    const drawCalls = calls.filter((call) => call.method === "drawImage");
+    expect(drawCalls).toHaveLength(2);
+    expect(drawCalls[0]!.args[0]).toBe(bitmap);
+    expect(drawCalls[1]!.args[0]).toBe(bitmap);
+  });
+
   it("aborts stale renders after awaiting image decode", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
