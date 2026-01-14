@@ -24,6 +24,7 @@ test("tokens.css forced-colors overrides apply even when data-theme is set", () 
   // otherwise inherit from light/dark themes (shadows, tooltip colors, etc).
   assert.match(afterMedia, /--accent-hover\s*:/);
   assert.match(afterMedia, /--accent-active\s*:/);
+  assert.match(afterMedia, /--link\s*:/);
   assert.match(afterMedia, /--panel-shadow\s*:/);
   assert.match(afterMedia, /--tooltip-bg\s*:/);
   assert.match(afterMedia, /--tooltip-text\s*:/);

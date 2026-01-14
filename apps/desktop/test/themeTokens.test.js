@@ -30,6 +30,7 @@ test("tokens.css defines required design tokens", () => {
     "accent-hover",
     "accent-active",
     "accent-light",
+    "link",
     "error",
     "warning",
     "success"
