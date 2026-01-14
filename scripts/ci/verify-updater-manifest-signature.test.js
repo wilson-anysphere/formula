@@ -215,6 +215,40 @@ test("supports minisign key/signature structures (\"Ed\" + keyId + bytes)", () =
   assert.match(proc.stdout, /signature OK/);
 });
 
+test("supports minisign pubkey file with raw (non-minisign) signature", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const keyId = Buffer.from([9, 8, 7, 6, 5, 4, 3, 2]);
+  const keyIdHex = Buffer.from(keyId).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyId, rawPubkey]); // "Ed" + keyId + pubkey
+  const pubPayloadLine = pubPayload.toString("base64").replace(/=+$/, "");
+  const minisignPubkeyFile = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayloadLine}\n`;
+  const tauriPubkey = Buffer.from(minisignPubkeyFile, "utf8").toString("base64");
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey); // raw 64-byte Ed25519 signature
+
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, Buffer.from(signature).toString("base64"));
+  writeFileSync(
+    configPath,
+    JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2),
+  );
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /signature OK/);
+  assert.match(proc.stdout, /pubkey: minisign/i);
+  assert.match(proc.stdout, new RegExp(keyIdHex));
+});
+
 test("supports minisign signature *files* (comment + payload lines)", () => {
   const tmp = makeTempDir();
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
