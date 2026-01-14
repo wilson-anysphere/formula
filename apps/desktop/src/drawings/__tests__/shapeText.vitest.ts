@@ -81,6 +81,32 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Item 1\n• Item 2");
   });
 
+  it("inherits bullet characters from <a:lstStyle> based on paragraph lvl", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle>
+            <a:lvl1pPr><a:buChar char="•"/></a:lvl1pPr>
+            <a:lvl2pPr><a:buChar char="◦"/></a:lvl2pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr lvl="0"/>
+            <a:r><a:t>Top</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:pPr lvl="1"/>
+            <a:r><a:t>Nested</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Top\n  ◦ Nested");
+  });
+
   it("prepends <a:buAutoNum> numbering to paragraph text", () => {
     const rawXml = `
       <xdr:sp>
@@ -102,6 +128,31 @@ describe("parseDrawingMLShapeText", () => {
     const parsed = parseDrawingMLShapeText(rawXml);
     expect(parsed).not.toBeNull();
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("1. First\n2. Second");
+  });
+
+  it("numbers nested <a:buAutoNum> paragraphs independently by lvl", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle>
+            <a:lvl1pPr><a:buAutoNum type="arabicPeriod" startAt="1"/></a:lvl1pPr>
+            <a:lvl2pPr><a:buAutoNum type="alphaLcPeriod" startAt="1"/></a:lvl2pPr>
+          </a:lstStyle>
+          <a:p><a:pPr lvl="0"/><a:r><a:t>Item 1</a:t></a:r></a:p>
+          <a:p><a:pPr lvl="1"/><a:r><a:t>Sub 1</a:t></a:r></a:p>
+          <a:p><a:pPr lvl="1"/><a:r><a:t>Sub 2</a:t></a:r></a:p>
+          <a:p><a:pPr lvl="0"/><a:r><a:t>Item 2</a:t></a:r></a:p>
+          <a:p><a:pPr lvl="1"/><a:r><a:t>Sub again</a:t></a:r></a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe(
+      ["1. Item 1", "  a. Sub 1", "  b. Sub 2", "2. Item 2", "  a. Sub again"].join("\n"),
+    );
   });
 
   it("supports alpha/roman buAutoNum formats (parenBoth)", () => {

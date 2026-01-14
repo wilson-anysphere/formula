@@ -17,6 +17,24 @@ export type ShapeTextLayout = {
 
 type RunStyle = Omit<ShapeTextRun, "text">;
 
+type BulletDef =
+  | { kind: "none" }
+  | { kind: "char"; char: string }
+  | { kind: "auto"; type: string; startAt: number };
+
+function parseParagraphLevel(value: string | null): number {
+  if (value == null) return 0;
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(8, n);
+}
+
+function parseStartAt(value: string | null): number {
+  if (value == null) return 1;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 const KNOWN_NAMESPACE_URIS: Record<string, string> = {
   a: "http://schemas.openxmlformats.org/drawingml/2006/main",
   xdr: "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
@@ -231,6 +249,34 @@ function collectTextInDescendants(root: ParentNode, localName: string): string {
   return out;
 }
 
+function parseBulletDefFromDom(pPr: Element): BulletDef | null {
+  if (findFirstByLocalName(pPr, "buNone")) return { kind: "none" };
+
+  const buAuto = findFirstByLocalName(pPr, "buAutoNum");
+  if (buAuto) {
+    const type = buAuto.getAttribute("type")?.trim() || "arabicPeriod";
+    const startAt = parseStartAt(buAuto.getAttribute("startAt"));
+    return { kind: "auto", type, startAt };
+  }
+
+  const buChar = findFirstByLocalName(pPr, "buChar");
+  const bullet = buChar?.getAttribute("char")?.trim();
+  if (bullet) return { kind: "char", char: bullet };
+  return null;
+}
+
+function parseListStyleBulletsFromDom(lstStyle: Element | null): Map<number, BulletDef> {
+  const bullets = new Map<number, BulletDef>();
+  if (!lstStyle) return bullets;
+  for (let level = 0; level < 9; level += 1) {
+    const lvlPPr = findFirstByLocalName(lstStyle, `lvl${level + 1}pPr`);
+    if (!lvlPPr) continue;
+    const def = parseBulletDefFromDom(lvlPPr);
+    if (def) bullets.set(level, def);
+  }
+  return bullets;
+}
+
 function parseRunStyleFromDom(el: Element | null): RunStyle {
   if (!el) return {};
   const bold = parseBoolAttr(el.getAttribute("b"));
@@ -308,13 +354,17 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     (n): n is Element => n.nodeType === 1 && (n as Element).localName === "p",
   );
 
+  const listBullets = parseListStyleBulletsFromDom(findFirstByLocalName(txBody, "lstStyle"));
+
   const textRuns: ShapeTextRun[] = [];
   let alignment: ShapeTextLayout["alignment"] | undefined;
-  let autoNumber: { type: string; next: number } | null = null;
+  const autoNumbers = new Map<number, { type: string; next: number }>();
+  let prevLevel = 0;
 
   for (let pi = 0; pi < paragraphs.length; pi += 1) {
     const p = paragraphs[pi];
     const pPr = Array.from(p.childNodes).find((n): n is Element => n.nodeType === 1 && (n as Element).localName === "pPr") ?? null;
+    const level = parseParagraphLevel(pPr?.getAttribute("lvl") ?? null);
     if (!alignment) {
       const pPrAlign = pPr?.getAttribute("algn") ?? null;
       alignment = parseAlignment(pPrAlign);
@@ -325,34 +375,32 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     }
 
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromDom(findFirstByLocalName(pPr ?? p, "defRPr")));
-    // Best-effort bullet handling: if the paragraph defines a bullet character, prepend it so lists
-    // (e.g. SmartArt/shape text) display with readable bullets.
-    //
-    // Note: DrawingML supports many bullet types (auto-numbering, picture bullets, etc). We only
-    // implement `<a:buChar char="…"/>` and `<a:buAutoNum .../>` for now.
-    if (pPr && !findFirstByLocalName(pPr, "buNone")) {
-      const buAuto = findFirstByLocalName(pPr, "buAutoNum");
-      if (buAuto) {
-        const type = buAuto.getAttribute("type")?.trim() || "arabicPeriod";
-        const startAtRaw = buAuto.getAttribute("startAt");
-        const parsedStartAt = startAtRaw ? Number.parseInt(startAtRaw, 10) : NaN;
-        const startAt = Number.isFinite(parsedStartAt) && parsedStartAt > 0 ? parsedStartAt : 1;
-        if (!autoNumber || autoNumber.type !== type) {
-          autoNumber = { type, next: startAt };
-        }
-        const prefix = formatAutoNumber(type, autoNumber.next);
-        autoNumber.next += 1;
-        if (prefix) textRuns.push({ text: `${prefix} `, ...paraDefaultStyle });
-      } else {
-        autoNumber = null;
-        const buChar = findFirstByLocalName(pPr, "buChar");
-        const bullet = buChar?.getAttribute("char")?.trim();
-        if (bullet) {
-          textRuns.push({ text: `${bullet} `, ...paraDefaultStyle });
-        }
+    // Best-effort bullet handling: prepend a bullet character or auto-numbering prefix when
+    // the paragraph defines a bullet (either directly on `<a:pPr>` or inherited via `<a:lstStyle>`).
+    if (level < prevLevel) {
+      for (const key of Array.from(autoNumbers.keys())) {
+        if (key > level) autoNumbers.delete(key);
       }
+    }
+    prevLevel = level;
+
+    let bulletDef: BulletDef | null = pPr ? parseBulletDefFromDom(pPr) : null;
+    if (bulletDef == null) bulletDef = listBullets.get(level) ?? null;
+    const indent = level > 0 ? "  ".repeat(level) : "";
+    if (bulletDef?.kind === "auto") {
+      let state = autoNumbers.get(level);
+      if (!state || state.type !== bulletDef.type) {
+        state = { type: bulletDef.type, next: bulletDef.startAt };
+      }
+      const prefix = formatAutoNumber(bulletDef.type, state.next);
+      state.next += 1;
+      autoNumbers.set(level, state);
+      if (prefix) textRuns.push({ text: `${indent}${prefix} `, ...paraDefaultStyle });
     } else {
-      autoNumber = null;
+      autoNumbers.delete(level);
+      if (bulletDef?.kind === "char") {
+        textRuns.push({ text: `${indent}${bulletDef.char} `, ...paraDefaultStyle });
+      }
     }
 
     for (const child of Array.from(p.childNodes)) {
@@ -465,6 +513,42 @@ function parseRunStyleFromXmlSnippet(xml: string | null): RunStyle {
   return style;
 }
 
+function parseBulletDefFromXml(pPrXml: string | null): BulletDef | null {
+  if (!pPrXml) return null;
+  if (extractFirstElementXml(pPrXml, "buNone")) return { kind: "none" };
+
+  const buAutoXml = extractFirstElementXml(pPrXml, "buAutoNum");
+  if (buAutoXml) {
+    const buAutoOpen = /<[^>]+>/.exec(buAutoXml)?.[0] ?? buAutoXml;
+    const type = (getAttrFromTag(buAutoOpen, "type") ?? "").trim() || "arabicPeriod";
+    const startAt = parseStartAt(getAttrFromTag(buAutoOpen, "startAt"));
+    return { kind: "auto", type, startAt };
+  }
+
+  const buCharXml = extractFirstElementXml(pPrXml, "buChar");
+  if (buCharXml) {
+    const buCharOpen = /<[^>]+>/.exec(buCharXml)?.[0] ?? buCharXml;
+    const bulletRaw = getAttrFromTag(buCharOpen, "char");
+    const bullet = bulletRaw ? decodeXmlEntities(bulletRaw) : "";
+    const trimmed = bullet.trim();
+    if (trimmed) return { kind: "char", char: trimmed };
+  }
+
+  return null;
+}
+
+function parseListStyleBulletsFromXml(lstStyleXml: string | null): Map<number, BulletDef> {
+  const bullets = new Map<number, BulletDef>();
+  if (!lstStyleXml) return bullets;
+  for (let level = 0; level < 9; level += 1) {
+    const lvlXml = extractFirstElementXml(lstStyleXml, `lvl${level + 1}pPr`);
+    if (!lvlXml) continue;
+    const def = parseBulletDefFromXml(lvlXml);
+    if (def) bullets.set(level, def);
+  }
+  return bullets;
+}
+
 function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const txBodyMatch = /<(?:[A-Za-z_][\w.-]*:)?txBody\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?txBody\s*>/i.exec(rawXml);
   if (!txBodyMatch) return { textRuns: [] };
@@ -477,17 +561,20 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const wrap = parseWrap(getAttrFromTag(bodyPrOpen, "wrap"));
 
   const shapeDefaultStyle = parseRunStyleFromXmlSnippet(extractFirstElementXml(txBodyXml, "defRPr"));
+  const listBullets = parseListStyleBulletsFromXml(extractFirstElementXml(txBodyXml, "lstStyle"));
 
   const paragraphsInner = extractAllElementInner(txBodyInner, "p");
   const textRuns: ShapeTextRun[] = [];
   let alignment: ShapeTextLayout["alignment"] | undefined;
-  let autoNumber: { type: string; next: number } | null = null;
+  const autoNumbers = new Map<number, { type: string; next: number }>();
+  let prevLevel = 0;
 
   for (let pi = 0; pi < paragraphsInner.length; pi += 1) {
     const pInner = paragraphsInner[pi] ?? "";
 
     const pPrXml = extractFirstElementXml(pInner, "pPr");
     const pPrOpen = pPrXml ? /<[^>]+>/.exec(pPrXml)?.[0] ?? pPrXml : null;
+    const level = parseParagraphLevel(getAttrFromTag(pPrOpen ?? "", "lvl"));
     if (!alignment) {
       alignment = parseAlignment(getAttrFromTag(pPrOpen ?? "", "algn"));
       if (!alignment && pPrXml) {
@@ -499,35 +586,30 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
 
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
     // Best-effort bullet handling (see DOMParser path above).
-    if (pPrXml && !extractFirstElementXml(pPrXml, "buNone")) {
-      const buAutoXml = extractFirstElementXml(pPrXml, "buAutoNum");
-      if (buAutoXml) {
-        const buAutoOpen = /<[^>]+>/.exec(buAutoXml)?.[0] ?? buAutoXml;
-        const type = (getAttrFromTag(buAutoOpen, "type") ?? "").trim() || "arabicPeriod";
-        const startAtRaw = getAttrFromTag(buAutoOpen, "startAt");
-        const parsedStartAt = startAtRaw ? Number.parseInt(startAtRaw, 10) : NaN;
-        const startAt = Number.isFinite(parsedStartAt) && parsedStartAt > 0 ? parsedStartAt : 1;
-        if (!autoNumber || autoNumber.type !== type) {
-          autoNumber = { type, next: startAt };
-        }
-        const prefix = formatAutoNumber(type, autoNumber.next);
-        autoNumber.next += 1;
-        if (prefix) {
-          textRuns.push({ text: `${prefix} `, ...paraDefaultStyle });
-        }
-      } else {
-        autoNumber = null;
-        const buCharXml = extractFirstElementXml(pPrXml, "buChar");
-        const buCharOpen = buCharXml ? /<[^>]+>/.exec(buCharXml)?.[0] ?? buCharXml : "";
-        const bulletRaw = getAttrFromTag(buCharOpen, "char");
-        const bullet = bulletRaw ? decodeXmlEntities(bulletRaw) : "";
-        const trimmedBullet = bullet.trim();
-        if (trimmedBullet) {
-          textRuns.push({ text: `${trimmedBullet} `, ...paraDefaultStyle });
-        }
+    if (level < prevLevel) {
+      for (const key of Array.from(autoNumbers.keys())) {
+        if (key > level) autoNumbers.delete(key);
       }
+    }
+    prevLevel = level;
+
+    let bulletDef: BulletDef | null = parseBulletDefFromXml(pPrXml);
+    if (bulletDef == null) bulletDef = listBullets.get(level) ?? null;
+    const indent = level > 0 ? "  ".repeat(level) : "";
+    if (bulletDef?.kind === "auto") {
+      let state = autoNumbers.get(level);
+      if (!state || state.type !== bulletDef.type) {
+        state = { type: bulletDef.type, next: bulletDef.startAt };
+      }
+      const prefix = formatAutoNumber(bulletDef.type, state.next);
+      state.next += 1;
+      autoNumbers.set(level, state);
+      if (prefix) textRuns.push({ text: `${indent}${prefix} `, ...paraDefaultStyle });
     } else {
-      autoNumber = null;
+      autoNumbers.delete(level);
+      if (bulletDef?.kind === "char") {
+        textRuns.push({ text: `${indent}${bulletDef.char} `, ...paraDefaultStyle });
+      }
     }
 
     // Walk runs + breaks/tabs in order within the paragraph.
