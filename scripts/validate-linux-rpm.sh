@@ -877,7 +877,7 @@ validate_static() {
   fi
 
   # If we are skipping the container install step, still validate the `.desktop` file
-  # advertises spreadsheet (xlsx) associations by extracting the payload.
+  # advertises configured file association + deep link MIME types by extracting the payload.
   if [[ "${NO_CONTAINER}" -eq 1 ]]; then
     if ! validate_desktop_mime_associations_extracted "${rpm_path}"; then
       static_validation_failed=1

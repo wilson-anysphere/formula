@@ -797,12 +797,12 @@ validate_appimage() {
   fi
 
   if [ "$has_spreadsheet_mime" -ne 1 ]; then
-    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised spreadsheet (xlsx) support for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised spreadsheet/CSV file association support for AppImage: $appimage_path" >&2
     echo "${SCRIPT_NAME}: error: Expected MimeType= to include '${required_xlsx_mime}' (xlsx) or another spreadsheet MIME type." >&2
     echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
     for desktop_file in "${desktop_files[@]}"; do
       local rel
-      rel="${desktop_file#$appdir/}"
+        rel="${desktop_file#$appdir/}"
       local lines
       lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
       if [ -n "$lines" ]; then
