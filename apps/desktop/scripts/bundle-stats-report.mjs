@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
+const defaultDistDir = path.join(desktopRoot, "dist");
 const defaultStatsPath = path.join(desktopRoot, "dist", "bundle-stats.json");
 
 const KB = 1024;
@@ -31,6 +32,8 @@ function usage() {
     "",
     "Options:",
     "  --file <path>       Path to bundle-stats.json (default: dist/bundle-stats.json)",
+    "  --dist <path>       Dist directory containing index.html (default: dist/)",
+    "  --startup           Analyze only the initial JS loaded by dist/index.html (scripts + modulepreload).",
     "  --top <n>           Number of rows to print (default: 20)",
     "  --metric <m>        Sort metric: rendered | gzip | brotli (default: gzip)",
     "  --chunk <pattern>   Focus a specific chunk name (substring match). Default: largest chunk by metric.",
@@ -42,8 +45,8 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ file: string, top: number, metric: "rendered"|"gzip"|"brotli", chunkPattern?: string }} */
-  const out = { file: defaultStatsPath, top: 20, metric: "gzip" };
+  /** @type {{ file: string, distDir: string, startup: boolean, top: number, metric: "rendered"|"gzip"|"brotli", chunkPattern?: string }} */
+  const out = { file: defaultStatsPath, distDir: defaultDistDir, startup: false, top: 20, metric: "gzip" };
 
   let args = argv.slice();
   // pnpm forwards a literal `--` delimiter into scripts; strip it so users can do:
@@ -62,6 +65,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--startup") {
+      out.startup = true;
+      continue;
+    }
+
     if (arg === "--file") {
       const next = args[i + 1];
       if (!next) throw new Error("Missing value for --file");
@@ -71,6 +79,18 @@ function parseArgs(argv) {
     }
     if (arg.startsWith("--file=")) {
       out.file = arg.slice("--file=".length);
+      continue;
+    }
+
+    if (arg === "--dist") {
+      const next = args[i + 1];
+      if (!next) throw new Error("Missing value for --dist");
+      out.distDir = next;
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--dist=")) {
+      out.distDir = arg.slice("--dist=".length);
       continue;
     }
 
@@ -127,7 +147,70 @@ function parseArgs(argv) {
   if (!path.isAbsolute(out.file)) {
     out.file = path.resolve(desktopRoot, out.file);
   }
+  if (!path.isAbsolute(out.distDir)) {
+    out.distDir = path.resolve(desktopRoot, out.distDir);
+  }
 
+  return out;
+}
+
+function normalizeHtmlAssetPath(rawSrc) {
+  const src = rawSrc.trim();
+  if (!src) return null;
+  if (src.startsWith("data:")) return null;
+  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("//")) return null;
+
+  // Strip search/hash.
+  const cleaned = src.split("?", 1)[0]?.split("#", 1)[0] ?? "";
+  if (!cleaned) return null;
+
+  // Vite typically emits `/assets/...` but support relative forms too.
+  let rel = cleaned;
+  if (rel.startsWith("/")) rel = rel.slice(1);
+  if (rel.startsWith("./")) rel = rel.slice(2);
+
+  return rel || null;
+}
+
+function extractHtmlAttr(tagHtml, attrName) {
+  // Basic attribute parsing; good enough for Vite-generated HTML.
+  const re = new RegExp(`\\b${attrName}\\s*=\\s*(?:\"([^\"]+)\"|'([^']+)'|([^\\s>]+))`, "i");
+  const match = tagHtml.match(re);
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
+function extractScriptSrcs(html) {
+  /** @type {string[]} */
+  const out = [];
+  const scriptRe = /<script\b[^>]*>/gi;
+  for (const match of html.matchAll(scriptRe)) {
+    const tag = match[0];
+    const src = extractHtmlAttr(tag, "src");
+    if (!src) continue;
+    const normalized = normalizeHtmlAssetPath(src);
+    if (!normalized) continue;
+    if (!normalized.endsWith(".js")) continue;
+    out.push(normalized);
+  }
+  return out;
+}
+
+function extractModulePreloadHrefs(html) {
+  /** @type {string[]} */
+  const out = [];
+  const linkRe = /<link\b[^>]*>/gi;
+  for (const match of html.matchAll(linkRe)) {
+    const tag = match[0];
+    const rel = extractHtmlAttr(tag, "rel");
+    if (!rel) continue;
+    if (rel.toLowerCase() !== "modulepreload") continue;
+    const href = extractHtmlAttr(tag, "href");
+    if (!href) continue;
+    const normalized = normalizeHtmlAssetPath(href);
+    if (!normalized) continue;
+    if (!normalized.endsWith(".js")) continue;
+    out.push(normalized);
+  }
   return out;
 }
 
@@ -236,26 +319,118 @@ async function main() {
     );
   }
 
-  const focus =
-    args.chunkPattern != null
-      ? chunks.find((c) => String(c.name).includes(args.chunkPattern))
-      : chunks[0];
-  if (!focus) {
+  let startupEntryRelPaths = [];
+  let startupPreloadRelPaths = [];
+  /** @type {Set<string> | null} */
+  let startupRelPaths = null;
+  /** @type {Array<any> | null} */
+  let startupChunks = null;
+
+  if (args.startup) {
+    const indexHtmlPath = path.join(args.distDir, "index.html");
+    const indexHtml = await readFile(indexHtmlPath, "utf8");
+    startupEntryRelPaths = extractScriptSrcs(indexHtml);
+    startupPreloadRelPaths = extractModulePreloadHrefs(indexHtml);
+    startupRelPaths = new Set([...startupEntryRelPaths, ...startupPreloadRelPaths]);
+    startupChunks = chunks.filter((c) => startupRelPaths.has(String(c.name)));
+
+    console.log("");
+    console.log(`Startup chunks (from ${toPosixPath(path.relative(desktopRoot, indexHtmlPath))}):`);
+
+    /** @type {string[]} */
+    const missing = [];
+    for (const rel of startupRelPaths) {
+      if (!chunks.some((c) => String(c.name) === rel)) missing.push(rel);
+    }
+    if (missing.length > 0) {
+      console.log("  (warning) index.html references JS files not present in bundle-stats:");
+      for (const rel of missing) console.log(`  - ${rel}`);
+      console.log("");
+    }
+
+    const row = (label, rel) => {
+      const c = chunks.find((chunk) => String(chunk.name) === rel);
+      if (!c) return;
+      console.log(
+        [
+          `${fmtKiB(c[metricKey]).padStart(8)} KiB`,
+          `${label}`.padEnd(16),
+          `${c.name}`,
+          `(rendered ${fmtKiB(c.rendered)} KiB, gzip ${fmtKiB(c.gzip)} KiB, brotli ${fmtKiB(c.brotli)} KiB)`,
+        ].join(" "),
+      );
+    };
+
+    for (const rel of startupEntryRelPaths) row("entry", rel);
+    for (const rel of startupPreloadRelPaths) row("modulepreload", rel);
+
+    if (startupChunks.length > 0) {
+      const total = startupChunks.reduce(
+        (acc, c) => {
+          acc.rendered += c.rendered;
+          acc.gzip += c.gzip;
+          acc.brotli += c.brotli;
+          return acc;
+        },
+        { rendered: 0, gzip: 0, brotli: 0 },
+      );
+      console.log(
+        `\nStartup total: rendered ${fmtKiB(total.rendered)} KiB, gzip ${fmtKiB(total.gzip)} KiB, brotli ${fmtKiB(
+          total.brotli,
+        )} KiB`,
+      );
+    }
+  }
+
+  const focusChunks = (() => {
+    if (args.startup) {
+      const candidates = startupChunks ?? [];
+      if (args.chunkPattern != null) {
+        return candidates.filter((c) => String(c.name).includes(args.chunkPattern));
+      }
+      return candidates;
+    }
+    if (args.chunkPattern != null) {
+      const hit = chunks.find((c) => String(c.name).includes(args.chunkPattern));
+      return hit ? [hit] : [];
+    }
+    return chunks[0] ? [chunks[0]] : [];
+  })();
+
+  if (focusChunks.length === 0) {
     console.log("");
     console.log("[bundle-stats] No chunks found.");
     return;
   }
 
   console.log("");
-  console.log(`Focus chunk: ${focus.name}`);
+  if (focusChunks.length === 1) {
+    console.log(`Focus chunk: ${focusChunks[0].name}`);
+  } else {
+    console.log(`Focus chunks (${focusChunks.length}):`);
+    for (const c of focusChunks) console.log(`- ${c.name}`);
+  }
 
   /** @type {Array<{ modulePath: string, rendered: number, gzip: number, brotli: number }>} */
   const leaves = [];
-  collectLeafSizes(focus.node, data.nodeParts, [], leaves);
+  for (const c of focusChunks) {
+    collectLeafSizes(c.node, data.nodeParts, [], leaves);
+  }
+
+  /** @type {Map<string, { rendered: number, gzip: number, brotli: number }>} */
+  const byModule = new Map();
+  for (const leaf of leaves) {
+    const prev = byModule.get(leaf.modulePath) || { rendered: 0, gzip: 0, brotli: 0 };
+    prev.rendered += leaf.rendered;
+    prev.gzip += leaf.gzip;
+    prev.brotli += leaf.brotli;
+    byModule.set(leaf.modulePath, prev);
+  }
+  const mergedLeaves = Array.from(byModule.entries()).map(([modulePath, s]) => ({ modulePath, ...s }));
 
   /** @type {Map<string, { rendered: number, gzip: number, brotli: number }>} */
   const groupTotals = new Map();
-  for (const leaf of leaves) {
+  for (const leaf of mergedLeaves) {
     const group = inferGroup(leaf.modulePath);
     const prev = groupTotals.get(group) || { rendered: 0, gzip: 0, brotli: 0 };
     prev.rendered += leaf.rendered;
@@ -268,7 +443,8 @@ async function main() {
   groups.sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
 
   console.log("");
-  console.log(`Top dependency groups in ${focus.name} (sorted by ${args.metric}):`);
+  const focusLabel = focusChunks.length === 1 ? focusChunks[0].name : `${focusChunks.length} chunk(s)`;
+  console.log(`Top dependency groups in ${focusLabel} (sorted by ${args.metric}):`);
   for (const g of groups.slice(0, args.top)) {
     console.log(
       [
@@ -279,10 +455,10 @@ async function main() {
     );
   }
 
-  leaves.sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
+  mergedLeaves.sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
   console.log("");
-  console.log(`Top modules in ${focus.name} (sorted by ${args.metric}):`);
-  for (const leaf of leaves.slice(0, args.top)) {
+  console.log(`Top modules in ${focusLabel} (sorted by ${args.metric}):`);
+  for (const leaf of mergedLeaves.slice(0, args.top)) {
     console.log(
       [
         `${fmtKiB(leaf[metricKey]).padStart(8)} KiB`,
@@ -294,7 +470,7 @@ async function main() {
 
   console.log("");
   console.log(
-    `[bundle-stats] Done. Parsed ${fmtInt(leaves.length)} module(s) across ${fmtInt(chunks.length)} chunk(s).`,
+    `[bundle-stats] Done. Parsed ${fmtInt(mergedLeaves.length)} module(s) across ${fmtInt(chunks.length)} chunk(s).`,
   );
 }
 
@@ -302,4 +478,3 @@ main().catch((err) => {
   console.error("[bundle-stats] ERROR:", err);
   process.exit(1);
 });
-

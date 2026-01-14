@@ -21,6 +21,12 @@ To get a quick CLI summary of the largest chunks and dependency groups (from `bu
 pnpm -C apps/desktop report:bundle-stats
 ```
 
+To focus on the **startup path** (only the JS referenced by `dist/index.html` via `<script>` + `<link rel="modulepreload">`):
+
+```bash
+pnpm -C apps/desktop report:bundle-stats -- --startup
+```
+
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
 ## JS bundle size budgets (CI guard)

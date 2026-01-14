@@ -103,3 +103,55 @@ test("can focus a chunk by name substring", () => {
   assert.match(proc.stdout, /Focus chunk: assets\/vendor\.js/);
 });
 
+test("startup mode focuses chunks referenced by dist/index.html", () => {
+  const { root, statsPath } = writeFixture({
+    version: 2,
+    tree: {
+      name: "root",
+      children: [
+        {
+          name: "assets/index-AAA.js",
+          children: [{ name: "apps/desktop/src/main.ts", uid: "u1" }],
+        },
+        {
+          name: "assets/preloaded.js",
+          children: [{ name: "node_modules/foo/index.js", uid: "u2" }],
+        },
+        {
+          name: "assets/unused.js",
+          children: [{ name: "node_modules/unused/index.js", uid: "u3" }],
+        },
+      ],
+    },
+    nodeParts: {
+      u1: { renderedLength: 1_000, gzipLength: 400, brotliLength: 300 },
+      u2: { renderedLength: 2_000, gzipLength: 800, brotliLength: 600 },
+      u3: { renderedLength: 9_999, gzipLength: 9_999, brotliLength: 9_999 },
+    },
+  });
+
+  const distDir = path.join(root, "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(distDir, "index.html"),
+    `<!doctype html><html><head>
+      <script type="module" src="/assets/index-AAA.js"></script>
+      <link rel="modulepreload" href="/assets/preloaded.js" />
+    </head></html>`,
+    "utf8",
+  );
+
+  const proc = run(statsPath, ["--startup", "--dist", distDir]);
+  fs.rmSync(root, { recursive: true, force: true });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Startup chunks/i);
+  assert.match(proc.stdout, /\bentry\b/);
+  assert.match(proc.stdout, /\bmodulepreload\b/);
+  assert.match(proc.stdout, /Focus chunks \(2\)/);
+  assert.match(proc.stdout, /assets\/index-AAA\.js/);
+  assert.match(proc.stdout, /assets\/preloaded\.js/);
+  // The reporter still prints global \"Top chunks\" for context, but the startup focus
+  // should not include unrelated chunks.
+  assert.doesNotMatch(proc.stdout, /- assets\/unused\.js/);
+});
