@@ -330,7 +330,20 @@ The virtual blank row is considered “allowed” when the filter context does *
 - Any `row_filters` on the dimension table disable it (row filters do not include the virtual row).
 - Any column filter on the dimension table that does not include `BLANK` disables it.
 
-See `blank_row_allowed(...)` and `virtual_blank_row_exists(...)` in `engine.rs`.
+Two additional nuances (important for contributor mental models):
+
+- **Snowflake chains:** the virtual blank member can *cascade* across relationships. Conceptually, the
+  blank member of a table belongs to the blank member of its lookup tables, so:
+  `Sales (unmatched ProductId)` → `Products (blank member)` → `Categories (blank member)`.
+- **Indirect BLANK exclusion:** filtering `BLANK` out of a lookup table can also make downstream blank
+  members invisible. The engine computes this with `compute_blank_row_allowed_map(...)`, propagating
+  BLANK exclusion from `to_table → from_table` along active relationships. If `CROSSFILTER` forces a
+  relationship to propagate **only in the reverse direction** (`ONEWAY_LEFTFILTERSRIGHT` /
+  `ONEWAY_RIGHTFILTERSLEFT` in the reverse orientation), filters on `to_table` do not restrict
+  `from_table`, so BLANK exclusion does not cascade across that hop.
+
+See `blank_row_allowed(...)`, `compute_blank_row_allowed_map(...)`, and `virtual_blank_row_exists(...)`
+in `engine.rs`.
 
 ### Relationship resolution in DAX functions
 
