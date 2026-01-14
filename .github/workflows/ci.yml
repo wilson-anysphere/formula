@@ -82,6 +82,7 @@ jobs:
             scripts/validate-linux-rpm.test.js \
             scripts/validate-macos-bundle.test.js \
             scripts/validate-windows-bundles.test.js \
+            scripts/ci/generate-release-checksums.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/desktop-bundle-dry-run-windows-bundle-validation.test.js \
             scripts/__tests__/windows-arm64-smoke-windows-bundle-validation.test.js
