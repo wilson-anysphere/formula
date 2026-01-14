@@ -99,6 +99,13 @@ The formula engine is the computational heart of the spreadsheet. It must parse,
 
 The lexer must detect locale from file metadata or user settings and tokenize accordingly.
 
+Note: Excel locales also localize **function identifiers** (and some boolean/error spellings). The
+engine persists formulas in canonical en-US form and translates to/from localized display forms via
+locale translation tables; see
+[`crates/formula-engine/src/locale/data/README.md`](../crates/formula-engine/src/locale/data/README.md)
+for the source-of-truth TSV/JSON data and generation workflow (including completeness requirements
+for `es-ES`).
+
 ### R1C1 Mode
 
 When R1C1 mode is enabled:
