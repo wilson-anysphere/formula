@@ -19,6 +19,7 @@ import {
   resizeAnchor,
   shiftAnchor,
   type DrawingInteractionCallbacks,
+  type DrawingInteractionCommit,
 } from "../drawings/interaction.js";
 import {
   cursorForRotationHandle,
@@ -2355,6 +2356,9 @@ export class SpreadsheetApp {
           if (this.editor.isOpen()) {
             this.editor.commit("command");
           }
+        },
+        onInteractionCommit: (commit) => {
+          this.commitDrawingInteraction(commit);
         },
         onSelectionChange: (selectedId) => {
           const prev = this.selectedDrawingId;
@@ -7160,6 +7164,183 @@ export class SpreadsheetApp {
     this.renderDrawings();
   }
 
+  private commitDrawingInteraction(commit: DrawingInteractionCommit): void {
+    if (this.disposed) return;
+    if (!commit || typeof commit !== "object") return;
+    const after = (commit as any).after as DrawingObject | undefined;
+    if (!after || typeof after !== "object") return;
+
+    // Interactions should never mutate the document while editing text (cell editor / formula bar /
+    // inline edit) or while in read-only mode.
+    if (this.isReadOnly() || this.isEditing()) {
+      // Revert any live preview state to the persisted document snapshot.
+      this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
+      this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+      return;
+    }
+
+    const sheetId = this.sheetId;
+    const uiId = typeof (commit as any).id === "number" ? (commit as any).id : after.id;
+    if (typeof uiId !== "number" || !Number.isFinite(uiId)) return;
+
+    const label =
+      commit.kind === "move"
+        ? "Move Drawing"
+        : commit.kind === "resize"
+          ? "Resize Drawing"
+          : commit.kind === "rotate"
+            ? "Rotate Drawing"
+            : "Edit Drawing";
+
+    const docAny: any = this.document as any;
+    const updateDrawing =
+      typeof docAny.updateDrawing === "function"
+        ? (docAny.updateDrawing as (sheetId: string, drawingId: string | number, updater: (drawing: any) => any, options?: unknown) => void)
+        : null;
+    const getSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    const setSheetDrawings =
+      typeof docAny.setSheetDrawings === "function"
+        ? (docAny.setSheetDrawings as (sheetId: string, drawings: unknown[], options?: unknown) => void)
+        : null;
+
+    // `DrawingObject.id` is numeric in the UI layer, but DocumentController drawings can be stored with
+    // string ids (and we map them through a stable numeric hash). Resolve the raw ids by scanning the
+    // raw drawings list and comparing via the adapter layer (mirrors `deleteSelectedDrawing`).
+    const rawIdsToUpdate = new Set<string | number>();
+    if (getSheetDrawings) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry !== "object") continue;
+          let entryUiId: number | null = null;
+          try {
+            entryUiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
+          } catch {
+            entryUiId = null;
+          }
+          if (entryUiId !== uiId) continue;
+
+          const rawId = (entry as any).id;
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) rawIdsToUpdate.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            rawIdsToUpdate.add(rawId);
+          }
+        }
+      }
+    }
+    if (rawIdsToUpdate.size === 0) rawIdsToUpdate.add(uiId);
+
+    const applyDrawingPatch = (drawing: any): any => {
+      if (!drawing || typeof drawing !== "object") return drawing;
+      const stableId = (drawing as any).id;
+      const stableZOrder = (drawing as any).zOrder ?? (drawing as any).z_order;
+
+      const next: any = {
+        ...drawing,
+        // Always persist the updated anchor (position/size).
+        anchor: after.anchor,
+      };
+
+      // Persist rotation/flips (or clear if the UI removed them).
+      if (after.transform) next.transform = after.transform;
+      else if ("transform" in next) delete next.transform;
+
+      // Persist any preserved DrawingML payloads (e.g. patched `<a:xfrm>` in `xlsx.pic_xml`).
+      if (after.preserved) next.preserved = after.preserved;
+      else if ("preserved" in next) delete next.preserved;
+
+      // Only update explicit extracted `size` when present on the UI object.
+      if (after.size) next.size = after.size;
+
+      // Ensure stable identity + z-order even if callers accidentally include them in `after`.
+      if (stableId != null) next.id = stableId;
+      if (stableZOrder != null) {
+        next.zOrder = stableZOrder;
+        if ("z_order" in next) delete next.z_order;
+      }
+
+      return next;
+    };
+
+    // If multiple raw ids mapped to the same UI id (hash collision or duplicates), treat the
+    // commit as one undoable operation.
+    let batchStarted = false;
+    try {
+      this.document.beginBatch({ label });
+      batchStarted = true;
+    } catch {
+      batchStarted = false;
+    }
+
+    if (updateDrawing) {
+      for (const rawId of rawIdsToUpdate) {
+        try {
+          updateDrawing.call(docAny, sheetId, rawId, applyDrawingPatch, { label });
+        } catch {
+          // ignore
+        }
+      }
+    } else if (getSheetDrawings && setSheetDrawings) {
+      // Best-effort fallback for older DocumentController builds: update the sheet drawings array
+      // manually and write it back with `setSheetDrawings`.
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        const targetKeys = new Set<string>();
+        for (const rawId of rawIdsToUpdate) {
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) targetKeys.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            targetKeys.add(String(rawId));
+          }
+        }
+        const nextDrawings = raw.map((entry) => {
+          if (!entry || typeof entry !== "object") return entry;
+          const key = String((entry as any).id ?? "");
+          if (!targetKeys.has(key)) return entry;
+          try {
+            return applyDrawingPatch(entry);
+          } catch {
+            return entry;
+          }
+        });
+        try {
+          setSheetDrawings.call(docAny, sheetId, nextDrawings, { label });
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (batchStarted) {
+      try {
+        this.document.endBatch();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Ensure we don't keep stale in-memory objects after the commit.
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+  }
+
   deleteSelectedDrawing(): void {
     const drawingId = this.selectedDrawingId;
     if (drawingId == null) return;
@@ -7996,6 +8177,9 @@ export class SpreadsheetApp {
         if (this.editor.isOpen()) {
           this.editor.commit("command");
         }
+      },
+      onInteractionCommit: (commit) => {
+        this.commitDrawingInteraction(commit);
       },
       onSelectionChange: (selectedId) => {
         const prev = this.selectedDrawingId;

@@ -20,10 +20,30 @@ import {
 } from "./drawingml/patch";
 import { applyTransformVector, inverseTransformVector, normalizeRotationDeg } from "./transform";
 
+export type DrawingInteractionCommitKind = "move" | "resize" | "rotate";
+
+export type DrawingInteractionCommit = {
+  kind: DrawingInteractionCommitKind;
+  /** UI id (numeric). */
+  id: number;
+  /** Drawing state at gesture start. */
+  before: DrawingObject;
+  /** Final drawing state at gesture commit time (after any DrawingML patching). */
+  after: DrawingObject;
+};
+
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
   getObjects(): DrawingObject[];
   setObjects(next: DrawingObject[]): void;
+  /**
+   * Commit a single drawing interaction gesture (move/resize/rotate).
+   *
+   * This is called once per gesture (pointerup) and includes the before/after
+   * values for the edited object, so integrations can persist changes without
+   * diffing entire object lists.
+   */
+  onInteractionCommit?(commit: DrawingInteractionCommit): void;
   /**
    * Commit the final drawing state to the backing document/store.
    *
@@ -628,7 +648,14 @@ export class DrawingInteractionController {
     this.updateCursor(x, y);
 
     try {
-      this.callbacks.commitObjects?.(finalObjects);
+      const commit = this.callbacks.onInteractionCommit;
+      const afterObj = finalObjects.find((obj) => obj.id === active.id);
+      if (typeof commit === "function" && startObj && afterObj) {
+        const kind: DrawingInteractionCommitKind = rotating ? "rotate" : resizing ? "resize" : "move";
+        commit({ kind, id: active.id, before: startObj, after: afterObj });
+      } else {
+        this.callbacks.commitObjects?.(finalObjects);
+      }
     } finally {
       this.callbacks.endBatch?.();
     }
