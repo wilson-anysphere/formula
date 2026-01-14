@@ -1,6 +1,7 @@
 export const PanelIds: Readonly<{
   AI_CHAT: string;
   AI_AUDIT: string;
+  SELECTION_PANE: string;
   MACROS: string;
   VERSION_HISTORY: string;
   FORMULA_DEBUGGER: string;
