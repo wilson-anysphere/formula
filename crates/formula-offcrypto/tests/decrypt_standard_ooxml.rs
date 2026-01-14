@@ -67,8 +67,12 @@ fn missing_encryptioninfo_stream_returns_error() {
 
     let err = decrypt_standard_ooxml_from_bytes(bytes, "pw").unwrap_err();
     assert!(
-        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("missing `EncryptionInfo` stream")),
-        "expected InvalidStructure(missing EncryptionInfo stream), got {err:?}"
+        matches!(
+            err,
+            OffcryptoError::InvalidStructure(ref msg)
+                if msg.contains("missing `EncryptionInfo` stream")
+        ),
+        "expected InvalidStructure(missing EncryptionInfo), got {err:?}"
     );
 }
 
@@ -77,8 +81,12 @@ fn invalid_ole_container_returns_error() {
     // Not a valid CFB/OLE file.
     let err = decrypt_standard_ooxml_from_bytes(vec![0u8; 32], "pw").unwrap_err();
     assert!(
-        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("failed to open OLE compound file")),
-        "expected InvalidStructure(failed to open OLE compound file), got {err:?}"
+        matches!(
+            err,
+            OffcryptoError::InvalidStructure(ref msg)
+                if msg.contains("failed to open OLE compound file")
+        ),
+        "expected InvalidStructure(open OLE), got {err:?}"
     );
 }
 

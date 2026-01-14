@@ -38,15 +38,6 @@ const VERIFIER_HASH_INPUT_LEN: usize = 16;
 #[cfg(test)]
 static ITERATED_HASH_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-fn hash_output_len(hash_alg: HashAlgorithm) -> usize {
-    match hash_alg {
-        HashAlgorithm::Sha1 => 20,
-        HashAlgorithm::Sha256 => 32,
-        HashAlgorithm::Sha384 => 48,
-        HashAlgorithm::Sha512 => 64,
-    }
-}
-
 /// Verify the decrypted Agile verifier fields for a candidate password.
 ///
 /// Callers are expected to pass the *decrypted* `verifierHashInput` and `verifierHashValue` fields.
@@ -56,11 +47,13 @@ pub fn verify_password(
     verifier_hash_value: &[u8],
     hash_alg: HashAlgorithm,
 ) -> Result<(), OffcryptoError> {
-    let digest = hash_alg.digest(verifier_hash_input);
+    let digest_len = hash_alg.digest_len();
+    let mut digest_buf = [0u8; 64];
+    hash_alg.digest_into(verifier_hash_input, &mut digest_buf[..digest_len]);
     let expected = verifier_hash_value
-        .get(..digest.len())
+        .get(..digest_len)
         .ok_or(OffcryptoError::InvalidPassword)?;
-    if !ct_eq(&digest, expected) {
+    if !ct_eq(&digest_buf[..digest_len], expected) {
         return Err(OffcryptoError::InvalidPassword);
     }
     Ok(())
@@ -97,11 +90,11 @@ pub fn agile_iterated_hash(
     #[cfg(test)]
     ITERATED_HASH_CALLS.fetch_add(1, Ordering::Relaxed);
 
-    let digest_len = hash_output_len(hash_alg);
+    let digest_len = hash_alg.digest_len();
     debug_assert!(digest_len <= crate::MAX_DIGEST_LEN);
 
-    // Avoid per-iteration allocations (spinCount is often 100k):
-    // keep the current digest in a fixed buffer and overwrite it each round.
+    // Avoid per-iteration allocations (spinCount is often 100k): keep the current digest in a fixed
+    // buffer and overwrite it each round.
     let mut h_buf: Zeroizing<[u8; crate::MAX_DIGEST_LEN]> =
         Zeroizing::new([0u8; crate::MAX_DIGEST_LEN]);
     hash_alg.digest_two_into(salt, password_utf16le, &mut h_buf[..digest_len]);
@@ -217,7 +210,7 @@ pub fn agile_secret_key_from_password_with_options(
     let verifier_hash_value =
         crate::aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &info.password_salt)?;
 
-    let digest_len = hash_output_len(info.password_hash_algorithm);
+    let digest_len = info.password_hash_algorithm.digest_len();
     if verifier_hash_value.len() < digest_len {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "decrypted verifierHashValue is truncated",
