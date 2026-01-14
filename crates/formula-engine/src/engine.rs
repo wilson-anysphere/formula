@@ -315,6 +315,21 @@ impl Workbook {
         id
     }
 
+    fn reorder_sheet(&mut self, sheet_id: SheetId, new_index: usize) -> bool {
+        let Some(current) = self.sheet_order.iter().position(|&id| id == sheet_id) else {
+            return false;
+        };
+        if new_index >= self.sheet_order.len() {
+            return false;
+        }
+        if current == new_index {
+            return true;
+        }
+        let sheet = self.sheet_order.remove(current);
+        self.sheet_order.insert(new_index, sheet);
+        true
+    }
+
     fn tab_index_by_sheet_id(&self) -> Vec<usize> {
         let mut tab_index = vec![usize::MAX; self.sheet_names.len()];
         for (idx, sheet_id) in self.sheet_order.iter().copied().enumerate() {
