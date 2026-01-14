@@ -144,7 +144,7 @@ impl Drop for CryptoKey {
     }
 }
 
-fn extract_session_key_bytes(kp_keyval: &[u8], expected_len: usize) -> Vec<u8> {
+fn extract_session_key_bytes(kp_keyval: &[u8], expected_len: usize, expected_alg_id: u32) -> Vec<u8> {
     // Some providers return raw key bytes, others return a PLAINTEXTKEYBLOB:
     //   BLOBHEADER (8) || DWORD key_bits (4) || key_bytes
     if kp_keyval.len() == expected_len {
@@ -158,7 +158,27 @@ fn extract_session_key_bytes(kp_keyval: &[u8], expected_len: usize) -> Vec<u8> {
         && kp_keyval.first().copied() == Some(PLAINTEXTKEYBLOB)
         && kp_keyval.get(1).copied() == Some(CUR_BLOB_VERSION)
     {
-        let key_bits = u32::from_le_bytes([kp_keyval[8], kp_keyval[9], kp_keyval[10], kp_keyval[11]]);
+        let reserved = u16::from_le_bytes([kp_keyval[2], kp_keyval[3]]);
+        assert_eq!(
+            reserved, 0,
+            "KP_KEYVAL PLAINTEXTKEYBLOB reserved field must be 0 (got {reserved})"
+        );
+        let alg_id = u32::from_le_bytes([
+            kp_keyval[4],
+            kp_keyval[5],
+            kp_keyval[6],
+            kp_keyval[7],
+        ]);
+        assert_eq!(
+            alg_id, expected_alg_id,
+            "KP_KEYVAL PLAINTEXTKEYBLOB aiKeyAlg mismatch (expected {expected_alg_id:#x}, got {alg_id:#x})"
+        );
+        let key_bits = u32::from_le_bytes([
+            kp_keyval[8],
+            kp_keyval[9],
+            kp_keyval[10],
+            kp_keyval[11],
+        ]);
         assert_eq!(
             key_bits as usize,
             expected_len * 8,
@@ -204,7 +224,7 @@ fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
         (CALG_AES_128, 16usize),
     ] {
         let (hash_value, key_blob) = derive_key_and_hash(&provider, alg_id_hash, alg_id_key, data);
-        let key_bytes = extract_session_key_bytes(&key_blob, key_len);
+        let key_bytes = extract_session_key_bytes(&key_blob, key_len, alg_id_key);
 
         let ours = crypt_derive_key(&hash_value, key_len, hash_alg);
         assert_eq!(
