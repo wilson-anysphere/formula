@@ -14,6 +14,7 @@ describe("computeSelectionFormatState", () => {
       strikethrough: false,
       fontName: null,
       fontSize: null,
+      fontVariantPosition: null,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -33,6 +34,18 @@ describe("computeSelectionFormatState", () => {
     expect(state.underline).toBe(true);
     expect(state.strikethrough).toBe(true);
     expect(state.wrapText).toBe(true);
+  });
+
+  it("detects subscript/superscript via font.vertAlign", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { font: { vertAlign: "superscript" } });
+
+    const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(state.fontVariantPosition).toBe("superscript");
+
+    doc.setRangeFormat("Sheet1", "B1", { font: { vertAlign: "subscript" } });
+    const mixed = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1 }]);
+    expect(mixed.fontVariantPosition).toBe("mixed");
   });
 
   it("detects font name/size and reports mixed when selection differs", () => {

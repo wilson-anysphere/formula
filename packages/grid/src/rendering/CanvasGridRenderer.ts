@@ -3319,10 +3319,19 @@ export class CanvasGridRenderer {
       const hasValue = cell.value !== null;
 
       if (hasValue || hasRichText) {
-        const fontSize = (style?.fontSize ?? 12) * zoom;
+        const fontVariantPosition = style?.fontVariantPosition;
+        const fontVariantScale = fontVariantPosition === "subscript" || fontVariantPosition === "superscript" ? 0.75 : 1;
+        const baseFontSize = (style?.fontSize ?? 12) * zoom;
+        const fontSize = baseFontSize * fontVariantScale;
         const fontFamily = style?.fontFamily ?? (isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily);
         const fontWeight = style?.fontWeight ?? "400";
         const fontStyle = style?.fontStyle ?? "normal";
+        const baselineShiftYBase =
+          fontVariantPosition === "superscript"
+            ? -Math.round(baseFontSize * 0.25)
+            : fontVariantPosition === "subscript"
+              ? Math.round(baseFontSize * 0.25)
+              : 0;
 
         if (
           currentFontSize !== fontSize ||
@@ -3360,6 +3369,7 @@ export class CanvasGridRenderer {
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
           const horizontalAlign = style?.horizontalAlign;
+          const baselineShiftY = rotationDeg === 0 ? baselineShiftYBase : 0;
 
           const availableWidth = Math.max(0, width - paddingX * 2);
           const availableHeight = Math.max(0, height - paddingY * 2);
@@ -3446,9 +3456,12 @@ export class CanvasGridRenderer {
             const runStyle =
               run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
             const underlineSpec = resolveUnderline(runStyle, defaultUnderline);
+            const baseRunFont = fontSpecForRichTextStyle(runStyle, defaults, zoom);
+            const hasExplicitSize = typeof runStyle?.size_100pt === "number" && Number.isFinite(runStyle.size_100pt);
             return {
               text: sliceByCodePointRange(text, offsets, run.start, run.end),
-              font: fontSpecForRichTextStyle(runStyle, defaults, zoom),
+              font:
+                hasExplicitSize && fontVariantScale !== 1 ? { ...baseRunFont, sizePx: baseRunFont.sizePx * fontVariantScale } : baseRunFont,
               color: engineColorToCanvasColor(runStyle?.color),
               underline: underlineSpec.underline,
               underlineStyle: underlineSpec.underlineStyle,
@@ -3497,6 +3510,7 @@ export class CanvasGridRenderer {
             } else if (verticalAlign === "bottom") {
               baselineY = y + height - paddingY - lineDescent;
             }
+            baselineY += baselineShiftY;
 
             const underlineSegments: DecorationSegment[] = [];
             const strikeSegments: DecorationSegment[] = [];
@@ -3704,7 +3718,7 @@ export class CanvasGridRenderer {
 
               for (let i = 0; i < layout.lines.length; i++) {
                 const line = layout.lines[i];
-                const baselineY = originY + i * layout.lineHeight + line.ascent;
+                const baselineY = originY + i * layout.lineHeight + line.ascent + baselineShiftY;
 
                 // Preserve non-justified semantics for the last line (Excel-like).
                 const justifyLine = justifyEnabled && i < layout.lines.length - 1 && line.width > 0 && maxWidth > line.width;
@@ -3938,6 +3952,7 @@ export class CanvasGridRenderer {
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
           const horizontalAlign = style?.horizontalAlign;
+          const baselineShiftY = rotationDeg === 0 ? baselineShiftYBase : 0;
           const underlineStyle = style?.underlineStyle;
           const underline =
             style?.underline === true || underlineStyle === "single" || underlineStyle === "double";
@@ -4004,6 +4019,7 @@ export class CanvasGridRenderer {
             } else if (verticalAlign === "bottom") {
               baselineY = y + height - paddingY - descent;
             }
+            baselineY += baselineShiftY;
 
             if (horizontalAlign === "fill" && textWidth > 0 && maxWidth > 0) {
               // Excel-style "Fill" alignment: repeat the single-line text horizontally to fill
@@ -4198,11 +4214,11 @@ export class CanvasGridRenderer {
               horizontalAlign === "justify" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
             const justifiedLineWidths: number[] | null = justifyEnabled ? new Array(layout.lines.length) : null;
 
-            const drawLayoutText = () => {
-              if (!justifyEnabled) {
-                drawTextLayout(contentCtx, layout, originX, originY);
-                return;
-              }
+              const drawLayoutText = () => {
+                if (!justifyEnabled) {
+                  drawTextLayout(contentCtx, layout, originX, originY + baselineShiftY);
+                  return;
+                }
 
               const whitespaceRe = /^\s+$/;
               const measureWidth = (token: string): number => {
@@ -4212,7 +4228,7 @@ export class CanvasGridRenderer {
 
               for (let i = 0; i < layout.lines.length; i++) {
                 const line = layout.lines[i];
-                const baselineY = originY + i * layout.lineHeight + line.ascent;
+                const baselineY = originY + i * layout.lineHeight + line.ascent + baselineShiftY;
 
                 // Preserve non-justified semantics for the last line.
                 if (i === layout.lines.length - 1) {
@@ -4286,7 +4302,7 @@ export class CanvasGridRenderer {
                   const x1 = originX + line.x;
                   const effectiveWidth = justifiedLineWidths?.[i] ?? line.width;
                   const x2 = x1 + effectiveWidth;
-                  const baselineY = originY + i * layout.lineHeight + line.ascent;
+                  const baselineY = originY + i * layout.lineHeight + line.ascent + baselineShiftY;
                   const underlineOffset = Math.max(1, Math.round(line.descent * 0.5));
                   const underlineY = alignDecorationY(baselineY + underlineOffset);
                   contentCtx.moveTo(x1, underlineY);
@@ -4307,7 +4323,7 @@ export class CanvasGridRenderer {
                   const x1 = originX + line.x;
                   const effectiveWidth = justifiedLineWidths?.[i] ?? line.width;
                   const x2 = x1 + effectiveWidth;
-                  const baselineY = originY + i * layout.lineHeight + line.ascent;
+                  const baselineY = originY + i * layout.lineHeight + line.ascent + baselineShiftY;
                   const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(line.ascent * 0.3)));
                   contentCtx.moveTo(x1, strikeY);
                   contentCtx.lineTo(x2, strikeY);

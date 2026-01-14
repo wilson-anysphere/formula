@@ -9,6 +9,8 @@ import type { ThemeController } from "../theme/themeController.js";
 import {
   NUMBER_FORMATS,
   toggleStrikethrough,
+  toggleSubscript,
+  toggleSuperscript,
   type CellRange,
 } from "../formatting/toolbar.js";
 
@@ -91,6 +93,30 @@ export function registerDesktopCommands(params: {
     { category: commandCategoryFormat },
   );
 
+  // Ribbon-only formatting toggles that are not yet part of the canonical `format.*` command namespace.
+  // These are still registered in the CommandRegistry so the ribbon does not auto-disable them and
+  // so other UI surfaces (command palette/keybindings) can invoke them consistently.
+  commandRegistry.registerBuiltinCommand(
+    "home.font.subscript",
+    "Subscript",
+    (next?: boolean) =>
+      applyFormattingToSelection("Subscript", (doc, sheetId, ranges) => toggleSubscript(doc, sheetId, ranges, { next }), {
+        forceBatch: true,
+      }),
+    { category: commandCategoryFormat },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "home.font.superscript",
+    "Superscript",
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        "Superscript",
+        (doc, sheetId, ranges) => toggleSuperscript(doc, sheetId, ranges, { next }),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat },
+  );
   if (layoutController) {
     registerBuiltinCommands({
       commandRegistry,

@@ -692,6 +692,44 @@ export function toggleStrikethrough(doc, sheetId, range, options = {}) {
   return applied;
 }
 
+export function toggleSubscript(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => {
+          const raw = s?.font?.vertAlign;
+          return typeof raw === "string" && raw.toLowerCase() === "subscript";
+        });
+  let applied = true;
+  // Excel semantics: subscript and superscript are mutually exclusive. Setting one clears the other.
+  const vertAlign = next ? "subscript" : null;
+  for (const r of normalizeRanges(range)) {
+    const ok = doc.setRangeFormat(sheetId, r, { font: { vertAlign } }, { label: "Subscript" });
+    if (ok === false) applied = false;
+  }
+  return applied;
+}
+
+export function toggleSuperscript(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => {
+          const raw = s?.font?.vertAlign;
+          return typeof raw === "string" && raw.toLowerCase() === "superscript";
+        });
+  let applied = true;
+  // Excel semantics: subscript and superscript are mutually exclusive. Setting one clears the other.
+  const vertAlign = next ? "superscript" : null;
+  for (const r of normalizeRanges(range)) {
+    const ok = doc.setRangeFormat(sheetId, r, { font: { vertAlign } }, { label: "Superscript" });
+    if (ok === false) applied = false;
+  }
+  return applied;
+}
+
 export function setFontSize(doc, sheetId, range, sizePt) {
   if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;

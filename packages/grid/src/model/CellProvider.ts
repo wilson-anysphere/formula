@@ -35,6 +35,12 @@ export interface CellStyle {
    * Note: This maps directly into the `FontSpec.style` field used by `@formula/text-layout`.
   */
   fontStyle?: string;
+  /**
+   * Excel-style baseline shift for subscript/superscript rendering.
+   *
+   * Semantics align with OOXML `font.vertAlign` values.
+   */
+  fontVariantPosition?: "subscript" | "superscript";
   textAlign?: CanvasTextAlign;
   /**
    * Text indentation in CSS pixels at zoom=1 (the renderer scales this by the current zoom).

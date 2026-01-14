@@ -8,6 +8,7 @@ export type SelectionNumberFormat = string | "mixed" | null;
 
 export type SelectionFontName = string | "mixed" | null;
 export type SelectionFontSize = number | "mixed" | null;
+export type SelectionFontVariantPosition = "subscript" | "superscript" | "mixed" | null;
 
 export type SelectionFormatState = {
   bold: boolean;
@@ -16,6 +17,7 @@ export type SelectionFormatState = {
   strikethrough: boolean;
   fontName: SelectionFontName;
   fontSize: SelectionFontSize;
+  fontVariantPosition: SelectionFontVariantPosition;
   wrapText: boolean;
   align: SelectionHorizontalAlign;
   numberFormat: SelectionNumberFormat;
@@ -96,6 +98,7 @@ type AggregationState = {
   strikethrough: boolean;
   fontName: string | null | "mixed" | undefined;
   fontSize: number | null | "mixed" | undefined;
+  fontVariantPosition: "subscript" | "superscript" | "mixed" | null | undefined;
   wrapText: boolean;
   align: "left" | "center" | "right" | "mixed" | null;
   numberFormat: string | null | "mixed" | undefined;
@@ -131,6 +134,7 @@ export function computeSelectionFormatState(
       strikethrough: false,
       fontName: null,
       fontSize: null,
+      fontVariantPosition: null,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -153,6 +157,7 @@ export function computeSelectionFormatState(
     strikethrough: true,
     fontName: undefined,
     fontSize: undefined,
+    fontVariantPosition: undefined,
     wrapText: true,
     align: null,
     numberFormat: undefined,
@@ -184,6 +189,12 @@ export function computeSelectionFormatState(
     const value = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
     if (state.fontSize === undefined) state.fontSize = value;
     else if (state.fontSize !== "mixed" && state.fontSize !== value) state.fontSize = "mixed";
+  };
+  const mergeFontVariantPosition = (raw: unknown) => {
+    const normalized = typeof raw === "string" ? raw.toLowerCase() : null;
+    const value = normalized === "subscript" || normalized === "superscript" ? (normalized as "subscript" | "superscript") : null;
+    if (state.fontVariantPosition === undefined) state.fontVariantPosition = value;
+    else if (state.fontVariantPosition !== "mixed" && state.fontVariantPosition !== value) state.fontVariantPosition = "mixed";
   };
   const anyDoc = doc as any;
   const hasGetCellFormat = typeof anyDoc.getCellFormat === "function";
@@ -218,6 +229,7 @@ export function computeSelectionFormatState(
     })();
 
     const font = style?.font ?? null;
+    mergeFontVariantPosition(font?.vertAlign);
 
     const bold =
       typeof font?.bold === "boolean"
@@ -309,6 +321,7 @@ export function computeSelectionFormatState(
     strikethrough: state.strikethrough,
     fontName: state.fontName === undefined ? null : state.fontName,
     fontSize: state.fontSize === undefined ? null : state.fontSize,
+    fontVariantPosition: state.fontVariantPosition === undefined ? null : state.fontVariantPosition,
     wrapText: state.wrapText,
     align: state.align ?? "left",
     numberFormat: state.numberFormat === undefined ? null : state.numberFormat,

@@ -258,6 +258,61 @@ describe("CanvasGridRenderer CellStyle primitives", () => {
     expect(lineToCalls).toBeGreaterThanOrEqual(2);
   });
 
+  it("applies baseline shift + smaller font size for style.fontVariantPosition (sub/superscript)", () => {
+    const measureBaselineY = (fontVariantPosition?: "subscript" | "superscript") => {
+      const provider: CellProvider = {
+        getCell: (row, col) =>
+          row === 0 && col === 0
+            ? { row, col, value: "A", style: fontVariantPosition ? { fontVariantPosition } : {} }
+            : null
+      };
+
+      const gridCanvas = document.createElement("canvas");
+      const contentCanvas = document.createElement("canvas");
+      const selectionCanvas = document.createElement("canvas");
+
+      const grid = createRecordingContext(gridCanvas);
+      const content = createRecordingContext(contentCanvas);
+      const selection = createRecordingContext(selectionCanvas);
+
+      const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+        [gridCanvas, grid.ctx],
+        [contentCanvas, content.ctx],
+        [selectionCanvas, selection.ctx]
+      ]);
+
+      HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+        const existing = contexts.get(this);
+        if (existing) return existing;
+        const created = createRecordingContext(this).ctx;
+        contexts.set(this, created);
+        return created;
+      }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+      const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 1, defaultColWidth: 100, defaultRowHeight: 40 });
+      renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+      renderer.resize(200, 80, 1);
+      renderer.renderImmediately();
+
+      const calls = (content.ctx as any).fillText.mock.calls as any[];
+      const call = calls.find((args) => args?.[0] === "A");
+      expect(call, `Expected fillText("A", ...) to be called (variant=${String(fontVariantPosition)})`).toBeTruthy();
+      const y = Number(call?.[2]);
+      expect(Number.isFinite(y)).toBe(true);
+      return { y, fonts: content.rec.fonts };
+    };
+
+    const normal = measureBaselineY(undefined);
+    const superscript = measureBaselineY("superscript");
+    const subscript = measureBaselineY("subscript");
+
+    expect(superscript.y).toBeLessThan(normal.y);
+    expect(subscript.y).toBeGreaterThan(normal.y);
+
+    // Font size should be smaller for sub/superscript.
+    expect(superscript.fonts.join("\n")).not.toEqual(normal.fonts.join("\n"));
+  });
+
   it("renders double underline for plain text when style.underlineStyle='double'", () => {
     const provider: CellProvider = {
       getCell: (row, col) =>

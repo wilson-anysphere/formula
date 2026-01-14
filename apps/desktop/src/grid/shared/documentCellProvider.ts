@@ -466,6 +466,17 @@ export class DocumentCellProvider implements CellProvider {
           : undefined;
     if (strike === true) out.strike = true;
 
+    // Baseline shift / font vertical position (Excel subscript/superscript).
+    // OOXML uses `font.vertAlign` with values like "subscript" / "superscript".
+    const vertAlignRaw =
+      font && hasOwn(font, "vertAlign")
+        ? (font as any).vertAlign
+        : font && hasOwn(font, "vert_align")
+          ? (font as any).vert_align
+          : undefined;
+    const vertAlign = typeof vertAlignRaw === "string" ? vertAlignRaw.toLowerCase() : null;
+    if (vertAlign === "subscript" || vertAlign === "superscript") out.fontVariantPosition = vertAlign;
+
     const fontName =
       typeof font?.name === "string"
         ? font.name

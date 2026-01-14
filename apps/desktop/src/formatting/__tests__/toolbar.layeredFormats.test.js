@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DocumentController } from "../../document/documentController.js";
-import { toggleBold, toggleItalic, toggleUnderline, toggleWrap } from "../toolbar.js";
+import { toggleBold, toggleItalic, toggleSubscript, toggleSuperscript, toggleUnderline, toggleWrap } from "../toolbar.js";
 
 function withGetCellFormatCallLimit(doc, limit, label, fn) {
   const originalGetCellFormat = doc.getCellFormat.bind(doc);
@@ -95,6 +95,26 @@ test("toggleItalic reads full-column formatting from the column layer (no per-ce
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.italic), false);
   assert.equal(sheet.cells.size, 0);
+});
+
+test("toggleSubscript toggles font.vertAlign between subscript and null", () => {
+  const doc = new DocumentController();
+
+  toggleSubscript(doc, "Sheet1", "A1");
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.vertAlign, "subscript");
+
+  toggleSubscript(doc, "Sheet1", "A1");
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.vertAlign, null);
+});
+
+test("toggleSuperscript toggles font.vertAlign between superscript and null", () => {
+  const doc = new DocumentController();
+
+  toggleSuperscript(doc, "Sheet1", "A1");
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.vertAlign, "superscript");
+
+  toggleSuperscript(doc, "Sheet1", "A1");
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.vertAlign, null);
 });
 
 test("toggleBold on a full-column selection treats a single conflicting cell override as mixed state", () => {

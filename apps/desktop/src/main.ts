@@ -2146,6 +2146,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.toggleItalic": formatState.italic,
       "format.toggleUnderline": formatState.underline,
       "format.toggleStrikethrough": formatState.strikethrough,
+      "home.font.subscript": formatState.fontVariantPosition === "subscript",
+      "home.font.superscript": formatState.fontVariantPosition === "superscript",
       "format.toggleWrapText": formatState.wrapText,
       "format.alignLeft": formatState.align === "left",
       "format.alignCenter": formatState.align === "center",
