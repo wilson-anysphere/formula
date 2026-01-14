@@ -149,6 +149,70 @@ test(
 );
 
 test(
+  "SqliteVectorStore can reset dimension mismatch even when storage.remove() throws",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
+
+    class ThrowingRemoveStorage {
+      removeCalls = 0;
+      saveCalls = 0;
+      /** @type {Uint8Array | null} */
+      data = null;
+
+      async load() {
+        return this.data ? new Uint8Array(this.data) : null;
+      }
+
+      async save(data) {
+        this.saveCalls += 1;
+        this.data = new Uint8Array(data);
+      }
+
+      async remove() {
+        this.removeCalls += 1;
+        throw new Error("remove failed");
+      }
+    }
+
+    const storage = new ThrowingRemoveStorage();
+
+    const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+    await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+    await store1.close();
+
+    const store2 = await SqliteVectorStore.create({
+      storage,
+      dimension: 4,
+      autoSave: false,
+      resetOnDimensionMismatch: true,
+    });
+
+    // `remove()` should have been attempted and the store should have recovered.
+    assert.equal(storage.removeCalls, 1);
+    assert.deepEqual(await store2.list(), []);
+    await store2.close();
+
+    assert.ok(storage.saveCalls >= 3, "expected at least 3 save() calls (persist, empty overwrite, fresh DB)");
+    assert.ok(storage.data && storage.data.length >= 16);
+    const expectedHeader = [
+      83, 81, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0,
+    ];
+    assert.deepEqual(Array.from(storage.data.slice(0, 16)), expectedHeader);
+
+    // Ensure the fresh DB was persisted and can be opened without reset.
+    const store3 = await SqliteVectorStore.create({
+      storage,
+      dimension: 4,
+      autoSave: false,
+      resetOnDimensionMismatch: false,
+    });
+    assert.deepEqual(await store3.list(), []);
+    await store3.close();
+  }
+);
+
+test(
   "SqliteVectorStore throws on invalid dimension metadata when resetOnCorrupt=false (file storage)",
   { skip: !sqlJsAvailable },
   async () => {
