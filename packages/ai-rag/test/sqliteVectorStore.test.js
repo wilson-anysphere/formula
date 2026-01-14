@@ -1034,7 +1034,7 @@ test(
       await assert.rejects(store.list(), /failed to decode stored vector blob for id=.*Invalid vector blob length/);
       await assert.rejects(store.list({ includeVector: false }), /invalid vector blob length/i);
       await assert.rejects(store.listContentHashes(), /invalid vector blob length/i);
-      await assert.rejects(store.query([1, 0, 0], 1), /dot\\(\\) failed to decode arg0 vector blob: Invalid vector blob length/);
+      await assert.rejects(store.query([1, 0, 0], 1), /dot\(\) failed to decode arg0 vector blob: Invalid vector blob length/);
     } finally {
       await store.close();
     }

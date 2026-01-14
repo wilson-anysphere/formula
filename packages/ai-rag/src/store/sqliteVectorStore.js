@@ -710,14 +710,30 @@ export class SqliteVectorStore {
     // sql.js exposes create_function(name, fn)
     // eslint-disable-next-line no-underscore-dangle
     this._db.create_function("dot", (a, b) => {
-      const va = blobToFloat32WithContext(a, "SqliteVectorStore dot() failed to decode arg0 vector blob");
-      const vb = blobToFloat32WithContext(b, "SqliteVectorStore dot() failed to decode arg1 vector blob");
+      // NOTE: When a user-defined function throws inside sql.js, the error message
+      // is only preserved if we throw a *string* (sql.js forwards it to
+      // `sqlite3_result_error`). Throwing an Error object results in a generic
+      // "Error" with an empty message.
+      //
+      // This is important because we rely on descriptive dot() errors to surface
+      // invalid/corrupt vector blobs in both tests and production debugging.
+      const decode = (blob, context) => {
+        try {
+          return blobToFloat32(blob);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw `${context}: ${msg}`;
+        }
+      };
+
+      const va = decode(a, "SqliteVectorStore dot() failed to decode arg0 vector blob");
+      const vb = decode(b, "SqliteVectorStore dot() failed to decode arg1 vector blob");
       if (va.length !== vb.length) {
-        throw new Error(
-          `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${va.length} vs ${vb.length}`
-        );
+        throw `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${va.length} vs ${vb.length}`;
       }
-      assertVectorDim(va, this._dimension, "SqliteVectorStore dot() dimension mismatch");
+      if (va.length !== this._dimension) {
+        throw `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${va.length}`;
+      }
       let dot = 0;
       for (let i = 0; i < va.length; i += 1) dot += va[i] * vb[i];
       return dot;
