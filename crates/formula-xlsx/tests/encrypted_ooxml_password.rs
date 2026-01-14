@@ -52,6 +52,7 @@ fn workbook_and_document_loaders_decrypt_agile_standard_and_empty_password_fixtu
         ("agile.xlsx", "password"),
         ("agile-unicode.xlsx", "pässwörd"),
         ("standard.xlsx", "password"),
+        ("standard-rc4.xlsx", "password"),
         ("standard-unicode.xlsx", "pässwörd🔒"),
         ("agile-empty-password.xlsx", ""),
     ];
@@ -102,6 +103,7 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
     for (encrypted_name, password) in [
         ("agile.xlsx", "password"),
         ("standard.xlsx", "password"),
+        ("standard-rc4.xlsx", "password"),
         ("standard-unicode.xlsx", "pässwörd🔒"),
     ] {
         let encrypted = read_fixture(encrypted_name);
@@ -128,6 +130,19 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
     );
 
     let err = XlsxPackage::from_bytes_with_password(&standard, "wrong").expect_err("bad password");
+    assert!(
+        matches!(err, XlsxError::InvalidPassword),
+        "expected XlsxError::InvalidPassword, got {err:?}"
+    );
+
+    let standard_rc4 = read_fixture("standard-rc4.xlsx");
+    let err = load_from_bytes_with_password(&standard_rc4, "wrong").expect_err("expected failure");
+    assert!(
+        matches!(err, ReadError::InvalidPassword),
+        "expected ReadError::InvalidPassword, got {err:?}"
+    );
+
+    let err = XlsxPackage::from_bytes_with_password(&standard_rc4, "wrong").expect_err("bad password");
     assert!(
         matches!(err, XlsxError::InvalidPassword),
         "expected XlsxError::InvalidPassword, got {err:?}"
