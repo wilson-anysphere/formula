@@ -68,6 +68,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: "Guard: locale function sources are normalized"
+        env:
+          LANG: C
+          LC_ALL: C
         run: node scripts/normalize-locale-function-sources.js --check
       - name: "Guard: locale function TSVs are up to date"
         # Force deterministic header date so this guard can't fail due to environment drift.
