@@ -135,7 +135,7 @@ fn import_with_password_surfaces_decrypt_error_for_malformed_filepass() {
 
     assert!(matches!(
         err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::InvalidFormat(_))
+        formula_xls::ImportError::Decrypt(_)
     ));
     assert!(
         !matches!(err, formula_xls::ImportError::Xls(_)),

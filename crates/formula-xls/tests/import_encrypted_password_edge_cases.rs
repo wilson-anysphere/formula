@@ -35,11 +35,8 @@ fn decrypts_rc4_standard_with_long_password_truncation() {
     let err = formula_xls::import_xls_path_with_password(&fixture_path, wrong)
         .expect_err("expected wrong password to fail");
     assert!(
-        matches!(
-            err,
-            formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-        ),
-        "expected Decrypt(WrongPassword), got {err:?}"
+        matches!(err, formula_xls::ImportError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
     );
 }
 
@@ -66,11 +63,8 @@ fn decrypts_rc4_standard_with_empty_password() {
     let err = formula_xls::import_xls_path_with_password(&fixture_path, "not-empty")
         .expect_err("expected wrong password to fail");
     assert!(
-        matches!(
-            err,
-            formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-        ),
-        "expected Decrypt(WrongPassword), got {err:?}"
+        matches!(err, formula_xls::ImportError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
     );
 }
 
@@ -95,10 +89,7 @@ fn rc4_cryptoapi_does_not_truncate_password_to_15_chars() {
     let err = formula_xls::import_xls_path_with_password(&fixture_path, truncated)
         .expect_err("expected truncated password to fail");
     assert!(
-        matches!(
-            err,
-            formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-        ),
-        "expected Decrypt(WrongPassword), got {err:?}"
+        matches!(err, formula_xls::ImportError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
     );
 }

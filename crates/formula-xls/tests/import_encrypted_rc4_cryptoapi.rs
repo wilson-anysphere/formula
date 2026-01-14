@@ -188,10 +188,7 @@ fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_password() {
 fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
     let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), "wrong password")
         .expect_err("expected wrong password error");
-    assert!(matches!(
-        err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-    ));
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]
