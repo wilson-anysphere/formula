@@ -15,6 +15,7 @@ describe("startupMetrics", () => {
   const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
   const originalFirstRenderReporting = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__;
   const originalTtiReported = (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__;
+  const originalTtiReporting = (globalThis as any).__FORMULA_STARTUP_TTI_REPORTING__;
   const originalBootstrapped = (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__;
   const originalWebviewReported = (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__;
 
@@ -31,6 +32,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TTI_REPORTING__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
   });
@@ -52,6 +54,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTING__ = originalFirstRenderReporting;
     (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = originalTtiReported;
+    (globalThis as any).__FORMULA_STARTUP_TTI_REPORTING__ = originalTtiReporting;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = originalBootstrapped;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = originalWebviewReported;
     vi.restoreAllMocks();
@@ -73,6 +76,22 @@ describe("startupMetrics", () => {
     // Idempotent: should not report twice.
     await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("can retry host TTI reporting after a transient invoke failure", async () => {
+    const invoke = vi.fn()
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValueOnce(null);
+    const listen = vi.fn().mockResolvedValue(() => {});
+    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
+
+    await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+    await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+
+    // First attempt fails, second succeeds.
+    expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 
   it("reports first render before TTI when first-render was not previously reported", async () => {

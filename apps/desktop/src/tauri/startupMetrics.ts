@@ -38,6 +38,7 @@ const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
 const TTI_REPORTED_KEY = "__FORMULA_STARTUP_TTI_REPORTED__";
 const HOST_INVOKE_RETRY_DEADLINE_MS = 10_000;
 const FIRST_RENDER_REPORTING_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTING__";
+const TTI_REPORTING_KEY = "__FORMULA_STARTUP_TTI_REPORTING__";
 
 function getStore(): StartupTimings {
   const g = globalThis as any;
@@ -310,6 +311,8 @@ export async function markStartupTimeToInteractive(options?: {
   }
 
   if (g[TTI_REPORTED_KEY]) return { ...store };
+  if (g[TTI_REPORTING_KEY]) return { ...store };
+  g[TTI_REPORTING_KEY] = true;
 
   const ensureFirstRenderReported = async (invoke: TauriInvoke): Promise<void> => {
     if (g[FIRST_RENDER_REPORTED_KEY]) return;
@@ -322,39 +325,46 @@ export async function markStartupTimeToInteractive(options?: {
     }
   };
 
-  const invoke = getTauriInvoke();
-  if (invoke) {
-    if (g[TTI_REPORTED_KEY]) return { ...store };
-    g[TTI_REPORTED_KEY] = true;
-    try {
-      await ensureFirstRenderReported(invoke);
-      await invoke("report_startup_tti");
-    } catch {
-      // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
-    }
-  } else {
-    // If the bootstrap ran but `__TAURI__` is injected late, retry briefly so we don't miss the
-    // Rust-side TTI mark (required for the `[startup] ...` line the perf harness parses).
-    const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
-    if (shouldRetry) {
-      const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
-      let delayMs = 1;
-      let retriedInvoke: TauriInvoke | null = null;
-      while (!retriedInvoke && Date.now() < deadlineMs) {
-        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-        delayMs = Math.min(50, delayMs * 2);
-        retriedInvoke = getTauriInvoke();
-      }
-      if (retriedInvoke) {
-        if (g[TTI_REPORTED_KEY]) return { ...store };
+  try {
+    const invoke = getTauriInvoke();
+    if (invoke) {
+      try {
+        await ensureFirstRenderReported(invoke);
+        await invoke("report_startup_tti");
         g[TTI_REPORTED_KEY] = true;
-        try {
-          await ensureFirstRenderReported(retriedInvoke);
-          await retriedInvoke("report_startup_tti");
-        } catch {
-          // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
+      } catch {
+        // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
+      }
+    } else {
+      // If the bootstrap ran but `__TAURI__` is injected late, retry briefly so we don't miss the
+      // Rust-side TTI mark (required for the `[startup] ...` line the perf harness parses).
+      const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
+      if (shouldRetry) {
+        const deadlineMs = Date.now() + HOST_INVOKE_RETRY_DEADLINE_MS;
+        let delayMs = 1;
+        let retriedInvoke: TauriInvoke | null = null;
+        while (!retriedInvoke && Date.now() < deadlineMs) {
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+          delayMs = Math.min(50, delayMs * 2);
+          retriedInvoke = getTauriInvoke();
+        }
+        if (retriedInvoke) {
+          try {
+            await ensureFirstRenderReported(retriedInvoke);
+            await retriedInvoke("report_startup_tti");
+            g[TTI_REPORTED_KEY] = true;
+          } catch {
+            // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
+          }
         }
       }
+    }
+  } finally {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (g as any)[TTI_REPORTING_KEY];
+    } catch {
+      g[TTI_REPORTING_KEY] = false;
     }
   }
 
