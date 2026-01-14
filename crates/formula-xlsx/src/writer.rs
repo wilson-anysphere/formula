@@ -1370,6 +1370,32 @@ fn cell_xml(
         }
     }
 
+    // Best-effort support for phonetic text (ruby) annotations.
+    //
+    // SpreadsheetML encodes phonetic strings as inline strings with `<rPh>` runs. The simple
+    // exporter does not attempt to preserve full sharedStrings.xml structure, so emit inlineStr
+    // when `Cell.phonetic` is present.
+    if let Some(phonetic) = cell.phonetic.as_deref() {
+        let base_text: Option<String> = match &cell.value {
+            CellValue::String(s) => Some(s.clone()),
+            CellValue::Entity(entity) => Some(entity.display_value.clone()),
+            CellValue::Record(record) => Some(record_display_string(record)),
+            CellValue::RichText(r) => Some(r.text.clone()),
+            CellValue::Image(image) => image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            _ => None,
+        };
+
+        if let Some(base_text) = base_text {
+            attrs.push_str(r#" t="inlineStr""#);
+            value_xml.push_str(&inline_string_with_phonetic_xml(&base_text, phonetic));
+            return format!(r#"<c{}>{}</c>"#, attrs, value_xml);
+        }
+    }
+
     match &cell.value {
         CellValue::Empty => {}
         CellValue::Number(n) => {
@@ -1774,4 +1800,37 @@ fn theme_xml(workbook: &Workbook) -> String {
   <a:extraClrSchemeLst/>
 </a:theme>"#
     )
+}
+
+fn inline_string_with_phonetic_xml(base: &str, phonetic: &str) -> String {
+    let len = base.chars().count();
+    format!(
+        r#"<is>{}<rPh sb="0" eb="{}">{}</rPh></is>"#,
+        inline_string_t(base),
+        len,
+        inline_string_t(phonetic)
+    )
+}
+
+fn inline_string_t(text: &str) -> String {
+    if needs_xml_space_preserve(text) {
+        format!(
+            r#"<t xml:space="preserve">{}</t>"#,
+            escape_xml(text)
+        )
+    } else {
+        format!(r#"<t>{}</t>"#, escape_xml(text))
+    }
+}
+
+fn needs_xml_space_preserve(text: &str) -> bool {
+    text.chars()
+        .next()
+        .map(|c| c.is_whitespace())
+        .unwrap_or(false)
+        || text
+            .chars()
+            .last()
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
 }

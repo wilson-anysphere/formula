@@ -276,9 +276,7 @@ fn detect_chart_kind(
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!(
-            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
-        ),
+        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
     });
 
     "unknown".to_string()
