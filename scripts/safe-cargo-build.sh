@@ -12,6 +12,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it
+# globally (often to `stable`), which would bypass the pinned toolchain and reintroduce
+# "whatever stable is today" drift.
+#
+# Clear it so these wrappers reliably use the pinned toolchain.
+if [ -n "${RUSTUP_TOOLCHAIN:-}" ] && [ -f "${REPO_ROOT}/rust-toolchain.toml" ]; then
+  unset RUSTUP_TOOLCHAIN
+fi
+
 # Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
 # when many agents build in parallel. Preserve any user/CI override.
 #
