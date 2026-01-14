@@ -1063,6 +1063,13 @@ fn regenerate_encrypted_xls_fixtures() {
     std::fs::write(&xor_path, xor_bytes)
         .unwrap_or_else(|err| panic!("write encrypted fixture {xor_path:?} failed: {err}"));
 
+    // Empty-password XOR fixture (some writers can emit this; Excel UI may refuse to create it).
+    let xor_empty_path = fixtures_dir.join("biff8_xor_pw_open_empty_password.xls");
+    let xor_empty_bytes = build_xor_encrypted_xls_bytes("");
+    std::fs::write(&xor_empty_path, xor_empty_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {xor_empty_path:?} failed: {err}");
+    });
+
     // Decryptable BIFF8 RC4 Standard fixture.
     let rc4_standard_path = fixtures_dir.join("biff8_rc4_standard_pw_open.xls");
     let rc4_standard_bytes = build_rc4_standard_encrypted_xls_bytes("password");
