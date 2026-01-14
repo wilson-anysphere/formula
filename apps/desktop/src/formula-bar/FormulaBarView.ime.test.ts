@@ -111,7 +111,7 @@ describe("FormulaBarView IME composition safety", () => {
     host.remove();
   });
 
-  it("does not intercept ArrowUp/ArrowDown (function autocomplete navigation) during composition", () => {
+  it("does not intercept ArrowUp/ArrowDown (function autocomplete navigation) during composition", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -137,6 +137,10 @@ describe("FormulaBarView IME composition safety", () => {
     expect(upDuringComposition.defaultPrevented).toBe(false);
 
     view.textarea.dispatchEvent(new Event("compositionend"));
+    // The function autocomplete controller re-opens suggestions on a microtask after
+    // compositionend so the final composed text is reflected in the textarea value.
+    // Wait for that microtask before asserting ArrowUp/ArrowDown navigation behavior.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     const downAfterComposition = new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true });
     view.textarea.dispatchEvent(downAfterComposition);
