@@ -1380,6 +1380,7 @@ This is a small-but-functional Excel-like Solver with three methods:
 Core types ([`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs)):
 
 - `SolverModel` trait — model abstraction (`get_vars`/`set_vars`/`recalc`/`objective`/`constraints`).
+- `SolverModel` trait — model abstraction (`num_vars`/`num_constraints` + `get_vars`/`set_vars`/`recalc`/`objective`/`constraints`).
 - `EngineSolverModel` ([`solver/engine_model.rs`](../crates/formula-engine/src/solver/engine_model.rs)) — adapter that binds the solver to `formula_engine::Engine` cell references.
 - `SolverProblem` — `{ objective: Objective, variables: Vec<VarSpec>, constraints: Vec<Constraint> }`
 - `Objective` / `ObjectiveKind` — maximize/minimize/target (with `targetValue` + `targetTolerance`)
