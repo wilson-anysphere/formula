@@ -1453,6 +1453,21 @@ export class SpreadsheetApp {
   private readonly scrollListeners = new Set<(scroll: { x: number; y: number }) => void>();
   private readonly zoomListeners = new Set<(zoom: number) => void>();
   private readonly formulaBarOverlayListeners = new Set<() => void>();
+  private readonly selectionClipRectScratch = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly selectionVisibleRowsScratch: number[] = [];
+  private readonly selectionVisibleColsScratch: number[] = [];
+  private readonly selectionRendererMetricsScratch: {
+    getCellRect: (cell: CellCoord) => { x: number; y: number; width: number; height: number } | null;
+    visibleRows: readonly number[];
+    visibleCols: readonly number[];
+  } = {
+    getCellRect: (cell) => this.getCellRect(cell),
+    visibleRows: [],
+    visibleCols: [],
+  };
+  private readonly selectionRendererOptionsScratch: { clipRect: { x: number; y: number; width: number; height: number } } = {
+    clipRect: this.selectionClipRectScratch,
+  };
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
@@ -16376,33 +16391,49 @@ export class SpreadsheetApp {
     }
 
     this.ensureViewportMappingCurrent();
-    const clipRect = {
-      x: this.rowHeaderWidth,
-      y: this.colHeaderHeight,
-      width: this.viewportWidth(),
-      height: this.viewportHeight(),
-    };
+    const clipRect = this.selectionClipRectScratch;
+    clipRect.x = this.rowHeaderWidth;
+    clipRect.y = this.colHeaderHeight;
+    clipRect.width = this.viewportWidth();
+    clipRect.height = this.viewportHeight();
 
     const renderer = this.formulaBar?.isFormulaEditing() ? this.formulaSelectionRenderer : this.selectionRenderer;
 
-    const visibleRows = this.frozenVisibleRows.length
-      ? [...this.frozenVisibleRows, ...this.visibleRows]
-      : this.visibleRows;
-    const visibleCols = this.frozenVisibleCols.length
-      ? [...this.frozenVisibleCols, ...this.visibleCols]
-      : this.visibleCols;
+    let visibleRows: readonly number[];
+    const frozenRows = this.frozenVisibleRows;
+    if (frozenRows.length === 0) {
+      visibleRows = this.visibleRows;
+    } else {
+      const out = this.selectionVisibleRowsScratch;
+      out.length = 0;
+      for (let i = 0; i < frozenRows.length; i += 1) out.push(frozenRows[i]!);
+      const scroll = this.visibleRows;
+      for (let i = 0; i < scroll.length; i += 1) out.push(scroll[i]!);
+      visibleRows = out;
+    }
+
+    let visibleCols: readonly number[];
+    const frozenCols = this.frozenVisibleCols;
+    if (frozenCols.length === 0) {
+      visibleCols = this.visibleCols;
+    } else {
+      const out = this.selectionVisibleColsScratch;
+      out.length = 0;
+      for (let i = 0; i < frozenCols.length; i += 1) out.push(frozenCols[i]!);
+      const scroll = this.visibleCols;
+      for (let i = 0; i < scroll.length; i += 1) out.push(scroll[i]!);
+      visibleCols = out;
+    }
+
+    const metrics = this.selectionRendererMetricsScratch;
+    metrics.visibleRows = visibleRows;
+    metrics.visibleCols = visibleCols;
 
     renderer.render(
       this.selectionCtx,
       this.selection,
-      {
-        getCellRect: (cell) => this.getCellRect(cell),
-        visibleRows,
-        visibleCols,
-      },
-      {
-        clipRect,
-      }
+      metrics,
+      this.selectionRendererOptionsScratch
     );
 
     if (!this.formulaBar?.isFormulaEditing() && this.fillPreviewRange) {
