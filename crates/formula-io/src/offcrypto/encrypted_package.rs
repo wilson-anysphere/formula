@@ -397,7 +397,7 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 /// - first 8 bytes: `orig_size` (`u64le`, plaintext size)
 /// - remaining bytes: ciphertext (RC4-encrypted package bytes)
 ///
-/// Unlike the AES-CBC segmented variant above (0x1000-byte segments), the RC4 variant uses
+/// Unlike the Standard/CryptoAPI AES `EncryptedPackage` variant above (AES-ECB), the RC4 variant uses
 /// **0x200-byte blocks** (note: this differs from BIFF8 `FILEPASS` RC4, which re-keys every 0x400 bytes)
 /// and derives a fresh RC4 key for each block:
 /// - `password_hash = SHA1(salt || UTF16LE(password))`
