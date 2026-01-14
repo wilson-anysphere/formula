@@ -1030,8 +1030,8 @@ fn read_encrypted_ooxml_workbook_blocking(
 
     let decrypted_zip = Arc::<[u8]>::from(decrypted_zip);
 
-    // The decrypted payload is a normal ZIP/OPC package. Sniff whether it is XLSX (`workbook.xml`)
-    // or XLSB (`workbook.bin`) and route to the appropriate reader.
+    // The decrypted payload is a normal ZIP/OPC package. Sniff whether it is XLSX/XLSM
+    // (`workbook.xml`) or XLSB (`workbook.bin`) and route to the appropriate reader.
     let workbook_format = {
         let cursor = Cursor::new(decrypted_zip.as_ref());
         let archive = zip::ZipArchive::new(cursor).ok();
@@ -1106,7 +1106,7 @@ fn read_encrypted_ooxml_workbook_blocking(
             )
         }
         _ => anyhow::bail!(
-            "encrypted workbook not supported: decrypted package is not a recognized XLSX/XLSB ZIP container"
+            "encrypted workbook not supported: decrypted package is not a recognized XLSX/XLSM/XLSB ZIP container"
         ),
     }
 }
