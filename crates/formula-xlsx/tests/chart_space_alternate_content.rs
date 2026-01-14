@@ -57,6 +57,9 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
             <c:crossAx val="123" />
             <c:crosses val="autoZero" />
           </c:valAx>
+          <c:extLst>
+            <c:ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}" />
+          </c:extLst>
         </mc:Fallback>
       </mc:AlternateContent>
     </c:plotArea>
@@ -76,6 +79,10 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
     );
 
     assert_eq!(model.axes.len(), 2, "expected two axes to be parsed");
+    assert!(
+        model.plot_area_ext_lst_xml.as_deref().is_some_and(|xml| xml.contains("extLst")),
+        "expected plotArea extLst to be captured even when wrapped in AlternateContent"
+    );
 
     assert_eq!(model.series.len(), 1);
     let ser = &model.series[0];

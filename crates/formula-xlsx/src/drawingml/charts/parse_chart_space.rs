@@ -154,7 +154,9 @@ pub fn parse_chart_space(
 
     let plot_area_ext_lst_xml = plot_area_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_ext_lst_node))
+        .find(|n| n.tag_name().name() == "extLst")
         .and_then(|n| super::slice_node_xml(&n, xml))
         .filter(|s| !s.is_empty());
     let plot_area_style = plot_area_node
@@ -648,6 +650,10 @@ fn is_external_data_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
 
 fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "ser"
+}
+
+fn is_ext_lst_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "extLst"
 }
 
 /// Flattens `mc:AlternateContent` wrappers for the chartSpace parser.
