@@ -202,6 +202,13 @@ fn indirect_external_workbook_refs_resolve_via_provider_without_bytecode() {
         provider.calls() > 0,
         "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
+    );
 }
 
 #[test]
@@ -255,6 +262,13 @@ fn indirect_dynamic_external_workbook_refs_resolve_via_provider_without_bytecode
             sheet: 0,
             addr: CellAddr { row: 0, col: 1 } // B1
         }));
+    assert!(engine
+        .precedents("Sheet1", "A1")
+        .unwrap()
+        .contains(&PrecedentNode::ExternalCell {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 }
+        }));
 }
 
 #[test]
@@ -299,5 +313,12 @@ fn indirect_external_workbook_refs_resolve_via_provider_in_r1c1_mode_without_byt
     assert!(
         provider.calls() > 0,
         "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
     );
 }
