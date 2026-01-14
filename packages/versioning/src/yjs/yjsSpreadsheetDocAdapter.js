@@ -69,6 +69,194 @@ function coerceString(value) {
   return String(value);
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Drawing ids can be authored via remote/shared state (sheet view state). Keep validation strict
+// so version snapshots/restores can't be DoS'd by cloning pathological ids (e.g. multi-megabyte
+// `drawings[*].id` strings or Y.Text values).
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
+/**
+ * @param {unknown} value
+ * @returns {string | number | null}
+ */
+function normalizeDrawingIdValue(value) {
+  const text = getYText(value);
+  if (text) {
+    // Avoid `text.toString()` for oversized ids: it would allocate a large JS string.
+    if (typeof text.length === "number" && text.length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    value = yjsValueToJson(text);
+  }
+
+  if (typeof value === "string") {
+    if (value.length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return trimmed;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) return null;
+    return value;
+  }
+
+  return null;
+}
+
+/**
+ * Convert a `drawings` list into JSON without materializing oversized `drawing.id` strings.
+ *
+ * @param {unknown} raw
+ * @returns {any[] | null}
+ */
+function drawingsValueToJsonSafe(raw) {
+  if (raw === null) return null;
+  if (raw === undefined) return null;
+
+  const yArr = getYArray(raw);
+  const isArr = Array.isArray(raw);
+  if (!yArr && !isArr) return null;
+
+  /** @type {any[]} */
+  const out = [];
+  const len = yArr ? yArr.length : raw.length;
+
+  for (let idx = 0; idx < len; idx += 1) {
+    const entry = yArr ? yArr.get(idx) : raw[idx];
+
+    const map = getYMap(entry);
+    if (map) {
+      const normalizedId = normalizeDrawingIdValue(map.get("id"));
+      if (normalizedId == null) continue;
+
+      /** @type {any} */
+      const obj = { id: normalizedId };
+      const keys = Array.from(map.keys()).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[String(key)] = yjsValueToJson(map.get(key));
+      }
+      out.push(obj);
+      continue;
+    }
+
+    if (isRecord(entry)) {
+      const normalizedId = normalizeDrawingIdValue(entry.id);
+      if (normalizedId == null) continue;
+
+      /** @type {any} */
+      const obj = { id: normalizedId };
+      const keys = Object.keys(entry).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[key] = yjsValueToJson(entry[key]);
+      }
+      out.push(obj);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Convert a sheet `view` object into JSON, treating `view.drawings` specially so we don't
+ * materialize oversized `drawing.id` strings.
+ *
+ * @param {unknown} rawView
+ * @returns {any}
+ */
+function sheetViewValueToJsonSafe(rawView) {
+  if (rawView == null) return yjsValueToJson(rawView);
+
+  const map = getYMap(rawView);
+  if (map) {
+    /** @type {Record<string, any>} */
+    const out = {};
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        const rawDrawings = map.get(key);
+        if (rawDrawings === null) out.drawings = null;
+        else out.drawings = drawingsValueToJsonSafe(rawDrawings) ?? [];
+        continue;
+      }
+      out[String(key)] = yjsValueToJson(map.get(key));
+    }
+    return out;
+  }
+
+  if (isRecord(rawView)) {
+    /** @type {Record<string, any>} */
+    const out = {};
+    const keys = Object.keys(rawView).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        const rawDrawings = rawView.drawings;
+        if (rawDrawings === null) out.drawings = null;
+        else out.drawings = drawingsValueToJsonSafe(rawDrawings) ?? [];
+        continue;
+      }
+      out[key] = yjsValueToJson(rawView[key]);
+    }
+    return out;
+  }
+
+  return yjsValueToJson(rawView);
+}
+
+/**
+ * Clone a sheet entry map while sanitizing potentially large `drawings[*].id` values.
+ *
+ * This is used by version snapshots/restores when we have to clone a doc to filter
+ * excluded roots.
+ *
+ * @param {any} entry
+ * @param {YjsTypeConstructors} constructors
+ * @returns {any}
+ */
+function cloneSheetEntryWithSanitizedView(entry, constructors) {
+  const map = getYMap(entry);
+  const MapCtor = constructors?.Map ?? (map ? map.constructor : Y.Map);
+  const out = new MapCtor();
+
+  if (map) {
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) {
+      if (key === "view") {
+        out.set("view", sheetViewValueToJsonSafe(map.get(key)));
+        continue;
+      }
+      if (key === "drawings") {
+        const raw = map.get(key);
+        out.set("drawings", raw === null ? null : drawingsValueToJsonSafe(raw) ?? []);
+        continue;
+      }
+      out.set(String(key), cloneYjsValue(map.get(key), constructors));
+    }
+    return out;
+  }
+
+  if (isRecord(entry)) {
+    const keys = Object.keys(entry).sort();
+    for (const key of keys) {
+      if (key === "view") {
+        out.set("view", sheetViewValueToJsonSafe(entry[key]));
+        continue;
+      }
+      if (key === "drawings") {
+        const raw = entry[key];
+        out.set("drawings", raw === null ? null : drawingsValueToJsonSafe(raw) ?? []);
+        continue;
+      }
+      out.set(key, cloneYjsValue(entry[key], constructors));
+    }
+  }
+
+  return out;
+}
+
 /**
  * Recover list items (sequence entries with `parentSub === null`) stored on a map
  * root.
@@ -274,7 +462,11 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           const target = snapshotDoc.getArray(name);
           for (let i = 0; i < source.length; i++) {
             const value = source.get(i);
-            target.push([cloneYjsValue(value, snapshotConstructors)]);
+            target.push([
+              name === "sheets"
+                ? cloneSheetEntryWithSanitizedView(value, snapshotConstructors)
+                : cloneYjsValue(value, snapshotConstructors),
+            ]);
           }
           continue;
         }
@@ -418,7 +610,11 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
 
             for (let i = 0; i < source.length; i++) {
               const value = source.get(i);
-              target.push([cloneYjsValue(value, docConstructors)]);
+              target.push([
+                name === "sheets"
+                  ? cloneSheetEntryWithSanitizedView(value, docConstructors)
+                  : cloneYjsValue(value, docConstructors),
+              ]);
             }
             continue;
           }

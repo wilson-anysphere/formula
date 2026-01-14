@@ -658,3 +658,32 @@ test("branch adapter works when workbook roots were instantiated by a different 
   doc1.destroy();
   doc2.destroy();
 });
+
+test("branchStateFromYjsDoc: drops drawings with oversized Y.Text ids without materializing strings", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Y.Map();
+    const drawings = new Y.Array();
+    const drawing = new Y.Map();
+    const idText = new Y.Text();
+    idText.insert(0, "x".repeat(5000));
+    // If snapshot extraction calls `toString()` on this oversized id, this test should fail.
+    idText.toString = () => {
+      throw new Error("unexpected Y.Text.toString() on oversized drawing id");
+    };
+    drawing.set("id", idText);
+    drawing.set("zOrder", 0);
+    drawings.push([drawing]);
+    view.set("drawings", drawings);
+    sheet.set("view", view);
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view?.drawings, []);
+});

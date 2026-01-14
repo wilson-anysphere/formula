@@ -9,6 +9,117 @@ type CollabSessionLike = Pick<CollabSession, "sheets" | "transactLocal">;
 
 export type CollabSheetsKeyRef = { value: string };
 
+// Drawing ids can be authored via remote/shared state (sheet view state). Keep validation strict
+// so local sheet-tab operations (e.g. move/reorder) don't deep-clone pathological ids when
+// preserving unknown sheet metadata keys.
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeDrawingIdValue(value: unknown): string | number | null {
+  const text = getYText(value);
+  if (text) {
+    // Avoid `text.toString()` for oversized ids: it would allocate a large JS string.
+    if (typeof text.length === "number" && text.length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    value = yjsValueToJson(text);
+  }
+
+  if (typeof value === "string") {
+    if (value.length > MAX_DRAWING_ID_STRING_CHARS) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return trimmed;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) return null;
+    return value;
+  }
+
+  return null;
+}
+
+function sanitizeDrawingsValue(value: unknown): any[] | null {
+  if (value === null) return null;
+  if (value === undefined) return null;
+
+  const yArr = getYArray(value);
+  const isArr = Array.isArray(value);
+  if (!yArr && !isArr) return null;
+
+  const out: any[] = [];
+  const len = yArr ? yArr.length : value.length;
+
+  for (let idx = 0; idx < len; idx += 1) {
+    const entry: any = yArr ? yArr.get(idx) : value[idx];
+    const map = getYMap(entry);
+    if (map) {
+      const normalizedId = normalizeDrawingIdValue(map.get("id"));
+      if (normalizedId == null) continue;
+
+      const obj: any = { id: normalizedId };
+      const keys = Array.from(map.keys()).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[String(key)] = yjsValueToJson(map.get(key));
+      }
+      out.push(obj);
+      continue;
+    }
+
+    if (isRecord(entry)) {
+      const normalizedId = normalizeDrawingIdValue(entry.id);
+      if (normalizedId == null) continue;
+
+      const obj: any = { id: normalizedId };
+      const keys = Object.keys(entry).sort();
+      for (const key of keys) {
+        if (key === "id") continue;
+        obj[key] = yjsValueToJson(entry[key]);
+      }
+      out.push(obj);
+    }
+  }
+
+  return out;
+}
+
+function sanitizeSheetViewValue(value: unknown): unknown {
+  if (value == null) return value;
+
+  const map = getYMap(value);
+  if (map) {
+    const out: Record<string, any> = {};
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        const rawDrawings = map.get(key);
+        out.drawings = rawDrawings === null ? null : sanitizeDrawingsValue(rawDrawings) ?? [];
+        continue;
+      }
+      out[String(key)] = yjsValueToJson(map.get(key));
+    }
+    return out;
+  }
+
+  if (isRecord(value)) {
+    const out: Record<string, any> = {};
+    const keys = Object.keys(value).sort();
+    for (const key of keys) {
+      if (key === "drawings") {
+        out.drawings = value.drawings === null ? null : sanitizeDrawingsValue(value.drawings) ?? [];
+        continue;
+      }
+      out[key] = yjsValueToJson((value as any)[key]);
+    }
+    return out;
+  }
+
+  return value;
+}
+
 function coerceCollabSheetField(value: unknown): string | null {
   try {
     const json = yjsValueToJson(value);
@@ -140,7 +251,14 @@ function cloneCollabSheetMap(entry: unknown): Y.Map<unknown> {
       if (!k) return;
       if (k === "id") return;
       if (k === "name") return;
-      const cloned = cloneCollabSheetMetaValue(value);
+      const cloned =
+        k === "view"
+          ? sanitizeSheetViewValue(value)
+          : k === "drawings"
+            ? value === null
+              ? null
+              : sanitizeDrawingsValue(value) ?? []
+            : cloneCollabSheetMetaValue(value);
       if (cloned === undefined) return;
       out.set(k, cloned);
     });

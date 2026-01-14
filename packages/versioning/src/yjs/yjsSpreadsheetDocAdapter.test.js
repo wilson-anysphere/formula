@@ -210,3 +210,81 @@ test("createYjsSpreadsheetDocAdapter.on('update') returns an unsubscribe functio
   doc.getMap("cells").set("Sheet1:0:1", "beta");
   assert.equal(updates, 1);
 });
+
+test("createYjsSpreadsheetDocAdapter.encodeState sanitizes oversized drawing ids in sheet view when cloning sheets", (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Y.Map();
+    const drawings = new Y.Array();
+    const drawing = new Y.Map();
+    const idText = new Y.Text();
+    idText.insert(0, "x".repeat(5000));
+    // If snapshot extraction calls `toString()` on this oversized id, this test should fail.
+    idText.toString = () => {
+      throw new Error("unexpected Y.Text.toString() on oversized drawing id");
+    };
+    drawing.set("id", idText);
+    drawing.set("zOrder", 0);
+    drawings.push([drawing]);
+    view.set("drawings", drawings);
+    sheet.set("view", view);
+    sheets.push([sheet]);
+  });
+
+  // Ensure the excluded root exists so encodeState takes the "clone roots" path (instead of
+  // directly encoding the doc).
+  doc.getMap("internal").set("k", "v");
+
+  // Using excluded roots forces the adapter to clone roots (instead of encoding the doc directly).
+  const adapter = createYjsSpreadsheetDocAdapter(doc, { excludeRoots: ["internal"] });
+  const snapshot = adapter.encodeState();
+
+  const restored = new Y.Doc();
+  t.after(() => restored.destroy());
+  Y.applyUpdate(restored, snapshot);
+
+  const sheet2 = restored.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  const view2 = sheet2.get("view");
+  assert.equal(view2 && typeof view2 === "object", true);
+  assert.deepEqual(view2.drawings, []);
+});
+
+test("createYjsSpreadsheetDocAdapter.applyState sanitizes oversized drawing ids in sheet view when restoring", (t) => {
+  const source = new Y.Doc();
+  t.after(() => source.destroy());
+
+  source.transact(() => {
+    const sheets = source.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("view", {
+      drawings: [
+        { id: "x".repeat(5000), zOrder: 0 },
+        { id: "ok", zOrder: 1 },
+      ],
+    });
+    sheets.push([sheet]);
+  });
+
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  const adapter = createYjsSpreadsheetDocAdapter(doc);
+  adapter.applyState(snapshot);
+
+  const sheet2 = doc.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  const view2 = sheet2.get("view");
+  assert.equal(view2 && typeof view2 === "object", true);
+  assert.deepEqual(view2.drawings.map((d) => d.id), ["ok"]);
+});
