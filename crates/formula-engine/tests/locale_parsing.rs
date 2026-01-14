@@ -371,12 +371,12 @@ fn canonicalize_and_localize_supports_nbsp_thousands_separator_in_fr_fr() {
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=SUM(1234.56,0.5)");
 
-    // When localizing the canonical form, the engine should re-insert thousands grouping for
-    // readability. Accept either NBSP or narrow NBSP depending on the locale configuration.
-    let roundtrip = locale::localize_formula(&canon, &locale::FR_FR).unwrap();
-    assert!(
-        roundtrip == fr || roundtrip == "=SOMME(1\u{202F}234,56;0,5)",
-        "unexpected localized roundtrip: {roundtrip:?}"
+    // Excel accepts locale-specific thousands separators in localized input, but `FormulaLocal`
+    // typically normalizes numeric literals when serializing formulas back (omitting grouping).
+    // See `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        "=SOMME(1234,56;0,5)"
     );
 }
 
@@ -403,14 +403,10 @@ fn canonicalize_supports_mixed_nbsp_and_narrow_nbsp_thousands_separators_in_fr_f
 }
 
 #[test]
-fn localize_inserts_multiple_thousands_separators_in_fr_fr() {
+fn localize_omits_thousands_grouping_in_fr_fr() {
     let canon = "=SUM(1234567.89,0.5)";
     let localized = locale::localize_formula(canon, &locale::FR_FR).unwrap();
-    assert!(
-        localized == "=SOMME(1\u{00A0}234\u{00A0}567,89;0,5)"
-            || localized == "=SOMME(1\u{202F}234\u{202F}567,89;0,5)",
-        "unexpected localized output: {localized:?}"
-    );
+    assert_eq!(localized, "=SOMME(1234567,89;0,5)");
 }
 
 #[test]
