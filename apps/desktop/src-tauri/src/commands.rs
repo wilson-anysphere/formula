@@ -3,6 +3,7 @@ use formula_engine::pivot::{
     SortOrder, SubtotalPosition,
 };
 use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
+use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref};
 use serde::{de, Deserialize, Serialize};
 #[cfg(feature = "desktop")]
 use serde_json::json;
@@ -1654,6 +1655,18 @@ impl From<IpcPivotFieldRef> for PivotFieldRef {
             IpcPivotFieldRef::MeasureName { name } => PivotFieldRef::DataModelMeasure(name.into_inner()),
         }
     }
+}
+
+fn pivot_field_ref_from_ipc(raw: String) -> PivotFieldRef {
+    // Keep behavior consistent with `formula_model::pivots::PivotFieldRef` serde decoding:
+    // DAX-looking strings become structured Data Model refs; everything else stays a cache field name.
+    if let Some(measure) = parse_dax_measure_ref(&raw) {
+        return PivotFieldRef::DataModelMeasure(measure);
+    }
+    if let Some((table, column)) = parse_dax_column_ref(&raw) {
+        return PivotFieldRef::DataModelColumn { table, column };
+    }
+    PivotFieldRef::CacheFieldName(raw)
 }
 
 impl From<IpcPivotField> for formula_engine::pivot::PivotField {
