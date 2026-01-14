@@ -354,7 +354,8 @@ fn save_with_cell_formula_text_edits_auto_interns_xlfn_xlws_namespaced_function(
     let file = std::fs::File::open(&output_path).expect("open output");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
     let mut wb_entry = zip.by_name("xl/workbook.bin").expect("workbook.bin");
-    let mut workbook_bin = Vec::with_capacity(wb_entry.size() as usize);
+    // Avoid pre-allocating based on attacker-controlled ZIP metadata.
+    let mut workbook_bin = Vec::new();
     wb_entry
         .read_to_end(&mut workbook_bin)
         .expect("read workbook.bin");
