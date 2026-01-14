@@ -542,6 +542,8 @@ export type RpcMethod =
   | "setCellRich"
   | "setRange"
   | "setLocale"
+  | "getCalcSettings"
+  | "setCalcSettings"
   | "recalculate"
   | "applyOperation"
   | "goalSeek"

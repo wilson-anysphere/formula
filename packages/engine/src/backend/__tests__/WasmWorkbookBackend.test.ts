@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineClient } from "../../client.ts";
+import type { CalcSettings } from "../../protocol.ts";
 import { colToName, fromA1, toA1, toA1Range } from "../a1.ts";
 import { normalizeFormulaText } from "../formula.ts";
 import { WasmWorkbookBackend } from "../WasmWorkbookBackend.ts";
+
+const defaultCalcSettings: CalcSettings = {
+  calculationMode: "manual",
+  calculateBeforeSave: true,
+  fullPrecision: true,
+  fullCalcOnLoad: false,
+  iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
+};
 
 describe("A1 helpers", () => {
   it("converts 0-based columns to Excel column names", () => {
@@ -63,13 +72,7 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
-      getCalcSettings: vi.fn(async () => ({
-        calculationMode: "manual",
-        calculateBeforeSave: true,
-        fullPrecision: true,
-        fullCalcOnLoad: false,
-        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
-      })),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
       setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
@@ -144,13 +147,7 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
-      getCalcSettings: vi.fn(async () => ({
-        calculationMode: "manual",
-        calculateBeforeSave: true,
-        fullPrecision: true,
-        fullCalcOnLoad: false,
-        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
-      })),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
       setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => {
         calls.push("recalculate");
@@ -240,6 +237,8 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
+      setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
@@ -324,13 +323,7 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
-      getCalcSettings: vi.fn(async () => ({
-        calculationMode: "manual",
-        calculateBeforeSave: true,
-        fullPrecision: true,
-        fullCalcOnLoad: false,
-        iterative: { enabled: false, maxIterations: 100, maxChange: 0.001 },
-      })),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
       setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
