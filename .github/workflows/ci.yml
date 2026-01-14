@@ -194,6 +194,9 @@ jobs:
           key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
+            # Backwards-compat: allow restoring caches created before we aligned the key format
+            # with release/perf workflows (which did not include the extra `rust-` segment).
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Cache wasm-pack tool downloads (Linux)
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
