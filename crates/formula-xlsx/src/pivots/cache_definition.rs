@@ -115,6 +115,28 @@ impl PivotCacheDefinition {
             .unwrap_or(PivotCacheValue::Missing)
     }
 
+    /// Resolve a record's values against this cache definition.
+    ///
+    /// This is a convenience wrapper around [`Self::resolve_record_value`] that uses the value's
+    /// position in the record as `field_idx` (0-based).
+    ///
+    /// This helper returns an iterator so callers can resolve values while streaming records
+    /// without allocating a new record buffer.
+    #[inline]
+    pub fn resolve_record_values<'a, I>(
+        &'a self,
+        values: I,
+    ) -> impl Iterator<Item = PivotCacheValue> + 'a
+    where
+        I: IntoIterator<Item = PivotCacheValue>,
+        I::IntoIter: 'a,
+    {
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(field_idx, value)| self.resolve_record_value(field_idx, value))
+    }
+
     /// Resolve a shared item index for a given cache field into a typed [`ScalarValue`].
     ///
     /// Excel encodes some pivot cache values (and slicer selections) as indices into a per-field
@@ -1062,6 +1084,35 @@ mod tests {
         assert_eq!(
             def.resolve_record_value(0, PivotCacheValue::Index(1)),
             PivotCacheValue::Number(42.0)
+        );
+    }
+
+    #[test]
+    fn resolves_record_values_iterator_uses_field_position() {
+        let def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Field1".to_string(),
+                    shared_items: Some(vec![PivotCacheValue::String("A".to_string())]),
+                    ..PivotCacheField::default()
+                },
+                PivotCacheField {
+                    name: "Field2".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::Number(42.0),
+                        PivotCacheValue::Number(43.0),
+                    ]),
+                    ..PivotCacheField::default()
+                },
+            ],
+            ..PivotCacheDefinition::default()
+        };
+
+        let record = vec![PivotCacheValue::Index(0), PivotCacheValue::Index(1)];
+        let resolved = def.resolve_record_values(record).collect::<Vec<_>>();
+        assert_eq!(
+            resolved,
+            vec![PivotCacheValue::String("A".to_string()), PivotCacheValue::Number(43.0)]
         );
     }
 
