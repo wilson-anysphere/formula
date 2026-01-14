@@ -49,6 +49,23 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("A1");
   });
 
+  it("includes the encrypted payload key id in the toast when available", () => {
+    showCollabEditRejectedToast([
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        rejectionKind: "cell",
+        rejectionReason: "encryption",
+        encryptionKeyId: "k-range-1",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("Missing encryption key");
+    expect(content).toContain("k-range-1");
+  });
+
   it("shows a formatting toast for rejected format edits", () => {
     showCollabEditRejectedToast([
       {
