@@ -428,6 +428,129 @@ fn indirect_dependency_switching_updates_graph_edges() {
 }
 
 #[test]
+fn cell_address_does_not_record_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"address\",INDIRECT(D1))")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("$A$1".to_string())
+    );
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    // Switch the target.
+    engine.set_cell_value("Sheet1", "D1", "A2").unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("$A$2".to_string())
+    );
+
+    let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a2,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert!(engine.dependents("Sheet1", "A2").unwrap().is_empty());
+}
+
+#[test]
+fn cell_col_does_not_record_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"col\",INDIRECT(D1))")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    // Switch the target to a different column.
+    engine.set_cell_value("Sheet1", "D1", "B1").unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(2.0));
+
+    let precedents_b1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_b1,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert!(engine.dependents("Sheet1", "B1").unwrap().is_empty());
+}
+
+#[test]
+fn cell_row_does_not_record_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"row\",INDIRECT(D1))")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    // Switch the target to a different row.
+    engine.set_cell_value("Sheet1", "D1", "A2").unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(2.0));
+
+    let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a2,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert!(engine.dependents("Sheet1", "A2").unwrap().is_empty());
+}
+
+#[test]
 fn cell_width_does_not_record_dynamic_dependencies_for_indirect_reference_arg() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
