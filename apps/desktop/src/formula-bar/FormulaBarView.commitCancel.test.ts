@@ -292,6 +292,61 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commitEdit() closes function autocomplete (and does not accept it)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    view.commitEdit();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=VLO", { reason: "command", shift: false });
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("=VLO");
+    expect(dropdown.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
+  it("cancelEdit() closes function autocomplete", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    view.cancelEdit();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.textarea.value).toBe("orig");
+    expect(dropdown.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
   it("commitEdit('enter') commits even when the textarea is not focused", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
