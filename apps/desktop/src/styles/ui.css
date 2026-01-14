@@ -631,7 +631,8 @@ a:visited {
   transition:
     background-color var(--motion-duration) var(--motion-ease),
     border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease);
+    color var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease);
 }
 
 .formula-bar--has-error .formula-bar-error-button {
@@ -640,6 +641,11 @@ a:visited {
 
 .formula-bar-error-button:hover {
   background: var(--bg-tertiary);
+}
+
+.formula-bar-error-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .formula-bar-error-panel {
