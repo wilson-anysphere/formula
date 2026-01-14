@@ -426,6 +426,18 @@ The reader should enforce a reasonable maximum spin count (and surface a specifi
 Note: Standard encryption uses a fixed 50,000 iteration count; the DoS concern is primarily for
 Agile’s file-provided `spinCount`.
 
+### `EncryptionInfo` size limits (XML + base64 fields)
+Agile `EncryptionInfo` embeds an XML descriptor with multiple base64-encoded fields
+(`saltValue`, `encryptedKeyValue`, `encryptedVerifierHash*`, `encryptedHmac*`, …).
+These fields are attacker-controlled and can be made extremely large to cause **memory** DoS.
+
+In this repo:
+
+- `crates/formula-xlsx::offcrypto` enforces bounded parsing via `ParseOptions` (defaults: **1 MiB**
+  max XML length / base64 field length / decoded length), and returns structured errors:
+  `OffCryptoError::EncryptionInfoTooLarge` / `OffCryptoError::FieldTooLarge`.
+  - See: `crates/formula-xlsx/src/offcrypto/encryption_info.rs`
+
 ## Spec references (sections we implement)
 Primary:
 * **MS-OFFCRYPTO** (Office encryption container, Standard + Agile):
