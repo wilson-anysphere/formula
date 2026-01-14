@@ -225,7 +225,7 @@ fn engine_pivot_infers_dates_from_column_number_formats_when_cell_styles_inherit
 fn engine_pivot_infers_dates_from_range_run_number_formats_when_cell_styles_inherit_num_fmt() {
     use chrono::NaiveDate;
     use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
-    use formula_engine::FormatRun;
+    use formula_engine::metadata::FormatRun;
 
     let mut engine = Engine::new();
 

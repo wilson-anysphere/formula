@@ -266,7 +266,7 @@ fn refresh_pivot_infers_dates_from_column_number_formats_when_cell_styles_inheri
 
 #[test]
 fn refresh_pivot_infers_dates_from_range_run_number_formats_when_cell_styles_inherit_num_fmt() {
-    use formula_engine::FormatRun;
+    use formula_engine::metadata::FormatRun;
 
     let mut engine = Engine::new();
 
