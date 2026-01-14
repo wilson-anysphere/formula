@@ -17,7 +17,7 @@ export interface ContextSheet {
    * correct absolute A1 ranges.
    */
   origin?: { row: number; col: number };
-  namedRanges?: NamedRangeSchema[];
+  namedRanges?: Array<NamedRangeSchema & { [key: string]: unknown }>;
   /**
    * Optional explicit table definitions (used by schema extraction).
    */

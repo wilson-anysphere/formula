@@ -51,7 +51,7 @@ export function extractSheetSchema(sheet: {
    * sample), `origin` lets schema extraction produce correct absolute A1 ranges.
    */
   origin?: { row: number; col: number };
-  namedRanges?: NamedRangeSchema[];
+  namedRanges?: Array<NamedRangeSchema & { [key: string]: unknown }>;
   tables?: Array<{ name: string; range: string; [key: string]: unknown }>;
 }, options?: {
   signal?: AbortSignal;

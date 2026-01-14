@@ -68,6 +68,15 @@ type _WorkbookRagTableNotAny = Assert<IsAny<WorkbookRagTable> extends false ? tr
 type _WorkbookRagNamedRangeNotAny = Assert<IsAny<WorkbookRagNamedRange> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
+type _VectorStoreListContentHashesShape = Assert<
+  WorkbookRagVectorStore["listContentHashes"] extends
+    | ((opts?: { workbookId?: string; signal?: AbortSignal }) => Promise<
+        Array<{ id: string; contentHash: string | null; metadataHash: string | null }>
+      >)
+    | undefined
+    ? true
+    : false
+>;
 type _ClearCacheOptionsNotAny = Assert<
   IsAny<Parameters<ContextManager["clearSheetIndexCache"]>[0]> extends false ? true : false
 >;
@@ -85,7 +94,12 @@ type _ClearCacheOptionsNotAny = Assert<
  });
 
 const result = await cm.buildContext({
-  sheet: { name: "Sheet1", values: [[1]], tables: [{ name: "T", range: "A1:B2", id: "tbl-1" }] },
+  sheet: {
+    name: "Sheet1",
+    values: [[1]],
+    tables: [{ name: "T", range: "A1:B2", id: "tbl-1" }],
+    namedRanges: [{ name: "NR", range: "A1:A1", id: "nr-1" }],
+  },
   query: "hi",
    limits: { maxContextCols: 10 },
 });
