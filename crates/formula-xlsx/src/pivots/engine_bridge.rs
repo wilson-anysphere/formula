@@ -39,11 +39,9 @@ pub fn pivot_cache_to_engine_source(
 
     for record in records {
         let mut row = Vec::with_capacity(def.cache_fields.len());
+        let mut record_values = record.into_iter();
         for field_idx in 0..def.cache_fields.len() {
-            let value = record
-                .get(field_idx)
-                .cloned()
-                .unwrap_or(PivotCacheValue::Missing);
+            let value = record_values.next().unwrap_or(PivotCacheValue::Missing);
             row.push(pivot_cache_value_to_engine(def, field_idx, value));
         }
         out.push(row);

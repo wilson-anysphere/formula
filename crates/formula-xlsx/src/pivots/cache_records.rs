@@ -25,7 +25,11 @@ pub enum PivotCacheValue {
     /// Excel stores real date/time values as strings in pivot caches, so we keep
     /// the raw attribute value (instead of coercing to an Excel serial number).
     DateTime(String),
-    /// `<x v="..."/>` (shared item index)
+    /// `<x v="..."/>` (shared item index).
+    ///
+    /// Excel can store record values as indices into a per-field `<sharedItems>` table in the
+    /// pivot cache definition. Use [`crate::pivots::PivotCacheDefinition::resolve_record_value`]
+    /// to turn this into the corresponding typed value.
     Index(u32),
 }
 
@@ -87,8 +91,12 @@ impl<'a> PivotCacheRecordsReader<'a> {
 
     /// Return the next `<r>` record, if present.
     ///
-    /// The record is returned as a list of typed values in the order they
-    /// appeared in XML. Unknown tags are ignored.
+    /// The record is returned as a list of typed values in the order they appeared in XML.
+    /// Unknown tags are ignored.
+    ///
+    /// Note: record values may include [`PivotCacheValue::Index`] entries, which need to be
+    /// resolved against the corresponding cache definition's `<sharedItems>` table using
+    /// [`crate::pivots::PivotCacheDefinition::resolve_record_value`].
     pub fn next_record(&mut self) -> Option<Vec<PivotCacheValue>> {
         if self.done {
             return None;
