@@ -51,6 +51,10 @@ pub enum ArrowInteropError {
     UnsupportedDataType(DataType),
     UnsupportedDictionaryValueType(DataType),
     InvalidDictionaryKey { key: String, dictionary_len: usize },
+    Context {
+        context: String,
+        source: Box<ArrowInteropError>,
+    },
     InvalidMetadata { key: &'static str, value: String },
 }
 
@@ -66,6 +70,7 @@ impl std::fmt::Display for ArrowInteropError {
                 f,
                 "invalid dictionary key {key} (dictionary has {dictionary_len} values)"
             ),
+            Self::Context { context, source } => write!(f, "{context}: {source}"),
             Self::InvalidMetadata { key, value } => {
                 write!(f, "invalid Arrow field metadata {key}={value:?}")
             }
@@ -77,6 +82,7 @@ impl std::error::Error for ArrowInteropError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Arrow(err) => Some(err),
+            Self::Context { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -586,9 +592,13 @@ pub fn record_batch_to_columnar_with_options(
     let schema = batch.schema();
     let mut column_schema = Vec::with_capacity(schema.fields().len());
     for field in schema.fields() {
+        let column_type = column_type_from_field(field).map_err(|err| ArrowInteropError::Context {
+            context: format!("while parsing Arrow field {:?}", field.name()),
+            source: Box::new(err),
+        })?;
         column_schema.push(ColumnSchema {
             name: field.name().clone(),
-            column_type: column_type_from_field(field)?,
+            column_type,
         });
     }
 
@@ -600,7 +610,15 @@ pub fn record_batch_to_columnar_with_options(
         for col in 0..cols {
             let ty = column_schema[col].column_type;
             let array = batch.column(col).as_ref();
-            values.push(value_from_array(array, row, ty)?);
+            values.push(value_from_array(array, row, ty).map_err(|err| {
+                ArrowInteropError::Context {
+                    context: format!(
+                        "while reading Arrow column {:?} (row {row})",
+                        column_schema[col].name
+                    ),
+                    source: Box::new(err),
+                }
+            })?);
         }
         builder.append_row(&values);
     }

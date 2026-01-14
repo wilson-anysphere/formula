@@ -71,9 +71,14 @@ fn table_schema_from_arrow(schema: &arrow_schema::Schema) -> Result<Vec<ColumnSc
         .fields()
         .iter()
         .map(|field| {
+            let column_type =
+                column_type_from_field(field).map_err(|err| ArrowInteropError::Context {
+                    context: format!("while parsing Arrow field {:?}", field.name()),
+                    source: Box::new(err),
+                })?;
             Ok(ColumnSchema {
                 name: field.name().clone(),
-                column_type: column_type_from_field(field)?,
+                column_type,
             })
         })
         .collect()
@@ -92,7 +97,15 @@ fn append_record_batch(
         for col in 0..cols {
             let ty = column_schema[col].column_type;
             let array = batch.column(col).as_ref();
-            values.push(value_from_array(array, row, ty)?);
+            values.push(value_from_array(array, row, ty).map_err(|err| {
+                ArrowInteropError::Context {
+                    context: format!(
+                        "while reading Arrow column {:?} (row {row})",
+                        column_schema[col].name
+                    ),
+                    source: Box::new(err),
+                }
+            })?);
         }
         builder.append_row(&values);
     }
