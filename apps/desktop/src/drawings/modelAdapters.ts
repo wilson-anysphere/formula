@@ -1000,9 +1000,27 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (anchor) {
+            const derivedTransform =
+              transform ??
+              (() => {
+                if (kind.type === "image") {
+                  const picXml = preserved?.["xlsx.pic_xml"];
+                  if (typeof picXml !== "string" || picXml.length === 0) return undefined;
+                  const parsed = parseDrawingTransformFromRawXml(picXml);
+                  if (!parsed) return undefined;
+                  return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+                }
+
+                const rawXml = (kind as any).rawXml ?? (kind as any).raw_xml;
+                if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
+                const parsed = parseDrawingTransformFromRawXml(rawXml);
+                if (!parsed) return undefined;
+                return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+              })();
+
             const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
             if (preserved) obj.preserved = preserved;
-            if (transform) obj.transform = transform;
+            if (derivedTransform) obj.transform = derivedTransform;
             out.push(obj);
             continue;
           }
