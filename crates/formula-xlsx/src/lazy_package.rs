@@ -259,6 +259,22 @@ impl XlsxLazyPackage {
     /// workbook kind.
     pub fn enforce_workbook_kind(&mut self, kind: WorkbookKind) -> Result<(), XlsxError> {
         self.workbook_kind = Some(kind);
+
+        let Some(existing) = self.read_part("[Content_Types].xml")? else {
+            // Match `XlsxPackage` semantics: don't synthesize a missing content types file.
+            return Ok(());
+        };
+
+        let Some(updated) = crate::rewrite_content_types_workbook_kind(&existing, kind)? else {
+            // Avoid rewriting when no change is required.
+            return Ok(());
+        };
+
+        self.overrides.insert(
+            "[Content_Types].xml".to_string(),
+            PartOverride::Replace(updated),
+        );
+
         Ok(())
     }
 
