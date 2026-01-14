@@ -909,6 +909,40 @@ describe("AiCellFunctionEngine", () => {
     expect(resolved).toBe("ok");
   });
 
+  it("heuristically redacts referenced emails even when cell values are truncated", async () => {
+    // Ensure the classification store is empty so enforcement relies on heuristics.
+    globalThis.localStorage?.clear();
+
+    const workbookId = "dlp-heuristic-email-truncated";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    // Force aggressive truncation so the prompt-formatted scalar would not include the full email.
+    // Heuristic scanning should still detect the full value and redact it.
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+      limits: { maxCellChars: 10 },
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : null);
+
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain("user@example.com");
+  });
+
   it("heuristically redacts sensitive values inside referenced ranges even without structured classifications", async () => {
     // Ensure the classification store is empty so enforcement relies on heuristics.
     globalThis.localStorage?.clear();
