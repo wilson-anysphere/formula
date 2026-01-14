@@ -74,6 +74,15 @@ test("verify_linux_desktop_integration passes for a desktop entry targeting the 
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("verify_linux_desktop_integration accepts quoted Exec= paths", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+  const configPath = writeConfig(tmp);
+  const pkgRoot = writePackageRoot(tmp, { execLine: '"/usr/bin/formula-desktop" %U' });
+
+  const proc = runValidator({ packageRoot: pkgRoot, configPath });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("verify_linux_desktop_integration fails when no .desktop entries target the expected binary", { skip: !hasPython3 }, () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
   const configPath = writeConfig(tmp);

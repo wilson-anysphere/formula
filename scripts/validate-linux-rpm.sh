@@ -812,7 +812,7 @@ validate_container() {
   container_cmd+=$'  fi\n'
   container_cmd+=$'done\n'
   container_cmd+=$'if [ "${#matching_desktop_files[@]}" -eq 0 ]; then\n'
-  container_cmd+=$'  echo "No installed .desktop file under /usr/share/applications referenced expected main binary ${expected_binary} in its Exec= entry." >&2\n'
+  container_cmd+=$'  echo "No installed .desktop files appear to target the expected executable ${expected_binary} (or ${binary_path}) in their Exec= entry." >&2\n'
   container_cmd+=$'  echo "Installed .desktop files inspected:" >&2\n'
   container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
