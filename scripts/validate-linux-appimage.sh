@@ -48,6 +48,7 @@ EOF
 }
 
 APPIMAGE_PATH=""
+AUTO_DISCOVERED=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,6 +58,7 @@ while [[ $# -gt 0 ]]; do
       if [ -z "$APPIMAGE_PATH" ]; then
         die "--appimage requires a path"
       fi
+      AUTO_DISCOVERED=0
       shift
       ;;
     -h|--help)
@@ -176,6 +178,57 @@ else
   done < <(find_appimages)
 fi
 
+expected_file_arch_substring() {
+  # `file` prints e.g.:
+  #   ELF 64-bit LSB executable, x86-64, ...
+  #   ELF 64-bit LSB executable, ARM aarch64, ...
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) echo "x86-64" ;;
+    aarch64) echo "aarch64" ;;
+    armv7l) echo "ARM" ;;
+    *) echo "" ;;
+  esac
+}
+
+# When auto-discovering, try to ignore stale/cross-arch AppImages so CI doesn't
+# trip over cached artifacts.
+if [ "$AUTO_DISCOVERED" -eq 1 ] && [ "${#APPIMAGES[@]}" -gt 1 ] && command -v file >/dev/null 2>&1; then
+  expected_arch_substring="$(expected_file_arch_substring)"
+  if [ -n "$expected_arch_substring" ]; then
+    declare -a filtered=()
+    for appimage in "${APPIMAGES[@]}"; do
+      file_out="$(file -b "$appimage" 2>/dev/null || true)"
+      if grep -qiF "$expected_arch_substring" <<<"$file_out"; then
+        filtered+=("$appimage")
+      else
+        info "Skipping AppImage with mismatched architecture: $appimage (file: $file_out)"
+      fi
+    done
+    if [ "${#filtered[@]}" -gt 0 ]; then
+      APPIMAGES=("${filtered[@]}")
+    fi
+  fi
+fi
+
+# If multiple AppImages remain, default to validating the most recently modified
+# (usually the one produced by the current build). Allow opting into validating
+# all discovered AppImages via FORMULA_VALIDATE_ALL_APPIMAGES=1.
+if [ "$AUTO_DISCOVERED" -eq 1 ] && [ "${#APPIMAGES[@]}" -gt 1 ] && [ -z "${FORMULA_VALIDATE_ALL_APPIMAGES:-}" ]; then
+  info "Multiple AppImages found; selecting the most recently modified. Set FORMULA_VALIDATE_ALL_APPIMAGES=1 to validate all."
+  newest="$(
+    for f in "${APPIMAGES[@]}"; do
+      ts="$(stat -c '%Y' "$f" 2>/dev/null || stat -f '%m' "$f" 2>/dev/null || echo 0)"
+      printf '%s\t%s\n' "$ts" "$f"
+    done | sort -nr | head -n 1 | cut -f2-
+  )"
+  if [ -z "$newest" ]; then
+    die "Failed to select an AppImage from discovered candidates"
+  fi
+  APPIMAGES=("$newest")
+fi
+
 validate_appimage() {
   local appimage_path="$1"
 
@@ -259,16 +312,18 @@ validate_appimage() {
   # 4) Validate the bundle advertises spreadsheet file associations via desktop metadata.
   #
   # On Linux, file associations are driven by the `MimeType=` field in the `.desktop`
-  # entry. We require:
-  #  - at least one `.desktop` file includes a `MimeType=` entry
-  #  - it includes the xlsx MIME type or another clearly-spreadsheet MIME type
+  # entry. At a minimum, require the `.desktop` file advertises xlsx integration by
+  # including:
+  #  - the xlsx MIME type, OR
+  #  - some MIME token containing the substring `xlsx` (e.g. application/x-xlsx).
   local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   local spreadsheet_mime_regex
-  spreadsheet_mime_regex='application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+  spreadsheet_mime_regex='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
 
   local has_any_mimetype=0
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
+  local has_xlsx_integration=0
 
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
@@ -285,6 +340,10 @@ validate_appimage() {
 
     if printf '%s' "$mime_value" | grep -Fqi "$required_xlsx_mime"; then
       has_xlsx_mime=1
+      has_xlsx_integration=1
+    fi
+    if printf '%s' "$mime_value" | grep -Fqi "xlsx"; then
+      has_xlsx_integration=1
     fi
     if printf '%s' "$mime_value" | grep -Eqi "$spreadsheet_mime_regex"; then
       has_spreadsheet_mime=1
@@ -299,7 +358,27 @@ validate_appimage() {
     for desktop_file in "${desktop_files[@]}"; do
       echo "  - ${desktop_file#$appdir/}" >&2
     done
-    exit 1
+    die "No .desktop file contained a MimeType= entry for AppImage: $appimage_path"
+  fi
+
+  if [ "$has_xlsx_integration" -ne 1 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised xlsx support for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: Expected MimeType= to include substring 'xlsx' or MIME '${required_xlsx_mime}'." >&2
+    echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#$appdir/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    die "No .desktop file advertised .xlsx support for AppImage: $appimage_path"
   fi
 
   if [ "$has_spreadsheet_mime" -ne 1 ]; then
@@ -320,7 +399,7 @@ validate_appimage() {
         echo "  - ${rel}: (no MimeType= entry)" >&2
       fi
     done
-    exit 1
+    die "No .desktop file advertised spreadsheet MIME types for AppImage: $appimage_path"
   fi
 
   if [ "$has_xlsx_mime" -ne 1 ]; then
