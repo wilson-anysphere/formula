@@ -1093,7 +1093,7 @@ fn read_encrypted_ooxml_workbook_blocking(
             Ok(workbook)
         }
         Some(SniffedWorkbookFormat::Xlsx) => {
-            // Mirror the non-encrypted XLSX open logic: only retain the decrypted ZIP bytes baseline when
+            // Mirror the non-encrypted XLSX/XLSM open logic: only retain the decrypted ZIP bytes baseline when
             // it is within the configured limit. This keeps memory usage bounded even if a user opens a
             // large password-protected workbook.
             let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
