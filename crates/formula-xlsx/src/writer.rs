@@ -1,11 +1,13 @@
 use crate::styles::StylesPart;
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::WorkbookKind;
+use crate::ConditionalFormattingDxfAggregation;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
-    HyperlinkTarget, ManualPageBreaks, Outline, PageMargins, PageSetup, Range, Scaling,
-    SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
+    normalize_formula_text, Cell, CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind,
+    DateSystem, DefinedNameScope, Hyperlink, HyperlinkTarget, ManualPageBreaks, Outline,
+    PageMargins, PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook,
+    WorkbookWindowState, Worksheet,
 };
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -85,6 +87,13 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     let style_to_xf = styles_part
         .xf_indices_for_style_ids(style_ids, &style_table)
         .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+
+    // Conditional formatting dxfs live in a single global `<dxfs>` table inside styles.xml, but the
+    // in-memory model stores them per-sheet. Aggregate and deduplicate deterministically, then
+    // remap per-sheet `cfRule/@dxfId` values during worksheet writing.
+    let cf_dxfs = ConditionalFormattingDxfAggregation::from_worksheets(&workbook.sheets);
+    styles_part.set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
+
     let styles_xml = styles_part.to_xml_bytes();
 
     // Root relationships
@@ -173,6 +182,7 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
             &shared_strings,
             &table_parts_by_sheet[idx],
             &style_to_xf,
+            cf_dxfs.local_to_global_by_sheet.get(&sheet.id).map(|v| v.as_slice()),
         )?;
         zip.start_file(&sheet_path, options)?;
         zip.write_all(sheet_xml.as_bytes())?;
@@ -706,12 +716,99 @@ fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> St
     s
 }
 
+fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<&[u32]>) -> String {
+    if sheet.conditional_formatting_rules.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for rule in &sheet.conditional_formatting_rules {
+        let Some(cf_rule_xml) = render_cf_rule(rule, local_to_global_dxf) else {
+            continue;
+        };
+
+        let sqref = rule
+            .applies_to
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if sqref.is_empty() {
+            continue;
+        }
+
+        out.push_str(&format!(
+            r#"<conditionalFormatting sqref="{}">{}</conditionalFormatting>"#,
+            escape_xml(&sqref),
+            cf_rule_xml
+        ));
+    }
+    out
+}
+
+fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<String> {
+    let mut attrs = String::new();
+
+    if let Some(id) = rule.id.as_deref() {
+        attrs.push_str(&format!(r#" id="{}""#, escape_xml(id)));
+    }
+
+    attrs.push_str(&format!(r#" priority="{}""#, rule.priority));
+
+    if rule.stop_if_true {
+        attrs.push_str(r#" stopIfTrue="1""#);
+    }
+
+    // Remap per-sheet `dxf_id` to the workbook-global `dxfs` index table. Best-effort:
+    // out-of-bounds indices are emitted as no `dxfId` attribute.
+    let global_dxf_id = rule
+        .dxf_id
+        .and_then(|local| local_to_global_dxf?.get(local as usize).copied());
+    if let Some(global) = global_dxf_id {
+        attrs.push_str(&format!(r#" dxfId="{}""#, global));
+    }
+
+    let (type_attr, body) = match &rule.kind {
+        CfRuleKind::Expression { formula } => (
+            "expression",
+            format!(r#"<formula>{}</formula>"#, escape_xml(formula)),
+        ),
+        CfRuleKind::CellIs { operator, formulas } => {
+            let op = cell_is_operator_attr(*operator);
+            let mut inner = String::new();
+            for f in formulas {
+                inner.push_str(&format!(r#"<formula>{}</formula>"#, escape_xml(f)));
+            }
+            attrs.push_str(&format!(r#" operator="{op}""#));
+            ("cellIs", inner)
+        }
+        // Best-effort: skip rules we can't currently serialize.
+        _ => return None,
+    };
+
+    Some(format!(r#"<cfRule type="{type_attr}"{attrs}>{body}</cfRule>"#))
+}
+
+fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
+    match op {
+        CellIsOperator::GreaterThan => "greaterThan",
+        CellIsOperator::GreaterThanOrEqual => "greaterThanOrEqual",
+        CellIsOperator::LessThan => "lessThan",
+        CellIsOperator::LessThanOrEqual => "lessThanOrEqual",
+        CellIsOperator::Equal => "equal",
+        CellIsOperator::NotEqual => "notEqual",
+        CellIsOperator::Between => "between",
+        CellIsOperator::NotBetween => "notBetween",
+    }
+}
+
 fn sheet_xml(
     sheet: &Worksheet,
     print_settings: Option<&SheetPrintSettings>,
     shared_strings: &SharedStrings,
     table_parts: &[(String, String)],
     style_to_xf: &HashMap<u32, u32>,
+    local_to_global_dxf: Option<&[u32]>,
 ) -> Result<(String, String), XlsxWriteError> {
     // Dimension should include both the columnar table extent and any sparse overlay cells.
     let mut dim: Option<Range> = sheet.used_range();
@@ -1031,6 +1128,8 @@ fn sheet_xml(
         String::new()
     };
 
+    let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
+
     let sheet_protection_xml = sheet_protection_xml(sheet);
 
     let mut page_margins_xml = String::new();
@@ -1114,6 +1213,11 @@ fn sheet_xml(
     if !auto_filter_xml.is_empty() {
         xml.push_str("  ");
         xml.push_str(&auto_filter_xml);
+        xml.push('\n');
+    }
+    if !conditional_formatting_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&conditional_formatting_xml.replace('\n', "\n  "));
         xml.push('\n');
     }
     if !page_margins_xml.is_empty() {

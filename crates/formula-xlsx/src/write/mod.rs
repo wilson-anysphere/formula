@@ -6,9 +6,9 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::drawings::DrawingObjectKind;
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
-    CellRef, CellValue, Comment, CommentKind, ErrorValue, Hyperlink, HyperlinkTarget, Outline,
-    OutlineEntry, Range, SheetProtection, SheetVisibility, WorkbookProtection, WorkbookWindowState,
-    Worksheet, WorksheetId,
+    CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind, Comment, CommentKind, ErrorValue,
+    Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range, SheetProtection, SheetVisibility,
+    WorkbookProtection, WorkbookWindowState, Worksheet, WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -24,6 +24,7 @@ use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
+use crate::ConditionalFormattingDxfAggregation;
 use crate::{
     CellValueKind, DateSystem, RecalcPolicy, SheetMeta, WorkbookKind, XlsxDocument, XlsxError,
 };
@@ -676,6 +677,11 @@ fn build_parts(
         parts.insert(shared_strings_part_name.clone(), shared_strings_xml);
     }
 
+    // Conditional formatting uses a single workbook-global `<dxfs>` table inside `styles.xml`, but
+    // the in-memory model stores differential formats per-sheet. Aggregate and deduplicate
+    // deterministically, and (for new documents) emit the resulting global table.
+    let cf_dxfs = ConditionalFormattingDxfAggregation::from_worksheets(&doc.workbook.sheets);
+
     // Parse/update styles.xml (cellXfs) so cell `s` attributes refer to real xf indices.
     let mut style_table = doc.workbook.styles.clone();
     let mut styles_editor = XlsxStylesEditor::parse_or_default(
@@ -691,11 +697,21 @@ fn build_parts(
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
-    if is_new
+    let has_existing_styles_part = parts.contains_key(&styles_part_name);
+    let should_write_styles_part = is_new
         || !style_to_xf.is_empty()
-        || parts.contains_key(&styles_part_name)
+        || has_existing_styles_part
         || synthesize_styles_for_missing_relationship
-    {
+        || !cf_dxfs.global_dxfs.is_empty();
+    if should_write_styles_part {
+        // Only rewrite the `<dxfs>` table when we control the entire styles.xml payload (new
+        // documents, or when synthesizing a missing styles part). This avoids dropping unknown dxf
+        // content from existing workbooks (we only model a subset of differential formatting).
+        if !cf_dxfs.global_dxfs.is_empty() && (is_new || !has_existing_styles_part) {
+            styles_editor
+                .styles_part_mut()
+                .set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
+        }
         parts.insert(styles_part_name.clone(), styles_editor.to_styles_xml_bytes());
     }
 
@@ -898,6 +914,10 @@ fn build_parts(
             true
         };
 
+        let local_to_global_dxf = cf_dxfs
+            .local_to_global_by_sheet
+            .get(&sheet.id)
+            .map(|v| v.as_slice());
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
             sheet_meta,
@@ -906,6 +926,7 @@ fn build_parts(
             &shared_string_lookup,
             &style_to_xf,
             &sheet_plan.cell_meta_sheet_ids,
+            local_to_global_dxf,
             changed_formula_cells,
         )?;
         let has_drawings = !sheet.drawings.is_empty();
@@ -5070,6 +5091,7 @@ fn write_worksheet_xml(
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    local_to_global_dxf: Option<&[u32]>,
     changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
@@ -5088,6 +5110,7 @@ fn write_worksheet_xml(
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
     let cols_xml = render_cols(sheet, None);
     let sheet_protection_xml = render_sheet_protection(&sheet.sheet_protection, None);
+    let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
     let sheet_data_xml = render_sheet_data(
         doc,
         sheet_meta,
@@ -5132,8 +5155,102 @@ fn write_worksheet_xml(
     if !sheet_protection_xml.is_empty() {
         xml.push_str(&sheet_protection_xml);
     }
+    if !conditional_formatting_xml.is_empty() {
+        xml.push_str(&conditional_formatting_xml);
+    }
     xml.push_str("</worksheet>");
     Ok(xml.into_bytes())
+}
+
+fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<&[u32]>) -> String {
+    if sheet.conditional_formatting_rules.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for rule in &sheet.conditional_formatting_rules {
+        let Some(cf_rule_xml) = render_cf_rule(rule, local_to_global_dxf) else {
+            continue;
+        };
+
+        let sqref = rule
+            .applies_to
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if sqref.is_empty() {
+            continue;
+        }
+
+        out.push_str(r#"<conditionalFormatting sqref=""#);
+        out.push_str(&escape_attr(&sqref));
+        out.push_str(r#"">"#);
+        out.push_str(&cf_rule_xml);
+        out.push_str("</conditionalFormatting>");
+    }
+
+    out
+}
+
+fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<String> {
+    let mut attrs = String::new();
+
+    if let Some(id) = rule.id.as_deref() {
+        attrs.push_str(r#" id=""#);
+        attrs.push_str(&escape_attr(id));
+        attrs.push('"');
+    }
+
+    attrs.push_str(&format!(r#" priority="{}""#, rule.priority));
+
+    if rule.stop_if_true {
+        attrs.push_str(r#" stopIfTrue="1""#);
+    }
+
+    // Remap per-sheet `dxf_id` to the workbook-global `dxfs` index table. Best-effort:
+    // out-of-bounds indices are emitted as no `dxfId` attribute.
+    let global_dxf_id = rule
+        .dxf_id
+        .and_then(|local| local_to_global_dxf?.get(local as usize).copied());
+    if let Some(global) = global_dxf_id {
+        attrs.push_str(&format!(r#" dxfId="{}""#, global));
+    }
+
+    let (type_attr, body, extra_attrs) = match &rule.kind {
+        CfRuleKind::Expression { formula } => (
+            "expression",
+            format!(r#"<formula>{}</formula>"#, escape_text(formula)),
+            String::new(),
+        ),
+        CfRuleKind::CellIs { operator, formulas } => {
+            let op = cell_is_operator_attr(*operator);
+            let mut inner = String::new();
+            for f in formulas {
+                inner.push_str(&format!(r#"<formula>{}</formula>"#, escape_text(f)));
+            }
+            ("cellIs", inner, format!(r#" operator="{op}""#))
+        }
+        // Best-effort: skip rules we can't currently serialize.
+        _ => return None,
+    };
+
+    Some(format!(
+        r#"<cfRule type="{type_attr}"{extra_attrs}{attrs}>{body}</cfRule>"#
+    ))
+}
+
+fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
+    match op {
+        CellIsOperator::GreaterThan => "greaterThan",
+        CellIsOperator::GreaterThanOrEqual => "greaterThanOrEqual",
+        CellIsOperator::LessThan => "lessThan",
+        CellIsOperator::LessThanOrEqual => "lessThanOrEqual",
+        CellIsOperator::Equal => "equal",
+        CellIsOperator::NotEqual => "notEqual",
+        CellIsOperator::Between => "between",
+        CellIsOperator::NotBetween => "notBetween",
+    }
 }
 
 fn render_sheet_protection(protection: &SheetProtection, prefix: Option<&str>) -> String {

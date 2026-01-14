@@ -228,19 +228,21 @@ impl StylesPart {
             .collect()
     }
 
-    /// Replace the differential formats (`<dxfs>`) table used by conditional formatting.
+    /// Replace the `styles.xml` `<dxfs>` table used by conditional formatting rules.
     ///
-    /// `dxfs` is the global table referenced from worksheet conditional formatting rules via
-    /// `cfRule/@dxfId`.
+    /// XLSX stores a single global `<dxfs>` table in `xl/styles.xml`. Individual worksheet
+    /// conditional formatting rules reference these via `<cfRule dxfId="...">`.
     ///
-    /// This preserves all other style structures (fonts/fills/borders/cellXfs/etc) unchanged.
+    /// Note: this writer only serializes the subset of differential formatting currently modeled
+    /// in [`formula_model::CfStyleOverride`] (font bold/italic/color + fill fgColor). Any
+    /// additional content previously present in `<dxfs>` will be dropped if this method is used.
     pub fn set_conditional_formatting_dxfs(&mut self, dxfs: &[CfStyleOverride]) {
         let dxfs_el = ensure_styles_child(&mut self.root, "dxfs");
-
         dxfs_el.children.clear();
-        dxfs_el
-            .children
-            .extend(dxfs.iter().map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))));
+        dxfs_el.children.extend(
+            dxfs.iter()
+                .map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))),
+        );
         dxfs_el.set_attr("count", dxfs.len().to_string());
     }
 
@@ -431,7 +433,8 @@ fn build_conditional_formatting_dxf(style: &CfStyleOverride) -> XmlElement {
         dxf.children.push(XmlNode::Element(fill));
     }
 
-    if style.font_color.is_some() || style.bold.is_some() || style.italic.is_some() {
+    let has_font = style.bold.is_some() || style.italic.is_some() || style.font_color.is_some();
+    if has_font {
         let mut font = empty_element("font");
         if let Some(bold) = style.bold {
             if bold {
@@ -457,7 +460,6 @@ fn build_conditional_formatting_dxf(style: &CfStyleOverride) -> XmlElement {
         }
         dxf.children.push(XmlNode::Element(font));
     }
-
     dxf
 }
 
