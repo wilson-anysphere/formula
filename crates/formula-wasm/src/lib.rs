@@ -11,6 +11,7 @@ use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     iter_locales, ValueLocaleConfig, EN_US,
 };
+use formula_engine::metadata::FormatRun as EngineFormatRun;
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
@@ -120,6 +121,14 @@ fn get_js_prop(obj: &Object, key: &str) -> Option<JsValue> {
         .filter(|v| !v.is_null() && !v.is_undefined())
 }
 
+fn has_js_prop(obj: &Object, key: &str) -> bool {
+    Reflect::has(obj, &JsValue::from_str(key)).unwrap_or(false)
+}
+
+fn get_js_prop_raw(obj: &Object, key: &str) -> Option<JsValue> {
+    Reflect::get(obj, &JsValue::from_str(key)).ok()
+}
+
 fn get_js_bool(obj: &Object, keys: &[&str]) -> Option<bool> {
     for key in keys {
         let value = match get_js_prop(obj, key) {
@@ -211,11 +220,13 @@ fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
 
 fn parse_protection_from_js(value: &JsValue) -> Option<Protection> {
     let obj = js_value_to_object(value)?;
+    let explicit_locked_clear = has_js_prop(&obj, "locked")
+        && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null());
     let locked = get_js_bool(&obj, &["locked"]).unwrap_or(true);
     let hidden = get_js_bool(&obj, &["hidden"]).unwrap_or(false);
 
     // Avoid interning redundant "default" protection structs; Excel default is locked.
-    if locked && !hidden {
+    if locked && !hidden && !explicit_locked_clear {
         return None;
     }
 
@@ -276,17 +287,54 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
         .dyn_into::<Object>()
         .map_err(|_| js_err("internStyle: style must be an object"))?;
 
-    let number_format = get_js_string(&obj, &["numberFormat", "number_format"]).and_then(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return None;
+    let number_format = {
+        // DocumentController style objects use explicit `null` values to mean "clear this field
+        // back to default". Preserve that behavior by encoding an explicit default number format so
+        // the style can override lower precedence layers.
+        //
+        // Prefer camelCase `numberFormat` overrides over snake_case `number_format` imported values.
+        let mut out: Option<String> = None;
+        let mut set = false;
+        if has_js_prop(&obj, "numberFormat") {
+            if let Some(value) = get_js_prop_raw(&obj, "numberFormat") {
+                if value.is_null() {
+                    out = Some("General".to_string());
+                    set = true;
+                } else if let Some(raw) = value.as_string() {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        out = Some("General".to_string());
+                        set = true;
+                    } else if trimmed.eq_ignore_ascii_case("general") {
+                        // Excel treats "General" as the default.
+                        out = None;
+                        set = true;
+                    } else {
+                        out = Some(raw);
+                        set = true;
+                    }
+                }
+            }
         }
-        // Excel treats "General" as the default.
-        if trimmed.eq_ignore_ascii_case("general") {
-            return None;
+        if !set && has_js_prop(&obj, "number_format") {
+            if let Some(value) = get_js_prop_raw(&obj, "number_format") {
+                if value.is_null() {
+                    out = Some("General".to_string());
+                } else if let Some(raw) = value.as_string() {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        out = Some("General".to_string());
+                    } else if trimmed.eq_ignore_ascii_case("general") {
+                        // Excel treats "General" as the default.
+                        out = None;
+                    } else {
+                        out = Some(raw);
+                    }
+                }
+            }
         }
-        Some(raw)
-    });
+        out
+    };
 
     let top_level_strike = get_js_bool(&obj, &["strike"]);
     let font = get_js_prop(&obj, "font")
@@ -305,12 +353,14 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
             // Treat those as an alias for `{ protection: { ... } }`.
             let locked = get_js_bool(&obj, &["locked"]);
             let hidden = get_js_bool(&obj, &["hidden"]);
-            if locked.is_none() && hidden.is_none() {
+            let explicit_locked_clear = has_js_prop(&obj, "locked")
+                && get_js_prop_raw(&obj, "locked").is_some_and(|v| v.is_null());
+            if locked.is_none() && hidden.is_none() && !explicit_locked_clear {
                 return None;
             }
             let locked = locked.unwrap_or(true);
             let hidden = hidden.unwrap_or(false);
-            if locked && !hidden {
+            if locked && !hidden && !explicit_locked_clear {
                 None
             } else {
                 Some(Protection { locked, hidden })
@@ -343,35 +393,61 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
     };
 
     // --- number_format ---
-    if let Some(fmt) = obj
-        .get("numberFormat")
-        .or_else(|| obj.get("number_format"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        // Excel treats "General" as the default.
-        if fmt.eq_ignore_ascii_case("general") {
-            out.number_format = None;
-        } else {
-            out.number_format = Some(fmt.to_string());
+    // Mirror `parse_style_from_js` behavior:
+    // - camelCase `numberFormat` overrides snake_case `number_format`
+    // - explicit null / empty-string means "clear" -> encode explicit General default so higher
+    //   precedence layers override lower ones.
+    if obj.contains_key("numberFormat") {
+        match obj.get("numberFormat") {
+            Some(JsonValue::Null) => out.number_format = Some("General".to_string()),
+            Some(v) => {
+                if let Some(raw) = v.as_str() {
+                    let fmt = raw.trim();
+                    if fmt.is_empty() {
+                        out.number_format = Some("General".to_string());
+                    } else if fmt.eq_ignore_ascii_case("general") {
+                        out.number_format = None;
+                    } else {
+                        out.number_format = Some(raw.to_string());
+                    }
+                }
+            }
+            None => {}
+        }
+    } else if obj.contains_key("number_format") {
+        match obj.get("number_format") {
+            Some(JsonValue::Null) => out.number_format = Some("General".to_string()),
+            Some(v) => {
+                if let Some(raw) = v.as_str() {
+                    let fmt = raw.trim();
+                    if fmt.is_empty() {
+                        out.number_format = Some("General".to_string());
+                    } else if fmt.eq_ignore_ascii_case("general") {
+                        out.number_format = None;
+                    } else {
+                        out.number_format = Some(raw.to_string());
+                    }
+                }
+            }
+            None => {}
         }
     }
 
     // --- protection ---
     let protection = obj.get("protection").and_then(|v| v.as_object());
-    let locked = protection
+    let locked_value = protection
         .and_then(|p| p.get("locked"))
-        .or_else(|| obj.get("locked"))
-        .and_then(|v| v.as_bool());
-    let hidden = protection
+        .or_else(|| obj.get("locked"));
+    let hidden_value = protection
         .and_then(|p| p.get("hidden"))
-        .or_else(|| obj.get("hidden"))
-        .and_then(|v| v.as_bool());
-    if locked.is_some() || hidden.is_some() {
+        .or_else(|| obj.get("hidden"));
+    let explicit_locked_clear = locked_value.is_some_and(|v| v.is_null());
+    let locked = locked_value.and_then(|v| v.as_bool());
+    let hidden = hidden_value.and_then(|v| v.as_bool());
+    if locked.is_some() || hidden.is_some() || explicit_locked_clear {
         let locked = locked.unwrap_or(true);
         let hidden = hidden.unwrap_or(false);
-        if locked && !hidden {
+        if locked && !hidden && !explicit_locked_clear {
             out.protection = None;
         } else {
             out.protection = Some(Protection { locked, hidden });
@@ -380,23 +456,31 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
 
     // --- alignment.horizontal ---
     if let Some(alignment) = obj.get("alignment").and_then(|v| v.as_object()) {
-        let horizontal = alignment
-            .get("horizontal")
-            .and_then(|v| v.as_str())
-            .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
-                "general" => Some(HorizontalAlignment::General),
-                "left" => Some(HorizontalAlignment::Left),
-                "center" | "centre" => Some(HorizontalAlignment::Center),
-                "right" => Some(HorizontalAlignment::Right),
-                "fill" => Some(HorizontalAlignment::Fill),
-                "justify" => Some(HorizontalAlignment::Justify),
-                _ => None,
-            });
-        if horizontal.is_some() {
-            out.alignment = Some(Alignment {
-                horizontal,
-                ..Default::default()
-            });
+        if alignment.contains_key("horizontal") {
+            let horizontal = match alignment.get("horizontal") {
+                Some(JsonValue::Null) => Some(HorizontalAlignment::General),
+                Some(v) => v.as_str().and_then(|raw| {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        return Some(HorizontalAlignment::General);
+                    }
+                    match trimmed.to_ascii_lowercase().as_str() {
+                        "general" => Some(HorizontalAlignment::General),
+                        "left" => Some(HorizontalAlignment::Left),
+                        "center" | "centre" => Some(HorizontalAlignment::Center),
+                        "right" => Some(HorizontalAlignment::Right),
+                        "fill" => Some(HorizontalAlignment::Fill),
+                        "justify" => Some(HorizontalAlignment::Justify),
+                        _ => None,
+                    }
+                }),
+                None => None,
+            };
+            if let Some(horizontal) = horizontal {
+                let mut alignment = out.alignment.unwrap_or_default();
+                alignment.horizontal = Some(horizontal);
+                out.alignment = Some(alignment);
+            }
         }
     }
 
@@ -8373,15 +8457,50 @@ mod tests {
     }
 
     #[test]
+    fn style_json_to_model_style_treats_null_number_format_as_explicit_general_override() {
+        let style = style_json_to_model_style(&json!({ "numberFormat": null }));
+        assert_eq!(style.number_format.as_deref(), Some("General"));
+    }
+
+    #[test]
+    fn style_json_to_model_style_prefers_null_number_format_over_imported_snake_case() {
+        let style = style_json_to_model_style(&json!({
+            "number_format": "0.00",
+            "numberFormat": null,
+        }));
+        assert_eq!(style.number_format.as_deref(), Some("General"));
+    }
+
+    #[test]
     fn style_json_to_model_style_accepts_ui_protection_locked() {
         let style = style_json_to_model_style(&json!({ "protection": { "locked": false } }));
         assert_eq!(style.protection.as_ref().map(|p| p.locked), Some(false));
     }
 
     #[test]
+    fn style_json_to_model_style_treats_null_locked_as_explicit_default_override() {
+        // Explicit null clears a lower-precedence `locked=false` back to Excel's default locked=true.
+        let style = style_json_to_model_style(&json!({ "locked": null }));
+        assert_eq!(style.protection, Some(Protection::default()));
+    }
+
+    #[test]
     fn style_json_to_model_style_accepts_top_level_locked() {
         let style = style_json_to_model_style(&json!({ "locked": false }));
         assert_eq!(style.protection.as_ref().map(|p| p.locked), Some(false));
+    }
+
+    #[test]
+    fn style_json_to_model_style_treats_null_alignment_horizontal_as_general_override() {
+        let style = style_json_to_model_style(&json!({ "alignment": { "horizontal": null } }));
+        assert_eq!(
+            style
+                .alignment
+                .as_ref()
+                .and_then(|a| a.horizontal)
+                .unwrap_or(HorizontalAlignment::Left),
+            HorizontalAlignment::General
+        );
     }
 
     #[test]

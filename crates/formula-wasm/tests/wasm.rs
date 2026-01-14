@@ -57,6 +57,93 @@ fn to_js_value<T: serde::Serialize>(value: &T) -> JsValue {
         .expect("failed to serialize JS value")
 }
 
+#[wasm_bindgen_test]
+fn style_number_format_null_clears_lower_layers_for_cell_format() {
+    let mut wb = WasmWorkbook::new();
+
+    let row_style_id = wb
+        .intern_style(to_js_value(&json!({ "numberFormat": "0.00" })))
+        .unwrap();
+    wb.set_row_style_id(DEFAULT_SHEET.to_string(), 0, Some(row_style_id));
+
+    let clear_style_id = wb
+        .intern_style(to_js_value(&json!({ "numberFormat": JsonValue::Null })))
+        .unwrap();
+    assert_ne!(clear_style_id, 0, "expected explicit clear style to intern");
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), clear_style_id)
+        .unwrap();
+
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str(r#"=CELL("format",A1)"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, json!("G"));
+}
+
+#[wasm_bindgen_test]
+fn style_alignment_horizontal_null_clears_lower_layers_for_cell_prefix() {
+    let mut wb = WasmWorkbook::new();
+
+    let row_style_id = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": "right" } })))
+        .unwrap();
+    wb.set_row_style_id(DEFAULT_SHEET.to_string(), 1, Some(row_style_id));
+
+    let clear_style_id = wb
+        .intern_style(to_js_value(&json!({ "alignment": { "horizontal": JsonValue::Null } })))
+        .unwrap();
+    assert_ne!(clear_style_id, 0, "expected explicit clear style to intern");
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A2".to_string(), clear_style_id)
+        .unwrap();
+
+    wb.set_cell(
+        "B2".to_string(),
+        JsValue::from_str(r#"=CELL("prefix",A2)"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b2_js = wb.get_cell("B2".to_string(), None).unwrap();
+    let b2: CellData = serde_wasm_bindgen::from_value(b2_js).unwrap();
+    assert_eq!(b2.value, json!(""));
+}
+
+#[wasm_bindgen_test]
+fn style_locked_null_clears_lower_layers_for_cell_protect() {
+    let mut wb = WasmWorkbook::new();
+
+    let row_style_id = wb
+        .intern_style(to_js_value(&json!({ "locked": false })))
+        .unwrap();
+    wb.set_row_style_id(DEFAULT_SHEET.to_string(), 2, Some(row_style_id));
+
+    let clear_style_id = wb
+        .intern_style(to_js_value(&json!({ "locked": JsonValue::Null })))
+        .unwrap();
+    assert_ne!(clear_style_id, 0, "expected explicit clear style to intern");
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A3".to_string(), clear_style_id)
+        .unwrap();
+
+    wb.set_cell(
+        "B3".to_string(),
+        JsValue::from_str(r#"=CELL("protect",A3)"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b3_js = wb.get_cell("B3".to_string(), None).unwrap();
+    let b3: CellData = serde_wasm_bindgen::from_value(b3_js).unwrap();
+    assert_json_number(&b3.value, 1.0);
+}
+
 #[derive(Debug, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct PartialParseResult {
