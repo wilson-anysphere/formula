@@ -39,7 +39,7 @@ Usage:
   node scripts/release-smoke-test.mjs --tag vX.Y.Z [--repo owner/name] [--token <token>] [--local-bundles] [expectations...]
 
 Options:
-  --tag            Required. Release tag (example: v0.2.3).
+  --tag            Release tag (example: v0.2.3). Defaults to $GITHUB_REF_NAME if set.
   --repo           GitHub repo in owner/name form. Defaults to:
                      - $GITHUB_REPOSITORY (if set)
                      - or inferred from git remote "origin" (if possible)
@@ -142,15 +142,26 @@ function parseArgs(argv) {
       out.expectFlags = list;
       continue;
     }
-    if (arg === "--tag" || arg === "--repo" || arg === "--token") {
-      const value = argv[i + 1];
+    if (
+      arg === "--tag" ||
+      arg.startsWith("--tag=") ||
+      arg === "--repo" ||
+      arg.startsWith("--repo=") ||
+      arg === "--token" ||
+      arg.startsWith("--token=")
+    ) {
+      const value =
+        arg === "--tag" || arg === "--repo" || arg === "--token"
+          ? argv[i + 1]
+          : arg.slice(arg.indexOf("=") + 1);
       if (!value || value.startsWith("-")) {
-        die(`Missing value for ${arg}.\n\nRun with --help for usage.`);
+        const flag = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+        die(`Missing value for ${flag}.\n\nRun with --help for usage.`);
       }
-      if (arg === "--tag") out.tag = value;
-      if (arg === "--repo") out.repo = value;
-      if (arg === "--token") out.token = value;
-      i++;
+      if (arg === "--tag" || arg.startsWith("--tag=")) out.tag = value;
+      if (arg === "--repo" || arg.startsWith("--repo=")) out.repo = value;
+      if (arg === "--token" || arg.startsWith("--token=")) out.token = value;
+      if (arg === "--tag" || arg === "--repo" || arg === "--token") i++;
       continue;
     }
     die(`Unknown argument: ${arg}\n\nRun with --help for usage.`);
@@ -559,10 +570,13 @@ async function main() {
     return;
   }
 
-  const tag = typeof args.tag === "string" ? args.tag : "";
+  const tag =
+    typeof args.tag === "string" && args.tag.trim().length > 0
+      ? args.tag.trim()
+      : (process.env.GITHUB_REF_NAME ?? "").trim();
   if (!tag) {
     printUsage();
-    die("\nError: --tag is required.");
+    die("\nError: --tag is required (or set GITHUB_REF_NAME).");
   }
 
   const explicitRepo = typeof args.repo === "string" ? normalizeRepo(args.repo) : "";
