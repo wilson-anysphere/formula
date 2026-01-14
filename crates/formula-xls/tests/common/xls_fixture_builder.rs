@@ -1764,6 +1764,32 @@ pub fn build_page_setup_sanitized_sheet_name_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing two sheets where sanitizing one invalid sheet name
+/// collides with another sheet's original name.
+///
+/// Sheet 0: `Bad:Name` (invalid, sanitizes to `Bad_Name`). Includes distinctive page setup and
+/// manual breaks (same payload as [`build_page_setup_sanitized_sheet_name_fixture_xls`]).
+///
+/// Sheet 1: `Bad_Name` (valid, collides with sheet 0's sanitized name and is deduped to
+/// `Bad_Name (2)`). Includes *different* page setup and manual breaks.
+///
+/// This is used to ensure BIFF-derived print settings are applied by sheet identity (or final
+/// sanitized name) rather than the original BIFF BoundSheet name. A buggy implementation that
+/// applies print settings by the BIFF name would mis-attach sheet 1's settings to sheet 0.
+pub fn build_page_setup_sanitized_sheet_name_collision_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_sanitized_sheet_name_collision_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -1821,6 +1847,75 @@ fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
+}
+
+fn build_page_setup_sanitized_sheet_name_collision_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One default cell XF (General).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Sheet 0: invalid BIFF name (contains ':') that sanitizes to `Bad_Name`.
+    let boundsheet0_start = globals.len();
+    let mut boundsheet0 = Vec::<u8>::new();
+    boundsheet0.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet0.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet0, "Bad:Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet0);
+    let boundsheet0_offset_pos = boundsheet0_start + 4;
+
+    // Sheet 1: already has the sanitized base name, will be deduped to `Bad_Name (2)`.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Bad_Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams ------------------------------------------------------
+    let sheet0_offset = globals.len();
+    let sheet0 = build_page_setup_sanitized_sheet_name_sheet_stream(xf_general);
+    globals[boundsheet0_offset_pos..boundsheet0_offset_pos + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet0);
+
+    let sheet1_offset = globals.len();
+    let sheet1 = build_page_setup_sheet_stream(
+        xf_general,
+        PageSetupFixtureSheet {
+            paper_size: 1,
+            landscape: false,
+            scale_percent: 77,
+            header_margin: 0.11,
+            footer_margin: 0.22,
+            left_margin: 5.55,
+            right_margin: 6.66,
+            top_margin: 7.77,
+            bottom_margin: 8.88,
+            row_break_after: 2,
+            col_break_after: 1,
+            cell_value: 2.0,
+        },
+    );
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet1);
+
+    globals
 }
 
 /// Build a BIFF8 `.xls` fixture with worksheet page setup records designed to exercise print
