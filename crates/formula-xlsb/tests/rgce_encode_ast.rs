@@ -50,6 +50,52 @@ fn ast_encoder_roundtrips_area_ref() {
 }
 
 #[test]
+fn ast_encoder_preserves_mixed_abs_row_flags_when_rows_equal() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A1:B$1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x25, // PtgArea
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0x00, 0x00, 0x00, 0x00, // rowLast=0
+            0x00, 0xC0, // colFirst=A (relative row/col)
+            0x01, 0x80, // colLast=B (absolute row, relative col)
+        ]
+    );
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1:B$1");
+}
+
+#[test]
+fn ast_encoder_preserves_mixed_abs_col_flags_when_cols_equal() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A1:$A$2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x25, // PtgArea
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0x01, 0x00, 0x00, 0x00, // rowLast=1
+            0x00, 0xC0, // colFirst=A (relative row/col)
+            0x00, 0x00, // colLast=$A (absolute row/col)
+        ]
+    );
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1:$A$2");
+}
+
+#[test]
 fn ast_encoder_roundtrips_intersection_operator() {
     let ctx = WorkbookContext::default();
 

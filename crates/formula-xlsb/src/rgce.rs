@@ -3698,10 +3698,44 @@ mod encode_ast {
         let col_first = a.col.min(b.col);
         let col_last = a.col.max(b.col);
 
-        let abs_row_first = if a.row <= b.row { a.abs_row } else { b.abs_row };
-        let abs_row_last = if a.row >= b.row { a.abs_row } else { b.abs_row };
-        let abs_col_first = if a.col <= b.col { a.abs_col } else { b.abs_col };
-        let abs_col_last = if a.col >= b.col { a.abs_col } else { b.abs_col };
+        // Preserve absolute flags when the input endpoints are not in canonical top-left/bottom-right
+        // order, and when one dimension is degenerate but still uses mixed abs markers.
+        let rows_equal = a.row == b.row;
+        let cols_equal = a.col == b.col;
+        let (row_first_from_a, col_first_from_a, row_last_from_a, col_last_from_a) =
+            if rows_equal && cols_equal {
+                (true, true, false, false)
+            } else if rows_equal {
+                let col_first_from_a = a.col < b.col;
+                let col_last_from_a = a.col > b.col;
+                (
+                    col_first_from_a,
+                    col_first_from_a,
+                    col_last_from_a,
+                    col_last_from_a,
+                )
+            } else if cols_equal {
+                let row_first_from_a = a.row < b.row;
+                let row_last_from_a = a.row > b.row;
+                (
+                    row_first_from_a,
+                    row_first_from_a,
+                    row_last_from_a,
+                    row_last_from_a,
+                )
+            } else {
+                (
+                    a.row < b.row,
+                    a.col < b.col,
+                    a.row > b.row,
+                    a.col > b.col,
+                )
+            };
+
+        let abs_row_first = if row_first_from_a { a.abs_row } else { b.abs_row };
+        let abs_col_first = if col_first_from_a { a.abs_col } else { b.abs_col };
+        let abs_row_last = if row_last_from_a { a.abs_row } else { b.abs_row };
+        let abs_col_last = if col_last_from_a { a.abs_col } else { b.abs_col };
 
         match sheet {
             SheetSpec::Current => {
@@ -4668,12 +4702,54 @@ fn emit_area_fields(a: &CellRef, b: &CellRef, out: &mut Vec<u8>) {
     // in the token stream is still the top-left corner (min row/col) and the "last" corner is the
     // bottom-right (max row/col).
     //
-    // Preserve absolute flags by selecting them from whichever input corner contributed the
-    // corresponding row/col coordinate, independently for row and col.
-    let abs_row_first = if a.row <= b.row { a.abs_row } else { b.abs_row };
-    let abs_row_last = if a.row >= b.row { a.abs_row } else { b.abs_row };
-    let abs_col_first = if a.col <= b.col { a.abs_col } else { b.abs_col };
-    let abs_col_last = if a.col >= b.col { a.abs_col } else { b.abs_col };
+    // Preserve absolute flags by selecting them from the appropriate input reference for each
+    // corner coordinate:
+    // - For cross-corner ranges (e.g. `B$1:$A2`), the top-left corner combines the smaller row from
+    //   one endpoint with the smaller column from the other.
+    // - For degenerate ranges where one dimension is equal (e.g. `A1:B$1`, `A1:$A$2`), Excel can
+    //   still preserve mixed absolute markers, so use the other dimension as a stable tie-breaker.
+    let rows_equal = a.row == b.row;
+    let cols_equal = a.col == b.col;
+    let (row_first_from_a, col_first_from_a, row_last_from_a, col_last_from_a) =
+        if rows_equal && cols_equal {
+            // Single-cell area (A1:A1): preserve both endpoints' flags if they differ by assigning
+            // the first corner to `a` and the last corner to `b`.
+            (true, true, false, false)
+        } else if rows_equal {
+            // Horizontal range: use column ordering to decide which endpoint supplies the row flags.
+            let col_first_from_a = a.col < b.col;
+            let col_last_from_a = a.col > b.col;
+            (
+                col_first_from_a,
+                col_first_from_a,
+                col_last_from_a,
+                col_last_from_a,
+            )
+        } else if cols_equal {
+            // Vertical range: use row ordering to decide which endpoint supplies the column flags.
+            let row_first_from_a = a.row < b.row;
+            let row_last_from_a = a.row > b.row;
+            (
+                row_first_from_a,
+                row_first_from_a,
+                row_last_from_a,
+                row_last_from_a,
+            )
+        } else {
+            // General rectangle: rows/cols both differ, so each dimension can be resolved
+            // independently.
+            (
+                a.row < b.row,
+                a.col < b.col,
+                a.row > b.row,
+                a.col > b.col,
+            )
+        };
+
+    let abs_row_first = if row_first_from_a { a.abs_row } else { b.abs_row };
+    let abs_col_first = if col_first_from_a { a.abs_col } else { b.abs_col };
+    let abs_row_last = if row_last_from_a { a.abs_row } else { b.abs_row };
+    let abs_col_last = if col_last_from_a { a.abs_col } else { b.abs_col };
 
     out.extend_from_slice(&row_first.to_le_bytes());
     out.extend_from_slice(&row_last.to_le_bytes());
@@ -5187,9 +5263,12 @@ impl<'a> FormulaParser<'a> {
             }
             Some(':') => {
                 self.next_char();
-                let second_sheet = self
-                    .parse_sheet_name()?
-                    .ok_or_else(|| "expected sheet name after ':'".to_string())?;
+                let Some(second_sheet) = self.parse_sheet_name()? else {
+                    // If we can't parse a second sheet name, treat this as a normal `:` range
+                    // operator (e.g. `A1:$A$2`) rather than a sheet span.
+                    self.pos = start;
+                    return Ok(None);
+                };
                 self.skip_ws();
                 if self.peek_char() != Some('!') {
                     self.pos = start;

@@ -122,6 +122,25 @@ fn legacy_encoder_encodes_reordered_row_range_and_preserves_absolute_flags() {
 }
 
 #[test]
+fn legacy_encoder_preserves_mixed_abs_row_flags_when_rows_equal() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context("=A1:B$1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "A1:B$1");
+}
+
+#[test]
+fn legacy_encoder_preserves_mixed_abs_col_flags_when_cols_equal() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context("=A1:$A$2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "A1:$A$2");
+}
+
+#[test]
 fn legacy_encoder_roundtrips_implicit_intersection_on_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyNamedRange", 1);
