@@ -371,9 +371,10 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/cargo-tauri
-          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-tauri.
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
-            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Install pinned tauri-cli (cargo tauri)
         if: steps.cargo-tauri-cache.outputs.cache-hit != 'true'
         run: bash scripts/cargo_agent.sh install tauri-cli --version "${TAURI_CLI_VERSION}" --locked --force
