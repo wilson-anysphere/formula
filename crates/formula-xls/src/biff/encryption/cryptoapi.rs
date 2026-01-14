@@ -1407,4 +1407,169 @@ mod tests {
             .expect("decrypt");
         assert_eq!(encrypted, plain);
     }
+
+    #[test]
+    fn decrypt_cryptoapi_legacy_respects_boundsheet_and_never_encrypted_records() {
+        // Legacy CryptoAPI RC4 in BIFF8 has a few record-specific rules:
+        // - INTERFACEHDR is never encrypted.
+        // - BoundSheet8.lbPlyPos (first 4 bytes) is never encrypted.
+        //
+        // This test ensures those exceptions are honored and that "40-bit" keys padded to 16 bytes
+        // (the Excel/WinCrypt effective-key-length behavior) decrypt correctly.
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+            let mut out = Vec::with_capacity(4 + payload.len());
+            out.extend_from_slice(&record_id.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            out.extend_from_slice(payload);
+            out
+        }
+
+        fn dummy_payload(len: usize, seed: u8) -> Vec<u8> {
+            (0..len)
+                .map(|i| {
+                    seed.wrapping_add((i as u8).wrapping_mul(31))
+                        .wrapping_add((i >> 8) as u8)
+                })
+                .collect()
+        }
+
+        // Deterministic salt/verifier for reproducibility.
+        let salt: [u8; 16] = core::array::from_fn(|i| 0x22u8.wrapping_add(i as u8));
+        let verifier_plain: [u8; 16] = core::array::from_fn(|i| 0xB0u8.wrapping_add(i as u8));
+        let verifier_hash_plain = sha1_bytes(&[&verifier_plain]);
+
+        // Encrypt verifier using the WinCrypt padded-16-byte representation for 40-bit keys.
+        let key_material =
+            derive_key_material_legacy(CryptoApiHashAlg::Sha1, password, &salt).expect("kdf");
+        let key0_padded =
+            derive_block_key(CryptoApiHashAlg::Sha1, key_material.as_slice(), 0, 5, true);
+        let mut rc4 = Rc4::new(&key0_padded[..]);
+        drop(key0_padded);
+        let mut verifier_buf = [0u8; 36];
+        verifier_buf[..16].copy_from_slice(&verifier_plain);
+        verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+        rc4.apply_keystream(&mut verifier_buf);
+        let encrypted_verifier: [u8; 16] = verifier_buf[..16].try_into().unwrap();
+        let encrypted_verifier_hash: [u8; 20] = verifier_buf[16..].try_into().unwrap();
+
+        // EncryptionHeader (32 bytes, no CSP name).
+        let mut enc_header = Vec::<u8>::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+        enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // KeySize bits (0 => 40-bit)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+        // EncryptionVerifier.
+        let mut enc_verifier = Vec::<u8>::new();
+        enc_verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        enc_verifier.extend_from_slice(&salt);
+        enc_verifier.extend_from_slice(&encrypted_verifier);
+        enc_verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
+        enc_verifier.extend_from_slice(&encrypted_verifier_hash);
+
+        // FILEPASS payload (legacy layout B).
+        let mut filepass_payload = Vec::<u8>::new();
+        filepass_payload.extend_from_slice(&super::super::BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes()); // wEncryptionType
+        filepass_payload
+            .extend_from_slice(&super::super::BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes()); // wEncryptionInfo (0x0004)
+        filepass_payload.extend_from_slice(&4u16.to_le_bytes()); // vMajor
+        filepass_payload.extend_from_slice(&2u16.to_le_bytes()); // vMinor
+        filepass_payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        filepass_payload.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        filepass_payload.extend_from_slice(&enc_header);
+        filepass_payload.extend_from_slice(&enc_verifier);
+
+        // Build plaintext workbook stream. Include:
+        // - INTERFACEHDR (never encrypted)
+        // - BOUNDSHEET (lbPlyPos plaintext)
+        // - Dummy record that crosses the 1024-byte rekey boundary.
+        let interface_hdr = record(
+            super::super::RECORD_INTERFACEHDR,
+            &dummy_payload(32, 0x33),
+        );
+        let boundsheet_payload = {
+            let mut payload = Vec::<u8>::new();
+            payload.extend_from_slice(&0x11223344u32.to_le_bytes()); // lbPlyPos (plaintext)
+            payload.extend_from_slice(&dummy_payload(20, 0x44)); // encrypted remainder
+            payload
+        };
+        let boundsheet = record(super::super::RECORD_BOUNDSHEET, &boundsheet_payload);
+        let r1 = record(0x00FC, &dummy_payload(1500, 0x55));
+
+        let bof = record(records::RECORD_BOF_BIFF8, &bof_payload);
+        let filepass = record(records::RECORD_FILEPASS, &filepass_payload);
+        let plain = [
+            bof,
+            filepass,
+            interface_hdr,
+            boundsheet,
+            r1,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Encrypt record payload bytes after FILEPASS using the legacy absolute-position stream
+        // mapping.
+        let encrypted_start = filepass_payload
+            .len()
+            .checked_add(4)
+            .and_then(|l| l.checked_add(bof_payload.len() + 4))
+            .unwrap();
+        let mut encrypted = plain.clone();
+
+        let mut offset = encrypted_start;
+        let mut stream_pos = encrypted_start;
+        while offset < encrypted.len() {
+            let remaining = encrypted.len().saturating_sub(offset);
+            if remaining < 4 {
+                break;
+            }
+
+            let record_id = u16::from_le_bytes([encrypted[offset], encrypted[offset + 1]]);
+            let len = u16::from_le_bytes([encrypted[offset + 2], encrypted[offset + 3]]) as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+
+            // Record headers are not encrypted but still advance the CryptoAPI RC4 stream position.
+            stream_pos += 4;
+
+            if !is_never_encrypted_record(record_id) && len > 0 {
+                if record_id == super::super::RECORD_BOUNDSHEET {
+                    if len > 4 {
+                        decrypt_range_by_offset(
+                            &mut encrypted[data_start + 4..data_end],
+                            stream_pos + 4,
+                            CryptoApiHashAlg::Sha1,
+                            key_material.as_slice(),
+                            5,
+                            true,
+                        );
+                    }
+                } else {
+                    decrypt_range_by_offset(
+                        &mut encrypted[data_start..data_end],
+                        stream_pos,
+                        CryptoApiHashAlg::Sha1,
+                        key_material.as_slice(),
+                        5,
+                        true,
+                    );
+                }
+            }
+
+            stream_pos += len;
+            offset = data_end;
+        }
+
+        crate::biff::encryption::decrypt_workbook_stream(&mut encrypted, password)
+            .expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
 }
