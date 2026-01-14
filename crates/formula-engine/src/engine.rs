@@ -3127,7 +3127,7 @@ impl Engine {
 
         for (r_off, row_values) in values.iter().enumerate() {
             let row = start_row + r_off as u32;
-            for (c_off, value) in row_values.iter().enumerate() {
+            for (c_off, raw_value) in row_values.iter().enumerate() {
                 let col = start_col + c_off as u32;
                 let addr = CellAddr { row, col };
                 let key = CellKey {
@@ -3135,19 +3135,38 @@ impl Engine {
                     addr,
                 };
 
-                // Treat `Value::Blank` as clearing the cell to preserve sheet sparsity.
-                let is_blank = *value == Value::Blank;
+                // Match `set_cell_value` semantics, including "precision as displayed" rounding for
+                // numeric literals.
+                let value = if self.calc_settings.full_precision {
+                    raw_value.clone()
+                } else {
+                    match raw_value {
+                        Value::Number(n) => {
+                            let format_pattern = self.number_format_pattern_for_rounding(key);
+                            Value::Number(self.round_number_as_displayed(*n, format_pattern))
+                        }
+                        other => other.clone(),
+                    }
+                };
+
+                // Treat `Value::Blank` as clearing cell contents. Preserve formatting for style-only
+                // cells, but keep storage sparse by pruning empty default cells.
+                let is_blank = value == Value::Blank;
 
                 let in_spill = self.spill_origin_key(key).is_some();
                 let needs_update = if in_spill {
                     true
                 } else if let Some(cell) = self.workbook.get_cell(key) {
                     if is_blank {
-                        // Preserve sparse storage semantics by removing any stored cell entry when
-                        // the requested value is blank.
-                        true
+                        cell.formula.is_some()
+                            || cell.compiled.is_some()
+                            || cell.phonetic.is_some()
+                            || cell.value != Value::Blank
                     } else {
-                        cell.formula.is_some() || cell.compiled.is_some() || cell.value != *value
+                        cell.formula.is_some()
+                            || cell.compiled.is_some()
+                            || cell.phonetic.is_some()
+                            || cell.value != value
                     }
                 } else {
                     !is_blank
@@ -3170,14 +3189,36 @@ impl Engine {
                 self.dirty_reasons.remove(&key);
 
                 if is_blank {
+                    let remove_cell = {
+                        let cell = self.workbook.get_or_create_cell_mut(key);
+                        cell.value = Value::Blank;
+                        cell.phonetic = None;
+                        cell.formula = None;
+                        cell.compiled = None;
+                        cell.bytecode_compile_reason = None;
+                        cell.volatile = false;
+                        cell.thread_safe = true;
+                        cell.dynamic_deps = false;
+
+                        // Preserve sparse semantics when clearing contents:
+                        // - blank + no formula + default style => remove the cell entry entirely
+                        // - otherwise keep the entry (e.g. style-only cell)
+                        cell.value == Value::Blank
+                            && cell.formula.is_none()
+                            && cell.style_id == 0
+                            && cell.phonetic.is_none()
+                            && cell.number_format.is_none()
+                    };
                     if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
-                        sheet_state.cells.remove(&addr);
                         sheet_state.origin_dependents.remove(&addr);
+                        if remove_cell {
+                            sheet_state.cells.remove(&addr);
+                        }
                     }
                 } else {
                     {
                         let cell = self.workbook.get_or_create_cell_mut(key);
-                        cell.value = value.clone();
+                        cell.value = value;
                         cell.phonetic = None;
                         cell.formula = None;
                         cell.compiled = None;
@@ -3189,7 +3230,7 @@ impl Engine {
                     if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
                         sheet_state.origin_dependents.remove(&addr);
                     }
-                }
+                };
 
                 // Mark downstream dependents dirty.
                 self.mark_dirty_dependents_with_reasons(key);
@@ -16134,6 +16175,53 @@ mod tests {
             engine.get_cell_value("Sheet1", "B2"),
             Value::Text("x".to_string())
         );
+    }
+
+    #[test]
+    fn set_range_values_blank_preserves_style_only_cells() {
+        let mut engine = Engine::new();
+        let style_id = engine.intern_style(Style {
+            number_format: Some("0".to_string()),
+            ..Style::default()
+        });
+        engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
+        engine
+            .set_cell_style_id("Sheet1", "A1", style_id)
+            .unwrap();
+
+        let range = Range::from_a1("A1:A1").expect("range");
+        let values = vec![vec![Value::Blank]];
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
+        assert_eq!(
+            engine.get_cell_style_id("Sheet1", "A1").unwrap(),
+            Some(style_id)
+        );
+    }
+
+    #[test]
+    fn set_range_values_rounds_numbers_in_precision_as_displayed_mode() {
+        let mut engine = Engine::new();
+        engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::Manual,
+            full_precision: false,
+            ..CalcSettings::default()
+        });
+
+        engine
+            .set_cell_number_format("Sheet1", "A1", Some("0.00".to_string()))
+            .unwrap();
+
+        let range = Range::from_a1("A1:A1").expect("range");
+        let values = vec![vec![Value::Number(1.234)]];
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.23));
     }
 
     #[test]
