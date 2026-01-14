@@ -9626,7 +9626,11 @@ export class SpreadsheetApp {
     // (values/formulas/formatting/view changes, including edits on other sheets that may affect
     // computed values in the active sheet).
     const docUpdateVersion = this.document.updateVersion;
-    const key = `${this.sheetId}:${docUpdateVersion}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
+    // `computedValuesVersion` increments when the engine updates computed values asynchronously.
+    // Include it so tooltip samples refresh even when the underlying DocumentController data
+    // did not change (e.g. WASM engine recomputation arriving after the edit already applied).
+    const computedValuesVersion = this.computedValuesVersion;
+    const key = `${this.sheetId}:${docUpdateVersion}:${computedValuesVersion}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
     if (this.formulaRangePreviewTooltipVisible && this.formulaRangePreviewTooltipLastKey === key) {
       return;
     }
