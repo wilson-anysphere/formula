@@ -1235,6 +1235,26 @@ pub fn build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_fixture_xl
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a worksheet formula with an array constant (`PtgArray`)
+/// whose `rgcb` payload is split across a `CONTINUE` record boundary inside the UTF-16 string bytes.
+///
+/// BIFF8 inserts a 1-byte continued-segment option flags prefix (`fHighByte`) at the start of the
+/// continued fragment when a string payload crosses a `CONTINUE` boundary. The importer should skip
+/// that byte so the decoded array literal remains parseable (e.g. `{\"ABCDE\"}`).
+pub fn build_formula_array_constant_continued_rgcb_string_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_formula_array_constant_continued_rgcb_string_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -9216,6 +9236,14 @@ fn build_formula_array_constant_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("ArrayConst", &sheet_stream, 1252)
 }
 
+fn build_formula_array_constant_continued_rgcb_string_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_formula_array_constant_continued_rgcb_string_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ArrayConstStr", &sheet_stream, 1252)
+}
+
 fn build_formula_array_constant_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -9248,6 +9276,54 @@ fn build_formula_array_constant_sheet_stream(xf_cell: u16) -> Vec<u8> {
         RECORD_FORMULA,
         &formula_cell_with_rgcb(0, 0, xf_cell, 10.0, &rgce, &rgcb),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_formula_array_constant_continued_rgcb_string_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Formula: SUM({\"ABCDE\"})
+    let rgce = [
+        0x20u8, // PtgArray
+        0, 0, 0, 0, 0, 0, 0, // 7-byte header
+        0x22, // PtgFuncVar
+        0x01, // argc=1
+        0x04, 0x00, // iftab=4 (SUM)
+    ];
+
+    let rgcb = rgcb_array_constant_string_1x1("ABCDE");
+    let full_payload = formula_cell_with_rgcb(0, 0, xf_cell, 0.0, &rgce, &rgcb);
+
+    // Split the rgcb string's UTF-16 bytes across a CONTINUE boundary after 2 characters, and
+    // prefix the continued fragment with the required 1-byte option flags (fHighByte=1).
+    let formula_header_len = 22usize;
+    let rgce_len = rgce.len();
+    let rgcb_string_prefix_len = 4 /* dims */ + 1 /* ty */ + 2 /* cch */;
+    let start_utf16 = formula_header_len + rgce_len + rgcb_string_prefix_len;
+    let split_at = start_utf16 + 4; // two UTF-16 code units ("AB")
+    let (part1, rest) = full_payload.split_at(split_at);
+
+    push_record(&mut sheet, RECORD_FORMULA, part1);
+
+    let mut cont = Vec::new();
+    cont.push(1); // continued segment option flags (fHighByte=1)
+    cont.extend_from_slice(rest);
+    push_record(&mut sheet, RECORD_CONTINUE, &cont);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
@@ -19553,6 +19629,26 @@ fn rgcb_array_constant_numbers_2x2(values: &[f64; 4]) -> Vec<u8> {
     for v in *values {
         out.push(0x01); // xltypeNum
         out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+fn rgcb_array_constant_string_1x1(value: &str) -> Vec<u8> {
+    // Serialize a 1x1 string array constant payload for BIFF8 `rgcb` trailing bytes.
+    //
+    // This matches the simplified structure expected by our BIFF8 array-constant decoder:
+    //   [cols_minus1: u16][rows_minus1: u16]
+    // followed by a single element encoded as:
+    //   [xltypeStr: 0x02][cch: u16][utf16 chars...]
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let cch: u16 = units.len().try_into().unwrap_or(u16::MAX);
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1 (1 col)
+    out.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1 (1 row)
+    out.push(0x02); // xltypeStr
+    out.extend_from_slice(&cch.to_le_bytes());
+    for unit in units {
+        out.extend_from_slice(&unit.to_le_bytes());
     }
     out
 }

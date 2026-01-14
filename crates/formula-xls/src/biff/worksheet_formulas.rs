@@ -138,7 +138,7 @@ pub(crate) fn parse_biff8_formula_record(
 
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
 
     Ok(ParsedFormulaRecord {
         row,
@@ -919,7 +919,7 @@ fn parse_shrfmla_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<(Vec<u8>, 
     cursor.skip_bytes(2)?;
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -931,7 +931,7 @@ fn parse_shrfmla_with_refu_no_cuse(
     // cce
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -942,7 +942,7 @@ fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<(Vec<u8>, 
     cursor.skip_bytes(2)?;
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -953,7 +953,7 @@ fn parse_shrfmla_with_ref8_no_cuse(
     cursor.skip_bytes(8)?;
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -966,7 +966,7 @@ fn parse_array_with_refu(
     cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -979,7 +979,7 @@ fn parse_array_with_ref8(
     cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
-    let rgcb = cursor.read_remaining_bytes()?;
+    let rgcb = cursor.read_biff8_rgcb()?;
     Ok((rgce, rgcb))
 }
 
@@ -1095,6 +1095,109 @@ impl<'a> FragmentCursor<'a> {
     fn read_remaining_bytes(&mut self) -> Result<Vec<u8>, String> {
         let remaining = self.remaining_total_bytes();
         self.read_bytes(remaining)
+    }
+
+    fn read_biff8_rgcb(&mut self) -> Result<Vec<u8>, String> {
+        // `rgcb` stores additional payloads for certain ptgs (notably `PtgArray`). Like `rgce`, BIFF8
+        // allows the record payload to be continued across `CONTINUE` records. If the continuation
+        // boundary falls inside a Unicode string payload (e.g. an array constant string), Excel
+        // inserts a 1-byte continued-segment option flags prefix (`fHighByte`) at the start of the
+        // continued fragment.
+        //
+        // Best-effort parse the BIFF8 array-constant stream so we can skip that extra byte and
+        // return canonical `rgcb` bytes. If parsing fails, fall back to raw concatenation of the
+        // remaining fragments.
+        if self.remaining_total_bytes() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut cursor = self.clone();
+        if let Ok(out) = cursor.read_biff8_rgcb_best_effort() {
+            *self = cursor;
+            return Ok(out);
+        }
+
+        self.read_remaining_bytes()
+    }
+
+    fn read_biff8_rgcb_best_effort(&mut self) -> Result<Vec<u8>, String> {
+        // Mirror the `PtgArray` decoder's safety cap to avoid looping excessively on crafted
+        // workbooks. When we can't safely parse, callers fall back to raw `rgcb` bytes.
+        const MAX_ARRAY_CELLS: usize = 4096;
+
+        let mut out = Vec::with_capacity(self.remaining_total_bytes());
+
+        while self.remaining_total_bytes() > 0 {
+            // Array constant header: [cols_minus1: u16][rows_minus1: u16]
+            let cols_minus1 = self.read_u16_le()?;
+            let rows_minus1 = self.read_u16_le()?;
+            out.extend_from_slice(&cols_minus1.to_le_bytes());
+            out.extend_from_slice(&rows_minus1.to_le_bytes());
+
+            let cols = cols_minus1 as usize + 1;
+            let rows = rows_minus1 as usize + 1;
+            if cols == 0 || rows == 0 {
+                return Err("invalid array constant dimensions".to_string());
+            }
+            if cols.saturating_mul(rows) > MAX_ARRAY_CELLS {
+                return Err("array constant too large".to_string());
+            }
+
+            for _ in 0..rows.saturating_mul(cols) {
+                let ty = self.read_u8()?;
+                out.push(ty);
+                match ty {
+                    0x00 => {}
+                    0x01 => out.extend_from_slice(&self.read_bytes(8)?),
+                    0x02 => {
+                        let cch = self.read_u16_le()?;
+                        out.extend_from_slice(&cch.to_le_bytes());
+
+                        let mut remaining_chars = cch as usize;
+                        // Array constant strings are stored as a sequence of UTF-16LE (or compressed
+                        // 8-bit) chars. When they span a CONTINUE boundary, the continued fragment
+                        // begins with a 1-byte option flags prefix (fHighByte).
+                        let mut is_unicode = true;
+                        while remaining_chars > 0 {
+                            if self.remaining_in_fragment() == 0 {
+                                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
+                                continue;
+                            }
+
+                            let bytes_per_char = if is_unicode { 2 } else { 1 };
+                            let available_bytes = self.remaining_in_fragment();
+                            let available_chars = available_bytes / bytes_per_char;
+                            if available_chars == 0 {
+                                return Err(
+                                    "array constant string continuation split mid-character"
+                                        .to_string(),
+                                );
+                            }
+
+                            let take_chars = remaining_chars.min(available_chars);
+                            let take_bytes = take_chars * bytes_per_char;
+                            let bytes = self.read_exact_from_current(take_bytes)?;
+                            if is_unicode {
+                                out.extend_from_slice(bytes);
+                            } else {
+                                // Expand compressed bytes into canonical UTF-16LE (high byte 0)
+                                // so downstream `rgcb` decoders can treat the stream uniformly.
+                                for &b in bytes {
+                                    out.push(b);
+                                    out.push(0);
+                                }
+                            }
+                            remaining_chars -= take_chars;
+                        }
+                    }
+                    0x04 => out.push(self.read_u8()?),
+                    0x10 => out.push(self.read_u8()?),
+                    _ => return Err(format!("unsupported array constant element type 0x{ty:02X}")),
+                }
+            }
+        }
+
+        Ok(out)
     }
 
     fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {
