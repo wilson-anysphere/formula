@@ -7436,7 +7436,7 @@ mod tests {
                     cell_formats: Some(LimitedSheetCellFormatDeltas(vec![SheetCellFormatDelta {
                         row: 0,
                         col: 0,
-                        format,
+                        format: format.into(),
                     }])),
                 },
             )
@@ -7489,7 +7489,7 @@ mod tests {
                 &mut state,
                 ApplySheetFormattingDeltasRequest {
                     sheet_id: "Sheet1".to_string(),
-                    default_format: Some(Some(default_format)),
+                    default_format: Some(Some(default_format.into())),
                     row_formats: None,
                     col_formats: None,
                     format_runs_by_col: None,
@@ -7565,7 +7565,7 @@ mod tests {
                             runs: LimitedSheetFormatRunDeltas(vec![SheetFormatRunDelta {
                                 start_row: 0,
                                 end_row_exclusive: 1,
-                                format: run_format,
+                                format: run_format.into(),
                             }]),
                         },
                     ])),
@@ -7644,7 +7644,7 @@ mod tests {
                     cell_formats: Some(LimitedSheetCellFormatDeltas(vec![SheetCellFormatDelta {
                         row: 0,
                         col: 0,
-                        format,
+                        format: format.into(),
                     }])),
                 },
             )
