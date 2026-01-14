@@ -14,6 +14,10 @@ export interface LegacySheetRegionChunkStoreLike {
   /**
    * In-memory store shape used by ai-context's sheet-level RAG store.
    */
+  deleteByPrefix?: (
+    prefix: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown> | unknown;
   items?: {
     keys(): IterableIterator<string> | Iterable<string>;
     delete(id: string): boolean;
@@ -27,7 +31,7 @@ export interface LegacySheetRegionChunkStoreLike {
  * cleanup of legacy `${sheetName}-region-*` ids when supported by the store.
  */
 export function deleteSheetRegionChunks(
-  store: any,
+  store: LegacySheetRegionChunkStoreLike,
   sheetName: string,
   options?: { signal?: AbortSignal },
 ): Promise<void>;
