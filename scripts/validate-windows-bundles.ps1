@@ -1419,20 +1419,25 @@ try {
   }
 
   $urlSpec = Get-ExpectedUrlProtocolSpec -RepoRoot $repoRoot
-  $requiredScheme = ""
+  $primaryScheme = ""
   $candidateSchemes = @()
   if ($null -ne $urlSpec -and ($urlSpec.PSObject.Properties.Name -contains "Schemes")) {
     $candidateSchemes = @($urlSpec.Schemes | Where-Object { $_ } | ForEach-Object { $_.ToString().Trim().TrimEnd("/").TrimEnd(":").ToLowerInvariant() } | Where-Object { $_ })
   }
-  # Prefer `formula` if it exists in the config (stable external deep link scheme).
-  if ($candidateSchemes -contains "formula") {
-    $requiredScheme = "formula"
-  } elseif ($candidateSchemes.Count -gt 0) {
-    $requiredScheme = ($candidateSchemes | Select-Object -First 1)
+  $expectedSchemes = @()
+  if ($candidateSchemes.Count -gt 0) {
+    $expectedSchemes = @($candidateSchemes | Sort-Object -Unique)
   } else {
-    $requiredScheme = "formula"
+    $expectedSchemes = @("formula")
   }
-  $requiredScheme = $requiredScheme.Trim().TrimEnd("/").TrimEnd(":")
+  # Prefer `formula` if it exists in the config (stable external deep link scheme) as the
+  # primary one for best-effort validations (NSIS marker scan / MSI binary scan fallback).
+  if ($expectedSchemes -contains "formula") {
+    $primaryScheme = "formula"
+  } else {
+    $primaryScheme = ($expectedSchemes | Select-Object -First 1)
+  }
+  $primaryScheme = $primaryScheme.Trim().TrimEnd("/").TrimEnd(":")
 
   if ($msiInstallers.Count -gt 0) {
     foreach ($msi in $msiInstallers) {
@@ -1473,26 +1478,30 @@ try {
         }
       }
  
-      try {
-        Assert-MsiRegistersUrlProtocol -Msi $msi -Scheme $requiredScheme
-      } catch {
-        $msg = $_.Exception.Message
-        if ($msg -match 'Failed to open MSI for inspection') {
-          Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
-          $needles = @(
-            "URL Protocol",
-            "URL protocol",
-            $requiredScheme,
-            "\$requiredScheme\shell\open\command",
-            "$requiredScheme\shell\open\command"
-          )
-          $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
-          if ([string]::IsNullOrWhiteSpace($marker)) {
-            throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$requiredScheme://' in the MSI binary: $($msi.FullName)"
+      foreach ($scheme in $expectedSchemes) {
+        try {
+          Assert-MsiRegistersUrlProtocol -Msi $msi -Scheme $scheme
+        } catch {
+          $msg = $_.Exception.Message
+          if ($msg -match 'Failed to open MSI for inspection') {
+            Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
+            # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
+            $needles = @(
+              "URL Protocol",
+              "URL protocol",
+              $primaryScheme,
+              "\$primaryScheme\shell\open\command",
+              "$primaryScheme\shell\open\command"
+            )
+            $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
+            if ([string]::IsNullOrWhiteSpace($marker)) {
+              throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$primaryScheme://' in the MSI binary: $($msi.FullName)"
+            }
+            Write-Warning "MSI table inspection failed, but the MSI contained marker '$marker' related to '$primaryScheme://'. Assuming URL protocol metadata is present (best-effort)."
+            break
+          } else {
+            throw
           }
-          Write-Warning "MSI table inspection failed, but the MSI contained marker '$marker' related to '$requiredScheme://'. Assuming URL protocol metadata is present (best-effort)."
-        } else {
-          throw
         }
       }
       Assert-MsiContainsComplianceArtifacts -Msi $msi
@@ -1503,9 +1512,9 @@ try {
 
   if ($exeInstallers.Count -gt 0) {
     foreach ($exe in $exeInstallers) {
-      $integrationMarker = Find-ExeDesktopIntegrationMarker -Exe $exe -ExtensionNoDot $requiredExtensionNoDot -UrlScheme $requiredScheme
+      $integrationMarker = Find-ExeDesktopIntegrationMarker -Exe $exe -ExtensionNoDot $requiredExtensionNoDot -UrlScheme $primaryScheme
       if ([string]::IsNullOrWhiteSpace($integrationMarker)) {
-        throw "EXE installer did not contain any expected desktop integration marker strings. This validation is heuristic for NSIS installers.`n- Installer: $($exe.FullName)`n- Looked for: URL Protocol, x-scheme-handler/$requiredScheme, \\$requiredScheme\\shell\\open\\command, .$requiredExtensionNoDot"
+        throw "EXE installer did not contain any expected desktop integration marker strings. This validation is heuristic for NSIS installers.`n- Installer: $($exe.FullName)`n- Looked for: URL Protocol, x-scheme-handler/$primaryScheme, \\$primaryScheme\\shell\\open\\command, .$requiredExtensionNoDot"
       }
       Write-Host ("EXE marker scan: found {0}" -f $integrationMarker)
  
@@ -1519,9 +1528,9 @@ try {
         }
       }
  
-      $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $requiredScheme
+      $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $primaryScheme
       if ([string]::IsNullOrWhiteSpace($protocolMarker)) {
-        $msg = "EXE installer did not contain obvious markers for '$requiredScheme://' URL protocol registration (e.g. 'URL Protocol'). This validation is heuristic for NSIS installers."
+        $msg = "EXE installer did not contain obvious markers for '$primaryScheme://' URL protocol registration (e.g. 'URL Protocol'). This validation is heuristic for NSIS installers."
         if ($msiInstallers.Count -gt 0) {
           Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS URL protocol wiring."
         } else {

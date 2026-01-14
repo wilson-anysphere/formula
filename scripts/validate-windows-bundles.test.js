@@ -96,6 +96,19 @@ test("validate-windows-bundles.ps1 prefers validating the stable formula:// sche
   );
 });
 
+test("validate-windows-bundles.ps1 validates all configured URL protocol schemes via MSI", () => {
+  assert.match(
+    text,
+    /foreach\s*\(\s*\$scheme\s+in\s+\$expectedSchemes\s*\)/i,
+    "Expected validator to loop over all configured deep-link schemes when validating MSI URL protocol registration.",
+  );
+  assert.match(
+    text,
+    /Assert-MsiRegistersUrlProtocol\s+-Msi\s+\$msi\s+-Scheme\s+\$scheme/i,
+    "Expected validator to validate each URL scheme via Assert-MsiRegistersUrlProtocol.",
+  );
+});
+
 test("validate-windows-bundles.ps1 asserts LICENSE/NOTICE are included in MSI installers", () => {
   assert.match(
     text,
