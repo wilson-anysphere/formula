@@ -177,13 +177,15 @@ describe("DrawingInteractionController zoom + capture", () => {
     // Move to mutate the in-memory object list.
     el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 80, clientY: 60, pointerId: 1 }));
     expect(objects).not.toBe(original);
+    const movedObjects = objects;
 
     controller.dispose();
 
-    // Dispose should cancel the gesture, releasing pointer capture and restoring the original objects.
+    // Dispose is used for teardown; it should cancel the gesture (releasing pointer capture and cancelling
+    // the undo batch) but avoid writing back to in-memory objects via `setObjects`.
     expect(cancelBatch).toHaveBeenCalledTimes(1);
     expect(((el as any).pointerCapture as Set<number>).has(1)).toBe(false);
-    expect(objects).toBe(original);
+    expect(objects).toBe(movedObjects);
   });
 
   it("stops propagation on hit, but not on miss (capture listener)", () => {

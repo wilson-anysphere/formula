@@ -197,7 +197,25 @@ export class DrawingInteractionController {
     // If the app/view is torn down mid-gesture (e.g. hot reload, workbook switch),
     // ensure we release pointer capture and close any pending undo batch.
     try {
-      this.cancelActiveGesture();
+      // Important: do *not* call `setObjects` during teardown. The in-memory object
+      // state is owned by the host app; if it is being disposed, reverting objects
+      // is unnecessary and can trigger unwanted UI work/tests (the view is going away).
+      const active = this.dragging ?? this.resizing ?? this.rotating;
+      if (active) {
+        const pointerId = active.pointerId;
+        this.dragging = null;
+        this.resizing = null;
+        this.rotating = null;
+        this.activeRect = null;
+        this.detachEscapeListener();
+        this.tryReleasePointerCapture(pointerId);
+        try {
+          this.callbacks.cancelBatch?.();
+        } catch {
+          // Best-effort.
+        }
+        this.element.style.cursor = "default";
+      }
     } catch {
       // Best-effort: teardown should still remove listeners even if the integration
       // callbacks throw (e.g. partially-initialized test harnesses).
