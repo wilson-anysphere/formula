@@ -8775,6 +8775,20 @@ async function hideTauriWindow(): Promise<void> {
   window.close();
 }
 
+async function showTauriWindowBestEffort(): Promise<void> {
+  try {
+    const win = getTauriWindowHandleOrThrow();
+    if (typeof win.show === "function") {
+      await win.show();
+    }
+    if (typeof win.setFocus === "function") {
+      await win.setFocus();
+    }
+  } catch {
+    // Best-effort.
+  }
+}
+
 async function minimizeTauriWindow(): Promise<void> {
   try {
     const win = getTauriWindowHandleOrThrow();
@@ -9720,21 +9734,29 @@ try {
   });
 
   void listen("tray-open", () => {
-    void promptOpenWorkbook().catch((err) => {
+    void (async () => {
+      // Ensure the window is visible so any toast-based error handling is observable.
+      await showTauriWindowBestEffort();
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
+    })().catch((err) => {
       console.error("Failed to open workbook:", err);
       void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
   });
 
   void listen("tray-new", () => {
-    void handleNewWorkbook().catch((err) => {
+    void (async () => {
+      // Ensure the window is visible so any toast-based error handling is observable.
+      await showTauriWindowBestEffort();
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
+    })().catch((err) => {
       console.error("Failed to create workbook:", err);
       void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
     });
   });
 
   void listen("tray-quit", () => {
-    void requestAppQuit().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
       console.error("Failed to quit app:", err);
     });
   });
@@ -10117,7 +10139,11 @@ try {
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
   void listen("shortcut-quick-open", () => {
-    void promptOpenWorkbook().catch((err) => {
+    void (async () => {
+      // Ensure the window is visible so any toast-based error handling is observable.
+      await showTauriWindowBestEffort();
+      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
+    })().catch((err) => {
       console.error("Failed to open workbook:", err);
       void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
