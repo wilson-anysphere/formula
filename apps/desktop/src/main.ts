@@ -2332,8 +2332,17 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             // Structural edits should not be available in read-only mode.
             "home.cells.insert.insertSheetRows": true,
             "home.cells.insert.insertSheetColumns": true,
+            "home.cells.insert.insertCells": true,
             "home.cells.delete.deleteSheetRows": true,
             "home.cells.delete.deleteSheetColumns": true,
+            "home.cells.delete.deleteCells": true,
+            // Sheet-view mutations (freeze panes) should not be available in read-only mode,
+            // since they would only apply locally and never sync to the shared document.
+            "view.window.freezePanes": true,
+            "view.freezePanes": true,
+            "view.freezeTopRow": true,
+            "view.freezeFirstColumn": true,
+            "view.unfreezePanes": true,
           }
         : null),
       ...(printExportAvailable

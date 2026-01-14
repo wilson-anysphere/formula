@@ -81,8 +81,10 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.editing.fill.series"]).toBeUndefined();
 
     // Home → Cells structural edit commands are also handled directly in `main.ts`.
+    expect(baselineDisabledById["home.cells.insert.insertCells"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteCells"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBeUndefined();
   });

@@ -957,6 +957,90 @@ function shiftFormatRunsForRowEdit(runs, row0, count, mode) {
 }
 
 /**
+ * Shift range-run formatting horizontally for a row band (used by Insert/Delete Cells shift right/left).
+ *
+ * Note: This operates only on the provided row band. Run segments outside the band remain in their
+ * original columns.
+ *
+ * @param {Map<number, FormatRun[]>} formatRunsByCol
+ * @param {{
+ *   rowStart: number,
+ *   rowEndExclusive: number,
+ *   /**
+ *    * Map a column index for an overlapping segment to its destination column. Return `null` to
+ *    * drop the segment (e.g. deleted cells).
+ *    *\/
+ *   mapOverlapCol: (col: number) => number | null,
+ * }} params
+ * @returns {Map<number, FormatRun[]>}
+ */
+function shiftFormatRunsByColForRowBandColumnShift(formatRunsByCol, params) {
+  const rowStart = Math.max(0, Math.trunc(params?.rowStart ?? 0));
+  const rowEndExclusive = Math.max(rowStart, Math.trunc(params?.rowEndExclusive ?? rowStart));
+  const mapOverlapCol = typeof params?.mapOverlapCol === "function" ? params.mapOverlapCol : () => null;
+
+  /** @type {Map<number, FormatRun[]>} */
+  const outByCol = new Map();
+  const push = (col, run) => {
+    if (!Number.isInteger(col) || col < 0 || col >= EXCEL_MAX_COLS) return;
+    if (!run) return;
+    const startRow = Math.max(0, Math.trunc(run.startRow));
+    const endRowExclusive = Math.max(startRow, Math.trunc(run.endRowExclusive));
+    if (endRowExclusive <= startRow) return;
+    const styleId = Number(run.styleId);
+    if (!Number.isInteger(styleId) || styleId === 0) return;
+    let list = outByCol.get(col);
+    if (!list) {
+      list = [];
+      outByCol.set(col, list);
+    }
+    list.push({ startRow, endRowExclusive, styleId });
+  };
+
+  for (const [col, runs] of formatRunsByCol.entries()) {
+    if (!Number.isInteger(col) || col < 0) continue;
+    const input = Array.isArray(runs) ? runs : [];
+    for (const run of input) {
+      if (!run) continue;
+
+      const runStart = Math.max(0, Math.trunc(run.startRow));
+      const runEnd = Math.max(runStart, Math.trunc(run.endRowExclusive));
+      if (runEnd <= runStart) continue;
+
+      // Prefix (above row band): stays in original column.
+      if (runStart < rowStart) {
+        push(col, { startRow: runStart, endRowExclusive: Math.min(runEnd, rowStart), styleId: run.styleId });
+      }
+
+      // Overlap with row band: may move columns.
+      const overlapStart = Math.max(runStart, rowStart);
+      const overlapEnd = Math.min(runEnd, rowEndExclusive);
+      if (overlapEnd > overlapStart) {
+        const nextCol = mapOverlapCol(col);
+        if (nextCol != null) {
+          push(nextCol, { startRow: overlapStart, endRowExclusive: overlapEnd, styleId: run.styleId });
+        }
+      }
+
+      // Suffix (below row band): stays in original column.
+      if (runEnd > rowEndExclusive) {
+        push(col, { startRow: Math.max(runStart, rowEndExclusive), endRowExclusive: runEnd, styleId: run.styleId });
+      }
+    }
+  }
+
+  /** @type {Map<number, FormatRun[]>} */
+  const normalized = new Map();
+  for (const [col, runs] of outByCol.entries()) {
+    if (!runs || runs.length === 0) continue;
+    runs.sort((a, b) => a.startRow - b.startRow);
+    const nextRuns = normalizeFormatRuns(runs);
+    if (nextRuns.length > 0) normalized.set(col, nextRuns);
+  }
+  return normalized;
+}
+
+/**
  * @typedef {{
  *   frozenRows: number,
  *   frozenCols: number,
@@ -4317,9 +4401,12 @@ export class DocumentController {
   /**
    * Insert cells in the given range, shifting cells right (Excel semantics).
    *
-   * Note: this currently shifts only stored cell states (value/formula/styleId). Callers can
-   * optionally provide engine-computed `formulaRewrites` (from `@formula/engine` applyOperation)
-   * to update formula text.
+   * This shifts:
+   * - stored cell state (`value`/`formula`/`styleId`)
+   * - range-run formatting (`formatRunsByCol`) so large range-applied formatting moves with the cells
+   *
+   * Callers can optionally provide engine-computed `formulaRewrites` (from `@formula/engine`
+   * `applyOperation`) to update formula text.
    *
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
@@ -4542,8 +4629,77 @@ export class DocumentController {
       }
     }
 
+    /** @type {RangeRunDelta[]} */
+    const rangeRunDeltas = [];
+    if (sheet.formatRunsByCol && sheet.formatRunsByCol.size > 0) {
+      /** @type {Map<number, FormatRun[]>} */
+      let afterRunsByCol = new Map();
+      if (kind === "insertShiftRight" || kind === "deleteShiftLeft") {
+        const rowEndExclusive = Math.min(EXCEL_MAX_ROWS, rect.endRow + 1);
+        const mapOverlapCol =
+          kind === "insertShiftRight"
+            ? (col) => (col >= rect.startCol ? col + width : col)
+            : (col) => {
+                if (col < rect.startCol) return col;
+                if (col <= rect.endCol) return null;
+                return col - width;
+              };
+        afterRunsByCol = shiftFormatRunsByColForRowBandColumnShift(sheet.formatRunsByCol, {
+          rowStart: rect.startRow,
+          rowEndExclusive,
+          mapOverlapCol,
+        });
+      } else {
+        // Vertical shifts: only selected columns participate.
+        for (const [col, runs] of sheet.formatRunsByCol.entries()) {
+          if (!Number.isInteger(col) || col < 0) continue;
+          const inBand = col >= rect.startCol && col <= rect.endCol;
+          const shifted = inBand
+            ? shiftFormatRunsForRowEdit(runs, rect.startRow, height, kind === "insertShiftDown" ? "insert" : "delete")
+            : Array.isArray(runs)
+              ? normalizeFormatRuns(runs.map(cloneFormatRun))
+              : [];
+          if (shifted.length > 0) afterRunsByCol.set(col, shifted);
+        }
+      }
+
+      const allRunCols = new Set();
+      for (const col of sheet.formatRunsByCol.keys()) allRunCols.add(col);
+      for (const col of afterRunsByCol.keys()) allRunCols.add(col);
+      for (const col of allRunCols) {
+        const beforeRuns = sheet.formatRunsByCol.get(col) ?? [];
+        const afterRuns = afterRunsByCol.get(col) ?? [];
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+
+        let startRow = Infinity;
+        let endRowExclusive = -Infinity;
+        if (beforeRuns.length > 0) {
+          startRow = Math.min(startRow, beforeRuns[0].startRow);
+          endRowExclusive = Math.max(endRowExclusive, beforeRuns[beforeRuns.length - 1].endRowExclusive);
+        }
+        if (afterRuns.length > 0) {
+          startRow = Math.min(startRow, afterRuns[0].startRow);
+          endRowExclusive = Math.max(endRowExclusive, afterRuns[afterRuns.length - 1].endRowExclusive);
+        }
+        if (!Number.isFinite(startRow)) startRow = 0;
+        if (!Number.isFinite(endRowExclusive) || endRowExclusive < startRow) endRowExclusive = startRow;
+
+        rangeRunDeltas.push({
+          sheetId: id,
+          col,
+          startRow,
+          endRowExclusive,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+    }
+
     const defaultLabel = kind === "insertShiftRight" || kind === "insertShiftDown" ? "Insert Cells" : "Delete Cells";
-    this.#applyUserDeltas(deltas, { label: options.label ?? defaultLabel });
+    this.#applyUserWorkbookEdits(
+      { cellDeltas: deltas, rangeRunDeltas },
+      { label: options.label ?? defaultLabel },
+    );
   }
 
   /**
