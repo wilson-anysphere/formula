@@ -222,6 +222,48 @@ fn noop_save_preserves_drawing_parts_even_without_drawings_snapshot() {
 }
 
 #[test]
+fn cell_edit_preserves_drawing_parts_even_without_drawings_snapshot() {
+    let original_bytes = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
+
+    let mut doc = load_from_bytes(original_bytes).expect("load fixture");
+    let sheet_id = doc.workbook.sheets[0].id;
+    doc.xlsx_meta_mut().drawings_snapshot.remove(&sheet_id);
+
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_value(CellRef::from_a1("A1").expect("valid A1"), CellValue::String("hello".to_string()));
+
+    let saved = doc.save_to_vec().expect("save");
+
+    let before = XlsxPackage::from_bytes(original_bytes).expect("read original pkg");
+    let after = XlsxPackage::from_bytes(&saved).expect("read saved pkg");
+
+    assert_eq!(
+        before.part("xl/drawings/drawing1.xml").unwrap(),
+        after.part("xl/drawings/drawing1.xml").unwrap(),
+        "drawing XML should be preserved byte-for-byte when editing cells even without a snapshot"
+    );
+    assert_eq!(
+        before.part("xl/drawings/_rels/drawing1.xml.rels").unwrap(),
+        after.part("xl/drawings/_rels/drawing1.xml.rels").unwrap(),
+        "drawing relationship XML should be preserved byte-for-byte when editing cells even without a snapshot"
+    );
+    assert_eq!(
+        before.part("xl/media/image1.png").unwrap(),
+        after.part("xl/media/image1.png").unwrap(),
+        "image media bytes should be preserved byte-for-byte when editing cells even without a snapshot"
+    );
+    assert_eq!(
+        before
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .unwrap(),
+        after.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap(),
+        "worksheet relationship part should be preserved byte-for-byte when editing cells even without a snapshot"
+    );
+}
+
+#[test]
 fn multi_sheet_noop_save_preserves_all_drawing_parts() {
     let original_bytes = build_two_sheet_drawing_workbook();
 
