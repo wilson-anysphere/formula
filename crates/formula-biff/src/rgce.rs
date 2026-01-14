@@ -811,21 +811,6 @@ fn decode_rgce_impl(
 
                 stack.push(ExprFragment::new(text));
             }
-            // PtgName: [nameId: u32][reserved: u16]
-            0x23 | 0x43 | 0x63 => {
-                if rgce.len().saturating_sub(i) < 6 {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
-                // Skip reserved u16.
-                i += 6;
-                stack.push(ExprFragment::new(format!("Name{{{name_id}}}")));
-            }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
                 if rgce.len().saturating_sub(i) < 3 {
@@ -928,13 +913,18 @@ fn decode_rgce_impl(
             }
             // PtgName: [nameId: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
-                if input.len() < 6 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                if rgce.len().saturating_sub(i) < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
                 }
 
-                let name_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
                 // Skip reserved u16.
-                input = &input[6..];
+                i += 6;
 
                 // Best-effort: we don't have workbook name context in this crate, so emit a stable
                 // placeholder that is parseable as an Excel identifier.
@@ -960,13 +950,18 @@ fn decode_rgce_impl(
             }
             // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
-                if input.len() < 4 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                if rgce.len().saturating_sub(i) < 4 {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 4,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
                 }
 
-                let ixti = u16::from_le_bytes([input[0], input[1]]);
-                let name_index = u16::from_le_bytes([input[2], input[3]]);
-                input = &input[4..];
+                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
+                let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
+                i += 4;
 
                 // Best-effort: emit a stable placeholder identifier. Avoid characters like `:` and
                 // `{}` which would be treated as operators / invalid names by Excel formula
@@ -1229,21 +1224,6 @@ fn decode_rgce_impl(
                     }
                     stack.push(frag);
                 }
-            }
-            // PtgNameX: [ixti: u16][nameIndex: u16]
-            0x39 | 0x59 | 0x79 => {
-                if rgce.len().saturating_sub(i) < 4 {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
-                i += 4;
-                stack.push(ExprFragment::new(format!("ExternName{ixti}:{name_index}")));
             }
             // PtgRef3d: [ixti: u16][row: u32][col: u16]
             0x3A | 0x5A | 0x7A => {
