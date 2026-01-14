@@ -6402,9 +6402,11 @@ export class SpreadsheetApp {
       this.drawingInteractionController?.reset({ clearSelection: true });
 
       const prevSelectedDrawingId = this.selectedDrawingId;
-      if (prevSelectedDrawingId != null) {
+      const prevSelectedChartId = this.selectedChartId;
+      if (prevSelectedDrawingId != null || prevSelectedChartId != null) {
         this.selectedDrawingId = null;
         this.selectedDrawingIndex = null;
+        this.selectedChartId = null;
         this.drawingOverlay.setSelectedId(null);
         this.dispatchDrawingSelectionChanged();
       }
@@ -6701,6 +6703,7 @@ export class SpreadsheetApp {
     this.invalidateDrawingHitTestIndexCaches();
     this.selectedDrawingId = null;
     this.selectedDrawingIndex = null;
+    this.selectedChartId = null;
     this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
@@ -6772,6 +6775,7 @@ export class SpreadsheetApp {
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.selectedDrawingIndex = null;
+      this.selectedChartId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -6844,6 +6848,7 @@ export class SpreadsheetApp {
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.selectedDrawingIndex = null;
+      this.selectedChartId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);

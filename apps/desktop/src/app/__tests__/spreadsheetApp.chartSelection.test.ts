@@ -197,6 +197,54 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("switching sheets clears chart selection even if the chart is on the target sheet", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    delete process.env.CANVAS_CHARTS;
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(false);
+      const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+      expect(chart).toBeTruthy();
+
+      const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+      expect(rect).not.toBeNull();
+      const layout = (app as any).chartOverlayLayout();
+      const originX = layout.originX as number;
+      const originY = layout.originY as number;
+
+      const clickX = originX + rect.left + 2;
+      const clickY = originY + rect.top + 2;
+      dispatchPointerEvent(root, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 91 });
+      dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 91 });
+      expect(app.getSelectedChartId()).toBe(chart!.id);
+
+      // Ensure the target sheet exists before switching.
+      app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+      // Simulate moving the selected chart to the destination sheet (e.g. via cut/paste or remote update).
+      const store = (app as any).chartStore as any;
+      store.charts = store.charts.map((c: any) => (c.id === chart!.id ? { ...c, sheetId: "Sheet2" } : c));
+
+      app.activateSheet("Sheet2");
+
+      expect(app.getSelectedChartId()).toBe(null);
+      expect(app.getSelectedDrawingId()).toBe(null);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
   it("ignores pointerdown events from scrollbars (does not select/deselect charts)", () => {
     const root = createRoot();
     const status = {
@@ -250,6 +298,52 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
     app.destroy();
     root.remove();
+  });
+
+  it("canvas charts mode: switching sheets clears chart selection even if the chart is on the target sheet", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Chart Sheet Switch Selection",
+        position: "A1",
+      });
+
+      // Select the chart.
+      (app as any).setSelectedChartId(result.chart_id);
+      expect(app.getSelectedChartId()).toBe(result.chart_id);
+      expect(app.getSelectedDrawingId()).toBeTruthy();
+
+      // Ensure the target sheet exists before switching.
+      app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+      // Simulate moving the selected chart to the destination sheet.
+      const store = (app as any).chartStore as any;
+      store.charts = store.charts.map((c: any) => (c.id === result.chart_id ? { ...c, sheetId: "Sheet2" } : c));
+
+      app.activateSheet("Sheet2");
+
+      expect(app.getSelectedChartId()).toBe(null);
+      expect(app.getSelectedDrawingId()).toBe(null);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
   });
 
   it("canvas charts mode: ignores pointerdown events from scrollbars (does not select/deselect charts)", () => {
