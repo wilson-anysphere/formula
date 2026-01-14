@@ -45,6 +45,8 @@ jobs:
         run: bash scripts/ci/check-wasm-pack-version-pins.sh
       - name: "Guard: Tauri CLI pins match release workflow"
         run: bash scripts/ci/check-tauri-cli-version-pins.sh
+      - name: "Guard: benchmark gh-pages publishes are serialized"
+        run: bash scripts/ci/check-benchmark-gh-pages-concurrency.sh .github/workflows
       - name: "Guard: Pyodide assets are cached for desktop builds"
         run: python3 scripts/ci/check-pyodide-cache.py
       - name: "Guard: desktop installer artifact size reporter JSON output"
