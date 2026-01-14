@@ -226,18 +226,13 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
-    let Some(first) = raw.chars().next() else {
+    if raw.is_empty() {
         return Cow::Borrowed("''");
-    };
-
-    // DAX allows unquoted identifiers in a conservative "C identifier" form; quote anything that
-    // doesn't match ASCII `[A-Za-z_][A-Za-z0-9_]*`.
-    let is_simple = (first.is_ascii_alphabetic() || first == '_')
-        && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    if is_simple {
-        Cow::Borrowed(raw)
+    }
+    if dax_identifier_requires_quotes(raw) {
+        Cow::Owned(quote_dax_identifier(raw))
     } else {
-        Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
+        Cow::Borrowed(raw)
     }
 }
 
@@ -608,6 +603,46 @@ mod tests {
         );
         assert_eq!(parse_dax_measure_ref("[]"), None);
         assert_eq!(parse_dax_measure_ref("Table[Column]"), None);
+    }
+
+    #[test]
+    fn pivot_field_ref_display_formats_dax_identifiers() {
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string()
+            }
+            .to_string(),
+            "Sales[Amount]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Dim Product".to_string(),
+                column: "Category".to_string()
+            }
+            .to_string(),
+            "'Dim Product'[Category]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "O'Reilly".to_string(),
+                column: "Name".to_string()
+            }
+            .to_string(),
+            "'O''Reilly'[Name]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "T".to_string(),
+                column: "Col]Name".to_string()
+            }
+            .to_string(),
+            "T[Col]]Name]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
+            "[Total Sales]"
+        );
     }
 
     #[test]
