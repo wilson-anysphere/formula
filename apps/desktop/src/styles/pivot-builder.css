@@ -7,19 +7,19 @@
 
 .pivot-builder {
   display: grid;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
 }
 
 .pivot-builder__config {
   display: grid;
-  gap: 10px;
-  padding-bottom: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
+  padding-bottom: calc(var(--space-4) + var(--space-1));
   border-bottom: 1px solid var(--border);
 }
 
 .pivot-builder__section {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .pivot-builder__section-title {
@@ -34,20 +34,20 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .pivot-builder__radio-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .pivot-builder__label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -77,8 +77,8 @@
 
 .pivot-builder__pivots {
   display: grid;
-  gap: 8px;
-  padding-top: 10px;
+  gap: var(--space-4);
+  padding-top: calc(var(--space-4) + var(--space-1));
   border-top: 1px solid var(--border);
 }
 
@@ -92,15 +92,15 @@
 
 .pivot-builder__pivots-list {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .pivot-builder__pivot-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  padding: 8px;
+  gap: calc(var(--space-4) + var(--space-1));
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -109,7 +109,7 @@
 .pivot-builder__pivot-item-info {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .pivot-builder__pivot-item-name {
@@ -134,7 +134,7 @@
 .pivot-builder input:not([type="checkbox"]):not([type="radio"]),
 .pivot-builder select {
   min-width: 0;
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -157,7 +157,7 @@
 
 .pivot-builder button {
   flex: 0 0 auto;
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -213,12 +213,12 @@
 .pivot-builder__builder {
   display: grid;
   grid-template-columns: 1fr 2fr;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
   align-items: start;
 }
 
 .pivot-builder__fields-title {
-  margin: 0 0 6px 0;
+  margin: 0 0 var(--space-3) 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
@@ -229,11 +229,11 @@
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .pivot-builder__field {
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -254,13 +254,13 @@
 .pivot-builder__drop-zones {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
   min-width: 0;
 }
 
 .pivot-builder__drop-area {
   min-height: 96px;
-  padding: 8px;
+  padding: var(--space-4);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -272,19 +272,19 @@
   color: var(--text-secondary);
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .pivot-builder__drop-content {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .pivot-builder__pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-pill);
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
@@ -301,14 +301,14 @@
 
 .pivot-builder__value-fields {
   display: grid;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .pivot-builder__value-field {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 8px;
+  gap: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -318,7 +318,7 @@
   font-size: 11px;
   line-height: 16px;
   color: var(--text-secondary);
-  margin-bottom: 2px;
+  margin-bottom: var(--space-1);
 }
 
 .pivot-builder__value-field select {
@@ -329,7 +329,7 @@
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-6);
   flex-wrap: wrap;
 }
 
@@ -337,6 +337,6 @@
   grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
