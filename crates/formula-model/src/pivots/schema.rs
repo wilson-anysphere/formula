@@ -272,6 +272,19 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    // In DAX, a table name can be unquoted (e.g. `Sales`) or single-quoted
+    // (e.g. `'Sales 2024'`). Quote when the identifier contains anything other
+    // than ASCII alphanumerics or `_`.
+    raw.chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // Within quoted identifiers, `'` is escaped as `''`.
+    format!("'{}'", raw.replace('\'', "''"))
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
