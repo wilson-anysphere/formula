@@ -340,6 +340,29 @@ fn canonicalize_and_localize_formula_roundtrip_fr_fr() {
 }
 
 #[wasm_bindgen_test]
+fn canonicalize_and_localize_error_literals_roundtrip_es_es_inverted_punctuation() {
+    // es-ES uses inverted punctuation variants for many error literals.
+    // Ensure these round-trip through the public wasm API.
+    assert_eq!(
+        canonicalize_formula("=#¡VALOR!", "es-ES", None).unwrap(),
+        "=#VALUE!"
+    );
+    assert_eq!(
+        localize_formula("=#VALUE!", "es-ES", None).unwrap(),
+        "=#¡VALOR!"
+    );
+
+    assert_eq!(
+        canonicalize_formula("=#¿NOMBRE?", "es-ES", None).unwrap(),
+        "=#NAME?"
+    );
+    assert_eq!(
+        localize_formula("=#NAME?", "es-ES", None).unwrap(),
+        "=#¿NOMBRE?"
+    );
+}
+
+#[wasm_bindgen_test]
 fn canonicalize_and_localize_formula_roundtrip_r1c1_reference_style() {
     let localized = "=SUMME(R1C1;R1C2)";
     let canonical = canonicalize_formula(localized, "de-DE", Some("R1C1".to_string())).unwrap();
