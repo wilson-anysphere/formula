@@ -1024,6 +1024,13 @@ const TEXT_MATCH_END_ENUM_0_1 = [
   { replacement: "1", displayText: "1 (match from end)", confidence: 0.62 },
 ];
 
+const TEXT_DELIMITER_ENUM_COMMON = [
+  { replacement: '","', displayText: '"," (comma)', confidence: 0.67 },
+  { replacement: '" "', displayText: '" " (space)', confidence: 0.66 },
+  { replacement: '";"', displayText: '";" (semicolon)', confidence: 0.65 },
+  { replacement: '"|"', displayText: '"|" (pipe)', confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1141,6 +1148,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     2: TOCOL_SCAN_BY_COLUMN_ENUM,
   },
   TEXTSPLIT: {
+    // col_delimiter
+    1: TEXT_DELIMITER_ENUM_COMMON,
+    // row_delimiter
+    2: TEXT_DELIMITER_ENUM_COMMON,
     // ignore_empty
     3: [
       { replacement: "TRUE", displayText: "TRUE (ignore empty)", confidence: 0.66 },
@@ -1150,12 +1161,16 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     4: TEXT_MATCH_MODE_ENUM_0_1,
   },
   TEXTBEFORE: {
+    // delimiter
+    1: TEXT_DELIMITER_ENUM_COMMON,
     // match_mode
     3: TEXT_MATCH_MODE_ENUM_0_1,
     // match_end
     4: TEXT_MATCH_END_ENUM_0_1,
   },
   TEXTAFTER: {
+    // delimiter
+    1: TEXT_DELIMITER_ENUM_COMMON,
     // match_mode
     3: TEXT_MATCH_MODE_ENUM_0_1,
     // match_end
@@ -1172,6 +1187,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   TEXTJOIN: {
+    // delimiter
+    0: TEXT_DELIMITER_ENUM_COMMON,
     // ignore_empty
     1: [
       { replacement: "TRUE", displayText: "TRUE (ignore empty)", confidence: 0.66 },

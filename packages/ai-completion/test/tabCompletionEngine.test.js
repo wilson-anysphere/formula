@@ -2702,6 +2702,27 @@ test("TOROW ignore suggests 0, 1, 2, 3", async () => {
   }
 });
 
+test("TEXTSPLIT col_delimiter suggests common delimiters", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTSPLIT("aXb", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("aXb", ","'),
+    `Expected TEXTSPLIT to suggest col_delimiter=\",\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("aXb", " "'),
+    `Expected TEXTSPLIT to suggest col_delimiter=\" \", got: ${suggestions.map((s) => JSON.stringify(s.text)).join(", ")}`
+  );
+});
+
 test("TEXTSPLIT ignore_empty suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
@@ -2741,6 +2762,27 @@ test("TEXTSPLIT match_mode suggests 0 and 1", async () => {
   assert.ok(
     suggestions.some((s) => s.text === '=TEXTSPLIT("aXb", "x", , FALSE, 1'),
     `Expected TEXTSPLIT to suggest match_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TEXTAFTER delimiter suggests common delimiters", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTAFTER("aXb", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", ","'),
+    `Expected TEXTAFTER to suggest delimiter=\",\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", " "'),
+    `Expected TEXTAFTER to suggest delimiter=\" \", got: ${suggestions.map((s) => JSON.stringify(s.text)).join(", ")}`
   );
 });
 
@@ -2784,6 +2826,27 @@ test("TEXTAFTER match_end suggests 0 and 1", async () => {
   assert.ok(
     suggestions.some((s) => s.text === '=TEXTAFTER("aXb", "x", 1, , 1'),
     `Expected TEXTAFTER to suggest match_end=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TEXTJOIN delimiter suggests common delimiters", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TEXTJOIN(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTJOIN(","'),
+    `Expected TEXTJOIN to suggest delimiter=\",\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTJOIN(" "'),
+    `Expected TEXTJOIN to suggest delimiter=\" \", got: ${suggestions.map((s) => JSON.stringify(s.text)).join(", ")}`
   );
 });
 
