@@ -138,6 +138,7 @@ import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBui
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY, clampZoom } from "@formula/grid";
+import { pickAdjacentVisibleSheetId } from "../sheets/sheetNavigation";
 import type {
   CanvasGridImageResolver,
   CellRange as GridCellRange,
@@ -1221,9 +1222,11 @@ export class SpreadsheetApp {
   // does not change on every pixel.
   private readonly wasmSheetOriginA1BySheetId = new Map<string, string>();
   private auditingUnsubscribe: (() => void) | null = null;
+  private undoRedoActiveSheetGuardUnsubscribe: (() => void) | null = null;
   private externalRepaintUnsubscribe: (() => void) | null = null;
   private drawingsUnsubscribe: (() => void) | null = null;
   private formulaRangePreviewTooltipUpdateUnsubscribe: (() => void) | null = null;
+  private undoRedoSheetOrderSnapshot: string[] | null = null;
 
   private gridCanvas: HTMLCanvasElement;
   private chartCanvas: HTMLCanvasElement;
@@ -3465,6 +3468,66 @@ export class SpreadsheetApp {
       }
     }
 
+    // Undo/redo/applyState can add/remove/hide sheets. DocumentController lazily materializes sheets
+    // whenever callers read sheet state (e.g. `getCell`, `getSheetView`). If the active sheet is
+    // deleted during undo/redo, downstream `document.on("change")` listeners can accidentally
+    // recreate it by reading from the now-missing sheet id.
+    //
+    // Keep the active sheet id valid *before* other change listeners run so sheet deletions don't
+    // resurrect "phantom" sheets. Mirror Excel behavior: prefer activating the adjacent visible
+    // sheet (next to the right, else left).
+    this.undoRedoActiveSheetGuardUnsubscribe = this.document.on("change", (payload: any) => {
+      const source = typeof payload?.source === "string" ? payload.source : "";
+      if (source !== "undo" && source !== "redo" && source !== "applyState") return;
+
+      const activeId = this.sheetId;
+      if (!activeId) return;
+
+      const sheetIds = this.document.getSheetIds();
+      if (sheetIds.length === 0) return;
+
+      const visibleSheetIds = this.document.getVisibleSheetIds();
+      const hasSheet = sheetIds.includes(activeId);
+      const isVisible = visibleSheetIds.includes(activeId);
+      if (hasSheet && isVisible) return;
+
+      const visibleSet = new Set(visibleSheetIds);
+      const sheetIdSet = new Set(sheetIds);
+
+      const currentSnapshot = sheetIds.map((id) => ({
+        id,
+        visibility: visibleSet.has(id) ? "visible" : "hidden",
+      }));
+
+      const ordering: string[] | null = (() => {
+        if (Array.isArray(this.undoRedoSheetOrderSnapshot) && this.undoRedoSheetOrderSnapshot.length > 0) {
+          return this.undoRedoSheetOrderSnapshot;
+        }
+        const delta = payload?.sheetOrderDelta;
+        const before = Array.isArray(delta?.before) ? delta.before : null;
+        if (before && before.length > 0) return before;
+        return null;
+      })();
+
+      const preferred =
+        pickAdjacentVisibleSheetId(currentSnapshot, activeId) ??
+        (ordering
+          ? pickAdjacentVisibleSheetId(
+              ordering.map((id) => ({
+                id,
+                visibility: visibleSet.has(id) ? "visible" : "hidden",
+              })),
+              activeId,
+            )
+          : null);
+
+      const fallback =
+        (preferred && sheetIdSet.has(preferred) ? preferred : null) ?? visibleSheetIds[0] ?? sheetIds[0] ?? null;
+      if (!fallback || fallback === activeId) return;
+
+      this.activateSheet(fallback);
+    });
+
     this.auditingUnsubscribe = this.document.on("change", (payload: any) => {
       // Outline state (row/col grouping + hidden flags) is tracked locally per sheet.
       // Ensure we don't retain outline state for sheets that have been deleted from the document.
@@ -4570,6 +4633,8 @@ export class SpreadsheetApp {
       // ignore
     }
     this.wasmEngineInit = null;
+    this.undoRedoActiveSheetGuardUnsubscribe?.();
+    this.undoRedoActiveSheetGuardUnsubscribe = null;
     this.auditingUnsubscribe?.();
     this.auditingUnsubscribe = null;
     this.externalRepaintUnsubscribe?.();
@@ -17558,21 +17623,30 @@ export class SpreadsheetApp {
   }
 
   private applyUndoRedo(kind: "undo" | "redo"): boolean {
+    const prevSheetOrder = this.document.getSheetIds();
+    this.undoRedoSheetOrderSnapshot = prevSheetOrder;
+
     let did = false;
-    if (this.collabUndoService) {
-      if (kind === "undo") {
-        if (this.collabUndoService.canUndo()) {
-          this.collabUndoService.undo();
-          did = true;
+    try {
+      if (this.collabUndoService) {
+        if (kind === "undo") {
+          if (this.collabUndoService.canUndo()) {
+            this.collabUndoService.undo();
+            did = true;
+          }
+        } else {
+          if (this.collabUndoService.canRedo()) {
+            this.collabUndoService.redo();
+            did = true;
+          }
         }
       } else {
-        if (this.collabUndoService.canRedo()) {
-          this.collabUndoService.redo();
-          did = true;
-        }
+        did = kind === "undo" ? this.document.undo() : this.document.redo();
       }
-    } else {
-      did = kind === "undo" ? this.document.undo() : this.document.redo();
+    } finally {
+      // Only needed during the synchronous `document.on("change")` dispatch triggered by undo/redo.
+      // Clear promptly so other document changes don't accidentally consume a stale snapshot.
+      this.undoRedoSheetOrderSnapshot = null;
     }
     if (!did) return false;
 
@@ -17587,10 +17661,31 @@ export class SpreadsheetApp {
     const hasSheet = sheetIds.includes(this.sheetId);
     const isVisible = visibleSheetIds.includes(this.sheetId);
     if ((!hasSheet || !isVisible) && sheetIds.length > 0) {
-      const fallback = visibleSheetIds[0] ?? sheetIds[0];
-      if (fallback && fallback !== this.sheetId) {
-        this.activateSheet(fallback);
-      }
+      const visibleSet = new Set(visibleSheetIds);
+      const sheetIdSet = new Set(sheetIds);
+
+      const currentSnapshot = sheetIds.map((id) => ({
+        id,
+        visibility: visibleSet.has(id) ? "visible" : "hidden",
+      }));
+
+      // Excel-like behavior: if the active sheet is deleted or becomes hidden, prefer activating the
+      // next visible sheet to the right; otherwise fall back to the previous visible sheet. When the
+      // sheet is removed entirely, use the pre-undo/redo ordering to locate the adjacent neighbor.
+      const preferred =
+        pickAdjacentVisibleSheetId(currentSnapshot, this.sheetId) ??
+        pickAdjacentVisibleSheetId(
+          prevSheetOrder.map((id) => ({
+            id,
+            visibility: visibleSet.has(id) ? "visible" : "hidden",
+          })),
+          this.sheetId,
+        );
+
+      const fallback =
+        (preferred && sheetIdSet.has(preferred) ? preferred : null) ?? visibleSheetIds[0] ?? sheetIds[0] ?? null;
+
+      if (fallback && fallback !== this.sheetId) this.activateSheet(fallback);
     }
 
     // Undo/redo can affect sheet view state (e.g. frozen panes). Keep renderer + scrollbars in sync.
