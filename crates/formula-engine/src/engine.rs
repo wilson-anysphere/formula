@@ -755,16 +755,6 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return false;
         };
-        if new_index >= self.workbook.sheet_order.len() {
-            return false;
-        }
-
-        let Some(current) = self.workbook.sheet_order.iter().position(|&id| id == sheet_id) else {
-            return false;
-        };
-        if current == new_index {
-            return true;
-        }
         let before_order = self.workbook.sheet_order.clone();
         let moved = self.workbook.sheet_order.remove(current);
         self.workbook.sheet_order.insert(new_index, moved);
@@ -979,10 +969,10 @@ impl Engine {
     /// Hosts may not have access to an OS-level directory path (e.g. web environments). In those
     /// cases, callers can supply just a filename.
     ///
-    /// Passing `None` or `Some("")` for a field clears it.
+    /// Passing `None` (or an empty string) clears the corresponding field.
     pub fn set_workbook_file_metadata(&mut self, directory: Option<&str>, filename: Option<&str>) {
-        let directory = directory.filter(|s| !s.is_empty()).map(|s| s.to_string());
-        let filename = filename.filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let directory = directory.map(|s| s.to_string()).filter(|s| !s.is_empty());
+        let filename = filename.map(|s| s.to_string()).filter(|s| !s.is_empty());
 
         if self.workbook.workbook_directory == directory
             && self.workbook.workbook_filename == filename
@@ -7981,6 +7971,8 @@ impl Snapshot {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
         let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
+        let workbook_directory = workbook.workbook_directory.clone();
+        let workbook_filename = workbook.workbook_filename.clone();
         let sheet_dimensions = workbook
             .sheets
             .iter()
@@ -8115,6 +8107,8 @@ impl Snapshot {
             sheets,
             sheet_names_by_id,
             sheet_order,
+            workbook_directory,
+            workbook_filename,
             sheet_dimensions,
             values,
             phonetics,
@@ -8129,8 +8123,6 @@ impl Snapshot {
             row_properties,
             col_properties,
             styles: workbook.styles.clone(),
-            workbook_directory: workbook.workbook_directory.clone(),
-            workbook_filename: workbook.workbook_filename.clone(),
             external_value_provider,
             external_data_provider,
             info,

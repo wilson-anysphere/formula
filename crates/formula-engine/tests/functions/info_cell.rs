@@ -508,6 +508,7 @@ fn cell_filename_includes_filename_even_when_directory_is_unknown() {
 
     let mut engine = Engine::new();
     engine.set_workbook_file_metadata(None, Some("Book1.xlsx"));
+
     engine
         .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
         .unwrap();
@@ -516,6 +517,61 @@ fn cell_filename_includes_filename_even_when_directory_is_unknown() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Text("[Book1.xlsx]Sheet1".to_string())
+    );
+}
+
+#[test]
+fn cell_filename_includes_workbook_path_when_metadata_is_set() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(Some(r"C:\tmp\"), Some("Book1.xlsx"));
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(r"C:\tmp\[Book1.xlsx]Sheet1".to_string())
+    );
+}
+
+#[test]
+fn cell_filename_uses_sheet_name_of_reference_argument() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(Some(r"C:\tmp\"), Some("Book1.xlsx"));
+    engine.ensure_sheet("Sheet2");
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\",Sheet2!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(r"C:\tmp\[Book1.xlsx]Sheet2".to_string())
+    );
+}
+
+#[test]
+fn info_directory_returns_directory_when_metadata_is_set() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(Some(r"C:\tmp\"), Some("Book1.xlsx"));
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"directory\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(r"C:\tmp\".to_string())
     );
 }
 
