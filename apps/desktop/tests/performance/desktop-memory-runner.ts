@@ -34,7 +34,7 @@ function usage(): string {
     `  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: ${defaults.timeoutMs})`,
     `  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: ${defaults.settleMs})`,
     '  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)',
-    `  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: ${defaults.targetMb})`,
+    `  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB / FORMULA_DESKTOP_MEMORY_TARGET_MB, default: ${defaults.targetMb})`,
     '  --json, --json-path <path> Write JSON output (samples + summary) to this path',
     '  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)',
     '  --allow-ci                 Allow running under CI without FORMULA_RUN_DESKTOP_MEMORY_BENCH=1',
@@ -305,7 +305,7 @@ async function main(): Promise<void> {
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_MEMORY_RUNS)\n` +
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
       `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
-      `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
+      `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB / FORMULA_DESKTOP_MEMORY_TARGET_MB)\n` +
       `- perf-home: ${formatPerfPath(perfHome)} (override with FORMULA_PERF_HOME)\n` +
       `- profile: ${formatPerfPath(profileRoot)}\n` +
       (enforce
