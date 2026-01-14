@@ -15,6 +15,7 @@ import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/index.
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { computeDlpCacheKey } from "../dlp/dlpCacheKey.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
 
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
@@ -296,12 +297,13 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     });
     const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
-    const dlp =
+    let dlp =
       maybeGetAiCloudDlpOptions({
         documentId: params.workbookId,
         sheetId: defaultSheetId,
         sheetNameResolver: params.sheetNameResolver,
       }) ?? undefined;
+    let dlpKey = computeDlpCacheKey(dlp);
     const devOnBuildStats =
       import.meta.env.MODE === "development"
         ? (stats: WorkbookContextBuildStats) => {
@@ -320,13 +322,27 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
           }
         : undefined;
 
-    const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+    function refreshDlpIfNeeded(): void {
+      const next =
+        maybeGetAiCloudDlpOptions({
+          documentId: params.workbookId,
+          sheetId: defaultSheetId,
+          sheetNameResolver: params.sheetNameResolver,
+        }) ?? undefined;
+      const nextKey = computeDlpCacheKey(next);
+      if (nextKey === dlpKey) return;
+      dlp = next;
+      dlpKey = nextKey;
+    }
+
+    let toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
       sheet_name_resolver: params.sheetNameResolver ?? null,
       require_approval_for_mutations: true,
       dlp,
       toolPolicy
     });
+    let toolExecutorDlpKey = dlpKey;
     const offeredTools = toolExecutor.tools.map((t) => t.name);
     const previewEngine = new PreviewEngine({ approval_cell_threshold: 0, ...(params.previewOptions ?? {}) });
 
@@ -376,6 +392,17 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
 
     async function refreshSystemMessage(targetMessages: any[]): Promise<void> {
       throwIfCancelled();
+      refreshDlpIfNeeded();
+      if (toolExecutorDlpKey !== dlpKey) {
+        toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+          default_sheet: defaultSheetId,
+          sheet_name_resolver: params.sheetNameResolver ?? null,
+          require_approval_for_mutations: true,
+          dlp,
+          toolPolicy
+        });
+        toolExecutorDlpKey = dlpKey;
+      }
       const contextAbortController = new AbortController();
       const ctx = await guard(
         contextBuilder.build({
@@ -461,9 +488,24 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     };
 
     const wrappedToolExecutor = {
-      tools: toolExecutor.tools,
+      get tools() {
+        return toolExecutor.tools;
+      },
       async execute(call: any) {
         throwIfCancelled();
+        // Refresh DLP before executing the tool call so we don't leak workbook data
+        // if policies/classifications change during a long-running agent task.
+        refreshDlpIfNeeded();
+        if (toolExecutorDlpKey !== dlpKey) {
+          toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+            default_sheet: defaultSheetId,
+            sheet_name_resolver: params.sheetNameResolver ?? null,
+            require_approval_for_mutations: true,
+            dlp,
+            toolPolicy
+          });
+          toolExecutorDlpKey = dlpKey;
+        }
         return guard(toolExecutor.execute(call));
       }
     };

@@ -17,6 +17,7 @@ import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/po
 import { createDesktopRagService } from "../../rag/ragService.js";
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
 import { createSheetNameResolverFromIdToNameMap } from "../../../sheet/sheetNameResolver.js";
+import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -135,6 +136,112 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     // One index run for the first model call; subsequent iterations should skip re-indexing.
     expect(indexWorkbookSpy).toHaveBeenCalledTimes(1);
     await ragService.dispose();
+  });
+
+  it("re-scans workbook RAG when DLP inputs change during an agent run (policy/classifications)", async () => {
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const listNonEmptyCellsSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "listNonEmptyCells");
+    try {
+      storage.clear();
+
+      const workbookId = "wb_agent_dlp_rag_reindex_on_dlp_change";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      });
+
+      const classificationStore = new LocalClassificationStore({ storage: storage as any });
+
+      const documentController = new DocumentController();
+      documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");
+
+      const embedder = new HashEmbedder({ dimension: 32 });
+      const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+      const contextManager = new ContextManager({
+        tokenBudgetTokens: 800,
+        workbookRag: { vectorStore, embedder, topK: 3 },
+      });
+
+      const ragService = createDesktopRagService({
+        documentController,
+        workbookId,
+        createRag: async () =>
+          ({
+            vectorStore,
+            embedder,
+            contextManager,
+            // Not used when DLP is enabled, but required by DesktopRagService's contract.
+            indexWorkbook: async () => ({ totalChunks: 0, upserted: 0, skipped: 0, deleted: 0 }),
+          }) as any,
+      });
+
+      let callCount = 0;
+      const llmClient = {
+        chat: vi.fn(async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            // Mutate DLP inputs after the first context build; the agent should pick up
+            // the updated localStorage state and force a DLP re-index on the next iteration.
+            classificationStore.upsert(
+              workbookId,
+              { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 0 },
+              { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels: ["test"] },
+            );
+            return {
+              message: {
+                role: "assistant",
+                content: "",
+                toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A1" } }],
+              },
+              usage: { promptTokens: 1, completionTokens: 1 },
+            };
+          }
+          return {
+            message: { role: "assistant", content: "done" },
+            usage: { promptTokens: 1, completionTokens: 1 },
+          };
+        }),
+      };
+
+      const auditStore = new MemoryAIAuditStore();
+      const result = await runAgentTask({
+        goal: "Read A1",
+        workbookId,
+        documentController,
+        llmClient: llmClient as any,
+        auditStore,
+        ragService,
+        maxIterations: 4,
+        maxDurationMs: 10_000,
+        model: "unit-test-model",
+      });
+
+      expect(result.status).toBe("complete");
+      // With DLP enabled, RAG scanning uses workbookFromSpreadsheetApi which calls
+      // listNonEmptyCells once per sheet for each indexing run.
+      expect(listNonEmptyCellsSpy).toHaveBeenCalledTimes(2);
+
+      await ragService.dispose();
+    } finally {
+      listNonEmptyCellsSpy.mockRestore();
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
   });
 
   it("blocks before calling the LLM when DLP policy forbids cloud AI processing", async () => {
