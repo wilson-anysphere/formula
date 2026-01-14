@@ -50,6 +50,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
         `formula_io::Error::InvalidPassword`).
       - Note: encrypted `.xlsb` workbooks decrypt to an OOXML ZIP containing `xl/workbook.bin`, but
         `formula-io` currently rejects them as `formula_io::Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
+        - Workaround: open encrypted `.xlsb` directly via `formula_io::xlsb::XlsbWorkbook::open_with_password(..)`
+          or `XlsbWorkbook::open_from_bytes_with_password(..)`.
 - Legacy **`.xls`** with BIFF `FILEPASS` yields:
   - `formula_io::Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (prompt
     callers to retry via the password-capable APIs).
@@ -552,6 +554,8 @@ Encrypted workbook handling should distinguish at least these cases:
    - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (today this is primarily
      `"xlsb"`).
    - UI action: explain limitation and suggest re-saving as `.xlsx`/`.xlsm` in Excel.
+   - Workaround (library callers): if the decrypted kind is `.xlsb`, open it via
+     `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` / `open_from_bytes_with_password(..)`.
 
 5. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
    - Surface as: a dedicated “corrupt encrypted container” error (future); today this may surface

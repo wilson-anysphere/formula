@@ -126,8 +126,10 @@ If you need full in-memory access to all parts, you can instead materialize the
 package via `formula_xlsx::XlsxPackage::from_bytes(&decrypted_zip)`.
 
 Note: encrypted `.xlsb` files also decrypt to a ZIP/OPC package, but the payload contains
-`xl/workbook.bin` instead of `xl/workbook.xml`. In that case, open the decrypted bytes via
-`formula-io` / `formula-xlsb` rather than `formula-xlsx`.
+`xl/workbook.bin` instead of `xl/workbook.xml`.
+`formula-io` does not currently route encrypted `.xlsb` through the `.xlsb` reader (it surfaces
+`Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`), but you can open encrypted `.xlsb`
+directly via `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
 
 ### Desktop app UX flow
 
