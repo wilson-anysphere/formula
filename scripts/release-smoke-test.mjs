@@ -65,6 +65,8 @@ Expectations (also forwarded; optional):
   --expect-linux-x64
   --expect-linux-arm64
 
+  -- <args...>    Forward remaining args to scripts/verify-desktop-release-assets.mjs
+
   -h, --help       Print this help.
 `;
   console.log(usage.trimEnd());
@@ -79,6 +81,10 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--") {
+      out.verifyArgs = argv.slice(i + 1);
+      break;
+    }
     if (arg === "--help" || arg === "-h") {
       out.help = true;
       continue;
@@ -615,6 +621,7 @@ async function main() {
         ...(Array.isArray(args.expectFlags)
           ? args.expectFlags.map((v) => String(v)).filter((v) => v.startsWith("--"))
           : []),
+        ...(Array.isArray(args.verifyArgs) ? args.verifyArgs.map((v) => String(v)) : []),
       ],
       env: token ? { ...process.env, GITHUB_TOKEN: token, GH_TOKEN: token } : process.env,
       skipIfMissing: false,
