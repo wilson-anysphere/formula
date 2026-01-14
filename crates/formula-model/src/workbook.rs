@@ -16,6 +16,7 @@ use crate::pivots::{
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::table::{validate_table_name, TableError, TableIdentifier};
 use crate::value::text_eq_case_insensitive;
+use crate::value::casefold;
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
     rewrite_table_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
@@ -1542,7 +1543,7 @@ fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
 fn collect_pivot_table_names(pivots: &[PivotTableModel]) -> HashSet<String> {
     pivots
         .iter()
-        .map(|pivot| pivot.name.to_ascii_lowercase())
+        .map(|pivot| casefold(&pivot.name))
         .collect()
 }
 
@@ -1572,7 +1573,7 @@ fn generate_duplicate_pivot_table_name(base: &str, used_names: &mut HashSet<Stri
     // Match Excel-style name collision behavior: `PivotTable1` -> `PivotTable1 (2)`.
     for i in 2u32.. {
         let candidate = format!("{base} ({i})");
-        if used_names.insert(candidate.to_ascii_lowercase()) {
+        if used_names.insert(casefold(&candidate)) {
             return candidate;
         }
     }

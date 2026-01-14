@@ -54,7 +54,11 @@ impl PivotFieldRef {
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
     pub fn display_string(&self) -> String {
-        self.to_string()
+        match self {
+            PivotFieldRef::CacheFieldName(name) => name.clone(),
+            PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
+            PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
+        }
     }
 
     /// Best-effort parse of an unstructured field identifier.

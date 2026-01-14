@@ -308,6 +308,63 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
 }
 
 #[test]
+fn duplicate_sheet_generates_unique_pivot_names_case_insensitively_for_unicode_text() {
+    let mut wb = Workbook::new();
+    let data = wb.add_sheet("Data").unwrap();
+    let report = wb.add_sheet("Report").unwrap();
+    let other = wb.add_sheet("Other").unwrap();
+
+    wb.pivot_tables.push(PivotTableModel {
+        id: uuid::Uuid::from_u128(1),
+        name: "Straße".to_string(),
+        source: PivotSource::Range {
+            sheet_id: data,
+            range: Range::from_a1("A1:A2").unwrap(),
+        },
+        destination: PivotDestination::Cell {
+            sheet_id: report,
+            cell: CellRef::from_a1("A1").unwrap(),
+        },
+        config: PivotConfig::default(),
+        cache_id: None,
+    });
+
+    // Pre-seed a pivot name that would collide with the default duplicated name `"Straße (2)"`
+    // under Unicode-aware case folding (ß -> SS).
+    wb.pivot_tables.push(PivotTableModel {
+        id: uuid::Uuid::from_u128(2),
+        name: "STRASSE (2)".to_string(),
+        source: PivotSource::Range {
+            sheet_id: data,
+            range: Range::from_a1("A1:A2").unwrap(),
+        },
+        destination: PivotDestination::Cell {
+            sheet_id: other,
+            cell: CellRef::from_a1("A1").unwrap(),
+        },
+        config: PivotConfig::default(),
+        cache_id: None,
+    });
+
+    let copied_sheet = wb.duplicate_sheet(report, None).unwrap();
+
+    // Only the pivot on the duplicated sheet is copied.
+    assert_eq!(wb.pivot_tables.len(), 3);
+
+    let duplicated = wb
+        .pivot_tables
+        .iter()
+        .find(|p| {
+            matches!(
+                &p.destination,
+                PivotDestination::Cell { sheet_id, .. } if *sheet_id == copied_sheet
+            )
+        })
+        .expect("expected duplicated pivot on copied sheet");
+    assert_eq!(duplicated.name, "Straße (3)");
+}
+
+#[test]
 fn delete_sheet_removes_pivots_and_dependent_objects() {
     let mut wb = Workbook::new();
     let data = wb.add_sheet("Data").unwrap();
