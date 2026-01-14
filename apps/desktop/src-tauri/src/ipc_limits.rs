@@ -285,10 +285,28 @@ mod tests {
     #[test]
     fn source_guardrail_commands_use_limited_string_for_paths() {
         let src = include_str!("commands.rs");
+        let start = src
+            .find("pub async fn open_workbook")
+            .expect("expected commands.rs to define open_workbook");
+        let end = (start + 300).min(src.len());
+        let snippet = &src[start..end];
         assert!(
-            src.contains("pub async fn open_workbook")
-                && src.contains("path: LimitedString<MAX_IPC_PATH_BYTES>"),
+            snippet.contains("path: LimitedString<MAX_IPC_PATH_BYTES>"),
             "expected `open_workbook` to use `LimitedString<MAX_IPC_PATH_BYTES>` for `path`"
+        );
+    }
+
+    #[test]
+    fn source_guardrail_commands_use_limited_string_for_network_fetch_url() {
+        let src = include_str!("commands.rs");
+        let start = src
+            .find("pub async fn network_fetch")
+            .expect("expected commands.rs to define network_fetch");
+        let end = (start + 200).min(src.len());
+        let snippet = &src[start..end];
+        assert!(
+            snippet.contains("url: LimitedString<MAX_IPC_URL_BYTES>"),
+            "expected `network_fetch` to use `LimitedString<MAX_IPC_URL_BYTES>` for `url`"
         );
     }
 

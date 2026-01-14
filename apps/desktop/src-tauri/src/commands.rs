@@ -6876,7 +6876,7 @@ pub use crate::network_fetch::NetworkFetchResult;
 #[tauri::command]
 pub async fn network_fetch(
     window: tauri::WebviewWindow,
-    url: String,
+    url: LimitedString<MAX_IPC_URL_BYTES>,
     init: Option<JsonValue>,
 ) -> Result<NetworkFetchResult, String> {
     let origin_url = window.url().map_err(|err| err.to_string())?;
@@ -6887,6 +6887,7 @@ pub async fn network_fetch(
     let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
     ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
 
+    let url = url.into_inner();
     let init = init.unwrap_or(JsonValue::Null);
     crate::network_fetch::network_fetch_impl(&url, &init).await
 }
@@ -6895,7 +6896,7 @@ pub async fn network_fetch(
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceSearchArgs {
-    pub base_url: String,
+    pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
     pub q: Option<String>,
     pub category: Option<String>,
     pub tag: Option<String>,
@@ -6927,7 +6928,7 @@ pub async fn marketplace_search(
     ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
-    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    let mut url = parse_marketplace_base_url(args.base_url.as_ref())?;
     {
         let mut segments = url
             .path_segments_mut()
@@ -6988,7 +6989,7 @@ pub async fn marketplace_search(
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceGetExtensionArgs {
-    pub base_url: String,
+    pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
     pub id: String,
 }
 
@@ -7003,7 +7004,7 @@ pub async fn marketplace_get_extension(
     ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
-    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    let mut url = parse_marketplace_base_url(args.base_url.as_ref())?;
     {
         let mut segments = url
             .path_segments_mut()
@@ -7040,7 +7041,7 @@ pub async fn marketplace_get_extension(
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceDownloadArgs {
-    pub base_url: String,
+    pub base_url: LimitedString<MAX_IPC_URL_BYTES>,
     pub id: String,
     pub version: String,
 }
@@ -7145,7 +7146,7 @@ pub async fn marketplace_download_package(
     ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
-    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    let mut url = parse_marketplace_base_url(args.base_url.as_ref())?;
     {
         let mut segments = url
             .path_segments_mut()
