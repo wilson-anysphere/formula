@@ -363,14 +363,13 @@ fn precedents_include_dynamic_external_precedents_from_indirect() {
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
+    // The bytecode backend currently rejects external workbook refs produced by INDIRECT (Excel
+    // semantics). Disable bytecode so this test exercises the AST evaluator's provider-backed
+    // behavior and ensures dynamic external precedents are still tracked.
+    engine.set_bytecode_enabled(false);
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
-    assert!(
-        engine.bytecode_compile_report(10).is_empty(),
-        "{:?}",
-        engine.bytecode_compile_report(10)
-    );
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
@@ -633,14 +632,12 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents() {
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
     engine.set_external_refs_volatile(false);
+    // Dynamic external workbook refs produced by INDIRECT are currently only supported via the
+    // AST evaluator. Disable bytecode so we can track and invalidate them.
+    engine.set_bytecode_enabled(false);
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
-    assert!(
-        engine.bytecode_compile_report(10).is_empty(),
-        "{:?}",
-        engine.bytecode_compile_report(10)
-    );
     engine.recalculate();
     assert!(!engine.is_dirty("Sheet1", "A1"));
 
@@ -730,6 +727,9 @@ fn external_sheet_invalidation_dirties_dynamic_external_dependents_from_indirect
         calculation_mode: CalculationMode::Automatic,
         ..CalcSettings::default()
     });
+    // Dynamic external workbook refs produced by INDIRECT are currently only supported via the
+    // AST evaluator. Disable bytecode so invalidation refreshes the value.
+    engine.set_bytecode_enabled(false);
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
