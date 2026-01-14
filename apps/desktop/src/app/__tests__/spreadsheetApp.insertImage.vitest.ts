@@ -147,10 +147,11 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     input!.dispatchEvent(new Event("change", { bubbles: true }));
 
     await waitFor(() => {
-      return app.getDrawingObjects(sheetId).length === 1;
+      const drawings = (app.getDocument() as any)?.getSheetDrawings?.(sheetId) ?? [];
+      return Array.isArray(drawings) && drawings.length === 1;
     });
 
-    const drawings = app.getDrawingObjects(sheetId);
+    const drawings = (app.getDocument() as any)?.getSheetDrawings?.(sheetId) ?? [];
     expect(drawings).toHaveLength(1);
     const obj = drawings[0]!;
 
@@ -164,6 +165,10 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     const entry = app.getDrawingImages().get(obj.kind.imageId);
     expect(entry).toBeTruthy();
     expect(entry.bytes).toEqual(bytes);
+
+    const stored = (app.getDocument() as any)?.getImage?.(obj.kind.imageId);
+    expect(stored).toBeTruthy();
+    expect(stored.bytes).toEqual(bytes);
 
     app.destroy();
     root.remove();

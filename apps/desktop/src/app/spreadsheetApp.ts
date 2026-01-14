@@ -353,6 +353,7 @@ class DocumentImageStore implements ImageStore {
   constructor(
     private readonly document: DocumentController,
     private readonly persisted: IndexedDbImageStore,
+    private readonly options: { mode?: "user" | "external"; source?: string } = {},
   ) {}
 
   get(id: string): ImageEntry | undefined {
@@ -383,6 +384,33 @@ class DocumentImageStore implements ImageStore {
 
     // Best-effort persistence: never block callers on IndexedDB availability.
     this.persisted.set(entry);
+
+    // External sync path (collab hydration): apply without creating undo history.
+    const doc = this.document as any;
+    if (this.options.mode === "external" && typeof doc.applyExternalImageDeltas === "function") {
+      try {
+        const imageId = entry.id;
+        const existing = doc.images?.get?.(imageId) ?? null;
+        const before =
+          existing && existing.bytes instanceof Uint8Array
+            ? // Preserve whether the stored entry explicitly had a mimeType field.
+              ("mimeType" in existing ? { bytes: existing.bytes, mimeType: existing.mimeType ?? null } : { bytes: existing.bytes })
+            : null;
+        doc.applyExternalImageDeltas(
+          [
+            {
+              imageId,
+              before,
+              after: { bytes: entry.bytes, mimeType: entry.mimeType },
+            },
+          ],
+          { source: this.options.source ?? "collab" },
+        );
+      } catch {
+        // ignore
+      }
+    }
+
     // Keep a session-local cache so synchronous `get()` calls can resolve quickly without
     // reading from IndexedDB.
     this.fallback.set(entry.id, entry);
@@ -2165,14 +2193,18 @@ export class SpreadsheetApp {
 
     }
 
-    this.drawingImages = new DocumentImageStore(this.document, new IndexedDbImageStore(localWorkbookId));
+    const persistedDrawingImages = new IndexedDbImageStore(localWorkbookId);
+
+    // Primary image store used by the drawings overlay. Writes should be undoable (user edits).
+    this.drawingImages = new DocumentImageStore(this.document, persistedDrawingImages, { mode: "user" });
     if (this.collabSession) {
       // In collab mode, image bytes are not guaranteed to be available locally (e.g. remote inserts,
       // or inserts made on another device without offline persistence). Bind drawing images to Yjs
       // metadata so collaborators eventually converge on the actual bytes.
       this.imageBytesBinder = bindImageBytesToCollabSession({
         session: this.collabSession,
-        images: this.drawingImages,
+        // Use a dedicated adapter for hydration so remote bytes don't create local undo history.
+        images: new DocumentImageStore(this.document, persistedDrawingImages, { mode: "external", source: "collab" }),
         origin: this.collabBinderOrigin ?? undefined,
       });
     }
@@ -6701,9 +6733,11 @@ export class SpreadsheetApp {
 
     const existingObjects = this.listDrawingObjectsForSheet();
     const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
+
     const docAny = this.document as any;
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
+    const canSetImage = typeof docAny.setImage === "function";
 
     if (canInsertDrawing) {
       this.document.beginBatch({ label: "Insert Image" });
@@ -6728,9 +6762,18 @@ export class SpreadsheetApp {
 
       if (canInsertDrawing) {
         try {
+          // Store the image bytes in the document so snapshots/undo/redo persist workbook media.
+          if (canSetImage) {
+            docAny.setImage(imageId, { bytes: image.bytes, mimeType: image.mimeType });
+          }
           docAny.insertDrawing(this.sheetId, inserted);
         } catch {
           // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
+          try {
+            this.document.cancelBatch();
+          } catch {
+            // ignore
+          }
         }
       }
 
