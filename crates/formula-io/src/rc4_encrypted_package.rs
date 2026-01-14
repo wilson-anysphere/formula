@@ -18,7 +18,8 @@
 //!
 //! MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
 //! `(u32 totalSize, u32 reserved)`. When the high DWORD is non-zero and the combined 64-bit value
-//! is not plausible for the available ciphertext, we fall back to the low DWORD for compatibility.
+//! is not plausible for the available ciphertext, we fall back to the low DWORD **only when it is
+//! non-zero** (so we don't misinterpret true 64-bit sizes that are exact multiples of `2^32`).
 //!
 //! This module is intentionally self-contained and does *not* implement RC4 decryption; it only
 //! parses and validates the size header. The decryption logic should treat the first 8 bytes as
