@@ -2080,7 +2080,7 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             buf0[20..].copy_from_slice(&0u32.to_le_bytes());
             let hfinal: [u8; 20] = Sha1::digest(&buf0).into();
 
-            let mut key_cryptoapi = {
+            let key_cryptoapi = {
                 // CryptoAPI `CryptDeriveKey` semantics (as used by `msoffcrypto-tool`).
                 let mut ipad = [0x36u8; 64];
                 let mut opad = [0x5Cu8; 64];
@@ -2111,34 +2111,46 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                 None
             };
 
-            // Verify key material against the file's encrypted verifier fields. This avoids
-            // treating algorithm mismatches as "wrong password".
-            match formula_offcrypto::standard_verify_key(&info, &key_cryptoapi) {
-                Ok(()) => {}
-                Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {
-                    if let Some(key) = key_trunc {
-                        match formula_offcrypto::standard_verify_key(&info, &key) {
-                            Ok(()) => key_cryptoapi = key,
-                            Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {
-                                return Err(formula_offcrypto::OffcryptoError::InvalidPassword)
-                            }
-                            Err(other) => return Err(other),
-                        }
-                    } else {
-                        return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
-                    }
+            // Standard encryption is a ZIP/OPC container. Some producers vary how the verifier
+            // fields and `EncryptedPackage` stream are encrypted (ECB vs CBC-segmented); since the
+            // decrypted bytes must form a valid ZIP archive, attempt decryption with a small set of
+            // key derivations + EncryptedPackage layouts and validate the output as a ZIP archive.
+            //
+            // Note: `standard_verify_key` is intentionally strict (ECB verifier scheme). For
+            // compatibility with non-Excel producers, do not require verifier success before
+            // attempting package decryption.
+            fn looks_like_zip_container(bytes: &[u8]) -> bool {
+                if !bytes.starts_with(b"PK") {
+                    return false;
                 }
-                Err(other) => return Err(other),
+                zip::ZipArchive::new(std::io::Cursor::new(bytes)).is_ok()
             }
 
-            let decrypted = formula_offcrypto::decrypt_standard_encrypted_package(
-                &key_cryptoapi,
-                &encrypted_package,
-            )?;
-            if !decrypted.starts_with(b"PK") {
-                return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+            let mut key_candidates: Vec<Vec<u8>> = Vec::new();
+            key_candidates.push(key_cryptoapi);
+            if let Some(key) = key_trunc {
+                if !key_candidates.iter().any(|k| k.as_slice() == key.as_slice()) {
+                    key_candidates.push(key);
+                }
             }
-            Ok(decrypted)
+
+            for key in key_candidates {
+                match formula_offcrypto::encrypted_package::decrypt_standard_encrypted_package_auto(
+                    &key,
+                    &info.verifier.salt,
+                    &encrypted_package,
+                ) {
+                    Ok(decrypted) => {
+                        if looks_like_zip_container(&decrypted) {
+                            return Ok(decrypted);
+                        }
+                    }
+                    Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {}
+                    Err(other) => return Err(other),
+                }
+            }
+
+            Err(formula_offcrypto::OffcryptoError::InvalidPassword)
         };
 
         match decrypt_with_offcrypto() {
