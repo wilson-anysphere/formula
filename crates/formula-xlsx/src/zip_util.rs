@@ -114,6 +114,62 @@ mod tests {
     }
 }
 
+/// Compute a canonicalized key for a ZIP entry/part name suitable for case- and separator-insensitive
+/// lookup.
+///
+/// The normalization matches [`zip_part_names_equivalent`]:
+/// - percent-decodes valid `%xx` sequences
+/// - strips leading path separators (`/` or `\`), including when percent-encoded
+/// - normalizes `\` to `/`
+/// - ASCII-lowercases
+///
+/// We return a byte vector (not a `String`) so we can represent arbitrary percent-decoded bytes
+/// without requiring valid UTF-8.
+pub(crate) fn zip_part_name_lookup_key(name: &str) -> Vec<u8> {
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let mut bytes = name.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut in_leading_separators = true;
+    while let Some(&b) = bytes.first() {
+        let decoded = if b == b'%' && bytes.len() >= 3 {
+            let hi = bytes[1];
+            let lo = bytes[2];
+            if let (Some(hi), Some(lo)) = (hex_val(hi), hex_val(lo)) {
+                bytes = &bytes[3..];
+                (hi << 4) | lo
+            } else {
+                bytes = &bytes[1..];
+                b
+            }
+        } else {
+            bytes = &bytes[1..];
+            b
+        };
+
+        // Skip any number of leading `/` or `\` separators, even when percent-encoded.
+        if in_leading_separators && matches!(decoded, b'/' | b'\\') {
+            continue;
+        }
+        in_leading_separators = false;
+
+        let normalized = if decoded == b'\\' {
+            b'/'
+        } else {
+            decoded.to_ascii_lowercase()
+        };
+        out.push(normalized);
+    }
+    out
+}
+
 /// Open a ZIP entry by name, tolerating common producer mistakes:
 /// - leading `/` mismatch
 /// - Windows-style `\` path separators

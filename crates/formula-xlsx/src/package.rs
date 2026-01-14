@@ -607,16 +607,18 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
+    let mut part_name_keys: HashSet<Vec<u8>> = HashSet::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
             continue;
         }
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
-        // producers that include it by normalizing to canonical part names.
+        // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name.strip_prefix('/').unwrap_or(name);
+        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
         part_names.insert(canonical.to_string());
+        part_name_keys.insert(crate::zip_util::zip_part_name_lookup_key(canonical));
     }
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
@@ -660,16 +662,6 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let workbook_part = "xl/workbook.xml";
     let mut out = Vec::with_capacity(sheets.len());
 
-    fn find_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
-        if part_names.contains(candidate) {
-            return Some(candidate.to_string());
-        }
-        part_names
-            .iter()
-            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
-            .cloned()
-    }
-
     for sheet in sheets {
         let resolved = rel_by_id
             .get(&sheet.rel_id)
@@ -679,13 +671,29 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             })
             .and_then(|rel| {
-                crate::path::resolve_target_candidates(workbook_part, &rel.target)
-                    .into_iter()
-                    .find_map(|candidate| find_part_name(&part_names, &candidate))
+                let candidates = crate::path::resolve_target_candidates(workbook_part, &rel.target);
+                // Prefer exact matches to keep part-name strings canonical when possible (some
+                // producers percent-encode relationship targets while storing ZIP entry names
+                // unescaped, and vice versa).
+                for candidate in &candidates {
+                    if part_names.contains(candidate) {
+                        return Some(candidate.clone());
+                    }
+                }
+                candidates.into_iter().find(|candidate| {
+                    part_name_keys.contains(&crate::zip_util::zip_part_name_lookup_key(candidate))
+                })
             })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                find_part_name(&part_names, &candidate)
+                if part_names.contains(&candidate)
+                    || part_name_keys
+                        .contains(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                {
+                    Some(candidate)
+                } else {
+                    None
+                }
             });
 
         let Some(worksheet_part) = resolved else {
@@ -715,16 +723,18 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
+    let mut part_name_keys: HashSet<Vec<u8>> = HashSet::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
             continue;
         }
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
-        // producers that include it by normalizing to canonical part names.
+        // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name.strip_prefix('/').unwrap_or(name);
+        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
         part_names.insert(canonical.to_string());
+        part_name_keys.insert(crate::zip_util::zip_part_name_lookup_key(canonical));
     }
 
     fn read_zip_part_required<R: Read + Seek>(
@@ -767,16 +777,6 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     let workbook_part = "xl/workbook.xml";
     let mut out = Vec::with_capacity(sheets.len());
 
-    fn find_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
-        if part_names.contains(candidate) {
-            return Some(candidate.to_string());
-        }
-        part_names
-            .iter()
-            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
-            .cloned()
-    }
-
     for sheet in sheets {
         let resolved = rel_by_id
             .get(&sheet.rel_id)
@@ -786,13 +786,26 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             })
             .and_then(|rel| {
-                crate::path::resolve_target_candidates(workbook_part, &rel.target)
-                    .into_iter()
-                    .find_map(|candidate| find_part_name(&part_names, &candidate))
+                let candidates = crate::path::resolve_target_candidates(workbook_part, &rel.target);
+                for candidate in &candidates {
+                    if part_names.contains(candidate) {
+                        return Some(candidate.clone());
+                    }
+                }
+                candidates.into_iter().find(|candidate| {
+                    part_name_keys.contains(&crate::zip_util::zip_part_name_lookup_key(candidate))
+                })
             })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                find_part_name(&part_names, &candidate)
+                if part_names.contains(&candidate)
+                    || part_name_keys
+                        .contains(&crate::zip_util::zip_part_name_lookup_key(&candidate))
+                {
+                    Some(candidate)
+                } else {
+                    None
+                }
             });
 
         let Some(worksheet_part) = resolved else {

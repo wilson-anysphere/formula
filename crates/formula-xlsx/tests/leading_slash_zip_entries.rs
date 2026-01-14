@@ -246,6 +246,15 @@ mod leading_slash_zip_entries_tests {
     }
 
     #[test]
+    fn worksheet_parts_from_reader_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let parts = worksheet_parts_from_reader(Cursor::new(bytes)).expect("worksheet parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "Sheet1");
+        assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet1.xml");
+    }
+
+    #[test]
     fn read_workbook_model_from_bytes_tolerates_leading_slash_entries() {
         let bytes = build_minimal_xlsx_with_leading_slash_entries();
         let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
