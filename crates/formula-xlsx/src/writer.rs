@@ -875,31 +875,7 @@ fn sheet_xml(
         String::new()
     };
 
-    let sheet_format_pr_xml = {
-        let base = sheet.base_col_width;
-        let default_col_width = sheet.default_col_width;
-        let default_row_height = sheet.default_row_height;
-
-        if base.is_none() && default_col_width.is_none() && default_row_height.is_none() {
-            String::new()
-        } else {
-            let mut out = String::new();
-            out.push_str("<sheetFormatPr");
-
-            if let Some(base) = base {
-                out.push_str(&format!(r#" baseColWidth="{base}""#));
-            }
-            if let Some(width) = default_col_width {
-                out.push_str(&format!(r#" defaultColWidth="{width}""#));
-            }
-            if let Some(height) = default_row_height {
-                out.push_str(&format!(r#" defaultRowHeight="{height}""#));
-            }
-
-            out.push_str("/>");
-            out
-        }
-    };
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
@@ -1545,28 +1521,6 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
 
     out.push_str("</dataValidations>");
     out
-}
-
-fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_row_height.is_none()
-        && sheet.default_col_width.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut attrs = String::new();
-    if let Some(base) = sheet.base_col_width {
-        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(w) = sheet.default_col_width {
-        attrs.push_str(&format!(r#" defaultColWidth="{w}""#));
-    }
-    if let Some(ht) = sheet.default_row_height {
-        attrs.push_str(&format!(r#" defaultRowHeight="{ht}""#));
-    }
-
-    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn sheet_protection_xml(sheet: &Worksheet) -> String {

@@ -34,7 +34,6 @@ use crate::styles::StylesPart;
 use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::theme::convert::to_model_theme_palette;
 use crate::theme::parse_theme_palette;
-use crate::zip_util::open_zip_part;
 use crate::WorkbookKind;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
