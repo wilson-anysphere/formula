@@ -126,6 +126,24 @@ fn ipc_pivot_field_ref_rejects_ambiguous_object_shapes() {
 }
 
 #[test]
+fn ipc_pivot_field_ref_rejects_oversize_strings() {
+    let max = desktop::resource_limits::MAX_PIVOT_TEXT_BYTES;
+    let long = "a".repeat(max + 1);
+    let json = serde_json::to_string(&long).unwrap();
+    let err = serde_json::from_str::<IpcPivotFieldRef>(&json).unwrap_err();
+    assert!(err.to_string().contains("string is too large"));
+}
+
+#[test]
+fn ipc_pivot_field_ref_rejects_oversize_structured_table_names() {
+    let max = desktop::resource_limits::MAX_PIVOT_TEXT_BYTES;
+    let long = "a".repeat(max + 1);
+    let json = format!(r#"{{"table":"{long}","column":"Amount"}}"#);
+    let err = serde_json::from_str::<IpcPivotFieldRef>(&json).unwrap_err();
+    assert!(err.to_string().contains("string is too large"));
+}
+
+#[test]
 fn ipc_pivot_field_ref_leaves_non_dax_strings_as_cache_field_names() {
     let ipc: IpcPivotFieldRef = serde_json::from_str("\"Region\"").unwrap();
     let core: PivotFieldRef = ipc.into();
