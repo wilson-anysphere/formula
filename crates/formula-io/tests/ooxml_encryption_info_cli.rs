@@ -165,7 +165,19 @@ fn cli_prints_standard_version() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("standard.xlsx");
 
-    let bytes = make_ooxml_encrypted_container(3, 2, 0xAABBCCDD, b"");
+    // Minimal Standard payload: headerSize + 8 DWORDs of EncryptionHeader fixed fields.
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&(32u32).to_le_bytes()); // headerSize
+    payload.extend_from_slice(&(0x0000_0024u32).to_le_bytes()); // EncryptionHeader.flags (fCryptoAPI | fAES)
+    payload.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+    payload.extend_from_slice(&0x0000_660Eu32.to_le_bytes()); // algId (AES-128)
+    payload.extend_from_slice(&0x0000_8004u32.to_le_bytes()); // algIdHash (SHA1)
+    payload.extend_from_slice(&128u32.to_le_bytes()); // keySize (bits)
+    payload.extend_from_slice(&0u32.to_le_bytes()); // providerType
+    payload.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+    payload.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+    let bytes = make_ooxml_encrypted_container(3, 2, 0xAABBCCDD, &payload);
     std::fs::write(&path, bytes).expect("write fixture");
 
     let out = Command::new(ooxml_encryption_info_bin())
@@ -180,7 +192,7 @@ fn cli_prints_standard_version() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         stdout.trim_end(),
-        "Standard (3.2) flags=0xaabbccdd",
+        "Standard (3.2) flags=0xaabbccdd hdr_flags=0x00000024 fCryptoAPI=1 fAES=1 algId=0x0000660e algIdHash=0x00008004 keySize=128",
         "unexpected stdout: {stdout}"
     );
 }
