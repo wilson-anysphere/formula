@@ -13517,7 +13517,11 @@ export class SpreadsheetApp {
 
     this.scrollbarDrag = { axis, pointerId: e.pointerId, grabOffset, thumbTravel, trackStart, maxScroll };
 
-    (thumb as HTMLElement).setPointerCapture(e.pointerId);
+    try {
+      (thumb as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
   }
 
   private onScrollbarTrackPointerDown(e: PointerEvent, axis: "x" | "y"): void {
@@ -14467,7 +14471,11 @@ export class SpreadsheetApp {
       e.preventDefault();
       this.dragState = { pointerId: e.pointerId, mode: "formula" };
       this.dragPointerPos = { x, y };
-      this.root.setPointerCapture(e.pointerId);
+      try {
+        this.root.setPointerCapture(e.pointerId);
+      } catch {
+        // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+      }
       this.selection = setActiveCell(this.selection, cell, this.limits);
       this.renderSelection();
       this.updateStatus();
@@ -14508,7 +14516,11 @@ export class SpreadsheetApp {
         };
         this.dragPointerPos = { x, y };
         this.fillPreviewRange = null;
-        this.root.setPointerCapture(e.pointerId);
+        try {
+          this.root.setPointerCapture(e.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+        }
         this.focus();
         return;
       }
@@ -14550,7 +14562,11 @@ export class SpreadsheetApp {
 
     this.dragState = { pointerId: e.pointerId, mode: "normal" };
     this.dragPointerPos = { x, y };
-    this.root.setPointerCapture(e.pointerId);
+    try {
+      this.root.setPointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
     if (e.shiftKey) {
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
     } else if (primary) {
