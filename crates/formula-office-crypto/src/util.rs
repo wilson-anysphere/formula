@@ -156,11 +156,27 @@ pub(crate) fn parse_encrypted_package_original_size(
     let size_u64 = len_lo | (len_hi << 32);
 
     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
-    Ok(if len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+    Ok(if len_lo != 0 && len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
         len_lo
     } else {
         size_u64
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypted_package_size_header_does_not_fall_back_when_low_dword_is_zero() {
+        // The header is specified as a `u64le`. Some producers treat it as `(u32 size, u32 reserved)`,
+        // but that heuristic must not misread sizes that are exact multiples of 2^32 (low DWORD = 0).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // low DWORD
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // high DWORD
+        let size = parse_encrypted_package_original_size(&bytes).expect("parse size");
+        assert_eq!(size, 1u64 << 32);
+    }
 }
 
 pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, OfficeCryptoError> {
