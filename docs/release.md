@@ -57,8 +57,8 @@ If you set **upload=true**, the workflow will create/update a **draft** GitHub R
 assets (matching the tag-driven behavior). This requires providing either `tag` or `version`.
 
 Note: `upload=true` runs the same version validation as a tagged release (the tag/version must
-match `apps/desktop/src-tauri/tauri.conf.json`), so for ad-hoc pipeline tests without bumping the
-app version, prefer `upload=false`.
+match both `apps/desktop/src-tauri/tauri.conf.json` and `apps/desktop/src-tauri/Cargo.toml`), so
+for ad-hoc pipeline tests without bumping the app version, prefer `upload=false`.
 
 ## Toolchain versions (keep local + CI in sync)
 
@@ -99,7 +99,9 @@ Run them locally from the repo root:
 # (Cargo.toml major/minor + Cargo.lock resolved patch), across workflows + docs.
 node scripts/ci/check-tauri-cli-version.mjs
 
-# Ensures the tag version matches apps/desktop/src-tauri/tauri.conf.json "version".
+# Ensures the tag version matches both:
+# - apps/desktop/src-tauri/tauri.conf.json "version"
+# - apps/desktop/src-tauri/Cargo.toml [package].version
 node scripts/check-desktop-version.mjs vX.Y.Z
 
 # Ensures plugins.updater.pubkey/endpoints are not placeholders and the pubkey is a valid minisign key
@@ -208,9 +210,10 @@ APIs so the updater plugin can complete any pending work during shutdown.
 ## 1) Versioning + tagging
 
 1. Update the desktop app version in `apps/desktop/src-tauri/tauri.conf.json` (`version`).
-2. Merge the version bump to `main`.
-3. Create and push a tag **with the same version** (CI enforces that the git tag matches
-   `tauri.conf.json`):
+2. Update the desktop Rust crate version in `apps/desktop/src-tauri/Cargo.toml` (`[package].version`).
+3. Merge the version bump to `main`.
+4. Create and push a tag **with the same version** (CI enforces that the git tag matches both
+   `tauri.conf.json` and `Cargo.toml`):
 
    ```bash
    git tag vX.Y.Z
