@@ -62,6 +62,24 @@ test("validate-windows-bundles.ps1 performs best-effort NSIS marker scanning", (
   );
 });
 
+test("validate-windows-bundles.ps1 validates all configured file association extensions (not just .xlsx) via MSI", () => {
+  assert.match(
+    text,
+    /expectedExtensions\s*=\s*@\(/,
+    "Expected validator to derive an extension list from tauri.conf.json bundle.fileAssociations.",
+  );
+  assert.match(
+    text,
+    /foreach\s*\(\s*\$ext\s+in\s+\$expectedExtensions\s*\)/,
+    "Expected validator to loop over all configured extensions when validating MSI file association metadata.",
+  );
+  assert.match(
+    text,
+    /Assert-MsiDeclaresFileAssociation\s+-Msi\s+\$msi\s+-ExtensionNoDot\s+\$ext/,
+    "Expected validator to validate each extension via the MSI Extension table.",
+  );
+});
+
 test("validate-windows-bundles.ps1 accepts common Excel ProgId evidence for .xlsx associations", () => {
   assert.match(
     text,

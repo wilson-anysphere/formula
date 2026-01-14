@@ -8,7 +8,8 @@
   signing is configured the produced installers are Authenticode-signed.
  
   We also validate that the built installers include registry entries for:
-    - spreadsheet file associations (at least `.xlsx`)
+    - file associations configured in `apps/desktop/src-tauri/tauri.conf.json` bundle.fileAssociations
+      (e.g. `.xlsx`, `.csv`, `.parquet`, ...)
     - the `formula://` URL protocol handler.
 
   By default this script searches common Tauri output locations (including
@@ -572,7 +573,7 @@ try {
   }
 
   # Validate desktop integration metadata is present in the produced installers:
-  # - spreadsheet file associations (at least `.xlsx`)
+  # - file associations (extensions) configured in tauri.conf.json bundle.fileAssociations
   # - the `formula://` URL protocol handler.
   #
   # On Windows, `.xlsx` file associations are typically registered via MSI tables
@@ -590,9 +591,11 @@ try {
     )
 
     $configPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+    $defaultXlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     $default = [pscustomobject]@{
       Extensions = @("xlsx")
-      XlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      MimeTypesByExtension = @{ xlsx = $defaultXlsxMime }
+      XlsxMimeType = $defaultXlsxMime
     }
 
     if (-not (Test-Path -LiteralPath $configPath)) {
@@ -621,27 +624,57 @@ try {
       return $default
     }
 
-    $xlsxEntry = @(
-      $fileAssociations |
-        Where-Object {
-          if (-not ($_.PSObject.Properties.Name -contains "ext")) { return $false }
-          # `ext` can be either a string or an array of strings.
-          $exts = @($_.ext)
-          return ($exts -contains "xlsx" -or $exts -contains ".xlsx")
+    $extSet = New-Object "System.Collections.Generic.HashSet[string]"
+    $mimeTypesByExtension = @{}
+
+    foreach ($assoc in @($fileAssociations)) {
+      if ($null -eq $assoc) { continue }
+      if (-not ($assoc.PSObject.Properties.Name -contains "ext")) { continue }
+
+      # `ext` can be either a string or an array of strings.
+      $exts = @($assoc.ext)
+
+      $mime = ""
+      if (
+        ($assoc.PSObject.Properties.Name -contains "mimeType") -and
+        -not [string]::IsNullOrWhiteSpace($assoc.mimeType)
+      ) {
+        $mime = ($assoc.mimeType).ToString().Trim()
+      }
+
+      foreach ($extRaw in $exts) {
+        if ($null -eq $extRaw) { continue }
+        $ext = $extRaw.ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($ext)) { continue }
+        $ext = $ext.TrimStart(".").ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($ext)) { continue }
+
+        $null = $extSet.Add($ext)
+        if (-not [string]::IsNullOrWhiteSpace($mime) -and -not $mimeTypesByExtension.ContainsKey($ext)) {
+          $mimeTypesByExtension[$ext] = $mime
         }
-    ) | Select-Object -First 1
-    $mime = $default.XlsxMimeType
-    if (
-      $null -ne $xlsxEntry -and
-      ($xlsxEntry.PSObject.Properties.Name -contains "mimeType") -and
-      -not [string]::IsNullOrWhiteSpace($xlsxEntry.mimeType)
-    ) {
-      $mime = ($xlsxEntry.mimeType).ToString()
+      }
+    }
+
+    if ($extSet.Count -eq 0) {
+      return $default
+    }
+
+    $extensions = @($extSet | Sort-Object -Unique)
+    $xlsxMime = $defaultXlsxMime
+    if ($mimeTypesByExtension.ContainsKey("xlsx")) {
+      $xlsxMime = ($mimeTypesByExtension["xlsx"]).ToString().Trim()
+    }
+
+    # Ensure the default has a stable mapping for `.xlsx` even if it was omitted from the config.
+    if (-not $mimeTypesByExtension.ContainsKey("xlsx")) {
+      $mimeTypesByExtension["xlsx"] = $xlsxMime
     }
 
     return [pscustomobject]@{
-      Extensions = @("xlsx")
-      XlsxMimeType = $mime
+      Extensions = $extensions
+      MimeTypesByExtension = $mimeTypesByExtension
+      XlsxMimeType = $xlsxMime
     }
   }
  
@@ -1318,16 +1351,39 @@ try {
   }
 
   $assocSpec = Get-ExpectedFileAssociationSpec -RepoRoot $repoRoot
-  $requiredExtension = ($assocSpec.Extensions | Select-Object -First 1)
-  if ([string]::IsNullOrWhiteSpace($requiredExtension)) {
-    $requiredExtension = "xlsx"
+  $expectedExtensions = @()
+  if ($null -ne $assocSpec -and ($assocSpec.PSObject.Properties.Name -contains "Extensions")) {
+    $expectedExtensions = @(
+      $assocSpec.Extensions |
+        Where-Object { $_ } |
+        ForEach-Object { $_.ToString().Trim().TrimStart(".").ToLowerInvariant() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique
+    )
   }
-  $requiredExtensionNoDot = $requiredExtension.Trim().TrimStart(".")
-  $expectedXlsxMimeType = ""
-  if ($null -ne $assocSpec -and $null -ne $assocSpec.XlsxMimeType) {
-    $expectedXlsxMimeType = ($assocSpec.XlsxMimeType).ToString().Trim()
+  if ($expectedExtensions.Count -eq 0) {
+    $expectedExtensions = @("xlsx")
   }
- 
+
+  # MSI validation is authoritative; validate every configured file association extension.
+  # For NSIS `.exe` marker scanning (best-effort), pick a stable representative extension (prefer `.xlsx`).
+  $requiredExtensionNoDot = "xlsx"
+  if (-not ($expectedExtensions -contains "xlsx")) {
+    $requiredExtensionNoDot = ($expectedExtensions | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($requiredExtensionNoDot)) {
+      $requiredExtensionNoDot = "xlsx"
+    }
+  }
+
+  $mimeTypesByExtension = @{}
+  if (
+    $null -ne $assocSpec -and
+    ($assocSpec.PSObject.Properties.Name -contains "MimeTypesByExtension") -and
+    ($assocSpec.MimeTypesByExtension -is [hashtable])
+  ) {
+    $mimeTypesByExtension = $assocSpec.MimeTypesByExtension
+  }
+
   $urlSpec = Get-ExpectedUrlProtocolSpec -RepoRoot $repoRoot
   $requiredScheme = ""
   $candidateSchemes = @()
@@ -1347,7 +1403,13 @@ try {
   if ($msiInstallers.Count -gt 0) {
     foreach ($msi in $msiInstallers) {
       try {
-        Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $requiredExtensionNoDot -ExpectedMimeType $expectedXlsxMimeType
+        foreach ($ext in $expectedExtensions) {
+          $expectedMime = ""
+          if ($mimeTypesByExtension.ContainsKey($ext)) {
+            $expectedMime = ($mimeTypesByExtension[$ext]).ToString().Trim()
+          }
+          Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $ext -ExpectedMimeType $expectedMime
+        }
       } catch {
         $msg = $_.Exception.Message
         if ($msg -match 'Failed to open MSI for inspection') {
