@@ -13562,6 +13562,85 @@ pub fn build_shared_formula_sheet_scoped_name_sanitization_fixture_xls() -> Vec<
     ole.into_inner().into_inner()
 }
 
+fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgexp_missing_shrfmla_row_oob_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedFallback_OOB", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Malformed shared-formula pattern near the BIFF8 row limit:
+    // - Base cell stores a full formula rgce using PtgRef with relative flags.
+    // - Follower cell stores only PtgExp referencing the base.
+    // - SHRFMLA definition record is intentionally missing.
+    //
+    // Base: B65535 = A65536+1
+    // Follower: B65536 should materialize as #REF!+1 (A65537 is out of BIFF8 bounds).
+    const BASE_ROW: u16 = 65_534; // 0-based row for Excel row 65535
+    const FOLLOWER_ROW: u16 = 65_535; // 0-based row for Excel row 65536
+    const BASE_COL: u16 = 1; // column B
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [BASE_ROW, FOLLOWER_ROW + 1) cols [0, 2) => A65535:B65536.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&(BASE_ROW as u32).to_le_bytes()); // first row
+    dims.extend_from_slice(&(FOLLOWER_ROW as u32 + 1).to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Base formula in B65535: `A65536+1` encoded using PtgRef with relative flags.
+    let rgce_base: Vec<u8> = vec![
+        0x24, // PtgRef
+        FOLLOWER_ROW.to_le_bytes()[0],
+        FOLLOWER_ROW.to_le_bytes()[1],
+        0x00, 0xC0, // col = A (0) + row_rel + col_rel
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(BASE_ROW, BASE_COL, xf_cell, 0.0, &rgce_base),
+    );
+
+    // Follower formula in B65536: `PtgExp(B65535)`.
+    let rgce_ptgexp = ptg_exp(BASE_ROW, BASE_COL);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(FOLLOWER_ROW, BASE_COL, xf_cell, 0.0, &rgce_ptgexp),
+    );
+
+    // Intentionally omit SHRFMLA/ARRAY definition records.
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+/// Build a BIFF8 `.xls` fixture containing a malformed shared formula near the BIFF8 row limit:
+/// `PtgExp` follower cell references a base `FORMULA.rgce` that uses `PtgRef` with relative flags,
+/// but the `SHRFMLA` definition record is missing.
+pub fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgexp_missing_shrfmla_row_oob_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a merged region (`A1:B1`) and a hyperlink anchored to
 /// a single cell within the merged region.
 ///

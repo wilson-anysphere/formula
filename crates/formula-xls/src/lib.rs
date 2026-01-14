@@ -473,20 +473,61 @@ fn import_xls_with_biff_reader(
     // coalescing CONTINUE fragments) rather than masking them. In rare cases where a NAME record
     // is so truncated that it can't be repaired safely without corrupting the stream, we mask it
     // to prevent panics (at the cost of potentially shifting name indices in calamine's table).
+    let mut calamine_formulas_disabled = false;
+
     let mut workbook: Xls<_> = match workbook_stream.as_deref() {
         Some(stream) => {
+            let detected_biff_version =
+                biff_version.unwrap_or_else(|| biff::detect_biff_version(stream));
+
             // Calamine's continued-NAME panic workaround only applies to BIFF8 NAME records. Avoid
             // patching BIFF5 streams (different NAME layout) to keep `.xls` import best-effort.
-            let sanitized = match biff_version.unwrap_or_else(|| biff::detect_biff_version(stream))
-            {
+            let sanitized = match detected_biff_version {
                 biff::BiffVersion::Biff8 => sanitize_biff8_stream_for_calamine(stream),
                 biff::BiffVersion::Biff5 => None,
             };
-            let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
-            catch_calamine_panic_with_context("opening `.xls` via calamine", || {
-                Xls::new(Cursor::new(xls_bytes))
-            })?
-            .map_err(ImportError::Xls)?
+            let stream_for_calamine = sanitized.as_deref().unwrap_or(stream);
+
+            let open_with_stream = |workbook_stream: &[u8]| -> Result<Xls<_>, ImportError> {
+                let xls_bytes = build_in_memory_xls(workbook_stream)?;
+                match catch_calamine_panic_with_context("opening `.xls` via calamine", || {
+                    Xls::new(Cursor::new(xls_bytes))
+                })? {
+                    Ok(workbook) => Ok(workbook),
+                    Err(err) => Err(ImportError::Xls(err)),
+                }
+            };
+
+            match open_with_stream(stream_for_calamine) {
+                Ok(workbook) => workbook,
+                Err(ImportError::CalaminePanic(message))
+                    if detected_biff_version == biff::BiffVersion::Biff8 =>
+                {
+                    // Calamine can panic while parsing `.xls` workbook streams when decoding BIFF8
+                    // formulas (notably shared-formula materialization near BIFF8 row/col bounds).
+                    //
+                    // Prefer a best-effort recovery path: retry with BIFF8 formula token streams
+                    // sanitized/disabled for calamine (we still import formulas from the raw BIFF
+                    // stream ourselves).
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "panic while opening `.xls` via calamine: {message}; retrying with BIFF8 formula decoding disabled"
+                        ),
+                        &mut warnings_suppressed,
+                    );
+
+                    let sanitized_formulas =
+                        sanitize_biff8_formula_records_for_calamine(stream_for_calamine);
+                    if sanitized_formulas.is_some() {
+                        calamine_formulas_disabled = true;
+                    }
+                    let stream_for_calamine =
+                        sanitized_formulas.as_deref().unwrap_or(stream_for_calamine);
+                    open_with_stream(stream_for_calamine)?
+                }
+                Err(other) => return Err(other),
+            }
         }
         None => {
             let bytes = match fallback_xls_bytes {
@@ -1604,71 +1645,77 @@ fn import_xls_with_biff_reader(
 
         let mut calamine_formula_failed = false;
 
-        // Best-effort: calamine's `.xls` formula decoding can error or panic on token streams it
-        // doesn't understand. Treat both errors and panics as non-fatal and fall back to BIFF
-        // parsing when possible.
-        match catch_calamine_panic_with_context(
-            &format!("reading formulas for sheet `{source_sheet_name}`"),
-            || workbook.worksheet_formula(&source_sheet_name),
-        ) {
-            Ok(Ok(formula_range)) => {
-                let formula_start = formula_range.start().unwrap_or((0, 0));
-                for (row, col, formula) in formula_range.used_cells() {
-                    let Some(cell_ref) = to_cell_ref(formula_start, row, col) else {
-                        push_import_warning(
-                            &mut warnings,
-                            format!(
-                                "skipping out-of-bounds formula in sheet `{sheet_name}` at ({row},{col})"
-                            ),
-                            &mut warnings_suppressed,
-                        );
-                        continue;
-                    };
+        if !calamine_formulas_disabled {
+            // Best-effort: calamine's `.xls` formula decoding can error or panic on token streams it
+            // doesn't understand. Treat both errors and panics as non-fatal and fall back to BIFF
+            // parsing when possible.
+            match catch_calamine_panic_with_context(
+                &format!("reading formulas for sheet `{source_sheet_name}`"),
+                || workbook.worksheet_formula(&source_sheet_name),
+            ) {
+                Ok(Ok(formula_range)) => {
+                    let formula_start = formula_range.start().unwrap_or((0, 0));
+                    for (row, col, formula) in formula_range.used_cells() {
+                        let Some(cell_ref) = to_cell_ref(formula_start, row, col) else {
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "skipping out-of-bounds formula in sheet `{sheet_name}` at ({row},{col})"
+                                ),
+                                &mut warnings_suppressed,
+                            );
+                            continue;
+                        };
 
-                    // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes (notably
-                    // defined-name references via `PtgName`). Strip them so the formula text is
-                    // parseable and stable across import paths.
-                    let formula_clean;
-                    let formula = if formula.contains('\0') {
-                        formula_clean = formula.replace('\0', "");
-                        formula_clean.as_str()
-                    } else {
-                        formula
-                    };
+                        // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes (notably
+                        // defined-name references via `PtgName`). Strip them so the formula text is
+                        // parseable and stable across import paths.
+                        let formula_clean;
+                        let formula = if formula.contains('\0') {
+                            formula_clean = formula.replace('\0', "");
+                            formula_clean.as_str()
+                        } else {
+                            formula
+                        };
 
-                    let Some(normalized) = normalize_formula_text(formula) else {
-                        continue;
-                    };
+                        let Some(normalized) = normalize_formula_text(formula) else {
+                            continue;
+                        };
 
-                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                    sheet.set_formula(anchor, Some(normalized));
+                        let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                        sheet.set_formula(anchor, Some(normalized));
 
-                    if let Some(resolved) =
-                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
-                    {
-                        sheet.set_style_id(anchor, resolved);
+                        if let Some(resolved) =
+                            style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
+                        {
+                            sheet.set_style_id(anchor, resolved);
+                        }
                     }
                 }
+                Ok(Err(err)) => {
+                    calamine_formula_failed = true;
+                    push_import_warning(
+                        &mut warnings,
+                        format!("failed to read formulas for sheet `{sheet_name}`: {err}"),
+                        &mut warnings_suppressed,
+                    );
+                }
+                Err(ImportError::CalaminePanic(message)) => {
+                    calamine_formula_failed = true;
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to read formulas for sheet `{sheet_name}`: calamine panicked: {message}"
+                        ),
+                        &mut warnings_suppressed,
+                    );
+                }
+                Err(other) => return Err(other),
             }
-            Ok(Err(err)) => {
-                calamine_formula_failed = true;
-                push_import_warning(
-                    &mut warnings,
-                    format!("failed to read formulas for sheet `{sheet_name}`: {err}"),
-                    &mut warnings_suppressed,
-                );
-            }
-            Err(ImportError::CalaminePanic(message)) => {
-                calamine_formula_failed = true;
-                push_import_warning(
-                    &mut warnings,
-                    format!(
-                        "failed to read formulas for sheet `{sheet_name}`: calamine panicked: {message}"
-                    ),
-                    &mut warnings_suppressed,
-                );
-            }
-            Err(other) => return Err(other),
+        } else {
+            // Calamine workbook open succeeded only after we sanitized formula record payloads; do
+            // not trust `worksheet_formula` output.
+            calamine_formula_failed = true;
         }
 
         // BIFF8 fallback/merge: calamine's `.xls` formula decoding can fail for token streams it
@@ -4701,6 +4748,60 @@ fn sanitize_biff8_wide_ptgexp_formulas_for_calamine(stream: &[u8]) -> Option<Vec
         let cce_offset = record.offset + 4 + 20;
         if cce_offset + 2 <= out.len() {
             out[cce_offset..cce_offset + 2].copy_from_slice(&5u16.to_le_bytes());
+        }
+    }
+
+    out
+}
+
+fn sanitize_biff8_formula_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
+    // Calamine can panic while decoding BIFF8 formulas. One observed case is shared-formula
+    // materialization near BIFF8 row/col bounds where shifting a `PtgRef`/`PtgArea` row overflows a
+    // `u16` during `PtgExp` resolution.
+    //
+    // To keep `.xls` import best-effort, sanitize all BIFF8 FORMULA rgce streams for calamine by
+    // replacing them with a minimal constant expression (`0`). This prevents calamine from parsing
+    // or materializing any formula token streams while still preserving:
+    // - cached formula results (cell values), and
+    // - sheet structure (row/col coordinates).
+    //
+    // We still import formulas ourselves from the raw BIFF stream, so correctness does not depend
+    // on calamine's formula strings when this sanitizer is applied.
+    const RECORD_FORMULA: u16 = 0x0006;
+
+    // Minimal rgce for `0`: PtgInt(0).
+    const SAFE_RGCE: [u8; 3] = [0x1E, 0x00, 0x00];
+
+    let mut out: Option<Vec<u8>> = None;
+    let mut iter = biff::records::BiffRecordIter::from_offset(stream, 0).ok()?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(_) => break,
+        };
+        if record.record_id != RECORD_FORMULA {
+            continue;
+        }
+        let data = record.data;
+        if data.len() < 22 {
+            continue;
+        }
+
+        let out = out.get_or_insert_with(|| stream.to_vec());
+        let cce_offset = record.offset + 4 + 20;
+        let rgce_offset = record.offset + 4 + 22;
+        if cce_offset + 2 > out.len() {
+            continue;
+        }
+
+        // If the record is long enough, patch the rgce bytes; otherwise set cce=0 so calamine
+        // skips parsing.
+        if rgce_offset + SAFE_RGCE.len() <= out.len() && data.len() >= 22 + SAFE_RGCE.len() {
+            out[cce_offset..cce_offset + 2].copy_from_slice(&(SAFE_RGCE.len() as u16).to_le_bytes());
+            out[rgce_offset..rgce_offset + SAFE_RGCE.len()].copy_from_slice(&SAFE_RGCE);
+        } else {
+            out[cce_offset..cce_offset + 2].copy_from_slice(&0u16.to_le_bytes());
         }
     }
 
