@@ -12,7 +12,6 @@
 //! Run:
 //!   cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored
 
-use formula_model::hash_legacy_password;
 use md5::{Digest as _, Md5};
 use sha1::Sha1;
 use std::io::{Cursor, Read, Write};
@@ -28,6 +27,11 @@ const RECORD_WINDOW1: u16 = 0x003D;
 const RECORD_FONT: u16 = 0x0031;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_INTERFACEHDR: u16 = 0x00E1;
+const RECORD_RRDINFO: u16 = 0x0138;
+const RECORD_RRDHEAD: u16 = 0x0139;
+const RECORD_USREXCL: u16 = 0x0194;
+const RECORD_FILELOCK: u16 = 0x0195;
 
 const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_WINDOW2: u16 = 0x023E;
@@ -512,42 +516,192 @@ impl PayloadRc4Standard {
     }
 }
 
-struct PayloadXor {
-    key_bytes: [u8; 2],
-    xor_array: [u8; 16],
-    pos: usize,
+// -------------------------------------------------------------------------------------------------
+// BIFF8 XOR obfuscation (MS-OFFCRYPTO/MS-XLS "Method 1")
+// -------------------------------------------------------------------------------------------------
+
+// [MS-OFFCRYPTO] 2.3.7.2 (CreateXorArray_Method1) constants.
+const XOR_PAD_ARRAY: [u8; 15] = [
+    0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF, 0xB9, 0x80, 0x00, 0xBE, 0x0F, 0x00, 0xBF, 0x0F, 0x00,
+];
+
+const XOR_INITIAL_CODE: [u16; 15] = [
+    0xE1F0, 0x1D0F, 0xCC9C, 0x84C0, 0x110C, 0x0E10, 0xF1CE, 0x313E, 0x1872, 0xE139, 0xD40F,
+    0x84F9, 0x280C, 0xA96A, 0x4EC3,
+];
+
+const XOR_MATRIX: [u16; 105] = [
+    0xAEFC, 0x4DD9, 0x9BB2, 0x2745, 0x4E8A, 0x9D14, 0x2A09, 0x7B61, 0xF6C2, 0xFDA5, 0xEB6B,
+    0xC6F7, 0x9DCF, 0x2BBF, 0x4563, 0x8AC6, 0x05AD, 0x0B5A, 0x16B4, 0x2D68, 0x5AD0, 0x0375,
+    0x06EA, 0x0DD4, 0x1BA8, 0x3750, 0x6EA0, 0xDD40, 0xD849, 0xA0B3, 0x5147, 0xA28E, 0x553D,
+    0xAA7A, 0x44D5, 0x6F45, 0xDE8A, 0xAD35, 0x4A4B, 0x9496, 0x390D, 0x721A, 0xEB23, 0xC667,
+    0x9CEF, 0x29FF, 0x53FE, 0xA7FC, 0x5FD9, 0x47D3, 0x8FA6, 0x0F6D, 0x1EDA, 0x3DB4, 0x7B68,
+    0xF6D0, 0xB861, 0x60E3, 0xC1C6, 0x93AD, 0x377B, 0x6EF6, 0xDDEC, 0x45A0, 0x8B40, 0x06A1,
+    0x0D42, 0x1A84, 0x3508, 0x6A10, 0xAA51, 0x4483, 0x8906, 0x022D, 0x045A, 0x08B4, 0x1168,
+    0x76B4, 0xED68, 0xCAF1, 0x85C3, 0x1BA7, 0x374E, 0x6E9C, 0x3730, 0x6E60, 0xDCC0, 0xA9A1,
+    0x4363, 0x86C6, 0x1DAD, 0x3331, 0x6662, 0xCCC4, 0x89A9, 0x0373, 0x06E6, 0x0DCC, 0x1021,
+    0x2042, 0x4084, 0x8108, 0x1231, 0x2462, 0x48C4,
+];
+
+fn xor_ror(byte1: u8, byte2: u8) -> u8 {
+    (byte1 ^ byte2).rotate_right(1)
 }
 
-impl PayloadXor {
-    fn new(key: u16, password: &str) -> Self {
-        Self {
-            key_bytes: key.to_le_bytes(),
-            xor_array: derive_xor_array(password),
-            pos: 0,
+fn create_password_verifier_method1(password: &[u8]) -> u16 {
+    let mut verifier: u16 = 0;
+    let mut password_array = Vec::<u8>::with_capacity(password.len().saturating_add(1));
+    password_array.push(password.len() as u8);
+    password_array.extend_from_slice(password);
+
+    for &b in password_array.iter().rev() {
+        let intermediate1 = if (verifier & 0x4000) == 0 { 0u16 } else { 1u16 };
+        let intermediate2 = verifier.wrapping_mul(2) & 0x7FFF;
+        let intermediate3 = intermediate1 | intermediate2;
+        verifier = intermediate3 ^ (b as u16);
+    }
+
+    verifier ^ 0xCE4B
+}
+
+fn create_xor_key_method1(password: &[u8]) -> u16 {
+    if password.is_empty() || password.len() > 15 {
+        return 0;
+    }
+
+    let mut xor_key = XOR_INITIAL_CODE[password.len() - 1];
+    let mut current_element: i32 = 0x68;
+
+    for &byte in password.iter().rev() {
+        let mut ch = byte;
+        for _ in 0..7 {
+            if (ch & 0x40) != 0 {
+                if current_element < 0 || current_element as usize >= XOR_MATRIX.len() {
+                    return xor_key;
+                }
+                xor_key ^= XOR_MATRIX[current_element as usize];
+            }
+            ch = ch.wrapping_mul(2);
+            current_element -= 1;
         }
     }
 
-    fn apply_keystream(&mut self, data: &mut [u8]) {
-        for b in data.iter_mut() {
-            let ks = self.xor_array[self.pos % self.xor_array.len()] ^ self.key_bytes[self.pos % 2];
-            *b ^= ks;
-            self.pos = self.pos.saturating_add(1);
-        }
-    }
+    xor_key
 }
 
-fn derive_xor_array(password: &str) -> [u8; 16] {
-    // Mirrors the legacy BIFF XOR obfuscation "XOR array" used by `crates/formula-xls`.
-    const PAD: [u8; 16] = [
-        0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF, 0xB9, 0xFF, 0xFF, 0xB8, 0xFF, 0xFF, 0xB7, 0xFF,
-        0xFF, 0xB6,
-    ];
+fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    let mut index = password.len();
 
-    let mut out = PAD;
-    for (i, ch) in password.encode_utf16().take(out.len()).enumerate() {
-        out[i] ^= (ch & 0xFF) as u8;
+    let key_high = (xor_key >> 8) as u8;
+    let key_low = (xor_key & 0x00FF) as u8;
+
+    if index % 2 == 1 {
+        if index < out.len() {
+            out[index] = xor_ror(XOR_PAD_ARRAY[0], key_high);
+        }
+
+        index = index.saturating_sub(1);
+
+        if !password.is_empty() && index < out.len() {
+            let password_last = password[password.len() - 1];
+            out[index] = xor_ror(password_last, key_low);
+        }
     }
+
+    while index > 0 {
+        index = index.saturating_sub(1);
+        if index < password.len() {
+            out[index] = xor_ror(password[index], key_high);
+        }
+
+        index = index.saturating_sub(1);
+        if index < password.len() {
+            out[index] = xor_ror(password[index], key_low);
+        }
+    }
+
+    let mut out_index: i32 = 15;
+    let mut pad_index: i32 = 15i32 - (password.len() as i32);
+    while pad_index > 0 {
+        if out_index < 0 {
+            break;
+        }
+
+        let pi = pad_index as usize;
+        if pi < XOR_PAD_ARRAY.len() {
+            out[out_index as usize] = xor_ror(XOR_PAD_ARRAY[pi], key_high);
+        }
+        out_index -= 1;
+        pad_index -= 1;
+
+        if out_index < 0 {
+            break;
+        }
+
+        let pi = pad_index.max(0) as usize;
+        if pi < XOR_PAD_ARRAY.len() {
+            out[out_index as usize] = xor_ror(XOR_PAD_ARRAY[pi], key_low);
+        }
+        out_index -= 1;
+        pad_index -= 1;
+    }
+
     out
+}
+
+fn encrypt_payloads_after_filepass_xor_method1(
+    workbook_stream: &mut [u8],
+    filepass_data_end: usize,
+    xor_array: &[u8; 16],
+) {
+    let mut cursor = filepass_data_end;
+    while cursor < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(cursor);
+        if remaining < 4 {
+            break;
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[cursor], workbook_stream[cursor + 1]]);
+        let len = u16::from_le_bytes([workbook_stream[cursor + 2], workbook_stream[cursor + 3]]) as usize;
+        let data_start = cursor + 4;
+        let data_end = data_start + len;
+        assert!(
+            data_end <= workbook_stream.len(),
+            "generated BIFF record extends past end of stream"
+        );
+
+        // Per [MS-XLS] 2.2.10, some record payloads are not encrypted or partially encrypted even
+        // after FILEPASS.
+        let mut encrypt_from = 0usize;
+        let skip_entire_payload = matches!(
+            record_id,
+            RECORD_BOF
+                | RECORD_FILEPASS
+                | RECORD_INTERFACEHDR
+                | RECORD_FILELOCK
+                | RECORD_USREXCL
+                | RECORD_RRDINFO
+                | RECORD_RRDHEAD
+        );
+
+        if !skip_entire_payload {
+            if record_id == RECORD_BOUNDSHEET {
+                // BoundSheet.lbPlyPos MUST NOT be encrypted.
+                encrypt_from = 4.min(len);
+            }
+
+            let payload = &mut workbook_stream[data_start..data_end];
+            for i in encrypt_from..payload.len() {
+                let abs_pos = data_start + i;
+                let mut value = payload[i];
+                value = value.rotate_left(5);
+                value ^= xor_array[abs_pos % 16];
+                payload[i] = value;
+            }
+        }
+
+        cursor = data_end;
+    }
 }
 
 fn build_filepass_cryptoapi_payload(
@@ -748,13 +902,22 @@ fn build_rc4_standard_encrypted_xls_from_plain_stream(
 }
 
 fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
-    // BIFF8 XOR obfuscation fixture.
-    const KEY: u16 = 0x1234;
-    let verifier = hash_legacy_password(password);
+    use encoding_rs::WINDOWS_1252;
+
+    // BIFF8 XOR obfuscation fixture using the MS-OFFCRYPTO/MS-XLS "Method 1" algorithm (the real
+    // Excel-compatible scheme).
+    let (pw_bytes, _, _) = WINDOWS_1252.encode(password);
+    let mut pw_bytes = pw_bytes.into_owned();
+    pw_bytes.truncate(15);
+
+    let key = create_xor_key_method1(&pw_bytes);
+    let verifier = create_password_verifier_method1(&pw_bytes);
+    let xor_array = create_xor_array_method1(&pw_bytes, key);
+
     let filepass_payload = [
         0x00, 0x00, // wEncryptionType (XOR)
-        KEY.to_le_bytes()[0],
-        KEY.to_le_bytes()[1],
+        key.to_le_bytes()[0],
+        key.to_le_bytes()[1],
         verifier.to_le_bytes()[0],
         verifier.to_le_bytes()[1],
     ];
@@ -773,10 +936,7 @@ fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     let filepass_data_end =
         filepass_data_end.expect("generated workbook stream should contain FILEPASS");
 
-    let mut cipher = PayloadXor::new(KEY, password);
-    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
-        cipher.apply_keystream(data);
-    });
+    encrypt_payloads_after_filepass_xor_method1(&mut workbook_stream, filepass_data_end, &xor_array);
 
     build_xls_bytes(&workbook_stream)
 }
