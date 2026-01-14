@@ -8970,6 +8970,7 @@ function handleRibbonCommand(commandId: string): void {
         if (isSpreadsheetEditing() || app.isReadOnly()) return;
         void handleDeleteActiveSheet();
         return;
+      // Legacy ribbon schema ids (Home → Editing → AutoSum menu items).
       case "home.editing.autoSum.average":
         app.autoSumAverage();
         app.focus();
