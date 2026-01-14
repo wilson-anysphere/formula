@@ -43,19 +43,7 @@ export class LocalStorageBinaryStorage {
       return fromBase64(encoded);
     } catch {
       // Corrupted base64 payload; clear it so future loads can recover.
-      try {
-        if (typeof storage.removeItem === "function") storage.removeItem(this.key);
-        else if (typeof storage.setItem === "function") storage.setItem(this.key, "");
-      } catch {
-        // If `removeItem` is unavailable or throws, fall back to overwriting the
-        // key with an empty string so subsequent `getItem()` returns a falsy
-        // value and callers treat the payload as missing.
-        try {
-          storage.setItem?.(this.key, "");
-        } catch {
-          // ignore
-        }
-      }
+      safeRemoveLocalStorageKey(storage, this.key);
       return null;
     }
   }
@@ -69,16 +57,7 @@ export class LocalStorageBinaryStorage {
   async remove() {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
-    try {
-      if (typeof storage.removeItem === "function") storage.removeItem(this.key);
-      else if (typeof storage.setItem === "function") storage.setItem(this.key, "");
-    } catch {
-      try {
-        storage.setItem?.(this.key, "");
-      } catch {
-        // ignore
-      }
-    }
+    safeRemoveLocalStorageKey(storage, this.key);
   }
 }
 
@@ -113,7 +92,11 @@ export class ChunkedLocalStorageBinaryStorage {
         // clear the orphaned chunks so localStorage doesn't slowly fill up.
         // We probe for chunk 0 first to avoid scanning `storage.length` in the common case.
         const orphanChunk0 = storage.getItem(`${this.key}:0`);
-        if (typeof orphanChunk0 === "string") {
+        // When we can't truly remove keys (e.g. minimal localStorage shims that
+        // lack `removeItem`), we may "remove" by overwriting with "". Treat an
+        // empty string as missing so we don't repeatedly attempt cleanup on each
+        // load.
+        if (typeof orphanChunk0 === "string" && orphanChunk0 !== "") {
           try {
             await this.remove();
           } catch {
@@ -135,11 +118,7 @@ export class ChunkedLocalStorageBinaryStorage {
       } catch {
         // Corrupted legacy base64 payload; clear it so future loads don't keep
         // failing (and to free storage space).
-        try {
-          storage.removeItem?.(this.key);
-        } catch {
-          // ignore
-        }
+        safeRemoveLocalStorageKey(storage, this.key);
         return null;
       }
     }
@@ -403,7 +382,7 @@ export class ChunkedLocalStorageBinaryStorage {
     } catch (err) {
       // Best-effort rollback to preserve the previously persisted value.
       try {
-        if (prevMeta == null) storage.removeItem?.(this.metaKey);
+        if (prevMeta == null) safeRemoveLocalStorageKey(storage, this.metaKey);
         else storage.setItem(this.metaKey, prevMeta);
       } catch {
         // ignore
@@ -411,7 +390,7 @@ export class ChunkedLocalStorageBinaryStorage {
 
       for (const { key, prev } of backups) {
         try {
-          if (prev == null) storage.removeItem?.(key);
+          if (prev == null) safeRemoveLocalStorageKey(storage, key);
           else storage.setItem(key, prev);
         } catch {
           // ignore
@@ -451,7 +430,7 @@ export class ChunkedLocalStorageBinaryStorage {
 
       if (canUseOldChunks) {
         for (let i = chunks; i < oldChunks; i += 1) {
-          storage.removeItem?.(`${this.key}:${i}`);
+          safeRemoveLocalStorageKey(storage, `${this.key}:${i}`);
         }
       } else {
         // Fallback: scan localStorage and remove any chunk keys >= the new chunk count.
@@ -471,12 +450,12 @@ export class ChunkedLocalStorageBinaryStorage {
             const index = Number(suffix);
             if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
           }
-          for (const key of keysToRemove) storage.removeItem?.(key);
+          for (const key of keysToRemove) safeRemoveLocalStorageKey(storage, key);
         }
       }
 
       // Clean up the legacy single-key storage entry if it exists.
-      storage.removeItem?.(this.key);
+      safeRemoveLocalStorageKey(storage, this.key);
     } catch {
       // ignore
     }
@@ -502,17 +481,9 @@ export class ChunkedLocalStorageBinaryStorage {
 
     if (chunkCount != null) {
       for (let i = 0; i < chunkCount; i += 1) {
-        try {
-          storage.removeItem?.(`${this.key}:${i}`);
-        } catch {
-          // ignore
-        }
+        safeRemoveLocalStorageKey(storage, `${this.key}:${i}`);
       }
-      try {
-        storage.removeItem?.(this.metaKey);
-      } catch {
-        // ignore
-      }
+      safeRemoveLocalStorageKey(storage, this.metaKey);
     } else if (typeof storage.key === "function" && typeof storage.length === "number") {
       const prefix = `${this.key}:`;
       /** @type {string[]} */
@@ -531,16 +502,19 @@ export class ChunkedLocalStorageBinaryStorage {
       }
 
       for (const key of keysToRemove) {
-        try {
-          storage.removeItem?.(key);
-        } catch {
-          // ignore
-        }
+        safeRemoveLocalStorageKey(storage, key);
       }
     } else {
       // Best-effort: at least clear meta so future loads don't attempt to read chunks.
+      safeRemoveLocalStorageKey(storage, this.metaKey);
+      // If the storage implementation doesn't support scanning keys, also clear
+      // chunk 0 (if present) so `load()` doesn't repeatedly treat it as an
+      // orphaned partial write.
       try {
-        storage.removeItem?.(this.metaKey);
+        const chunk0 = storage.getItem?.(`${this.key}:0`);
+        if (typeof chunk0 === "string" && chunk0 !== "") {
+          safeRemoveLocalStorageKey(storage, `${this.key}:0`);
+        }
       } catch {
         // ignore
       }
@@ -548,11 +522,7 @@ export class ChunkedLocalStorageBinaryStorage {
 
     // Also remove the legacy single-key entry (if it exists) so `load()` doesn't
     // fall back to stale data after a caller explicitly clears the store.
-    try {
-      storage.removeItem?.(this.key);
-    } catch {
-      // ignore
-    }
+    safeRemoveLocalStorageKey(storage, this.key);
   }
 }
 
@@ -700,6 +670,30 @@ function getLocalStorageOrNull() {
     return isStorage(storage) ? storage : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Best-effort key removal helper for localStorage-like shims.
+ *
+ * Real `window.localStorage` always provides `removeItem()`, but some constrained
+ * environments and polyfills only provide `getItem`/`setItem`. In those cases we
+ * fall back to overwriting the key with an empty string so subsequent reads treat
+ * it as missing.
+ *
+ * @param {any} storage
+ * @param {string} key
+ */
+function safeRemoveLocalStorageKey(storage, key) {
+  try {
+    if (typeof storage?.removeItem === "function") storage.removeItem(key);
+    else if (typeof storage?.setItem === "function") storage.setItem(key, "");
+  } catch {
+    try {
+      if (typeof storage?.setItem === "function") storage.setItem(key, "");
+    } catch {
+      // ignore
+    }
   }
 }
 
