@@ -913,22 +913,6 @@ export function registerBuiltinCommands(params: {
     },
   );
 
-  // Ribbon's View → Window → Freeze Panes dropdown uses a stable trigger id in a canonical
-  // namespace (`view.window.freezePanes`). Register it as an alias so it can be executed via
-  // the CommandRegistry (e.g. command palette) and so Ribbon↔CommandRegistry coverage tests
-  // can enforce that canonical ribbon ids stay wired.
-  commandRegistry.registerBuiltinCommand(
-    "view.window.freezePanes",
-    t("command.view.freezePanes"),
-    () => commandRegistry.executeCommand("view.freezePanes"),
-    {
-      category: t("commandCategory.view"),
-      icon: null,
-      description: t("commandDescription.view.freezePanes"),
-      keywords: ["freeze", "panes"],
-    },
-  );
-
   const setZoomPercent = (percent: number): void => {
     if (!app.supportsZoom()) return;
     const value = typeof percent === "number" ? percent : Number(percent);

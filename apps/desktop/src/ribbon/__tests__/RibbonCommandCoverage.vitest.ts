@@ -51,6 +51,9 @@ const INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS = new Set<string>([
   "view.window.arrangeAll.horizontal",
   "view.window.arrangeAll.vertical",
   "view.window.arrangeAll.cascade",
+  // View → Window → Freeze Panes is a dropdown menu trigger in the ribbon, not an actionable command.
+  // The menu items (`view.freezePanes`, `view.freezeTopRow`, etc) are the canonical commands.
+  "view.window.freezePanes",
   "view.window.hide",
   "view.window.unhide",
   "view.window.viewSideBySide",
