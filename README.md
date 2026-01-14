@@ -24,6 +24,11 @@ For details, see:
 - [`docs/adr/ADR-0002-engine-execution-model.md`](./docs/adr/ADR-0002-engine-execution-model.md)
 - [`docs/adr/ADR-0003-engine-protocol-parity.md`](./docs/adr/ADR-0003-engine-protocol-parity.md)
 
+## Excel file compatibility docs
+
+- XLSX format + round-trip notes: [`docs/02-xlsx-compatibility.md`](./docs/02-xlsx-compatibility.md)
+- Password-protected (encrypted) workbooks: [`docs/encrypted-workbooks.md`](./docs/encrypted-workbooks.md)
+
 ## Development
 
 ### Data model / DAX engine (Power Pivot)
