@@ -263,7 +263,7 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
   );
 });
 
-test("validateLatestJson rejects Windows updater archives by default (.zip)", () => {
+test("validateLatestJson rejects Windows updater .zip archives (expects .msi)", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
@@ -289,18 +289,19 @@ test("validateLatestJson rejects Windows updater archives by default (.zip)", ()
     (err) =>
       err instanceof ActionableError &&
       err.message.includes("windows-x86_64") &&
-      err.message.includes("Expected file extensions"),
+      err.message.includes("Expected file extensions") &&
+      err.message.includes(".msi"),
   );
 });
 
-test("validateLatestJson rejects raw Windows .exe installers by default", () => {
+test("validateLatestJson rejects raw Windows .exe updater URLs by default", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.exe", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.exe", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -310,7 +311,7 @@ test("validateLatestJson rejects raw Windows .exe installers by default", () => 
     "Formula.AppImage",
     "Formula_arm64.AppImage",
     "Formula_x64.exe",
-    "Formula_arm64.exe",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
 
@@ -323,7 +324,7 @@ test("validateLatestJson rejects raw Windows .exe installers by default", () => 
   );
 });
 
-test("validateLatestJson allows raw Windows .exe installers when explicitly enabled", () => {
+test("validateLatestJson allows raw Windows .exe updater URLs when explicitly enabled", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
@@ -344,9 +345,7 @@ test("validateLatestJson allows raw Windows .exe installers when explicitly enab
     "Formula.app.tar.gz",
   ]);
 
-  assert.doesNotThrow(() =>
-    validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }),
-  );
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }));
 });
 
 test("verifyUpdaterManifestSignature verifies latest.json.sig against latest.json with minisign pubkey", () => {

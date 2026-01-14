@@ -97,10 +97,10 @@ function expectedUpdaterExtensions(platformKey, opts = {}) {
   const lower = platformKey.toLowerCase();
 
   if (lower.includes("darwin")) {
-    return [".app.tar.gz", ".tar.gz"];
+    return [".app.tar.gz"];
   }
   if (lower.includes("linux")) {
-    return [".AppImage", ".AppImage.tar.gz"];
+    return [".AppImage"];
   }
   if (lower.includes("windows")) {
     /** @type {string[]} */
@@ -128,8 +128,8 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".dmg")) {
       return "macOS updater entries must not reference .dmg installers.";
     }
-    if (!lowerFilename.endsWith(".tar.gz")) {
-      return "macOS updater entries must reference an update-friendly archive (typically .app.tar.gz / .tar.gz).";
+    if (!lowerFilename.endsWith(".app.tar.gz")) {
+      return "macOS updater entries must reference a .app.tar.gz updater archive.";
     }
     return null;
   }
@@ -138,21 +138,20 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".deb") || lowerFilename.endsWith(".rpm")) {
       return "Linux updater entries must not reference .deb/.rpm installers.";
     }
-    if (!(lowerFilename.endsWith(".appimage") || lowerFilename.endsWith(".appimage.tar.gz"))) {
-      return "Linux updater entries must reference an AppImage updater payload (typically .AppImage / .AppImage.tar.gz).";
+    if (!lowerFilename.endsWith(".appimage")) {
+      return "Linux updater entries must reference an AppImage updater payload (.AppImage).";
     }
     return null;
   }
 
   if (lowerPlatform.includes("windows")) {
     if (lowerFilename.endsWith(".exe") && !opts.allowWindowsExe) {
-      return 'Windows updater entries must not reference a raw \".exe\" installer (pass --allow-windows-exe to permit).';
+      return 'Windows updater entries must not reference a raw \".exe\" installer (Formula uses .msi; pass --allow-windows-exe to permit).';
     }
 
     if (lowerFilename.endsWith(".msi")) {
       return null;
     }
-
     const allowed = [".msi"];
     if (opts.allowWindowsExe) allowed.push(".exe");
     if (!allowed.some((ext) => lowerFilename.endsWith(ext))) {
@@ -402,13 +401,13 @@ function containsArchToken(name, arch) {
 function osArtifactRegex(os) {
   switch (os) {
     case "windows":
-      // Includes updater artifacts like `.msi`, `.exe.sig`, etc.
+      // Includes `.msi` / `.exe` installers and their `.sig` files.
       return /(?:\.msi|\.exe)(?:\.|$)/i;
     case "macos":
       // Includes `.dmg`, `.pkg`, updater `.app.tar.gz`, etc.
       return /(?:\.dmg|\.pkg|\.app\.tar\.gz)(?:\.|$)/i;
     case "linux":
-      // Includes `.AppImage.tar.gz`, `.deb.sig`, etc.
+      // Includes `.AppImage`, `.deb`, `.rpm` and their `.sig` files.
       return /(?:\.appimage|\.deb|\.rpm)(?:\.|$)/i;
   }
 }
@@ -512,7 +511,7 @@ function usage() {
       "Options:",
       "  --tag <tag>        Release tag (default: env GITHUB_REF_NAME)",
       "  --repo <owner/repo> GitHub repo (default: env GITHUB_REPOSITORY)",
-      "  --allow-windows-msi Allow raw .msi in latest.json Windows entries (defaults to disallowed).",
+      "  --allow-windows-msi (deprecated; Windows updater entries use .msi by default in this repo).",
       "  --allow-windows-exe Allow raw .exe in latest.json Windows entries (defaults to disallowed).",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --all-assets       Hash all release assets (still excludes .sig by default)",
