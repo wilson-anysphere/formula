@@ -1119,13 +1119,8 @@ bash scripts/ci/linux-package-install-smoke.sh rpm
 Optional: openSUSE smoke install (helps validate our RPM rich-deps cover openSUSE package naming):
 
 ```bash
-docker run --rm -it \
-  -v "$rpm_dir:/rpm:ro" \
-  opensuse/tumbleweed:latest bash -lc '
-    zypper --non-interactive refresh
-    zypper --non-interactive install --no-recommends --allow-unsigned-rpm /rpm/*.rpm
-    ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
-  '
+# Use the same CI helper script, but override the container image.
+FORMULA_RPM_SMOKE_IMAGE=opensuse/tumbleweed:latest bash scripts/ci/linux-package-install-smoke.sh rpm
 ```
 
 CI guardrails (tagged releases):
