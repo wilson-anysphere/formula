@@ -4342,6 +4342,11 @@ impl AppState {
         // functions like `CELL("width")` can observe Excel column properties on desktop.
         for sheet in &workbook.sheets {
             let sheet_name = sheet.name.as_str();
+            if sheet.default_col_width.is_some() {
+                let _ =
+                    self.engine
+                        .set_sheet_default_col_width(sheet_name, sheet.default_col_width);
+            }
             for (col_0based, props) in &sheet.col_properties {
                 if let Some(width) = props.width {
                     let _ = self.engine.set_col_width(sheet_name, *col_0based, Some(width));

@@ -210,3 +210,38 @@ fn new_sheet_emits_sheet_format_pr_defaults() {
         "missing sheetFormatPr defaults: {sheet_xml}"
     );
 }
+
+#[test]
+fn workbook_writer_emits_sheet_format_pr_defaults() {
+    // `formula_xlsx::write_workbook_to_writer` uses the "regeneration" XLSX writer (not the
+    // patch-based `XlsxDocument` path). Ensure it also emits `<sheetFormatPr>` defaults so
+    // consumers that generate new workbooks preserve sheet default column widths.
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+    {
+        let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+        sheet.default_col_width = Some(20.0);
+        sheet.base_col_width = Some(8);
+    }
+
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).expect("write xlsx");
+    let bytes = cursor.into_inner();
+
+    let cursor = std::io::Cursor::new(&bytes);
+    let mut archive = ZipArchive::new(cursor).expect("zip open");
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet xml")
+        .read_to_string(&mut sheet_xml)
+        .expect("read sheet xml");
+
+    assert!(
+        sheet_xml.contains("<sheetFormatPr")
+            && sheet_xml.contains("defaultColWidth=\"20\"")
+            && sheet_xml.contains("baseColWidth=\"8\""),
+        "missing sheetFormatPr defaults: {sheet_xml}"
+    );
+}

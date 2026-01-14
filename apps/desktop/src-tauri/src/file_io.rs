@@ -90,6 +90,12 @@ pub struct Sheet {
     pub visibility: SheetVisibility,
     /// Excel-style tab color (OpenXML CT_Color).
     pub tab_color: Option<TabColor>,
+    /// Sheet default column width (Excel character units).
+    ///
+    /// This corresponds to the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">`.
+    /// It is used by worksheet information functions like `CELL("width")` when a column does not
+    /// have an explicit per-column width override.
+    pub default_col_width: Option<f32>,
     /// Sparse per-column formatting/visibility overrides (0-based column index).
     ///
     /// This is populated when importing XLSX/XLSM/XLS files via `formula_xlsx`/`formula_xls` so
@@ -135,6 +141,7 @@ impl Sheet {
             name,
             visibility: SheetVisibility::Visible,
             tab_color: None,
+            default_col_width: None,
             col_properties: BTreeMap::new(),
             xlsx_worksheet_part: None,
             origin_ordinal: None,
@@ -1309,6 +1316,7 @@ fn formula_model_sheet_to_app_sheet(
     let mut out = Sheet::new(sheet.name.clone(), sheet.name.clone());
     out.visibility = sheet.visibility;
     out.tab_color = sheet.tab_color.clone();
+    out.default_col_width = sheet.default_col_width;
     out.col_properties = sheet.col_properties.clone();
 
     for (cell_ref, cell) in sheet.iter_cells() {
@@ -3507,6 +3515,7 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         if let Some(model_sheet) = out.sheet_mut(sheet_id) {
             model_sheet.visibility = sheet.visibility;
             model_sheet.tab_color = sheet.tab_color.clone();
+            model_sheet.default_col_width = sheet.default_col_width;
             model_sheet.col_properties = sheet.col_properties.clone();
         }
         sheet_id_by_app_id.insert(sheet.id.clone(), sheet_id);
@@ -5767,6 +5776,21 @@ mod tests {
             Some(20.0)
         );
         assert_eq!(sheet.col_properties.get(&1).map(|p| p.hidden), Some(true));
+    }
+
+    #[test]
+    fn app_workbook_to_formula_model_roundtrip_preserves_sheet_default_col_width() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.sheets[0].default_col_width = Some(20.0);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("default_col_width.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let loaded = read_xlsx_blocking(&out_path).expect("read workbook");
+        let sheet = &loaded.sheets[0];
+        assert_eq!(sheet.default_col_width, Some(20.0));
     }
 
     #[test]
