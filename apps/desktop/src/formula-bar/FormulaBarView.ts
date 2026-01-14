@@ -1241,6 +1241,7 @@ export class FormulaBarView {
   #argumentPreviewDisplayKey: string | null = null;
   #argumentPreviewDisplayExpr: string | null = null;
   #argumentPreviewValue: unknown | null = null;
+  #argumentPreviewDisplayValue: string | null = null;
   #argumentPreviewPending = false;
   #argumentPreviewTimer: ReturnType<typeof setTimeout> | null = null;
   #argumentPreviewRequestId = 0;
@@ -3322,6 +3323,7 @@ export class FormulaBarView {
           this.#argumentPreviewDisplayKey = argPreviewKey;
           this.#argumentPreviewDisplayExpr = formatArgumentPreviewExpression(activeArg.argText);
           this.#argumentPreviewValue = null;
+          this.#argumentPreviewDisplayValue = null;
           this.#argumentPreviewPending = true;
           this.#scheduleArgumentPreviewEvaluation(activeArg, argPreviewKey);
         }
@@ -3337,7 +3339,7 @@ export class FormulaBarView {
     const nextArgPreviewRhs = wantsArgPreview
       ? this.#argumentPreviewPending
         ? "…"
-        : formatArgumentPreviewValue(this.#argumentPreviewValue)
+        : (this.#argumentPreviewDisplayValue ?? formatArgumentPreviewValue(this.#argumentPreviewValue))
       : null;
 
     const hintChanged =
@@ -3487,6 +3489,7 @@ export class FormulaBarView {
       this.#argumentPreviewDisplayKey === null &&
       this.#argumentPreviewDisplayExpr === null &&
       this.#argumentPreviewValue === null &&
+      this.#argumentPreviewDisplayValue === null &&
       this.#argumentPreviewTimer == null &&
       !this.#argumentPreviewPending
     ) {
@@ -3497,6 +3500,7 @@ export class FormulaBarView {
     this.#argumentPreviewDisplayKey = null;
     this.#argumentPreviewDisplayExpr = null;
     this.#argumentPreviewValue = null;
+    this.#argumentPreviewDisplayValue = null;
     this.#argumentPreviewPending = false;
     this.#argumentPreviewRequestId += 1;
     if (this.#argumentPreviewTimer != null) {
@@ -3537,6 +3541,7 @@ export class FormulaBarView {
           if (this.#argumentPreviewKey !== key) return;
           this.#argumentPreviewPending = false;
           this.#argumentPreviewValue = value === undefined ? "(preview unavailable)" : value;
+          this.#argumentPreviewDisplayValue = formatArgumentPreviewValue(this.#argumentPreviewValue);
           this.#requestRender({ preserveTextareaValue: true });
         })
         .catch(() => {
@@ -3545,6 +3550,7 @@ export class FormulaBarView {
           if (this.#argumentPreviewKey !== key) return;
           this.#argumentPreviewPending = false;
           this.#argumentPreviewValue = "(preview unavailable)";
+          this.#argumentPreviewDisplayValue = formatArgumentPreviewValue(this.#argumentPreviewValue);
           this.#requestRender({ preserveTextareaValue: true });
         });
     }, 0);
