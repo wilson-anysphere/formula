@@ -263,6 +263,9 @@ importers:
 
   packages/collab/encrypted-ranges:
     dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
       '@formula/collab-workbook':
         specifier: workspace:*
         version: link:../workbook
