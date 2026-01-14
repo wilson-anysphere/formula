@@ -227,7 +227,9 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
 
     // Key material for 40-bit and 56-bit keys is a raw truncation of `MD5(H || LE32(block))`.
-    // (CryptoAPI applies an additional padding quirk for 40-bit RC4 when initializing RC4.)
+    //
+    // Note: some implementations zero-pad 40-bit keys to 16 bytes when initializing RC4 (which
+    // changes the RC4 KSA and keystream). For MD5 we use the raw 5-byte key material (no padding).
     let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
     let key1_40 = standard_rc4_derive_block_key_md5(h, 1, 5);
     assert_eq!(key0_40, hex_decode("69badcae24"));
@@ -269,31 +271,33 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let key_material = hb[..5].to_vec();
     assert_eq!(key_material, hex_decode("6ad7dedf2d"));
 
-    // CryptoAPI/Office represent a "40-bit" RC4 key as a 16-byte RC4 key where the high 88 bits are
-    // zero. RC4's KSA depends on both the key bytes and the key length, so treating the 40-bit key
-    // material as a raw 5-byte key produces a different keystream than CryptoAPI/Office.
+    // CryptoAPI/Office quirk (SHA1 + 40-bit): some implementations initialize RC4 with a 16-byte
+    // key blob `key_material || 0x00 * 11` (not the raw 5-byte key). Demonstrate that the padding
+    // changes ciphertext.
     let mut padded_key = key_material.clone();
     padded_key.resize(16, 0);
     assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
 
     let plaintext = b"Hello, RC4 CryptoAPI!";
 
-    // CryptoAPI padded 16-byte key (correct behavior).
+    // Raw 5-byte key material (no padding).
+    let ciphertext_unpadded = rc4_apply(&key_material, plaintext);
+    assert_eq!(
+        ciphertext_unpadded,
+        hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
+    );
+
+    // Padded 16-byte key produces a different keystream/ciphertext.
     let ciphertext_padded = rc4_apply(&padded_key, plaintext);
     assert_eq!(
         ciphertext_padded,
         hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8")
     );
 
-    // Regression guard: the unpadded 5-byte key produces a different keystream/ciphertext.
-    let ciphertext_unpadded = rc4_apply(&key_material, plaintext);
-    assert_eq!(
-        ciphertext_unpadded,
-        hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
-    );
     assert_ne!(ciphertext_padded, ciphertext_unpadded);
 
-    // Ensure the production decrypt reader uses the CryptoAPI padded key form.
+    // Ensure the production decrypt reader uses the padded 16-byte key for the SHA1+40-bit
+    // compatibility quirk.
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     stream.extend_from_slice(&ciphertext_padded);

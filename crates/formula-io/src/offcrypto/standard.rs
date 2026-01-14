@@ -18,6 +18,7 @@ use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use md5::Md5;
 use sha1::Sha1;
+use zeroize::Zeroizing;
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -552,8 +553,8 @@ pub fn verify_password_standard(
     info: &StandardEncryptionInfo,
     password: &str,
 ) -> Result<bool, OffcryptoError> {
-    let key = derive_file_key_standard(info, password)?;
-    verify_password_standard_with_key(info, &key)
+    let key = Zeroizing::new(derive_file_key_standard(info, password)?);
+    verify_password_standard_with_key(info, key.as_slice())
 }
 
 /// Verify a candidate Standard/CryptoAPI key against the `EncryptionVerifier` structure.
@@ -566,7 +567,8 @@ pub(crate) fn verify_password_standard_with_key(
 ) -> Result<bool, OffcryptoError> {
     // Decrypt the concatenated verifier blob (`encryptedVerifier` || `encryptedVerifierHash`) as a
     // single stream.
-    let mut ciphertext = Vec::with_capacity(16 + info.verifier.encrypted_verifier_hash.len());
+    let mut ciphertext =
+        Zeroizing::new(Vec::with_capacity(16 + info.verifier.encrypted_verifier_hash.len()));
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier);
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier_hash);
 
@@ -579,28 +581,32 @@ pub(crate) fn verify_password_standard_with_key(
             }
 
             // Baseline MS-OFFCRYPTO Standard AES uses AES-ECB (no IV) for verifier fields.
-            // Compatibility fallback: AES-CBC (no padding) with a derived IV if ECB does not verify.
-            let mut ecb_plaintext = ciphertext.clone();
-            aes_ecb_decrypt_in_place(key, &mut ecb_plaintext)?;
-            if verifier_hash_matches(info, &ecb_plaintext)? {
+            // However, some producers use CBC-style variants; fall back to the derived-IV CBC
+            // scheme if ECB does not verify.
+            let mut ecb_plaintext = Zeroizing::new(ciphertext.as_slice().to_vec());
+            aes_ecb_decrypt_in_place(key, ecb_plaintext.as_mut_slice())?;
+            if verifier_hash_matches(info, ecb_plaintext.as_slice())? {
                 return Ok(true);
             }
 
             // Compatibility fallback: AES-CBC (no padding) with a derived IV.
             let iv = derive_standard_aes_iv(info)?;
-            decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut ciphertext).map_err(|err| {
-                let msg = match err {
-                    AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
-                    AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
-                    AesCbcDecryptError::InvalidCiphertextLength(_) => "invalid AES ciphertext length",
-                };
-                OffcryptoError::crypto(msg)
-            })?;
-            verifier_hash_matches(info, &ciphertext)
+            decrypt_aes_cbc_no_padding_in_place(key, &iv, ciphertext.as_mut_slice())
+                .map_err(|err| {
+                    let msg = match err {
+                        AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
+                        AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
+                        AesCbcDecryptError::InvalidCiphertextLength(_) => {
+                            "invalid AES ciphertext length"
+                        }
+                    };
+                    OffcryptoError::crypto(msg)
+                })?;
+            verifier_hash_matches(info, ciphertext.as_slice())
         }
         CALG_RC4 => {
-            rc4_apply_keystream(key, &mut ciphertext)?;
-            verifier_hash_matches(info, &ciphertext)
+            rc4_apply_keystream(key, ciphertext.as_mut_slice())?;
+            verifier_hash_matches(info, ciphertext.as_slice())
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
     }
@@ -683,11 +689,11 @@ pub(crate) fn derive_key_standard_for_block(
     }
     let key_len = (key_size_bits / 8) as usize;
 
-    let password_utf16le = utf16le_bytes(password);
-    let h = hash_password_fixed_spin(&password_utf16le, &info.verifier.salt, info.header.alg_id_hash)?;
+    let password_utf16le = Zeroizing::new(utf16le_bytes(password));
+    let h = hash_password_fixed_spin(password_utf16le.as_slice(), &info.verifier.salt, info.header.alg_id_hash)?;
 
     let block = block_index.to_le_bytes();
-    let h_block = hash(info.header.alg_id_hash, &[&h, &block])?;
+    let h_block = hash(info.header.alg_id_hash, &[h.as_slice(), &block])?;
 
     match info.header.alg_id {
         CALG_RC4 => {
@@ -698,7 +704,7 @@ pub(crate) fn derive_key_standard_for_block(
             Ok(h_block[..key_len].to_vec())
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            crypt_derive_key(&h_block, key_len, info.header.alg_id_hash)
+            crypt_derive_key(h_block.as_slice(), key_len, info.header.alg_id_hash)
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
     }
@@ -742,14 +748,14 @@ fn hash_password_fixed_spin(
     password_utf16le: &[u8],
     salt: &[u8],
     alg_id_hash: u32,
-) -> Result<Vec<u8>, OffcryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     // H0 = Hash(salt || password)
     let mut h = hash(alg_id_hash, &[salt, password_utf16le])?;
 
     // Hi = Hash(LE32(i) || H(i-1)), for i = 0..49999 (50,000 iterations).
     for i in 0..STANDARD_SPIN_COUNT {
         let i_le = (i as u32).to_le_bytes();
-        h = hash(alg_id_hash, &[&i_le, &h])?;
+        h = hash(alg_id_hash, &[&i_le, h.as_slice()])?;
     }
 
     Ok(h)
@@ -781,27 +787,37 @@ fn crypt_derive_key(
         });
     }
 
-    let mut buf = [0u8; 64];
+    let mut buf = Zeroizing::new([0u8; 64]);
     let copy_len = core::cmp::min(hash_len, buf.len());
     buf[..copy_len].copy_from_slice(&hash_value[..copy_len]);
 
-    let mut ipad = [0x36u8; 64];
-    let mut opad = [0x5Cu8; 64];
+    let mut ipad = Zeroizing::new([0x36u8; 64]);
+    let mut opad = Zeroizing::new([0x5Cu8; 64]);
     for i in 0..64 {
         ipad[i] ^= buf[i];
         opad[i] ^= buf[i];
     }
 
-    let x1 = hash(alg_id_hash, &[&ipad])?;
-    let x2 = hash(alg_id_hash, &[&opad])?;
-    let mut out = Vec::with_capacity(x1.len() + x2.len());
-    out.extend_from_slice(&x1);
-    out.extend_from_slice(&x2);
-    out.truncate(key_len);
+    let x1 = hash(alg_id_hash, &[&ipad[..]])?;
+    let x2 = hash(alg_id_hash, &[&opad[..]])?;
+
+    // Build the key material without `truncate()` to avoid leaving sensitive bytes in the
+    // allocation beyond `out.len()`.
+    let mut out = vec![0u8; key_len];
+    let mut written = 0usize;
+    for src in [x1.as_slice(), x2.as_slice()] {
+        if written == key_len {
+            break;
+        }
+        let take = core::cmp::min(key_len - written, src.len());
+        out[written..written + take].copy_from_slice(&src[..take]);
+        written += take;
+    }
+
     Ok(out)
 }
 
-fn hash(alg_id_hash: u32, parts: &[&[u8]]) -> Result<Vec<u8>, OffcryptoError> {
+fn hash(alg_id_hash: u32, parts: &[&[u8]]) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     match alg_id_hash {
         CALG_SHA1 => {
             use sha1::Digest as _;
@@ -809,7 +825,7 @@ fn hash(alg_id_hash: u32, parts: &[&[u8]]) -> Result<Vec<u8>, OffcryptoError> {
             for p in parts {
                 h.update(p);
             }
-            Ok(h.finalize().to_vec())
+            Ok(Zeroizing::new(h.finalize().to_vec()))
         }
         CALG_MD5 => {
             use md5::Digest as _;
@@ -817,7 +833,7 @@ fn hash(alg_id_hash: u32, parts: &[&[u8]]) -> Result<Vec<u8>, OffcryptoError> {
             for p in parts {
                 h.update(p);
             }
-            Ok(h.finalize().to_vec())
+            Ok(Zeroizing::new(h.finalize().to_vec()))
         }
         other => Err(OffcryptoError::UnsupportedAlgIdHash {
             alg_id_hash: other,
@@ -830,7 +846,7 @@ fn rc4_apply_keystream(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
         return Err(OffcryptoError::crypto("invalid RC4 key length (empty)"));
     }
 
-    let mut s = [0u8; 256];
+    let mut s = Zeroizing::new([0u8; 256]);
     for (i, b) in s.iter_mut().enumerate() {
         *b = i as u8;
     }
@@ -1046,6 +1062,63 @@ mod tests {
     }
 
     #[test]
+    fn verify_password_standard_uses_constant_time_verifier_hash_compare() {
+        let password = "hunter2";
+        let salt: [u8; 16] = [
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F,
+        ];
+
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
+            size_extra: 0,
+            alg_id: CALG_RC4,
+            alg_id_hash: CALG_SHA1,
+            key_size: 40,
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: "Microsoft Base Cryptographic Provider".to_string(),
+        };
+
+        let verifier: [u8; 16] = [
+            0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0x10, 0x32, 0x54, 0x76, 0x98,
+            0xBA, 0xDC, 0xFE,
+        ];
+        let verifier_hash = hash(CALG_SHA1, &[&verifier]).expect("sha1 hash");
+
+        // Build the standard RC4 key (keySize=40 => 5 bytes).
+        let password_utf16le = utf16le_bytes(password);
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
+        let block = 0u32.to_le_bytes();
+        let h_final = hash(CALG_SHA1, &[h.as_slice(), &block]).unwrap();
+        let key = h_final[..5].to_vec();
+
+        // Encrypt verifier || verifier_hash using RC4 (symmetric).
+        let mut ciphertext = Vec::new();
+        ciphertext.extend_from_slice(&verifier);
+        ciphertext.extend_from_slice(verifier_hash.as_slice());
+        rc4_apply_keystream(&key, &mut ciphertext).unwrap();
+
+        let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
+        let encrypted_verifier_hash = ciphertext[16..].to_vec();
+
+        let verifier_struct = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        let bytes = build_standard_encryption_info_bytes(&header, &verifier_struct);
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+
+        reset_ct_eq_calls();
+        assert!(verify_password_standard(&parsed, password).unwrap());
+        assert_eq!(ct_eq_call_count(), 1);
+    }
+
+    #[test]
     fn verify_password_standard_aes_sha1() {
         // Key derivation vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2).
         //
@@ -1095,14 +1168,14 @@ mod tests {
         // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
-        plaintext.extend_from_slice(&verifier_hash);
+        plaintext.extend_from_slice(verifier_hash.as_slice());
 
         // Derive key and IV and assert they match the embedded expected constants.
         let password_utf16le = utf16le_bytes(password);
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
         let block = 0u32.to_le_bytes();
-        let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
-        let key = crypt_derive_key(&h_final, 16, CALG_SHA1).unwrap();
+        let h_final = hash(CALG_SHA1, &[h.as_slice(), &block]).unwrap();
+        let key = crypt_derive_key(h_final.as_slice(), 16, CALG_SHA1).unwrap();
         assert_eq!(key.as_slice(), expected_key);
 
         let iv_full = hash(CALG_SHA1, &[&salt, &block]).unwrap();
@@ -1111,7 +1184,7 @@ mod tests {
         let mut buf = plaintext.clone();
         let pos = buf.len();
         buf.resize(pos + 16, 0);
-        let ct = cbc::Encryptor::<Aes128>::new_from_slices(&key, expected_iv.as_slice())
+        let ct = cbc::Encryptor::<Aes128>::new_from_slices(key.as_slice(), expected_iv.as_slice())
             .unwrap()
             .encrypt_padded_mut::<Pkcs7>(&mut buf, pos)
             .unwrap();
@@ -1167,14 +1240,14 @@ mod tests {
         let password_utf16le = utf16le_bytes(password);
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
         let block = 0u32.to_le_bytes();
-        let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
+        let h_final = hash(CALG_SHA1, &[h.as_slice(), &block]).unwrap();
         let key_40bit = h_final[..5].to_vec();
         assert_eq!(key_40bit.as_slice(), expected_key);
 
         // Encrypt verifier || verifier_hash using RC4 (symmetric).
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
-        plaintext.extend_from_slice(&verifier_hash);
+        plaintext.extend_from_slice(verifier_hash.as_slice());
 
         let mut ciphertext = plaintext.clone();
         rc4_apply_keystream(&key_40bit, &mut ciphertext).unwrap();
@@ -1428,7 +1501,7 @@ mod tests {
                 let password_utf16le = utf16le_bytes(password);
                 let h = hash_password_fixed_spin(&password_utf16le, &salt, alg_id_hash).unwrap();
                 let block = 0u32.to_le_bytes();
-                let h_final = hash(alg_id_hash, &[&h, &block]).unwrap();
+                let h_final = hash(alg_id_hash, &[h.as_slice(), &block]).unwrap();
                 // Standard RC4 key derivation truncates `H_final` directly (unlike AES, which uses
                 // `CryptDeriveKey`).
                 let key = h_final[..key_len].to_vec();
@@ -1446,7 +1519,7 @@ mod tests {
                 // Encrypt verifier || verifier_hash using RC4.
                 let mut ciphertext = Vec::new();
                 ciphertext.extend_from_slice(&verifier);
-                ciphertext.extend_from_slice(&verifier_hash);
+                ciphertext.extend_from_slice(verifier_hash.as_slice());
                 rc4_apply_keystream(&key, &mut ciphertext).unwrap();
 
                 let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
@@ -1508,14 +1581,14 @@ mod tests {
         // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
-        plaintext.extend_from_slice(&verifier_hash);
+        plaintext.extend_from_slice(verifier_hash.as_slice());
 
         // Derive key and IV.
         let password_utf16le = utf16le_bytes(password);
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
         let block = 0u32.to_le_bytes();
-        let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
-        let key = crypt_derive_key(&h_final, 32, CALG_SHA1).unwrap();
+        let h_final = hash(CALG_SHA1, &[h.as_slice(), &block]).unwrap();
+        let key = crypt_derive_key(h_final.as_slice(), 32, CALG_SHA1).unwrap();
         assert_eq!(key.len(), 32);
         assert!(
             32 > h_final.len(),
@@ -1528,7 +1601,7 @@ mod tests {
         let mut buf = plaintext.clone();
         let pos = buf.len();
         buf.resize(pos + 16, 0);
-        let ct = cbc::Encryptor::<Aes256>::new_from_slices(&key, iv)
+        let ct = cbc::Encryptor::<Aes256>::new_from_slices(key.as_slice(), iv)
             .unwrap()
             .encrypt_padded_mut::<Pkcs7>(&mut buf, pos)
             .unwrap();
@@ -1586,14 +1659,14 @@ mod tests {
         // exercise the compatibility fallback path.
         let mut plaintext = Vec::new();
         plaintext.extend_from_slice(&verifier);
-        plaintext.extend_from_slice(&verifier_hash);
+        plaintext.extend_from_slice(verifier_hash.as_slice());
 
         // Derive key and IV.
         let password_utf16le = utf16le_bytes(password);
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_MD5).unwrap();
         let block = 0u32.to_le_bytes();
-        let h_final = hash(CALG_MD5, &[&h, &block]).unwrap();
-        let key = crypt_derive_key(&h_final, 32, CALG_MD5).unwrap();
+        let h_final = hash(CALG_MD5, &[h.as_slice(), &block]).unwrap();
+        let key = crypt_derive_key(h_final.as_slice(), 32, CALG_MD5).unwrap();
         assert_eq!(key.len(), 32);
         assert!(
             32 > h_final.len(),
@@ -1606,7 +1679,7 @@ mod tests {
         let mut buf = plaintext.clone();
         let pos = buf.len();
         buf.resize(pos + 16, 0);
-        let ct = cbc::Encryptor::<Aes256>::new_from_slices(&key, &iv_full)
+        let ct = cbc::Encryptor::<Aes256>::new_from_slices(key.as_slice(), iv_full.as_slice())
             .unwrap()
             .encrypt_padded_mut::<Pkcs7>(&mut buf, pos)
             .unwrap();

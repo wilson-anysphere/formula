@@ -778,11 +778,8 @@ mod tests {
         //   6ad7dedf2da3514b1d85eabee069d47dd058967f
         // - 40-bit RC4 key material = first 5 bytes of digest:
         //   6ad7dedf2d
-        // - CryptoAPI quirk: the RC4 KSA receives a 16-byte key where the high 88 bits are zero:
-        //   6ad7dedf2d0000000000000000000000
-        //
-        // If the implementation incorrectly uses the raw 5-byte key material (without padding),
-        // ciphertext and decrypted plaintext will not match.
+        // - CryptoAPI/Office quirk (SHA1 + 40-bit): initialize RC4 with a 16-byte key blob
+        //   `key_material || 0x00 * 11`, not the raw 5-byte key.
         let h: Vec<u8> = vec![
             0x1b, 0x59, 0x72, 0x28, 0x4e, 0xab, 0x64, 0x81, 0xeb, 0x65, 0x65, 0xa0, 0x98, 0x5b,
             0x33, 0x4b, 0x3e, 0x65, 0xe0, 0x41,
@@ -794,8 +791,7 @@ mod tests {
             0x27, 0xb0, 0x1d, 0x36, 0x70, 0x7a, 0x6e, 0xf8,
         ];
 
-        // Encrypt with the CryptoAPI-padded 16-byte key and assert the ciphertext matches the known
-        // vector.
+        // Encrypt and assert ciphertext matches the known vector.
         let got_ciphertext = encrypt_rc4_cryptoapi(plaintext, &h, key_len, HashAlg::Sha1);
         assert_eq!(got_ciphertext, expected_ciphertext);
 
