@@ -722,6 +722,38 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
     Some((start.to_string(), end.to_string()))
 }
 
+/// Parse an Excel-style path-qualified external workbook prefix that's been lexed as a single
+/// quoted sheet name, e.g. `C:\path\[Book.xlsx]Sheet1`.
+///
+/// Returns `(workbook, sheet)` where `workbook` is the canonical workbook name/path (without
+/// brackets) and `sheet` is the sheet portion after the closing `]`.
+///
+/// This is a best-effort parser used only by the debug trace subsystem.
+fn parse_path_qualified_external_sheet_key(name: &str) -> Option<(String, String)> {
+    // We only treat this as the path-qualified form when `[` is not the leading character. If the
+    // name starts with `[`, it's already in the canonical external key form (or is malformed).
+    let open = name.rfind('[')?;
+    if open == 0 {
+        return None;
+    }
+
+    let rest = &name[open + 1..];
+    let close_rel = rest.find(']')?;
+    let close = open + 1 + close_rel;
+
+    let prefix = &name[..open];
+    let workbook = &name[open + 1..close];
+    let sheet = &name[close + 1..];
+    if workbook.is_empty() || sheet.is_empty() {
+        return None;
+    }
+
+    let mut out = String::with_capacity(prefix.len().saturating_add(workbook.len()));
+    out.push_str(prefix);
+    out.push_str(workbook);
+    Some((out, sheet.to_string()))
+}
+
 fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
     let raw = raw.trim();
     let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
@@ -1530,6 +1562,7 @@ impl ParserImpl {
 
     fn parse_sheet_ref(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let sheet_tok = self.next();
+        let start_was_quoted = matches!(&sheet_tok.kind, TokenKind::SheetName(_));
         let mut start_name = match sheet_tok.kind {
             TokenKind::Ident(s) | TokenKind::SheetName(s) => s,
             other => {
@@ -1566,6 +1599,15 @@ impl ParserImpl {
             start_name.push_str(&sheet_name);
         }
 
+        // Path-qualified external workbook references can wrap the entire prefix in a single quoted
+        // string, e.g. `'C:\path\[Book.xlsx]Sheet1'!A1`.
+        //
+        // Canonical evaluation normalizes these into the bracketed external key form:
+        // `[C:\path\Book.xlsx]Sheet1`.
+        let path_qualified_external = start_was_quoted
+            .then(|| parse_path_qualified_external_sheet_key(&start_name))
+            .flatten();
+
         let sheet = if matches!(self.peek().kind, TokenKind::Colon) {
             // Sheet span (3D ref) like `Sheet1:Sheet3!A1` / `'Sheet 1':'Sheet 3'!A1`.
             self.next(); // ':'
@@ -1601,30 +1643,56 @@ impl ParserImpl {
                     // yields `#REF!`.
                     SheetReference::External(format!("{start_name}:{end_name}"))
                 }
+            } else if let Some((workbook, start_sheet)) = &path_qualified_external {
+                // External workbook 3D span with a path-qualified workbook prefix, e.g.:
+                // `'C:\path\[Book.xlsx]Sheet1:Sheet3'!A1` / `'C:\path\[Book.xlsx]Sheet1':Sheet3!A1`.
+                //
+                // Preserve the span in the external sheet key (`[C:\path\Book.xlsx]Sheet1:Sheet3`)
+                // so evaluation can expand it using the provider's external sheet order. When the
+                // endpoint sheet names match, collapse to the single external sheet key so
+                // evaluation can consult the external provider directly.
+                if sheet_name_eq_case_insensitive(start_sheet, &end_name) {
+                    SheetReference::External(format!("[{workbook}]{start_sheet}"))
+                } else {
+                    SheetReference::External(format!("[{workbook}]{start_sheet}:{end_name}"))
+                }
             } else {
                 SheetReference::SheetRange(start_name, end_name)
             }
         } else {
             self.expect(TokenKind::Bang)?;
-            match split_sheet_span_name(&start_name) {
-                Some((start, end)) => {
-                    if crate::eval::is_valid_external_sheet_key(&start) {
-                        let Some((_, sheet_part)) = start.split_once(']') else {
-                            return Ok(SpannedExpr {
-                                span: Span::new(sheet_tok.span.start, sheet_tok.span.end),
-                                kind: SpannedExprKind::Error(ErrorKind::Ref),
-                            });
-                        };
-                        if sheet_name_eq_case_insensitive(sheet_part, &end) {
-                            SheetReference::External(start)
+            if let Some((workbook, sheet_part)) = &path_qualified_external {
+                match split_sheet_span_name(sheet_part) {
+                    Some((start, end)) => {
+                        if sheet_name_eq_case_insensitive(&start, &end) {
+                            SheetReference::External(format!("[{workbook}]{start}"))
                         } else {
-                            SheetReference::External(format!("{start}:{end}"))
+                            SheetReference::External(format!("[{workbook}]{start}:{end}"))
                         }
-                    } else {
-                        SheetReference::SheetRange(start, end)
                     }
+                    None => SheetReference::External(format!("[{workbook}]{sheet_part}")),
                 }
-                None => SheetReference::Sheet(start_name),
+            } else {
+                match split_sheet_span_name(&start_name) {
+                    Some((start, end)) => {
+                        if crate::eval::is_valid_external_sheet_key(&start) {
+                            let Some((_, sheet_part)) = start.split_once(']') else {
+                                return Ok(SpannedExpr {
+                                    span: Span::new(sheet_tok.span.start, sheet_tok.span.end),
+                                    kind: SpannedExprKind::Error(ErrorKind::Ref),
+                                });
+                            };
+                            if sheet_name_eq_case_insensitive(sheet_part, &end) {
+                                SheetReference::External(start)
+                            } else {
+                                SheetReference::External(format!("{start}:{end}"))
+                            }
+                        } else {
+                            SheetReference::SheetRange(start, end)
+                        }
+                    }
+                    None => SheetReference::Sheet(start_name),
+                }
             }
         };
 
@@ -4016,6 +4084,32 @@ mod tests {
                 }
             }
             other => panic!("expected FieldAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_path_qualified_external_sheet_key_extracts_workbook_and_sheet() {
+        let (workbook, sheet) =
+            parse_path_qualified_external_sheet_key(r"C:\path\[Book.xlsx]Sheet1")
+                .expect("expected path-qualified external ref");
+        assert_eq!(workbook, r"C:\path\Book.xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_path_qualified_external_workbook_refs() {
+        let expr =
+            parse_spanned_formula(r#"='C:\path\[Book.xlsx]Sheet1'!A1"#).expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                assert_eq!(
+                    cell.sheet,
+                    SheetReference::External(r"[C:\path\Book.xlsx]Sheet1".to_string())
+                );
+                assert_eq!(cell.addr, parse_a1("A1").unwrap());
+            }
+            other => panic!("expected CellRef, got {other:?}"),
         }
     }
 }

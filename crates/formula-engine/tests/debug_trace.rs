@@ -1,5 +1,5 @@
-use formula_engine::debug::{Span, TraceKind, TraceRef};
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::debug::{Span, TraceKind, TraceRef};
 use formula_engine::eval::CellAddr;
 use formula_engine::{
     Engine, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope, Value,
@@ -53,7 +53,10 @@ impl TestExternalDataProvider {
 
 impl ExternalDataProvider for TestExternalDataProvider {
     fn rtd(&self, prog_id: &str, server: &str, topics: &[String]) -> Value {
-        let mut args = vec![Value::Text(prog_id.to_string()), Value::Text(server.to_string())];
+        let mut args = vec![
+            Value::Text(prog_id.to_string()),
+            Value::Text(server.to_string()),
+        ];
         args.extend(topics.iter().cloned().map(Value::Text));
         self.record_call("RTD", args);
         Value::Number(123.0)
@@ -255,7 +258,10 @@ fn debug_trace_supports_getting_data_error_literal() {
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "A1");
-    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::GettingData));
+    assert_eq!(
+        computed,
+        Value::Error(formula_engine::ErrorKind::GettingData)
+    );
 
     let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
     assert_eq!(dbg.value, computed);
@@ -280,10 +286,7 @@ fn debug_trace_supports_rtd_calls() {
     assert_eq!(dbg.trace.children.len(), 3);
 
     assert!(
-        provider
-            .calls()
-            .iter()
-            .any(|(name, _args)| name == "RTD"),
+        provider.calls().iter().any(|(name, _args)| name == "RTD"),
         "expected provider to record an RTD call"
     );
 }
@@ -327,7 +330,11 @@ fn debug_trace_respects_value_locale_for_cube_numeric_args() {
     // for de-DE). The provider returns the parsed rank so we can assert debug tracing uses the
     // same coercion semantics as normal evaluation.
     engine
-        .set_cell_formula("Sheet1", "A1", "=CUBERANKEDMEMBER(\"conn\",\"set\",\"1,5\")")
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=CUBERANKEDMEMBER(\"conn\",\"set\",\"1,5\")",
+        )
         .unwrap();
     engine.recalculate();
 
@@ -342,7 +349,8 @@ fn debug_trace_respects_value_locale_for_cube_numeric_args() {
         provider
             .calls()
             .iter()
-            .any(|(name, args)| name == "CUBERANKEDMEMBER" && args.get(2) == Some(&Value::Number(1.0))),
+            .any(|(name, args)| name == "CUBERANKEDMEMBER"
+                && args.get(2) == Some(&Value::Number(1.0))),
         "expected provider to record a CUBERANKEDMEMBER call with rank=1"
     );
 }
@@ -371,7 +379,9 @@ fn debug_trace_respects_value_locale_for_numeric_coercion_in_operators() {
     let mut engine = Engine::new();
     assert!(engine.set_value_locale_id("de-DE"));
 
-    engine.set_cell_formula("Sheet1", "A1", "=\"1,5\"+0").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=\"1,5\"+0")
+        .unwrap();
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "A1");
@@ -441,8 +451,12 @@ fn debug_trace_supports_row_and_column_ranges_with_sheet_dimensions() {
     engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
     engine.set_cell_value("Sheet1", "A3", 100.0).unwrap();
 
-    engine.set_cell_formula("Sheet1", "B2", "=SUM(A:A)").unwrap();
-    engine.set_cell_formula("Sheet1", "B3", "=SUM(1:1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SUM(A:A)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=SUM(1:1)")
+        .unwrap();
     engine.recalculate();
 
     let dbg_col = engine.debug_evaluate("Sheet1", "B2").unwrap();
@@ -932,6 +946,43 @@ fn debug_trace_supports_external_refs_with_quoted_sheet_name_after_workbook_pref
 }
 
 #[test]
+fn debug_trace_supports_path_qualified_external_workbook_cell_refs() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        r"[C:\path\Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        11.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"='C:\path\[Book.xlsx]Sheet1'!A1"#)
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(11.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        r#"'C:\path\[Book.xlsx]Sheet1'!A1"#
+    );
+    assert!(matches!(dbg.trace.kind, TraceKind::CellRef));
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Cell {
+            sheet: formula_engine::functions::SheetId::External(
+                r"[C:\path\Book.xlsx]Sheet1".to_string()
+            ),
+            addr: CellAddr { row: 0, col: 0 }
+        })
+    );
+}
+
+#[test]
 fn debug_trace_supports_structured_references() {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
@@ -1121,12 +1172,16 @@ fn debug_trace_supports_field_access_on_record_values() {
     let mut engine = Engine::new();
 
     let mut record = Record::new("Widget");
-    record.fields.insert("Price".to_string(), Value::Number(19.99));
+    record
+        .fields
+        .insert("Price".to_string(), Value::Number(19.99));
     engine
         .set_cell_value("Sheet1", "A1", Value::Record(record))
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "B1");
@@ -1145,12 +1200,16 @@ fn debug_trace_propagates_field_error_for_missing_record_fields() {
     let mut engine = Engine::new();
 
     let mut record = Record::new("Widget");
-    record.fields.insert("Other".to_string(), Value::Number(1.0));
+    record
+        .fields
+        .insert("Other".to_string(), Value::Number(1.0));
     engine
         .set_cell_value("Sheet1", "A1", Value::Record(record))
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "B1");
