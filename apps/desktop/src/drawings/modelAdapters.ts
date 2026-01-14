@@ -986,10 +986,12 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
             if (rotationDeg != null) {
               const flipHRaw = pick(record, ["flipH", "flip_h"]);
               const flipVRaw = pick(record, ["flipV", "flip_v"]);
-              const flipH = flipHRaw === undefined ? false : flipHRaw;
-              const flipV = flipVRaw === undefined ? false : flipVRaw;
-              if (typeof flipH === "boolean" && typeof flipV === "boolean") {
-                transform = { rotationDeg, flipH, flipV };
+              // Treat incomplete transform payloads as malformed. We intentionally require
+              // both flip booleans to be present so we don't accidentally "repair" legacy /
+              // partially-authored snapshots and then rewrite them during unrelated commits
+              // (e.g. move/resize).
+              if (typeof flipHRaw === "boolean" && typeof flipVRaw === "boolean") {
+                transform = { rotationDeg, flipH: flipHRaw, flipV: flipVRaw };
               }
             }
           }
