@@ -542,7 +542,14 @@ export class DrawingOverlay {
       const last = this.lastRenderArgs;
       if (!last) return;
       try {
-        this.render(last.objects, last.viewport, last.options);
+        const result = this.render(last.objects, last.viewport, last.options) as unknown;
+        // `render()` is synchronous, but tests can stub it as an async mock. Swallow async rejections
+        // so we don't surface unhandled promise rejections from microtask-based hydration rerenders.
+        if (typeof (result as { then?: unknown } | null)?.then === "function") {
+          void Promise.resolve(result).catch(() => {
+            // Best-effort: avoid throwing from microtask callbacks.
+          });
+        }
       } catch {
         // Best-effort: avoid throwing from microtask callbacks.
       }
