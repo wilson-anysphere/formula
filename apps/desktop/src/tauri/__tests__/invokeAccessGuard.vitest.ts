@@ -431,6 +431,8 @@ function buildBannedResForGlobalAlias(globalAlias: string): RegExp[] {
 }
 
 describe("tauri/invoke guardrails", () => {
+  // This is a source scan over the entire desktop renderer tree and can take longer than Vitest's
+  // default 30s timeout in CI / constrained environments.
   it("does not access __TAURI__.core.invoke outside src/tauri helpers", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
     const violations = new Set<string>();
@@ -523,5 +525,5 @@ describe("tauri/invoke guardrails", () => {
             .join("\n"),
       );
     }
-  });
+  }, 60_000);
 });
