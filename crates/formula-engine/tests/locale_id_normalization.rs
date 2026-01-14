@@ -29,6 +29,7 @@ fn locale_id_normalization_get_locale_normalizes_locale_ids() {
         // `en-GB` is accepted as an alias for the formula locale (English function names +
         // `,` separators).
         ("en-GB", &locale::EN_US),
+        ("en-UK", &locale::EN_US),
         // Other English locales still use the `en-US` formula parsing locale, even though value
         // parsing may use a different date order.
         ("en-AU", &locale::EN_US),
@@ -85,6 +86,7 @@ fn locale_id_normalization_value_locale_config_for_locale_id_normalizes_locale_i
         // Exact IDs still work.
         ("en-US", ValueLocaleConfig::en_us()),
         ("en-GB", ValueLocaleConfig::en_gb()),
+        ("en-UK", ValueLocaleConfig::en_gb()),
         ("en-AU", ValueLocaleConfig::en_gb()),
         ("en-NZ", ValueLocaleConfig::en_gb()),
         ("en-IE", ValueLocaleConfig::en_gb()),

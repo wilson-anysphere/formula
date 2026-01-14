@@ -104,7 +104,7 @@ fn set_value_locale_id_accepts_common_en_dmy_locales_and_uses_dmy_date_order() {
 
     // Many English-speaking regions use DMY date order (Excel-compatible parsing).
     // Note: formula parsing locale still resolves to `en-US`; this only affects value parsing.
-    for locale_id in ["en-GB", "en-AU", "en-NZ", "en-IE", "en-ZA"] {
+    for locale_id in ["en-GB", "en-UK", "en-AU", "en-NZ", "en-IE", "en-ZA"] {
         let mut engine = engine_manual();
         assert!(
             engine.set_value_locale_id(locale_id),
