@@ -182,6 +182,48 @@ describe("formulaModelChartModelToUiChartModel", () => {
     ]);
   });
 
+  it("maps area charts to line charts (renderer fallback)", () => {
+    const input = {
+      chartKind: { kind: "area" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "area", grouping: null, axIds: [1, 2] },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "line" });
+  });
+
+  it("maps doughnut charts to pie charts (renderer fallback)", () => {
+    const input = {
+      chartKind: { kind: "doughnut" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "doughnut", varyColors: true, firstSliceAngle: null, holeSize: null },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "pie" });
+  });
+
+  it("preserves unsupported chart kinds as unknown with a name for debugging", () => {
+    const input = {
+      chartKind: { kind: "radar" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "radar", radarStyle: null, axIds: [1, 2] },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "unknown", name: "radar" });
+  });
+
   it("trims whitespace around series formula refs", () => {
     const input = {
       chartKind: { kind: "line" },

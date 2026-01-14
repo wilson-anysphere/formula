@@ -32,7 +32,9 @@ function parseChartType(value: unknown): ChartTypeModel {
   if (!parsed) return { kind: "unknown" };
   const kind = normalizeChartKind(parsed.kind);
   if (kind === "unknown") {
-    const name = parsed.name ?? parsed.rawName;
+    // Preserve unsupported chart types (including newly added Rust variants) in the `name`
+    // field so the UI can still surface what kind of chart was imported.
+    const name = parsed.name ?? parsed.rawName ?? parsed.kind;
     return name ? { kind, name } : { kind };
   }
   return { kind };
@@ -56,6 +58,10 @@ function normalizeChartKind(kind: string): ChartTypeModel["kind"] {
   if (k === "line") return "line";
   if (k === "pie") return "pie";
   if (k === "scatter") return "scatter";
+  // Canvas chart renderer does not implement these kinds yet; map them to the closest
+  // supported visualization so imported workbooks remain readable.
+  if (k === "area") return "line";
+  if (k === "doughnut") return "pie";
   return "unknown";
 }
 
