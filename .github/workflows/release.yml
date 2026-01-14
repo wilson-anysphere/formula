@@ -2084,6 +2084,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
+          # Note: historical name; the report contains per-installer artifact sizes (DMG/MSI/AppImage/etc).
           name: desktop-bundle-size-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           path: desktop-bundle-size-report.json
           if-no-files-found: warn
