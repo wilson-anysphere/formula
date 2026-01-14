@@ -167,3 +167,28 @@ fn sheet_lifecycle_by_id_rewrites_formulas_and_preserves_external_refs() {
     engine.delete_sheet_by_id(123_456).unwrap();
     assert_eq!(engine.sheet_ids_in_order(), order_before);
 }
+
+#[test]
+fn sheet_delete_by_id_rewrites_refs_for_display_and_stable_key_names() {
+    let mut engine = Engine::new();
+
+    // Create sheets with stable keys that differ from their user-visible display names.
+    engine.ensure_sheet("sheet1_key");
+    engine.ensure_sheet("sheet2_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
+
+    // A formula can reference the same sheet via either its display name or stable key (engine
+    // supports both). Deleting a sheet should invalidate *both* forms.
+    engine
+        .set_cell_formula("sheet2_key", "A1", "=Sheet1!A1+sheet1_key!A1")
+        .unwrap();
+
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
+    engine.delete_sheet_by_id(sheet1_id).unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("sheet2_key", "A1"),
+        Some("=#REF!+#REF!")
+    );
+}
