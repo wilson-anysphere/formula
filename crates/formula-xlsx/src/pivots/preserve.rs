@@ -2788,6 +2788,184 @@ mod tests {
     }
 
     #[test]
+    fn inserts_slicer_caches_into_prefixed_workbook() {
+        let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheets/></x:workbook>"#;
+        let fragment = r#"<x:slicerCaches><x:slicerCache r:id="rId1"/></x:slicerCaches>"#;
+
+        let updated = apply_preserved_slicer_caches_to_workbook_xml_with_part(
+            workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains("<x:slicerCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</slicerCaches>"),
+            "introduced unprefixed slicerCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_slicer_caches_adds_relationship_namespace_for_non_r_prefix() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{SPREADSHEETML_NS}" xmlns:r="{REL_NS}"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+        );
+        // Simulate a preserved fragment that used a non-`r` relationships prefix with the
+        // declaration living on the original `<workbook>` element (so it's missing here).
+        let fragment = r#"<slicerCaches><slicerCache rel:id="rId2"/></slicerCaches>"#;
+
+        let updated = apply_preserved_slicer_caches_to_workbook_xml_with_part(
+            &workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains(
+                r#"xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "missing xmlns:rel declaration: {updated}"
+        );
+        assert!(
+            updated.contains(r#"rel:id="rId2""#),
+            "missing rel:id attribute: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_slicer_caches_into_self_closing_prefixed_workbook_root() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="{SPREADSHEETML_NS}"/>"#
+        );
+        let fragment = r#"<x:slicerCaches><x:slicerCache r:id="rId1"/></x:slicerCaches>"#;
+
+        let updated = apply_preserved_slicer_caches_to_workbook_xml_with_part(
+            &workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains("<x:slicerCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            updated.contains("</x:workbook>"),
+            "missing prefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</slicerCaches>"),
+            "introduced unprefixed slicerCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_timeline_caches_into_prefixed_workbook() {
+        let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheets/></x:workbook>"#;
+        let fragment = r#"<x:timelineCaches><x:timelineCache r:id="rId1"/></x:timelineCaches>"#;
+
+        let updated = apply_preserved_timeline_caches_to_workbook_xml_with_part(
+            workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains("<x:timelineCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</timelineCaches>"),
+            "introduced unprefixed timelineCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_timeline_caches_adds_relationship_namespace_for_non_r_prefix() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{SPREADSHEETML_NS}" xmlns:r="{REL_NS}"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+        );
+        // Simulate a preserved fragment that used a non-`r` relationships prefix with the
+        // declaration living on the original `<workbook>` element (so it's missing here).
+        let fragment = r#"<timelineCaches><timelineCache rel:id="rId2"/></timelineCaches>"#;
+
+        let updated = apply_preserved_timeline_caches_to_workbook_xml_with_part(
+            &workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains(
+                r#"xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "missing xmlns:rel declaration: {updated}"
+        );
+        assert!(
+            updated.contains(r#"rel:id="rId2""#),
+            "missing rel:id attribute: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_timeline_caches_into_self_closing_prefixed_workbook_root() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="{SPREADSHEETML_NS}"/>"#
+        );
+        let fragment = r#"<x:timelineCaches><x:timelineCache r:id="rId1"/></x:timelineCaches>"#;
+
+        let updated = apply_preserved_timeline_caches_to_workbook_xml_with_part(
+            &workbook,
+            "xl/workbook.xml",
+            fragment,
+        )
+        .expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains("<x:timelineCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            updated.contains("</x:workbook>"),
+            "missing prefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</timelineCaches>"),
+            "introduced unprefixed timelineCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
     fn inserts_pivot_caches_into_self_closing_default_ns_workbook_root_adds_relationship_namespace()
     {
         let workbook = format!(
