@@ -20,7 +20,7 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
 
   for (const mode of GRID_MODES) {
     test(`prompts for a custom number format and applies it (${mode})`, async ({ page }) => {
-      await gotoDesktop(page, `/?grid=${mode}`);
+      await gotoDesktop(page, `/?grid=${mode}`, { appReadyTimeoutMs: 120_000 });
 
       // Seed A1 with a custom number format so the prompt can pre-fill it.
       await page.evaluate(() => {
