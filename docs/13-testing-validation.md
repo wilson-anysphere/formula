@@ -322,7 +322,7 @@ describe("XLSX Round-Trip", () => {
     const workbook = await loadWorkbook(original);
 
     // Important: if we didn't edit charts, saving must keep the original
-    // chart-related OPC parts intact (including extension lists / ChartEx).
+    // chart-related OPC parts intact (OPC part payload bytes; including extension lists / ChartEx).
     const saved = await saveWorkbook(workbook);
 
     expect(extractOpcParts(saved, { prefix: "xl/charts/" }))

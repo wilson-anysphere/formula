@@ -1318,6 +1318,12 @@ interface XlsxDocument {
 }
 ```
 
+**Terminology note:** throughout this document, “byte-for-byte” preservation typically refers to the
+**OPC part payload bytes** (i.e. the uncompressed bytes you get after inflating a ZIP entry). When
+using the streaming save path, **untouched ZIP entries** are often copied with
+`zip::ZipWriter::raw_copy_file(...)`, which also preserves the original compressed bytes for those
+entries.
+
 Forward-compat note: worksheet `<sheetProtection>` elements may include modern hashing attributes
 (`algorithmName`, `hashValue`, `saltValue`, `spinCount`). Even if the model only exposes the legacy
 `password` hash, these attributes must be preserved on round-trip when protection settings are

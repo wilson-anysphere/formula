@@ -52,7 +52,7 @@ class VBAPreserver {
   
   async saveToXLSX(archive: ZipArchive): Promise<void> {
     if (this.vbaProjectBin) {
-      // Preserve byte-for-byte
+      // Preserve byte-for-byte (OPC part payload bytes).
       archive.setEntry(this.vbaProjectPath, this.vbaProjectBin);
       
       // Update content types
