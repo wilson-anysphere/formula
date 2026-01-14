@@ -11,6 +11,7 @@ The intent is to continuously compare our formula engine against Excel across a 
 - A Windows-only **function-translation extractor** to generate locale function name sources via `Range.Formula/FormulaLocal` (`extract-function-translations.ps1`)
 - A Windows-only **error-literal extractor** to verify locale error spellings against real Excel (`extract-error-literals.ps1`)
 - A Windows-only **structured-reference keyword probe** to inspect `[#Headers]`/`[#Data]`/etc localization via `FormulaLocal` (`extract-structured-reference-keywords.ps1`)
+- A Windows-only **numeric literal formatting probe** to inspect whether `FormulaLocal` inserts thousands separators (`extract-formula-local-number-formatting.ps1`)
 - A **comparison tool** that diffs engine output vs Excel output and emits a mismatch report (`compare.py`)
 - A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
 - A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-2022` (engine validation) and optionally on a self-hosted Windows runner with Excel installed (oracle generation)
@@ -75,6 +76,22 @@ Notes / caveats:
   from the committed `*.errors.tsv` files (see `crates/formula-engine/src/locale/registry.rs`), and
   the Rust test `crates/formula-engine/tests/locale_error_tsv_sync.rs` enforces completeness +
   round-tripping.
+
+## Probe `FormulaLocal` numeric literal formatting (thousands separators)
+
+To check whether Excel inserts thousands/grouping separators into numeric literals when exporting a
+formula via `Range.FormulaLocal`, run (from repo root on Windows):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-formula-local-number-formatting.ps1 `
+  -OutPath out/
+```
+
+The output JSON includes both:
+
+- formulas set via `Range.Formula` (canonical / en-US form)
+- the observed `Range.FormulaLocal`
+- the observed `Range.FormulaLocal` after attempting to set `FormulaLocal` with explicit grouping
 
 ## Extract localized function-name spellings (locale data)
 

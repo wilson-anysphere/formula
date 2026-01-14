@@ -147,13 +147,13 @@ fn canonicalize_supports_thousands_and_leading_decimal_in_de_de() {
 }
 
 #[test]
-fn canonicalize_and_localize_supports_thousands_grouping_in_es_es() {
-    let localized = "=SUMA(1.234,56;0,5)";
-    let canonical = locale::canonicalize_formula(localized, &locale::ES_ES).unwrap();
+fn canonicalize_accepts_thousands_grouping_in_es_es_but_localize_omits_grouping() {
+    let localized_with_grouping = "=SUMA(1.234,56;0,5)";
+    let canonical = locale::canonicalize_formula(localized_with_grouping, &locale::ES_ES).unwrap();
     assert_eq!(canonical, "=SUM(1234.56,0.5)");
 
     let localized_roundtrip = locale::localize_formula(&canonical, &locale::ES_ES).unwrap();
-    assert_eq!(localized_roundtrip, localized);
+    assert_eq!(localized_roundtrip, "=SUMA(1234,56;0,5)");
 }
 
 #[test]
