@@ -116,7 +116,12 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
   });
 
   it("hydrates embedded cell images from an XLSX snapshot and attempts to resolve them during render", async () => {
-    const resolverSpy = vi.spyOn(DocumentController.prototype as any, "getImage");
+    // The shared-grid renderer resolves images via SpreadsheetApp's `sharedGridImageResolver`.
+    // That resolver prefers `DocumentController.getImageBlob()` when available (so CanvasGridRenderer
+    // can use its `<img>`-based decode fallback when `createImageBitmap(blob)` fails for some valid
+    // PNGs in headless Chromium), and falls back to `getImage()` (raw bytes) otherwise.
+    const blobSpy = vi.spyOn(DocumentController.prototype as any, "getImageBlob");
+    const bytesSpy = vi.spyOn(DocumentController.prototype as any, "getImage");
 
     const root = createRoot();
     const status = {
@@ -127,7 +132,8 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
 
     const app = new SpreadsheetApp(root, status);
 
-    resolverSpy.mockClear();
+    blobSpy.mockClear();
+    bytesSpy.mockClear();
 
     // Fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
     // - Sheet1!A1: Place-in-Cell image
@@ -188,7 +194,7 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
     const cellA1 = app.getDocument().getCell("Sheet1", "A1");
     expect(cellA1.value).toMatchObject({ type: "image", value: { imageId: "image1.png" } });
 
-    const calls = resolverSpy.mock.calls.map((args) => args[0]);
+    const calls = [...blobSpy.mock.calls.map((args) => args[0]), ...bytesSpy.mock.calls.map((args) => args[0])];
     expect(calls).toContain("image1.png");
 
     app.destroy();
