@@ -2,6 +2,7 @@ import type {
   CalcSettings,
   CellChange,
   CellData,
+  CellDataCompact,
   CellDataRich,
   CellScalar,
   CellValueRich,
@@ -60,6 +61,13 @@ export interface EngineClient {
    */
   getCellRich?(address: string, sheet?: string, options?: RpcOptions): Promise<CellDataRich>;
   getRange(range: string, sheet?: string, options?: RpcOptions): Promise<CellData[][]>;
+  /**
+   * Fetch a range using a compact payload shape (`[input, value]` per cell) to avoid
+   * allocating redundant `{sheet,address}` data for every cell.
+   *
+   * Additive API: older WASM builds may not export this method.
+   */
+  getRangeCompact?(range: string, sheet?: string, options?: RpcOptions): Promise<CellDataCompact[][]>;
   /**
    * Set a single cell, batched across the current microtask to minimize RPC
    * overhead.
@@ -385,6 +393,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.getCellRich(address, sheet, rpcOptions)),
     getRange: async (range, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
+    getRangeCompact: async (range, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getRangeCompact(range, sheet, rpcOptions)),
     setCell: async (address, value, sheet) => await withEngine((connected) => connected.setCell(address, value, sheet)),
     setCellRich: async (address, value, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setCellRich(address, value, sheet, rpcOptions)),

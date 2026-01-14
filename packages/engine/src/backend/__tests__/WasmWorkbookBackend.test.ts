@@ -54,6 +54,37 @@ describe("formula normalization", () => {
 });
 
 describe("WasmWorkbookBackend", () => {
+  function createMockEngine(overrides: Partial<EngineClient>): EngineClient {
+    return {
+      init: vi.fn(async () => {}),
+      newWorkbook: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
+      toJson: vi.fn(async () => "{}"),
+      getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
+      getRange: vi.fn(async () => []),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      setRange: vi.fn(async () => {}),
+      setWorkbookFileMetadata: vi.fn(async () => {}),
+      setCellStyleId: vi.fn(async () => {}),
+      setColWidth: vi.fn(async () => {}),
+      setColHidden: vi.fn(async () => {}),
+      internStyle: vi.fn(async () => 0),
+      setLocale: vi.fn(async () => true),
+      recalculate: vi.fn(async () => []),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
+      applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
+      rewriteFormulasForCopyDelta: vi.fn(async () => []),
+      lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
+      terminate: vi.fn(),
+      ...overrides,
+    };
+  }
+
   it("translates setRange row/col rectangles into engine A1 range calls (with formula normalization)", async () => {
     const engine: EngineClient = {
       init: vi.fn(async () => {}),
@@ -119,6 +150,89 @@ describe("WasmWorkbookBackend", () => {
 
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
     expect(engine.recalculate).toHaveBeenCalledWith("Sheet1");
+  });
+
+  it("prefers getRangeCompact when available and returns the same RangeData as legacy getRange", async () => {
+    const legacy = [
+      [
+        { sheet: "Sheet1", address: "A1", input: 1, value: 1 },
+        // Include whitespace to ensure backend normalization logic is stable.
+        { sheet: "Sheet1", address: "B1", input: "  =A1*2  ", value: 2 },
+      ],
+      [
+        { sheet: "Sheet1", address: "A2", input: null, value: null },
+        { sheet: "Sheet1", address: "B2", input: "Hello", value: "Hello" },
+      ],
+    ];
+
+    const compact = [
+      [
+        [1, 1],
+        ["  =A1*2  ", 2],
+      ],
+      [
+        [null, null],
+        ["Hello", "Hello"],
+      ],
+    ];
+
+    const engineCompact = createMockEngine({
+      getRangeCompact: vi.fn(async () => compact),
+      getRange: vi.fn(async () => legacy),
+    });
+    const backendCompact = new WasmWorkbookBackend(engineCompact);
+
+    const engineLegacy = createMockEngine({
+      getRange: vi.fn(async () => legacy),
+    });
+    const backendLegacy = new WasmWorkbookBackend(engineLegacy);
+
+    const params = { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 };
+    const gotCompact = await backendCompact.getRange(params);
+    const gotLegacy = await backendLegacy.getRange(params);
+
+    expect(gotCompact).toEqual(gotLegacy);
+    expect(gotCompact).toEqual({
+      start_row: 0,
+      start_col: 0,
+      values: [
+        [
+          { value: 1, formula: null, display_value: "1" },
+          { value: 2, formula: "=A1*2", display_value: "2" },
+        ],
+        [
+          { value: null, formula: null, display_value: "" },
+          { value: "Hello", formula: null, display_value: "Hello" },
+        ],
+      ],
+    });
+
+    expect(engineCompact.getRangeCompact!).toHaveBeenCalledTimes(1);
+    expect(engineCompact.getRange).toHaveBeenCalledTimes(0);
+    expect(engineLegacy.getRange).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to getRange when getRangeCompact is not supported", async () => {
+    const legacy = [[{ sheet: "Sheet1", address: "A1", input: 1, value: 1 }]];
+
+    const engine = createMockEngine({
+      getRangeCompact: vi.fn(async () => {
+        throw new Error("getRangeCompact: WasmWorkbook.getRangeCompact is not available in this WASM build");
+      }),
+      getRange: vi.fn(async () => legacy),
+    });
+
+    const backend = new WasmWorkbookBackend(engine);
+    const got = await backend.getRange({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+
+    expect(got).toEqual({
+      start_row: 0,
+      start_col: 0,
+      values: [[{ value: 1, formula: null, display_value: "1" }]],
+    });
+
+    expect(engine.getRangeCompact!).toHaveBeenCalledTimes(1);
+    expect(engine.getRange).toHaveBeenCalledTimes(1);
   });
 
   it("loads a workbook from XLSX bytes (and clears used range tracking)", async () => {

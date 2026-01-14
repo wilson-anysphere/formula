@@ -1,4 +1,5 @@
 use std::cmp::{max, min};
+
 use formula_model::sheet_name_eq_case_insensitive;
 
 use crate::{

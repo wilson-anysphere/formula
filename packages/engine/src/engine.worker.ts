@@ -31,6 +31,7 @@ type WasmWorkbookInstance = {
   getCalcSettings?: () => unknown;
   setCalcSettings?: (settings: unknown) => void;
   getRange(range: string, sheet?: string): unknown;
+  getRangeCompact?: (range: string, sheet?: string) => unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
   applyOperation?: (op: unknown) => unknown;
@@ -138,6 +139,18 @@ function normalizeCellData(value: unknown): unknown {
 function normalizeRangeData(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   return value.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeCellData(cell)) : row));
+}
+
+function normalizeCellDataCompact(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  // Compact payload shape: [input, value]
+  if (value.length < 2) return value;
+  return [normalizeCellScalar(value[0]), normalizeCellScalar(value[1])];
+}
+
+function normalizeRangeDataCompact(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeCellDataCompact(cell)) : row));
 }
 
 function normalizeCellChanges(value: unknown): unknown {
@@ -526,6 +539,14 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "getRange":
               result = normalizeRangeData(wb.getRange(params.range, params.sheet));
+              break;
+            case "getRangeCompact":
+              if (typeof (wb as any).getRangeCompact !== "function") {
+                throw new Error(
+                  "getRangeCompact: WasmWorkbook.getRangeCompact is not available in this WASM build"
+                );
+              }
+              result = normalizeRangeDataCompact((wb as any).getRangeCompact(params.range, params.sheet));
               break;
             case "setSheetDimensions":
               if (typeof (wb as any).setSheetDimensions !== "function") {

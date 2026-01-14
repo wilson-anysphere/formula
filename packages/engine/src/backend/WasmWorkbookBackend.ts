@@ -1,5 +1,5 @@
 import type { EngineClient } from "../client.ts";
-import type { CellScalar } from "../protocol.ts";
+import type { CellDataCompact, CellScalar } from "../protocol.ts";
 import { fromA1, toA1, toA1Range } from "./a1.ts";
 import { isFormulaInput, normalizeFormulaTextOpt } from "./formula.ts";
 import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "@formula/workbook-backend";
@@ -178,16 +178,42 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     endCol: number;
   }): Promise<RangeData> {
     const range = toA1Range(params.startRow, params.startCol, params.endRow, params.endCol);
-    const result = await this.engine.getRange(range, params.sheetId);
+    const getRangeCompact = (this.engine as EngineClient).getRangeCompact;
 
-    const values = result.map((row) =>
-      row.map((cell) => {
-        const input = cell?.input ?? null;
-        const formula = isFormulaInput(input) ? normalizeFormulaTextOpt(input) : null;
-        const value = cell?.value ?? null;
-        return { value, formula, display_value: String(value ?? "") };
-      }),
-    );
+    let compact: CellDataCompact[][] | null = null;
+    if (typeof getRangeCompact === "function") {
+      try {
+        compact = await getRangeCompact(range, params.sheetId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Backward compatibility: older WASM builds (or older worker bundles) may not
+        // implement the compact API yet.
+        const isMissingCompactApi =
+          message.includes("unknown method: getRangeCompact") ||
+          message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available");
+        if (!isMissingCompactApi) {
+          throw err;
+        }
+      }
+    }
+
+    const values = compact
+      ? compact.map((row) =>
+          row.map((cell) => {
+            const input = cell?.[0] ?? null;
+            const formula = isFormulaInput(input) ? normalizeFormulaTextOpt(input) : null;
+            const value = cell?.[1] ?? null;
+            return { value, formula, display_value: String(value ?? "") };
+          }),
+        )
+      : (await this.engine.getRange(range, params.sheetId)).map((row) =>
+          row.map((cell) => {
+            const input = cell?.input ?? null;
+            const formula = isFormulaInput(input) ? normalizeFormulaTextOpt(input) : null;
+            const value = cell?.value ?? null;
+            return { value, formula, display_value: String(value ?? "") };
+          }),
+        );
 
     return { values, start_row: params.startRow, start_col: params.startCol };
   }

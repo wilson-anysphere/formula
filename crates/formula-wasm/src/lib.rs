@@ -2848,6 +2848,34 @@ fn json_scalar_to_js(value: &JsonValue) -> JsValue {
     }
 }
 
+fn engine_value_to_js_scalar(value: EngineValue) -> JsValue {
+    match value {
+        EngineValue::Blank => JsValue::NULL,
+        EngineValue::Bool(b) => JsValue::from_bool(b),
+        EngineValue::Text(s) => JsValue::from_str(&s),
+        EngineValue::Number(n) => {
+            if n.is_finite() {
+                JsValue::from_f64(n)
+            } else {
+                // Preserve the existing scalar protocol semantics used by `engine_value_to_json`:
+                // JSON cannot represent NaN/Infinity, so degrade to a #NUM! error code.
+                JsValue::from_str(ErrorKind::Num.as_code())
+            }
+        }
+        EngineValue::Entity(entity) => JsValue::from_str(&entity.display),
+        EngineValue::Record(record) => JsValue::from_str(&record.display),
+        EngineValue::Error(kind) => JsValue::from_str(kind.as_code()),
+        // Arrays should generally be spilled into grid cells. If one reaches the JS boundary,
+        // degrade to its top-left value so callers still get a scalar.
+        EngineValue::Array(arr) => engine_value_to_js_scalar(arr.top_left()),
+        // The JS worker protocol only supports scalar-ish values today.
+        //
+        // Degrade any rich/non-scalar value (references, lambdas, entities, records, etc.) to its
+        // display string so existing `getCell` / `recalculate` callers keep receiving scalars.
+        other => JsValue::from_str(&other.to_string()),
+    }
+}
+
 fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
     Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
 }
@@ -4040,6 +4068,40 @@ impl WasmWorkbook {
                 let addr = CellRef::new(row, col).to_a1();
                 let cell = self.inner.get_cell_data(&sheet, &addr)?;
                 inner.push(&cell_data_to_js(&cell)?);
+            }
+            outer.push(&inner);
+        }
+
+        Ok(outer.into())
+    }
+
+    #[wasm_bindgen(js_name = "getRangeCompact")]
+    pub fn get_range_compact(&self, range: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        let sheet = self.inner.require_sheet(sheet)?;
+        let range = WorkbookState::parse_range(&range)?;
+
+        // Return a nested JS array (rows -> columns) with a compact per-cell payload:
+        //   [input, value]
+        // This avoids allocating redundant `{sheet,address}` strings per cell, which the
+        // TS backend discards anyway.
+        let sheet_cells = self.inner.sheets.get(sheet);
+
+        let outer = Array::new();
+        for row in range.start.row..=range.end.row {
+            let inner = Array::new();
+            for col in range.start.col..=range.end.col {
+                let addr = CellRef::new(row, col).to_a1();
+                let input = sheet_cells
+                    .and_then(|cells| cells.get(&addr))
+                    .map(json_scalar_to_js)
+                    .unwrap_or(JsValue::NULL);
+                let value = engine_value_to_js_scalar(self.inner.engine.get_cell_value(sheet, &addr));
+
+                let cell = Array::new();
+                cell.push(&input);
+                cell.push(&value);
+                inner.push(&cell);
             }
             outer.push(&inner);
         }

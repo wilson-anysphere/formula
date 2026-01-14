@@ -124,6 +124,13 @@ export interface CellData {
   value: CellScalar;
 }
 
+/**
+ * Compact range cell payload used by the `getRangeCompact` RPC.
+ *
+ * Shape: `[input, value]`
+ */
+export type CellDataCompact = [input: CellScalar, value: CellScalar];
+
 export interface CellDataRich {
   sheet: string;
   address: string;
@@ -538,6 +545,7 @@ export type RpcMethod =
   | "getCell"
   | "getCellRich"
   | "getRange"
+  | "getRangeCompact"
   | "setCells"
   | "setCellRich"
   | "setRange"

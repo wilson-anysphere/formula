@@ -386,6 +386,23 @@ describe("EngineWorker RPC", () => {
     expect(requests[0].params).toEqual({ address: "A1", sheet: "Sheet1" });
   });
 
+  it("sends getRangeCompact RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.getRangeCompact("A1:B2", "Sheet1");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "getRangeCompact"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ range: "A1:B2", sheet: "Sheet1" });
+  });
+
   it("flushes pending setCell batches before setCellRich", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({

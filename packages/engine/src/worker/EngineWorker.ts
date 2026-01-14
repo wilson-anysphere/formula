@@ -2,6 +2,7 @@ import type {
   CalcSettings,
   CellChange,
   CellData,
+  CellDataCompact,
   CellDataRich,
   CellScalar,
   CellValueRich,
@@ -263,6 +264,15 @@ export class EngineWorker {
   ): Promise<CellData[][]> {
     await this.flush();
     return (await this.invoke("getRange", { range, sheet }, options)) as CellData[][];
+  }
+
+  async getRangeCompact(
+    range: string,
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<CellDataCompact[][]> {
+    await this.flush();
+    return (await this.invoke("getRangeCompact", { range, sheet }, options)) as CellDataCompact[][];
   }
 
   async setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
