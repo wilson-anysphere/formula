@@ -414,6 +414,41 @@ fn calculate_keepfilters_on_different_column_applies_both_filters() {
 }
 
 #[test]
+fn calculate_keepfilters_supports_values_and_distinct_column_forms() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Keep Region via VALUES",
+            "CALCULATE([Total Sales], KEEPFILTERS(VALUES(Customers[Region])))",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Keep Region via DISTINCT",
+            "CALCULATE([Total Sales], KEEPFILTERS(DISTINCT(Customers[Region])))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    assert_eq!(
+        model
+            .evaluate_measure("Keep Region via VALUES", &east_filter)
+            .unwrap(),
+        38.0.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Keep Region via DISTINCT", &east_filter)
+            .unwrap(),
+        38.0.into()
+    );
+}
+
+#[test]
 fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
     let mut model = build_model();
     model
