@@ -14355,7 +14355,14 @@ export class SpreadsheetApp {
     if (charts.length === 0) return null;
     const sheetId = this.sheetId;
 
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations; compute frozen counts directly.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
     const rectScratch = this.chartCursorScratchRect;
     // Selection handles are drawn above other overlays, so handle hits should win even if the chart body is
     // obscured (e.g. by drawings in non-canvas mode). Prefer returning the selected chart when the pointer is
@@ -14366,7 +14373,7 @@ export class SpreadsheetApp {
         const chart = charts[i]!;
         if (chart.id !== this.selectedChartId) continue;
         if (chart.sheetId !== sheetId) break;
-        const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+        const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch, frozenRows, frozenCols);
         if (!rect) break;
         const fromRow =
           chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
