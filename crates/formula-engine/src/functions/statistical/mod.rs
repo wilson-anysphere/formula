@@ -91,12 +91,57 @@ pub fn var_s(values: &[f64]) -> Result<f64, ErrorKind> {
     Ok(sse / ((values.len() as f64) - 1.0))
 }
 
+/// Like [`var_p`]/[`var_s`], but treats `zeros` additional values as literal `0`.
+///
+/// This is primarily used by Excel's `*A` statistical functions, which include text/logical/blank
+/// cells as zero when arguments are references.
+fn variance_components_with_zeros(values: &[f64], zeros: u64) -> Result<(u64, f64, f64), ErrorKind> {
+    let count = (values.len() as u64).saturating_add(zeros);
+    if count == 0 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let mean = sum_kahan(values) / (count as f64);
+    let mut sse = sum_squared_deviations(values, mean);
+    if zeros > 0 {
+        // Each implicit/explicit zero contributes `(0 - mean)^2`.
+        sse += (zeros as f64) * mean * mean;
+    }
+
+    if !mean.is_finite() || !sse.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    Ok((count, mean, sse.max(0.0)))
+}
+
+pub fn var_p_with_zeros(values: &[f64], zeros: u64) -> Result<f64, ErrorKind> {
+    let (count, _mean, sse) = variance_components_with_zeros(values, zeros)?;
+    Ok(sse / (count as f64))
+}
+
+pub fn var_s_with_zeros(values: &[f64], zeros: u64) -> Result<f64, ErrorKind> {
+    let (count, _mean, sse) = variance_components_with_zeros(values, zeros)?;
+    if count < 2 {
+        return Err(ErrorKind::Div0);
+    }
+    Ok(sse / ((count as f64) - 1.0))
+}
+
 pub fn stdev_p(values: &[f64]) -> Result<f64, ErrorKind> {
     Ok(var_p(values)?.sqrt())
 }
 
 pub fn stdev_s(values: &[f64]) -> Result<f64, ErrorKind> {
     Ok(var_s(values)?.sqrt())
+}
+
+pub fn stdev_p_with_zeros(values: &[f64], zeros: u64) -> Result<f64, ErrorKind> {
+    Ok(var_p_with_zeros(values, zeros)?.sqrt())
+}
+
+pub fn stdev_s_with_zeros(values: &[f64], zeros: u64) -> Result<f64, ErrorKind> {
+    Ok(var_s_with_zeros(values, zeros)?.sqrt())
 }
 
 pub fn sumsq(values: &[f64]) -> Result<f64, ErrorKind> {

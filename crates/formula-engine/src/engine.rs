@@ -833,8 +833,16 @@ impl Engine {
             sheet: sheet_id,
             addr,
         };
-        let cell = self.workbook.get_or_create_cell_mut(key);
-        cell.style_id = style_id;
+        let remove_cell = {
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.style_id = style_id;
+            cell.value == Value::Blank && cell.formula.is_none() && cell.style_id == 0
+        };
+        if remove_cell {
+            if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+                sheet.cells.remove(&addr);
+            }
+        }
         Ok(())
     }
 
@@ -1685,14 +1693,27 @@ impl Engine {
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
-        let cell = self.workbook.get_or_create_cell_mut(key);
-        cell.value = value.into();
-        cell.formula = None;
-        cell.compiled = None;
-        cell.bytecode_compile_reason = None;
-        cell.volatile = false;
-        cell.thread_safe = true;
-        cell.dynamic_deps = false;
+        let value = value.into();
+        let remove_cell = {
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.value = value;
+            cell.formula = None;
+            cell.compiled = None;
+            cell.bytecode_compile_reason = None;
+            cell.volatile = false;
+            cell.thread_safe = true;
+            cell.dynamic_deps = false;
+
+            // Preserve sparse semantics when clearing contents:
+            // - blank + no formula + default style => remove the cell entry entirely
+            // - otherwise keep the entry (e.g. style-only cell)
+            cell.value == Value::Blank && cell.formula.is_none() && cell.style_id == 0
+        };
+        if remove_cell {
+            if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+                sheet.cells.remove(&addr);
+            }
+        }
 
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
@@ -1705,11 +1726,23 @@ impl Engine {
         Ok(())
     }
 
-    /// Clears a cell's stored value/formula so it behaves as if it does not exist.
+    pub fn get_cell_style_id(&self, sheet: &str, addr: &str) -> Result<Option<u32>, EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(None);
+        };
+        let addr = parse_a1(addr)?;
+        Ok(self
+            .workbook
+            .sheets
+            .get(sheet_id)
+            .and_then(|sheet| sheet.cells.get(&addr))
+            .map(|cell| cell.style_id))
+    }
+
+    /// Clears a cell's stored value/formula *and formatting* so it behaves as if it does not exist.
     ///
-    /// This is distinct from setting a cell to [`Value::Blank`]: clearing removes the
-    /// corresponding entry from the sheet's sparse cell map, preserving sparsity and
-    /// avoiding explicit blank entries for large cleared ranges.
+    /// This is distinct from setting a cell to [`Value::Blank`], which behaves like Excel "clear
+    /// contents" and preserves a cell's formatting (style id) when present.
     pub fn clear_cell(&mut self, sheet: &str, addr: &str) -> Result<(), EngineError> {
         let addr = parse_a1(addr)?;
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {

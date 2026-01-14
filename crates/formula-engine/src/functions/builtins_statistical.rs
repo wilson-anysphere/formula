@@ -52,10 +52,9 @@ fn push_numbers_from_scalar(
             }
             Ok(())
         }
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 
@@ -138,7 +137,37 @@ fn collect_numbers(
     Ok(out)
 }
 
-fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), ErrorKind> {
+#[derive(Debug, Default)]
+struct NumbersA {
+    /// Stored values that are not exactly `0`.
+    values: Vec<f64>,
+    /// Count of values that are exactly `0` (including implicit blanks).
+    zeros: u64,
+}
+
+impl NumbersA {
+    fn push(&mut self, value: f64) {
+        if value == 0.0 {
+            self.zeros = self.zeros.saturating_add(1);
+        } else {
+            self.values.push(value);
+        }
+    }
+
+    fn push_zeros(&mut self, count: u64) {
+        self.zeros = self.zeros.saturating_add(count);
+    }
+
+    fn count(&self) -> u64 {
+        (self.values.len() as u64).saturating_add(self.zeros)
+    }
+
+    fn sum(&self) -> f64 {
+        self.values.iter().copied().sum()
+    }
+}
+
+fn push_numbers_a_from_scalar(out: &mut NumbersA, value: Value) -> Result<(), ErrorKind> {
     match value {
         Value::Error(e) => Err(e),
         Value::Number(n) => {
@@ -159,7 +188,9 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
                     Value::Error(e) => return Err(*e),
                     Value::Number(n) => out.push(*n),
                     Value::Bool(b) => out.push(if *b { 1.0 } else { 0.0 }),
-                    Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
+                    Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+                        out.push(0.0)
+                    }
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Array(_)
                     | Value::Spill { .. }
@@ -177,10 +208,13 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
 
 fn push_numbers_a_from_reference(
     ctx: &dyn FunctionContext,
-    out: &mut Vec<f64>,
+    out: &mut NumbersA,
     reference: crate::functions::Reference,
 ) -> Result<(), ErrorKind> {
+    let size = reference.size();
+    let mut seen = 0u64;
     for addr in ctx.iter_reference_cells(&reference) {
+        seen = seen.saturating_add(1);
         let v = ctx.get_cell_value(&reference.sheet_id, addr);
         match v {
             Value::Error(e) => return Err(e),
@@ -194,26 +228,33 @@ fn push_numbers_a_from_reference(
             | Value::ReferenceUnion(_) => out.push(0.0),
         }
     }
+    // Preserve Excel semantics: references include implicit blanks as zeros.
+    out.push_zeros(size.saturating_sub(seen));
     Ok(())
 }
 
 fn push_numbers_a_from_reference_union(
     ctx: &dyn FunctionContext,
-    out: &mut Vec<f64>,
+    out: &mut NumbersA,
     ranges: Vec<crate::functions::Reference>,
 ) -> Result<(), ErrorKind> {
+    let size = reference_union_size(&ranges);
     let mut seen = HashSet::new();
+    let mut seen_count: u64 = 0;
     for reference in ranges {
         for addr in ctx.iter_reference_cells(&reference) {
             if !seen.insert((reference.sheet_id.clone(), addr)) {
                 continue;
             }
+            seen_count = seen_count.saturating_add(1);
             let v = ctx.get_cell_value(&reference.sheet_id, addr);
             match v {
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
                 Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
-                Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
+                Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+                    out.push(0.0)
+                }
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Array(_)
                 | Value::Spill { .. }
@@ -222,12 +263,13 @@ fn push_numbers_a_from_reference_union(
             }
         }
     }
+    out.push_zeros(size.saturating_sub(seen_count));
     Ok(())
 }
 
 fn push_numbers_a_from_arg(
     ctx: &dyn FunctionContext,
-    out: &mut Vec<f64>,
+    out: &mut NumbersA,
     arg: ArgValue,
 ) -> Result<(), ErrorKind> {
     match arg {
@@ -240,8 +282,8 @@ fn push_numbers_a_from_arg(
 fn collect_numbers_a(
     ctx: &dyn FunctionContext,
     args: &[CompiledExpr],
-) -> Result<Vec<f64>, ErrorKind> {
-    let mut out = Vec::new();
+) -> Result<NumbersA, ErrorKind> {
+    let mut out = NumbersA::default();
     for expr in args {
         push_numbers_a_from_arg(ctx, &mut out, ctx.eval_arg(expr))?;
     }
@@ -267,11 +309,11 @@ fn averagea_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    if values.is_empty() {
+    let count = values.count();
+    if count == 0 {
         return Value::Error(ErrorKind::Div0);
     }
-    let sum: f64 = values.iter().sum();
-    Value::Number(sum / (values.len() as f64))
+    Value::Number(values.sum() / (count as f64))
 }
 
 inventory::submit! {
@@ -294,8 +336,11 @@ fn maxa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
     let mut best: Option<f64> = None;
-    for n in values {
+    for &n in &values.values {
         best = Some(best.map_or(n, |b| b.max(n)));
+    }
+    if values.zeros > 0 {
+        best = Some(best.map_or(0.0, |b| b.max(0.0)));
     }
     Value::Number(best.unwrap_or(0.0))
 }
@@ -320,10 +365,93 @@ fn mina_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
     let mut best: Option<f64> = None;
-    for n in values {
+    for &n in &values.values {
         best = Some(best.map_or(n, |b| b.min(n)));
     }
+    if values.zeros > 0 {
+        best = Some(best.map_or(0.0, |b| b.min(0.0)));
+    }
     Value::Number(best.unwrap_or(0.0))
+}
+
+fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
+    fn size_for_rects(rects: &[crate::functions::Reference]) -> u64 {
+        if rects.is_empty() {
+            return 0;
+        }
+
+        // Convert to half-open row slabs: [start, end+1)
+        let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
+        for r in rects {
+            row_bounds.push(r.start.row);
+            row_bounds.push(r.end.row.saturating_add(1));
+        }
+        row_bounds.sort_unstable();
+        row_bounds.dedup();
+
+        let mut total: u64 = 0;
+        for rows in row_bounds.windows(2) {
+            let y0 = rows[0];
+            let y1 = rows[1];
+            if y1 <= y0 {
+                continue;
+            }
+
+            let mut intervals: Vec<(u32, u32)> = Vec::new();
+            for r in rects {
+                let r_end = r.end.row.saturating_add(1);
+                if r.start.row <= y0 && r_end >= y1 {
+                    intervals.push((r.start.col, r.end.col.saturating_add(1)));
+                }
+            }
+
+            if intervals.is_empty() {
+                continue;
+            }
+
+            intervals.sort_by_key(|(s, _e)| *s);
+
+            let mut cur_s = intervals[0].0;
+            let mut cur_e = intervals[0].1;
+            let mut len: u64 = 0;
+            for (s, e) in intervals.into_iter().skip(1) {
+                if s > cur_e {
+                    len += (cur_e - cur_s) as u64;
+                    cur_s = s;
+                    cur_e = e;
+                } else {
+                    cur_e = cur_e.max(e);
+                }
+            }
+            len += (cur_e - cur_s) as u64;
+
+            total += (y1 - y0) as u64 * len;
+        }
+
+        total
+    }
+
+    if ranges.is_empty() {
+        return 0;
+    }
+
+    let mut total: u64 = 0;
+    let mut by_sheet: std::collections::HashMap<
+        crate::functions::SheetId,
+        Vec<crate::functions::Reference>,
+    > = std::collections::HashMap::new();
+    for r in ranges {
+        by_sheet
+            .entry(r.sheet_id.clone())
+            .or_default()
+            .push(r.normalized());
+    }
+
+    for rects in by_sheet.into_values() {
+        total += size_for_rects(&rects);
+    }
+
+    total
 }
 
 inventory::submit! {
@@ -861,7 +989,7 @@ fn stdeva_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match crate::functions::statistical::stdev_s(&values) {
+    match crate::functions::statistical::stdev_s_with_zeros(&values.values, values.zeros) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
@@ -925,7 +1053,7 @@ fn stdevpa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match crate::functions::statistical::stdev_p(&values) {
+    match crate::functions::statistical::stdev_p_with_zeros(&values.values, values.zeros) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
@@ -989,7 +1117,7 @@ fn vara_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match crate::functions::statistical::var_s(&values) {
+    match crate::functions::statistical::var_s_with_zeros(&values.values, values.zeros) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
@@ -1053,7 +1181,7 @@ fn varpa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match crate::functions::statistical::var_p(&values) {
+    match crate::functions::statistical::var_p_with_zeros(&values.values, values.zeros) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
@@ -1865,15 +1993,21 @@ fn binom_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let trials = array_lift::eval_arg(ctx, &args[1]);
     let probability_s = array_lift::eval_arg(ctx, &args[2]);
     let cumulative = array_lift::eval_arg(ctx, &args[3]);
-    array_lift::lift4(number_s, trials, probability_s, cumulative, |number_s, trials, p, cumulative| {
-        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
-        let trials = trials.coerce_to_number_with_ctx(ctx)?;
-        let p = p.coerce_to_number_with_ctx(ctx)?;
-        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::binom_dist(
-            number_s, trials, p, cumulative,
-        )?))
-    })
+    array_lift::lift4(
+        number_s,
+        trials,
+        probability_s,
+        cumulative,
+        |number_s, trials, p, cumulative| {
+            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+            let trials = trials.coerce_to_number_with_ctx(ctx)?;
+            let p = p.coerce_to_number_with_ctx(ctx)?;
+            let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::binom_dist(
+                number_s, trials, p, cumulative,
+            )?))
+        },
+    )
 }
 
 inventory::submit! {
@@ -1900,27 +2034,32 @@ fn binom_dist_range_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
             let trials = trials.coerce_to_number_with_ctx(ctx)?;
             let p = p.coerce_to_number_with_ctx(ctx)?;
             let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
-            Ok(Value::Number(crate::functions::statistical::binom_dist_range(
-                trials,
-                p,
-                number_s,
-                None,
-            )?))
+            Ok(Value::Number(
+                crate::functions::statistical::binom_dist_range(trials, p, number_s, None)?,
+            ))
         })
     } else {
         let number_s2 = array_lift::eval_arg(ctx, &args[3]);
-        array_lift::lift4(trials, probability_s, number_s, number_s2, |trials, p, number_s, number_s2| {
-            let trials = trials.coerce_to_number_with_ctx(ctx)?;
-            let p = p.coerce_to_number_with_ctx(ctx)?;
-            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
-            let number_s2 = number_s2.coerce_to_number_with_ctx(ctx)?;
-            Ok(Value::Number(crate::functions::statistical::binom_dist_range(
-                trials,
-                p,
-                number_s,
-                Some(number_s2),
-            )?))
-        })
+        array_lift::lift4(
+            trials,
+            probability_s,
+            number_s,
+            number_s2,
+            |trials, p, number_s, number_s2| {
+                let trials = trials.coerce_to_number_with_ctx(ctx)?;
+                let p = p.coerce_to_number_with_ctx(ctx)?;
+                let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+                let number_s2 = number_s2.coerce_to_number_with_ctx(ctx)?;
+                Ok(Value::Number(
+                    crate::functions::statistical::binom_dist_range(
+                        trials,
+                        p,
+                        number_s,
+                        Some(number_s2),
+                    )?,
+                ))
+            },
+        )
     }
 }
 
@@ -2027,18 +2166,21 @@ fn negbinom_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number_s = array_lift::eval_arg(ctx, &args[1]);
     let probability_s = array_lift::eval_arg(ctx, &args[2]);
     let cumulative = array_lift::eval_arg(ctx, &args[3]);
-    array_lift::lift4(number_f, number_s, probability_s, cumulative, |number_f, number_s, p, cumulative| {
-        let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
-        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
-        let p = p.coerce_to_number_with_ctx(ctx)?;
-        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::negbinom_dist(
-            number_f,
-            number_s,
-            p,
-            cumulative,
-        )?))
-    })
+    array_lift::lift4(
+        number_f,
+        number_s,
+        probability_s,
+        cumulative,
+        |number_f, number_s, p, cumulative| {
+            let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
+            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+            let p = p.coerce_to_number_with_ctx(ctx)?;
+            let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::negbinom_dist(
+                number_f, number_s, p, cumulative,
+            )?))
+        },
+    )
 }
 
 inventory::submit! {
@@ -2059,17 +2201,19 @@ fn negbinomdist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number_f = array_lift::eval_arg(ctx, &args[0]);
     let number_s = array_lift::eval_arg(ctx, &args[1]);
     let probability_s = array_lift::eval_arg(ctx, &args[2]);
-    array_lift::lift3(number_f, number_s, probability_s, |number_f, number_s, p| {
-        let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
-        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
-        let p = p.coerce_to_number_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::negbinom_dist(
-            number_f,
-            number_s,
-            p,
-            false,
-        )?))
-    })
+    array_lift::lift3(
+        number_f,
+        number_s,
+        probability_s,
+        |number_f, number_s, p| {
+            let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
+            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+            let p = p.coerce_to_number_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::negbinom_dist(
+                number_f, number_s, p, false,
+            )?))
+        },
+    )
 }
 
 inventory::submit! {
@@ -2140,19 +2284,25 @@ fn hypgeomdist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number_sample = array_lift::eval_arg(ctx, &args[1]);
     let population_s = array_lift::eval_arg(ctx, &args[2]);
     let number_pop = array_lift::eval_arg(ctx, &args[3]);
-    array_lift::lift4(sample_s, number_sample, population_s, number_pop, |sample_s, number_sample, population_s, number_pop| {
-        let sample_s = sample_s.coerce_to_number_with_ctx(ctx)?;
-        let number_sample = number_sample.coerce_to_number_with_ctx(ctx)?;
-        let population_s = population_s.coerce_to_number_with_ctx(ctx)?;
-        let number_pop = number_pop.coerce_to_number_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::hypgeom_dist(
-            sample_s,
-            number_sample,
-            population_s,
-            number_pop,
-            false,
-        )?))
-    })
+    array_lift::lift4(
+        sample_s,
+        number_sample,
+        population_s,
+        number_pop,
+        |sample_s, number_sample, population_s, number_pop| {
+            let sample_s = sample_s.coerce_to_number_with_ctx(ctx)?;
+            let number_sample = number_sample.coerce_to_number_with_ctx(ctx)?;
+            let population_s = population_s.coerce_to_number_with_ctx(ctx)?;
+            let number_pop = number_pop.coerce_to_number_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::hypgeom_dist(
+                sample_s,
+                number_sample,
+                population_s,
+                number_pop,
+                false,
+            )?))
+        },
+    )
 }
 
 #[derive(Debug, Clone)]

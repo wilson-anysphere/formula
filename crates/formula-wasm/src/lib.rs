@@ -1522,6 +1522,30 @@ impl WorkbookState {
         }
         Ok(out)
     }
+    fn set_cell_style_id_internal(
+        &mut self,
+        sheet: &str,
+        address: &str,
+        style_id: u32,
+    ) -> Result<(), JsValue> {
+        let sheet = self.ensure_sheet(sheet);
+        let cell_ref = Self::parse_address(address)?;
+        let address = cell_ref.to_a1();
+        self.engine
+            .set_cell_style_id(&sheet, &address, style_id)
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    fn get_cell_style_id_internal(&self, sheet: &str, address: &str) -> Result<u32, JsValue> {
+        let sheet = self.require_sheet(sheet)?;
+        let cell_ref = Self::parse_address(address)?;
+        let address = cell_ref.to_a1();
+        let style_id = self
+            .engine
+            .get_cell_style_id(sheet, &address)
+            .map_err(|err| js_err(err.to_string()))?;
+        Ok(style_id.unwrap_or(0))
+    }
     fn set_cell_internal(
         &mut self,
         sheet: &str,
@@ -1567,11 +1591,14 @@ impl WorkbookState {
             .get_mut(&sheet)
             .expect("sheet just ensured must exist");
 
-        // `null` represents an empty cell in the JS protocol. Preserve sparse semantics by
-        // removing the stored entry instead of storing an explicit blank.
+        // `null` represents an empty cell in the JS protocol. Preserve sparse semantics in the
+        // JSON input map by removing the stored entry instead of storing an explicit blank.
+        //
+        // In the engine, treat this as "clear contents" (value/formula -> blank) so formatting can
+        // be preserved when a cell has a non-default style.
         if input.is_null() {
             self.engine
-                .clear_cell(&sheet, &address)
+                .set_cell_value(&sheet, &address, EngineValue::Blank)
                 .map_err(|err| js_err(err.to_string()))?;
 
             sheet_cells.remove(&address);
@@ -1595,7 +1622,7 @@ impl WorkbookState {
                 // non-whitespace content after '=', but keep a defensive fallback so
                 // we never store a literal "=" formula.
                 self.engine
-                    .clear_cell(&sheet, &address)
+                    .set_cell_value(&sheet, &address, EngineValue::Blank)
                     .map_err(|err| js_err(err.to_string()))?;
                 sheet_cells.remove(&address);
                 self.pending_spill_clears
@@ -3247,6 +3274,32 @@ impl WasmWorkbook {
         let cell = self.inner.get_cell_data(sheet, &address)?;
         cell_data_to_js(&cell)
     }
+
+    /// Returns the per-cell style id, or `0` if the cell has the default style.
+    ///
+    /// Note: This is currently a narrow interop hook so JS callers can preserve formatting when
+    /// clearing cell contents.
+    #[wasm_bindgen(js_name = "getCellStyleId")]
+    pub fn get_cell_style_id(&self, address: String, sheet: Option<String>) -> Result<u32, JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        self.inner.get_cell_style_id_internal(sheet, &address)
+    }
+
+    /// Sets the per-cell style id.
+    ///
+    /// Style id `0` represents the default style.
+    #[wasm_bindgen(js_name = "setCellStyleId")]
+    pub fn set_cell_style_id(
+        &mut self,
+        address: String,
+        style_id: u32,
+        sheet: Option<String>,
+    ) -> Result<(), JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        self.inner
+            .set_cell_style_id_internal(sheet, &address, style_id)
+    }
+
     #[wasm_bindgen(js_name = "setCell")]
     pub fn set_cell(
         &mut self,

@@ -1334,6 +1334,7 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
         .unwrap();
+    wb.set_cell_style_id("A1".to_string(), 42, None).unwrap();
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
@@ -1353,6 +1354,7 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
     let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert_eq!(cell.input, JsonValue::Null);
     assert_eq!(cell.value, JsonValue::Null);
+    assert_eq!(wb.get_cell_style_id("A1".to_string(), None).unwrap(), 42);
 
     let exported = wb.to_json().unwrap();
     let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
