@@ -8511,8 +8511,8 @@ export class SpreadsheetApp {
     const existing = this.splitViewSecondaryDrawingInteractionController;
     if (existing) return existing;
 
-    // Track the active interaction kind so the legacy `commitObjects` fallback can
-    // preserve semantics (e.g. rotate gestures must be able to clear transforms).
+    // Track the active interaction kind so the `commitObjects` fallback can preserve semantics
+    // (e.g. rotate gestures must be able to clear transforms).
     let interactionCommitKind: "move" | "resize" | "rotate" | null = null;
 
     const headerRows = 1;

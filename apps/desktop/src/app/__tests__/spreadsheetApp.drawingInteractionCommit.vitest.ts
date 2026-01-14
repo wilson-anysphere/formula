@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pxToEmu } from "../../drawings/overlay";
 import { convertDocumentSheetDrawingsToUiDrawingObjects } from "../../drawings/modelAdapters";
+import { SecondaryGridView } from "../../grid/splitView/secondaryGridView";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -836,5 +837,137 @@ describe("SpreadsheetApp drawing interaction commits", () => {
 
     app.dispose();
     root.remove();
+  });
+
+  it("commitObjects fallback is id-safe for split-view secondary drawing interactions (shared grid)", () => {
+    process.env.DESKTOP_GRID_MODE = "shared";
+    const root = createRoot();
+    const secondaryContainer = document.createElement("div");
+    secondaryContainer.tabIndex = 0;
+    secondaryContainer.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 1000,
+        top: 0,
+        right: 1800,
+        bottom: 600,
+        x: 1000,
+        y: 0,
+        toJSON: () => {},
+      }) as any;
+    // JSDOM doesn't always implement pointer capture APIs.
+    (secondaryContainer as any).setPointerCapture ??= () => {};
+    (secondaryContainer as any).releasePointerCapture ??= () => {};
+    Object.defineProperty(secondaryContainer, "clientWidth", { configurable: true, value: 800 });
+    Object.defineProperty(secondaryContainer, "clientHeight", { configurable: true, value: 600 });
+    document.body.appendChild(secondaryContainer);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+    // Ensure hit testing sees the latest document state immediately.
+    (app as any).drawingObjectsCache = null;
+    (app as any).drawingHitTestIndex = null;
+    (app as any).drawingHitTestIndexObjects = null;
+    (app as any).splitViewDrawingHitTestIndex = null;
+    (app as any).splitViewDrawingHitTestIndexObjects = null;
+
+    const images = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
+    const secondaryView = new SecondaryGridView({
+      container: secondaryContainer,
+      document: app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      rowCount: 30,
+      colCount: 30,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: (id) => app.getDrawingObjects(id),
+      images,
+      getSelectedDrawingId: () => app.getSelectedDrawingId(),
+    });
+    const selectionCanvas = secondaryContainer.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    if (!selectionCanvas) {
+      throw new Error("Missing secondary selection canvas");
+    }
+    // Ensure pointer hit testing uses the secondary pane origin.
+    selectionCanvas.getBoundingClientRect = secondaryContainer.getBoundingClientRect as any;
+
+    app.setSplitViewSecondaryGridView(secondaryView as any);
+
+    // Force split-view DrawingInteractionController to fall back to commitObjects.
+    const splitController = (app as any).splitViewSecondaryDrawingInteractionController as any;
+    expect(splitController).toBeTruthy();
+    splitController.callbacks.onInteractionCommit = () => {
+      throw new Error("boom");
+    };
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+    const downX = secondaryContainer.getBoundingClientRect().left + headerOffsetX + 10;
+    const downY = secondaryContainer.getBoundingClientRect().top + headerOffsetY + 10;
+
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX,
+        clientY: downY,
+        pointerId: 1,
+        button: 0,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX + 10,
+        clientY: downY,
+        pointerId: 1,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX + 10,
+        clientY: downY,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+
+    const updated = doc.getSheetDrawings(sheetId)[0];
+    expect(updated.id).toBe("drawing_foo");
+    expect(updated.anchor.type).toBe("absolute");
+    expect(updated.anchor.pos.xEmu).toBe(pxToEmu(10));
+
+    app.dispose();
+    root.remove();
+    secondaryView.destroy();
+    secondaryContainer.remove();
   });
 });
