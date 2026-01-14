@@ -4,6 +4,7 @@ use crate::openxml::{
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
 use crate::{DateSystem, XlsxDocument};
+use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::{PivotCacheDefinition, PivotCacheValue};
 use formula_engine::pivot::{FilterField, PivotFieldRef, PivotKeyPart};
 use chrono::{Datelike, NaiveDate};
@@ -120,7 +121,7 @@ pub fn resolve_slicer_item_key(
         PivotCacheValue::Number(n) => Some(ScalarValue::from(*n)),
         PivotCacheValue::Bool(b) => Some(ScalarValue::Bool(*b)),
         PivotCacheValue::DateTime(s) => {
-            if let Some(date) = parse_iso_ymd(s) {
+            if let Some(date) = pivot_cache_datetime_to_naive_date(s) {
                 Some(ScalarValue::Date(date))
             } else {
                 Some(ScalarValue::Text(s.clone()))
@@ -3469,6 +3470,40 @@ mod engine_filter_field_tests {
             resolve_slicer_item_key(&def, 0, "0"),
             Some(ScalarValue::Date(
                 NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn datetime_compact_ymd_shared_items_resolve_to_date() {
+        let mut field = PivotCacheField::default();
+        field.name = "DateField".to_string();
+        field.shared_items = Some(vec![PivotCacheValue::DateTime("20240115".to_string())]);
+
+        let mut def = PivotCacheDefinition::default();
+        def.cache_fields.push(field);
+
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "0"),
+            Some(ScalarValue::Date(
+                NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn datetime_serial_shared_items_resolve_to_date() {
+        let mut field = PivotCacheField::default();
+        field.name = "DateField".to_string();
+        field.shared_items = Some(vec![PivotCacheValue::DateTime("1.0".to_string())]);
+
+        let mut def = PivotCacheDefinition::default();
+        def.cache_fields.push(field);
+
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "0"),
+            Some(ScalarValue::Date(
+                NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()
             ))
         );
     }
