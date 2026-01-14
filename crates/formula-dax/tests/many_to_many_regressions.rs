@@ -1818,6 +1818,31 @@ fn relatedtable_respects_userelationship_overrides_with_m2m_for_columnar_fact() 
             .unwrap(),
         2.into()
     );
+
+    let mut ctx_c = RowContext::default();
+    ctx_c.push("Dim", 2);
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        1.into()
+    );
 }
 
 #[test]
