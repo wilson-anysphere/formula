@@ -39,6 +39,13 @@ const REQUIRED_SCHEME = "formula";
 const REQUIRED_FILE_EXT = "xlsx";
 
 /**
+ * @param {string} value
+ */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * @param {string} message
  */
 function err(message) {
@@ -218,6 +225,25 @@ function validateParquetMimeDefinition(config) {
   }
 }
 
+/**
+ * @param {any} config
+ * @returns {string[]}
+ */
+function collectFileAssociationExtensions(config) {
+  const fileAssociations = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+  /** @type {Set<string>} */
+  const out = new Set();
+  for (const assoc of fileAssociations) {
+    const rawExt = /** @type {any} */ (assoc)?.ext;
+    const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
+    for (const e of exts) {
+      const normalized = String(e).trim().toLowerCase().replace(/^\./, "");
+      if (normalized) out.add(normalized);
+    }
+  }
+  return Array.from(out).sort();
+}
+
 function main() {
   /** @type {any} */
   let config;
@@ -231,7 +257,7 @@ function main() {
     ]);
     return;
   }
-
+ 
   // ---- macOS: Info.plist contains CFBundleURLSchemes -> formula, and CFBundleDocumentTypes includes xlsx.
   try {
     const plist = readFileSync(infoPlistPath, "utf8");
@@ -246,11 +272,21 @@ function main() {
     }
 
     const docTypesBlock = extractPlistArrayBlock(plist, "CFBundleDocumentTypes");
-    const xlsxRe = new RegExp(`<string>\\s*${REQUIRED_FILE_EXT}\\s*<\\/string>`, "i");
-    if (!docTypesBlock || !xlsxRe.test(docTypesBlock)) {
+    const expectedExts = collectFileAssociationExtensions(config);
+    const missingExts = [];
+    if (docTypesBlock && expectedExts.length > 0) {
+      for (const ext of expectedExts) {
+        const re = new RegExp(`<string>\\s*${escapeRegExp(ext)}\\s*<\\/string>`, "i");
+        if (!re.test(docTypesBlock)) missingExts.push(ext);
+      }
+    }
+
+    if (!docTypesBlock || missingExts.length > 0) {
       errBlock("Missing macOS file association registration (Info.plist)", [
-        "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleDocumentTypes including:",
-        `  - ${REQUIRED_FILE_EXT}`,
+        "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleDocumentTypes entries for all extensions in bundle.fileAssociations (tauri.conf.json).",
+        ...(missingExts.length > 0
+          ? [`Missing extension(s): ${missingExts.join(", ")}`, `Expected extensions: ${expectedExts.join(", ")}`]
+          : []),
         "Fix: add/update CFBundleDocumentTypes/CFBundleTypeExtensions in Info.plist.",
       ]);
     }

@@ -34,8 +34,9 @@ function runWithConfigAndPlist(config, plistContents) {
   return proc;
 }
 
-function basePlistWithFormulaScheme() {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>xlsx</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+function basePlistWithFormulaScheme(fileExtensions = ["xlsx"]) {
+  const extsXml = fileExtensions.map((ext) => `        <string>${ext}</string>`).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n${extsXml}\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
 }
 
 function baseConfig({ fileAssociations }) {
@@ -58,7 +59,7 @@ test("passes when bundle.fileAssociations includes .xlsx and all entries have mi
       { ext: ["csv"], mimeType: "text/csv" },
     ],
   });
-  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme(["xlsx", "csv"]));
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
