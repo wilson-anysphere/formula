@@ -8,6 +8,7 @@ use sha1::{Digest as _, Sha1};
 ///   material* passed to the cipher is 128 bits where the remaining 88 bits are zero.
 /// - For other key sizes (including 56-bit), the key is the first `key_size_bits/8` bytes of
 ///   `Hfinal` (no additional zero padding).
+#[allow(dead_code)]
 pub(crate) fn derive_rc4_cryptoapi_key(
     password: &str,
     salt: &[u8; 16],
@@ -111,4 +112,3 @@ mod tests {
         assert_eq!(key0, key40);
     }
 }
-

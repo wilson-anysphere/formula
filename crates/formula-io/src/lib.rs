@@ -1697,6 +1697,17 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             path: path.to_path_buf(),
         });
     };
+
+    // `EncryptedPackage` streams should start with an 8-byte plaintext length header. If the stream
+    // is too short (and we didn't already detect a plaintext ZIP payload above), treat it as an
+    // unsupported/malformed encryption container rather than an invalid password.
+    if encrypted_package.len() < 8 {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
     let decrypted = if (version_major, version_minor) == (4, 4) {
         // Agile (4.4): prefer the strict decryptor in `formula-xlsx` because it validates
         // `dataIntegrity` when present. Some producers omit `dataIntegrity`; fall back to a more
