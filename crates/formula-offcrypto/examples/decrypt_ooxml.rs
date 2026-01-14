@@ -91,14 +91,15 @@ fn main() {
         Err(err) => eprintln!("warning: failed to inspect EncryptionInfo: {err}"),
     }
 
+    let options = DecryptOptions {
+        verify_integrity: args.verify_integrity,
+        ..Default::default()
+    };
     let decrypted_zip = match decrypt_encrypted_package(
         &encryption_info_bytes,
         &encrypted_package_bytes,
         &args.password,
-        DecryptOptions {
-            verify_integrity: args.verify_integrity,
-            ..Default::default()
-        },
+        options,
     ) {
         Ok(b) => b,
         Err(err) => {
