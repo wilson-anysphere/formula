@@ -4,11 +4,19 @@ use formula_office_crypto::{decrypt_encrypted_package, OfficeCryptoError};
 
 const AGILE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/encryption/encrypted_agile.xlsx"
+    "/../../fixtures/encrypted/ooxml/agile-large.xlsx"
+));
+const AGILE_PLAINTEXT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
 ));
 const STANDARD_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/encryption/encrypted_standard.xlsx"
+    "/../../fixtures/encrypted/ooxml/standard.xlsx"
+));
+const STANDARD_PLAINTEXT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/plaintext.xlsx"
 ));
 
 fn assert_decrypted_zip_contains_workbook(decrypted: &[u8]) {
@@ -33,6 +41,7 @@ fn assert_decrypted_zip_contains_workbook(decrypted: &[u8]) {
 #[test]
 fn decrypts_agile_encrypted_package() {
     let decrypted = decrypt_encrypted_package(AGILE_FIXTURE, "password").expect("decrypt agile");
+    assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
 
@@ -40,6 +49,7 @@ fn decrypts_agile_encrypted_package() {
 fn decrypts_standard_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
 
