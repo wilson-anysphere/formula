@@ -950,6 +950,12 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
 
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
+  // Detect dynamic imports with string literal specifiers so we can follow transitive
+  // dependencies when runtime wiring uses `await import("./foo.js")` (common in ESM).
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  // Some Node-oriented packages (or older code) still use `require()` even under
+  // `node --test` ESM mode. Treat string-literal requires as dependencies too.
+  const requireRe = /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g;
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
@@ -1219,6 +1225,14 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
       if (specifier) imports.push({ specifier, typeOnly });
     }
     for (const match of text.matchAll(sideEffectImportRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(dynamicImportRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(requireRe)) {
       const specifier = match[1];
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
