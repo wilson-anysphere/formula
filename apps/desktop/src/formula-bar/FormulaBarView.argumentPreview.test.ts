@@ -93,7 +93,7 @@ describe("FormulaBarView argument preview (integration)", () => {
     host.remove();
   });
 
-  it("keeps showing the argument preview when the cursor is after a closing paren", async () => {
+  it("keeps showing the argument preview when the cursor is after a closing paren (even with trailing whitespace)", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -107,7 +107,7 @@ describe("FormulaBarView argument preview (integration)", () => {
     });
     view.setArgumentPreviewProvider(provider);
 
-    const formula = "=ROUND(1, 2)";
+    const formula = "=ROUND(1, 2)\n";
     view.textarea.value = formula;
 
     // Cursor after the closing paren should behave as if the last argument is active.

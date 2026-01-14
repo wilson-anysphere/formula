@@ -353,11 +353,14 @@ export class FormulaBarModel {
     if (
       !context &&
       this.#cursorStart === this.#cursorEnd &&
-      this.#cursorStart > 0 &&
-      this.#draft[this.#cursorStart - 1] === ")"
+      this.#cursorStart > 0
     ) {
-      active = this.activeArgumentSpan(this.#cursorStart - 1);
-      context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
+      let scan = this.#cursorStart - 1;
+      while (scan >= 0 && isWhitespaceChar(this.#draft[scan] ?? "")) scan -= 1;
+      if (scan >= 0 && this.#draft[scan] === ")") {
+        active = this.activeArgumentSpan(scan);
+        context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
+      }
     }
 
     if (!context) return null;
@@ -718,6 +721,10 @@ export class FormulaBarModel {
     this.#activeArgumentSpanCache = null;
     this.#activeArgumentSpanCache2 = null;
   }
+}
+
+function isWhitespaceChar(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
 
 function findActiveReferenceIndex(

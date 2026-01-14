@@ -3083,13 +3083,12 @@ export class FormulaBarView {
         // `activeArgumentSpan()` returns null because the tokenizer-based parser has
         // already consumed the closing `)`, but the hint panel still treats the last
         // argument as active (Excel UX).
-        if (
-          !activeArg &&
-          this.model.cursorStart === this.model.cursorEnd &&
-          this.model.cursorStart > 0 &&
-          draft[this.model.cursorStart - 1] === ")"
-        ) {
-          activeArg = this.model.activeArgumentSpan(this.model.cursorStart - 1);
+        if (!activeArg && this.model.cursorStart === this.model.cursorEnd && this.model.cursorStart > 0) {
+          let scan = this.model.cursorStart - 1;
+          while (scan >= 0 && isWhitespaceChar(draft[scan] ?? "")) scan -= 1;
+          if (scan >= 0 && draft[scan] === ")") {
+            activeArg = this.model.activeArgumentSpan(scan);
+          }
         }
         const wantsArgPreview = Boolean(
           activeArg &&

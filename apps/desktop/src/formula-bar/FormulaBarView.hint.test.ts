@@ -134,7 +134,7 @@ describe("FormulaBarView function hint UI", () => {
     host.remove();
   });
 
-  it("keeps showing the innermost function hint when the cursor is after a closing paren", async () => {
+  it("keeps showing the innermost function hint when the cursor is after a closing paren (even with trailing whitespace)", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -142,7 +142,7 @@ describe("FormulaBarView function hint UI", () => {
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
-    view.textarea.value = "=ROUND(1, 2)";
+    view.textarea.value = "=ROUND(1, 2)\n";
     // Cursor after the closing paren.
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
