@@ -154,8 +154,8 @@ impl DaxModel {
 
     #[wasm_bindgen(js_name = "addRelationship")]
     pub fn add_relationship(&mut self, relationship: JsValue) -> Result<(), JsValue> {
-        let dto: RelationshipDto =
-            serde_wasm_bindgen::from_value(relationship).map_err(|err| js_error(err.to_string()))?;
+        let dto: RelationshipDto = serde_wasm_bindgen::from_value(relationship)
+            .map_err(|err| js_error(err.to_string()))?;
 
         let relationship = Relationship {
             name: dto.name,
@@ -171,12 +171,16 @@ impl DaxModel {
             enforce_referential_integrity: dto.enforce_referential_integrity.unwrap_or(true),
         };
 
-        self.model.add_relationship(relationship).map_err(dax_error_to_js)
+        self.model
+            .add_relationship(relationship)
+            .map_err(dax_error_to_js)
     }
 
     #[wasm_bindgen(js_name = "addMeasure")]
     pub fn add_measure(&mut self, name: &str, expression: &str) -> Result<(), JsValue> {
-        self.model.add_measure(name, expression).map_err(dax_error_to_js)
+        self.model
+            .add_measure(name, expression)
+            .map_err(dax_error_to_js)
     }
 
     #[wasm_bindgen(js_name = "addCalculatedColumn")]
@@ -203,6 +207,40 @@ impl DaxModel {
 
         // Provide a JS-friendly shortcut: if the input matches a known measure name,
         // evaluate it as a measure even if it isn't wrapped in `[brackets]`.
+        match self
+            .model
+            .evaluate_measure(expression_or_measure_name, &filter)
+        {
+            Ok(value) => Ok(dax_value_to_js(value)),
+            Err(DaxError::UnknownMeasure(_)) => DaxEngine::new()
+                .evaluate(
+                    &self.model,
+                    expression_or_measure_name,
+                    &filter,
+                    &RowContext::default(),
+                )
+                .map(dax_value_to_js)
+                .map_err(dax_error_to_js),
+            Err(err) => Err(dax_error_to_js(err)),
+        }
+    }
+
+    /// Evaluate an expression/measure under a filter context **without consuming** the
+    /// `DaxFilterContext` JS object.
+    ///
+    /// `evaluate()` takes `filterContext?: DaxFilterContext` by value because wasm-bindgen does not
+    /// currently support `Option<&T>` for exported classes. Passing a `DaxFilterContext` into
+    /// `evaluate()` will therefore consume it.
+    ///
+    /// JS callers that want to reuse a filter context across multiple evaluations should prefer
+    /// this API.
+    #[wasm_bindgen(js_name = "evaluateWithFilter")]
+    pub fn evaluate_with_filter(
+        &self,
+        expression_or_measure_name: &str,
+        filter_context: &DaxFilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context.ctx.clone();
         match self
             .model
             .evaluate_measure(expression_or_measure_name, &filter)
@@ -331,6 +369,24 @@ impl DaxModel {
         object_set(&obj, "data", &data.into())?;
         Ok(obj.into())
     }
+
+    /// Pivot query variant that borrows the provided `DaxFilterContext` instead of consuming it.
+    #[wasm_bindgen(js_name = "pivotWithFilter")]
+    pub fn pivot_with_filter(
+        &self,
+        base_table: &str,
+        group_by: JsValue,
+        measures: JsValue,
+        filter_context: &DaxFilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context.ctx.clone();
+        self.pivot(
+            base_table,
+            group_by,
+            measures,
+            Some(DaxFilterContext { ctx: filter }),
+        )
+    }
 }
 
 /// JS wrapper around [`formula_dax::FilterContext`].
@@ -358,6 +414,16 @@ impl DaxFilterContext {
         let value = js_value_to_dax_value(value)?;
         self.ctx.set_column_equals(table, column, value);
         Ok(())
+    }
+
+    /// Clone this filter context.
+    ///
+    /// Useful when passing a filter context into APIs that take ownership (e.g. `evaluate()`).
+    #[wasm_bindgen(js_name = "clone")]
+    pub fn clone_js(&self) -> DaxFilterContext {
+        DaxFilterContext {
+            ctx: self.ctx.clone(),
+        }
     }
 }
 
@@ -487,8 +553,8 @@ impl WasmDaxDataModel {
 
     #[wasm_bindgen(js_name = "addMeasure")]
     pub fn add_measure(&mut self, measure: JsValue) -> Result<(), JsValue> {
-        let measure: MeasureDto =
-            serde_wasm_bindgen::from_value(measure).map_err(|err| super::js_err(err.to_string()))?;
+        let measure: MeasureDto = serde_wasm_bindgen::from_value(measure)
+            .map_err(|err| super::js_err(err.to_string()))?;
         self.inner
             .add_measure(measure.name, measure.expression)
             .map_err(|err| super::js_err(err.to_string()))

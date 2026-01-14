@@ -97,7 +97,7 @@ fn dax_model_evaluate_and_pivot() {
     filter
         .set_column_equals("Customers", "Region", JsValue::from_str("East"))
         .unwrap();
-    let total_east = model.evaluate("Total", Some(filter)).unwrap();
+    let total_east = model.evaluate_with_filter("Total", &filter).unwrap();
     assert_eq!(total_east.as_f64().unwrap(), 38.0);
 
     // Pivot: group Orders by Customers[Region] and compute Total.
