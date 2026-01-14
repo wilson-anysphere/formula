@@ -99,6 +99,61 @@ fn filtermode_preserves_filtered_rows_as_filter_hidden() {
 }
 
 #[test]
+fn filtermode_does_not_reclassify_hidden_header_row_as_filter_hidden() {
+    let bytes = xls_fixture_builder::build_autofilter_filtermode_hidden_header_row_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilteredHiddenHeaderRow")
+        .expect("FilteredHiddenHeaderRow missing");
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected sheet.auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
+
+    assert!(
+        !af.filter_columns.is_empty(),
+        "expected filter criteria to be imported; auto_filter={af:?}; warnings={:?}",
+        result.warnings
+    );
+    assert_eq!(af.filter_columns[0].col_id, 0);
+    assert_eq!(
+        af.filter_columns[0].criteria,
+        vec![FilterCriterion::Equals(FilterValue::Text("X".to_string()))]
+    );
+
+    // FILTERMODE applies only to data rows below the header row; the header row should remain
+    // user-hidden.
+    assert!(
+        sheet.is_row_hidden_effective(1),
+        "expected row 1 to be hidden; outline={:?}; warnings={:?}",
+        sheet.row_outline_entry(1),
+        result.warnings
+    );
+    let outline = sheet.row_outline_entry(1);
+    assert!(
+        outline.hidden.user,
+        "expected row 1 to be user-hidden; outline={outline:?}; warnings={:?}",
+        result.warnings
+    );
+    assert!(
+        !outline.hidden.filter,
+        "expected row 1 to not be filter-hidden; outline={outline:?}; warnings={:?}",
+        result.warnings
+    );
+
+    assert!(
+        !result.warnings.iter().any(|w| w
+            .message
+            .contains("FILTERMODE is set but no AutoFilter criteria records were found")),
+        "expected no missing-criteria warning when AUTOFILTER records are present; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn filtermode_sets_filter_hidden_flag_on_outline_entry() {
     // Explicit regression test for `OutlineEntry.hidden.filter` when a BIFF ROW record is hidden
     // inside an active FILTERMODE range.
