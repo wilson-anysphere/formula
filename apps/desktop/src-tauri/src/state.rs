@@ -2114,34 +2114,39 @@ impl AppState {
             .as_deref()
             .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()));
 
+        // Allow operators to tighten the retention cap via `FORMULA_MAX_ORIGIN_XLSX_BYTES`.
+        // Never allow relaxing it above the built-in default (even in debug builds).
+        let max_origin_xlsx_bytes =
+            crate::resource_limits::max_origin_xlsx_bytes().min(MAX_ORIGIN_XLSX_BYTES);
+
         if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb")) {
             workbook.origin_xlsb_path = workbook.path.clone();
             workbook.origin_xlsx_bytes = None;
         } else if ext.is_some_and(Self::is_xlsx_family_extension) {
             workbook.origin_xlsb_path = None;
             if let Some(bytes) = new_origin_xlsx_bytes {
-                if bytes.len() <= MAX_ORIGIN_XLSX_BYTES {
+                if bytes.len() <= max_origin_xlsx_bytes {
                     workbook.origin_xlsx_bytes = Some(bytes);
                 } else {
                     // Defense-in-depth: avoid retaining arbitrarily large baseline snapshots in
                     // memory after save. Dropping the baseline forces subsequent saves to use the
                     // regeneration-based path (instead of patching from stale bytes).
                     eprintln!(
-                        "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds MAX_ORIGIN_XLSX_BYTES ({})",
+                        "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
                         bytes.len(),
-                        MAX_ORIGIN_XLSX_BYTES
+                        max_origin_xlsx_bytes
                     );
                     workbook.origin_xlsx_bytes = None;
                 }
             }
         } else if let Some(bytes) = new_origin_xlsx_bytes {
-            if bytes.len() <= MAX_ORIGIN_XLSX_BYTES {
+            if bytes.len() <= max_origin_xlsx_bytes {
                 workbook.origin_xlsx_bytes = Some(bytes);
             } else {
                 eprintln!(
-                    "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds MAX_ORIGIN_XLSX_BYTES ({})",
+                    "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
                     bytes.len(),
-                    MAX_ORIGIN_XLSX_BYTES
+                    max_origin_xlsx_bytes
                 );
                 workbook.origin_xlsx_bytes = None;
             }
