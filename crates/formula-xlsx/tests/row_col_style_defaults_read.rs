@@ -14,6 +14,20 @@ const STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes
   </cellXfs>
 </styleSheet>"#;
 
+// Same as `STYLES_XML`, but the non-default xf is at index 0.
+// This catches a subtle bug where malformed style indices were treated as `0`,
+// accidentally applying whatever style happens to live at `xf=0`.
+const STYLES_XML_XF0_CUSTOM: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="0.00"/>
+  </numFmts>
+  <cellXfs count="2">
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+</styleSheet>"#;
+
 fn build_minimal_xlsx(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -187,11 +201,14 @@ fn ignores_malformed_row_and_col_style_indices_best_effort() {
     <row r="2" s="bogus" customFormat="1"/>
   </sheetData>
 </worksheet>"#;
-    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML_XF0_CUSTOM);
 
     let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    // Sanity check: the custom numFmt exists (and is non-default).
+    let _ = style_id_for_number_format(&doc.workbook, "0.00");
     assert_no_row_col_style_defaults(&doc.workbook);
 
     let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    let _ = style_id_for_number_format(&workbook, "0.00");
     assert_no_row_col_style_defaults(&workbook);
 }

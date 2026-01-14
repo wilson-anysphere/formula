@@ -2687,7 +2687,7 @@ fn parse_worksheet_into_model(
                             custom_width = Some(parse_xml_bool(&v));
                         }
                         b"style" => {
-                            style = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                            style = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         b"customFormat" => {
                             let v = attr.unescape_value()?.into_owned();
@@ -2726,7 +2726,9 @@ fn parse_worksheet_into_model(
                         worksheet.set_col_style_id(col, None);
                     } else if let Some(xf_index) = style {
                         let style_id = styles_part.style_id_for_xf(xf_index);
-                        worksheet.set_col_style_id(col, (style_id != 0).then_some(style_id));
+                        if style_id != 0 {
+                            worksheet.set_col_style_id(col, Some(style_id));
+                        }
                     }
                 }
             }
@@ -2946,7 +2948,7 @@ fn parse_worksheet_into_model(
                             custom_height = Some(parse_xml_bool(&v));
                         }
                         b"s" => {
-                            style = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
+                            style = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         b"customFormat" => {
                             let v = attr.unescape_value()?.into_owned();
@@ -2972,7 +2974,9 @@ fn parse_worksheet_into_model(
                             worksheet.set_row_style_id(row, None);
                         } else if let Some(xf_index) = style {
                             let style_id = styles_part.style_id_for_xf(xf_index);
-                            worksheet.set_row_style_id(row, (style_id != 0).then_some(style_id));
+                            if style_id != 0 {
+                                worksheet.set_row_style_id(row, Some(style_id));
+                            }
                         }
                         if custom_height != Some(false) {
                             if let Some(height) = height {
