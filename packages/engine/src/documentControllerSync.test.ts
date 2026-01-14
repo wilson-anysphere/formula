@@ -208,6 +208,17 @@ describe("engine sync helpers", () => {
     expect(engine.setStyleCalls).toEqual([{ address: "A1", styleId: 1, sheet: "Sheet1" }]);
   });
 
+  it("engineHydrateFromDocument syncs sheet view column widths into engine metadata", async () => {
+    const doc = new DocumentController();
+    doc.setColWidth("Sheet1", 0, 120);
+
+    const engine = new FakeEngine([]);
+    await engineHydrateFromDocument(engine, doc);
+
+    // 120px -> Excel character width (1/256 precision): floor(((120-5)/7)*256)/256
+    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.42578125 }]);
+  });
+
   it("engineApplyDeltas propagates formatting-only deltas via internStyle + setCellStyleId", async () => {
     const doc = new DocumentController();
     // Intern a style into the document's style table without attaching it to a cell so

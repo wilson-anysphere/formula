@@ -231,6 +231,31 @@ export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: a
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
 
+  // Sync sheet view column widths (DocumentController stores base px; engine uses Excel char units).
+  //
+  // This ensures `CELL("width")` metadata is correct immediately after hydration (e.g. when
+  // opening a document that already contains persisted column width overrides).
+  if (typeof engine.setColWidth === "function" && typeof doc?.getSheetView === "function") {
+    const sheetIds: string[] =
+      typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
+    const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+
+    for (const sheetId of ids) {
+      const view = doc.getSheetView(sheetId) as { colWidths?: Record<string, number> } | null;
+      const colWidths = view?.colWidths ?? null;
+      if (!colWidths) continue;
+
+      for (const [key, rawWidth] of Object.entries(colWidths)) {
+        const col = Number(key);
+        if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
+        const widthPx = Number(rawWidth);
+        if (!Number.isFinite(widthPx) || widthPx <= 0) continue;
+        const widthChars = docColWidthPxToExcelChars(widthPx);
+        await engine.setColWidth(sheetId, col, widthChars);
+      }
+    }
+  }
+
   const styleTable = doc?.styleTable as StyleTableLike | null;
   if (styleTable && typeof styleTable.get === "function") {
     const ctx: EngineStyleSyncContext = { styleTable, docStyleIdToEngineStyleId: new Map() };

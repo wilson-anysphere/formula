@@ -107,7 +107,8 @@ import {
   engineHydrateFromDocument,
   type EditOp,
   type EditResult,
-  type EngineClient
+  type EngineClient,
+  type EngineSyncTarget
 } from "@formula/engine";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
@@ -200,6 +201,31 @@ const MAX_CLIPBOARD_CELLS = 200_000;
 // source snapshot) in JS. Keep this bounded so users can't accidentally generate millions
 // of edits on Excel-scale sheets.
 const MAX_FILL_CELLS = 200_000;
+
+// `engineApplyDocumentChange` / `engineHydrateFromDocument` operate on the narrower
+// `EngineSyncTarget` surface, which uses sheet-first signatures for certain metadata APIs
+// (matching the underlying WASM workbook bindings). The public `EngineClient` API uses
+// sheet-last signatures (`setColWidth(col, width, sheet)`), so we adapt here.
+const ENGINE_SYNC_TARGET_BY_CLIENT = new WeakMap<object, EngineSyncTarget>();
+
+function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
+  const key = engine as unknown as object;
+  const cached = ENGINE_SYNC_TARGET_BY_CLIENT.get(key);
+  if (cached) return cached;
+
+  const target: EngineSyncTarget = {
+    loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
+    setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
+    setCells: (updates) => engine.setCells(updates),
+    recalculate: (sheet) => engine.recalculate(sheet),
+    internStyle: (styleObj) => engine.internStyle(styleObj as any),
+    setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
+    setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
+  };
+
+  ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
+  return target;
+}
 // Excel-style date/time insertion shortcuts (Ctrl+; / Ctrl+Shift+;) can target the full
 // selection. Cap enumeration so accidental large selections don't allocate huge 2D arrays.
 const MAX_DATE_TIME_INSERT_CELLS = 10_000;
@@ -5839,7 +5865,7 @@ export class SpreadsheetApp {
       this.syncFrozenPanes();
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
-          const changes = await engineHydrateFromDocument(engine, this.document);
+          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document);
           this.applyComputedChanges(changes);
         });
       }
@@ -5920,7 +5946,7 @@ export class SpreadsheetApp {
             for (let attempt = 0; attempt < 2; attempt += 1) {
               changedDuringInit = false;
               this.clearComputedValuesByCoord();
-              const changes = await engineHydrateFromDocument(engine, this.document);
+              const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document);
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
             }
@@ -5937,7 +5963,7 @@ export class SpreadsheetApp {
             if (source === "applyState") {
               this.clearComputedValuesByCoord();
               void this.enqueueWasmSync(async (worker) => {
-                const changes = await engineHydrateFromDocument(worker, this.document);
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
                 this.applyComputedChanges(changes);
               });
               return;
@@ -5967,7 +5993,7 @@ export class SpreadsheetApp {
             }
 
             void this.enqueueWasmSync(async (worker) => {
-              const changes = await engineApplyDocumentChange(worker, payload, {
+              const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
               });
               this.applyComputedChanges(changes);
@@ -5985,7 +6011,7 @@ export class SpreadsheetApp {
           // Note: do not `await` inside this init chain (it would deadlock by waiting on the
           // promise chain we're currently building).
           postInitHydrate = this.enqueueWasmSync(async (worker) => {
-            const changes = await engineHydrateFromDocument(worker, this.document);
+            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
             this.applyComputedChanges(changes);
           });
           } catch {
@@ -7817,7 +7843,7 @@ export class SpreadsheetApp {
       let hydrateError: unknown = null;
       await this.enqueueWasmSync(async (worker) => {
         try {
-          const changes = await engineHydrateFromDocument(worker, this.document);
+          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
           this.applyComputedChanges(changes);
         } catch (err) {
           hydrateError = err;
