@@ -89,6 +89,48 @@ test("CollabSession sheet view binder syncs frozen panes + axis overrides withou
   docB.destroy();
 });
 
+test("CollabSession sheet view binder syncs drawings without polluting undo history", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  const sessionA = createCollabSession({ doc: docA });
+  const sessionB = createCollabSession({ doc: docB });
+
+  const dcA = new DocumentController();
+  const dcB = new DocumentController();
+
+  const binderA = bindSheetViewToCollabSession({ session: sessionA, documentController: dcA });
+  const binderB = bindSheetViewToCollabSession({ session: sessionB, documentController: dcB });
+
+  const drawings = [
+    {
+      id: "drawing-1",
+      zOrder: 0,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+    },
+  ];
+
+  dcA.setSheetDrawings("Sheet1", drawings, { label: "Insert Picture" });
+
+  await waitForCondition(() => {
+    assert.deepEqual(dcB.getSheetDrawings("Sheet1"), drawings);
+    return true;
+  });
+
+  // Remote changes should not create local undo history entries.
+  assert.deepEqual(dcB.getStackDepths(), { undo: 0, redo: 0 });
+
+  binderA.destroy();
+  binderB.destroy();
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession sheet view binder does not write view state into Yjs when session role is read-only", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc });

@@ -229,7 +229,11 @@ function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
     a.frozenCols === b.frozenCols &&
     axisEquals(a.colWidths, b.colWidths) &&
     axisEquals(a.rowHeights, b.rowHeights) &&
-    mergedRangesEquals(a.mergedRanges, b.mergedRanges)
+    mergedRangesEquals(a.mergedRanges, b.mergedRanges) &&
+    deepEquals(
+      Array.isArray(a.drawings) && a.drawings.length > 0 ? a.drawings : null,
+      Array.isArray(b.drawings) && b.drawings.length > 0 ? b.drawings : null,
+    )
   );
 }
 
@@ -397,6 +401,10 @@ export function bindSheetViewToCollabSession(options: {
     /** @type {Array<{ sheetId: string, before: any[], after: any[] }>} */
     const drawingDeltas: Array<{ sheetId: string; before: any[]; after: any[] }> = [];
 
+    const canApplyExternalDrawings =
+      typeof (documentController as any).getSheetDrawings === "function" &&
+      typeof (documentController as any).applyExternalDrawingDeltas === "function";
+
     for (const sheetId of sheetIds) {
       const sheet = findSheetMap(sheetId);
       if (!sheet) continue;
@@ -404,8 +412,10 @@ export function bindSheetViewToCollabSession(options: {
       const after = readSheetViewFromSheetMap(sheet);
 
       // Sheet view (frozen panes + axis overrides) lives in `DocumentController.getSheetView`.
-      const beforeRaw = documentController.getSheetView(sheetId) as SheetViewState;
-      const beforeView: SheetViewState = {
+      const beforeRaw = documentController.getSheetView(sheetId) as any;
+
+      // Compare only the keys this binder owns so we don't churn on unrelated view metadata.
+      const beforeComparable: SheetViewState = {
         frozenRows: beforeRaw.frozenRows,
         frozenCols: beforeRaw.frozenCols,
         ...(beforeRaw.colWidths ? { colWidths: beforeRaw.colWidths } : {}),
@@ -413,23 +423,48 @@ export function bindSheetViewToCollabSession(options: {
         ...(Array.isArray(beforeRaw.mergedRanges) && beforeRaw.mergedRanges.length > 0
           ? { mergedRanges: beforeRaw.mergedRanges }
           : {}),
+        // If the controller stores drawings inside sheet view state (instead of `drawingDeltas`),
+        // include them in the equality check so remote drawing updates hydrate correctly.
+        ...(canApplyExternalDrawings
+          ? {}
+          : Array.isArray(beforeRaw.drawings) && beforeRaw.drawings.length > 0
+            ? { drawings: beforeRaw.drawings }
+            : {}),
       };
-      const afterView: SheetViewState = {
+
+      const afterComparable: SheetViewState = {
         frozenRows: after.frozenRows,
         frozenCols: after.frozenCols,
         ...(after.colWidths ? { colWidths: after.colWidths } : {}),
         ...(after.rowHeights ? { rowHeights: after.rowHeights } : {}),
         ...(Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0 ? { mergedRanges: after.mergedRanges } : {}),
+        ...(canApplyExternalDrawings ? {} : after.drawings ? { drawings: after.drawings } : {}),
       };
 
-      if (!sheetViewEquals(beforeView, afterView)) {
-        viewDeltas.push({ sheetId, before: beforeView, after: afterView });
+      if (!sheetViewEquals(beforeComparable, afterComparable)) {
+        // Preserve unrelated view keys from the DocumentController (e.g. mergedRanges) so remote
+        // frozen/axis updates don't accidentally wipe local metadata that this binder does not sync.
+        const afterFull: any = { ...beforeRaw };
+        afterFull.frozenRows = after.frozenRows;
+        afterFull.frozenCols = after.frozenCols;
+        if (after.colWidths) afterFull.colWidths = after.colWidths;
+        else delete afterFull.colWidths;
+        if (after.rowHeights) afterFull.rowHeights = after.rowHeights;
+        else delete afterFull.rowHeights;
+        if (Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0) afterFull.mergedRanges = after.mergedRanges;
+        else delete afterFull.mergedRanges;
+
+        if (!canApplyExternalDrawings) {
+          if (after.drawings) afterFull.drawings = after.drawings;
+          else delete afterFull.drawings;
+        }
+
+        viewDeltas.push({ sheetId, before: beforeRaw, after: afterFull });
       }
 
       // Drawings are stored separately in the DocumentController (Task 218) as `drawingDeltas`.
-      const getSheetDrawings = (documentController as any).getSheetDrawings;
-      if (typeof getSheetDrawings === "function") {
-        const beforeDrawingsRaw = getSheetDrawings.call(documentController, sheetId);
+      if (canApplyExternalDrawings) {
+        const beforeDrawingsRaw = (documentController as any).getSheetDrawings(sheetId);
         const afterDrawingsRaw = after.drawings ?? [];
 
         const beforeDrawings = Array.isArray(beforeDrawingsRaw) ? beforeDrawingsRaw : [];
@@ -451,7 +486,7 @@ export function bindSheetViewToCollabSession(options: {
         (documentController as any).applyExternalSheetViewDeltas(viewDeltas, { source: "collab" });
       }
 
-      if (drawingDeltas.length > 0 && typeof (documentController as any).applyExternalDrawingDeltas === "function") {
+      if (drawingDeltas.length > 0 && canApplyExternalDrawings) {
         (documentController as any).applyExternalDrawingDeltas(drawingDeltas, { source: "collab" });
       }
     } finally {
