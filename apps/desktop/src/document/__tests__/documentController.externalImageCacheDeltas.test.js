@@ -209,6 +209,40 @@ test("applyExternalImageCacheDeltas ignores invalid entries (non-Uint8Array byte
   assert.equal(doc.getImage("img1"), null);
 });
 
+test("applyExternalImageCacheDeltas ignores invalid `after` payloads (does not delete existing cached images)", () => {
+  const doc = new DocumentController();
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+      },
+    ],
+    { source: "seed" },
+  );
+
+  let changeCount = 0;
+  doc.on("change", () => {
+    changeCount += 1;
+  });
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+        // Invalid bytes payload; should be ignored rather than treated as a delete.
+        after: { bytes: "not-bytes", mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  assert.equal(changeCount, 0);
+  assert.deepEqual(Array.from(doc.getImage("img1")?.bytes ?? []), [1, 2, 3]);
+});
+
 test("applyExternalImageCacheDeltas does not emit update events or bump updateVersion", () => {
   const doc = new DocumentController();
   const before = doc.updateVersion;

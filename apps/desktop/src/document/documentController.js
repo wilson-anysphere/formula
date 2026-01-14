@@ -7085,15 +7085,15 @@ export class DocumentController {
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
     const normalizeImageEntryInput = (raw) => {
-      if (!raw) return null;
-      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return null;
-      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return null;
+      if (raw == null) return { ok: true, value: null };
+      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return { ok: false, value: null };
+      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
       /** @type {ImageEntry} */
       const out = { bytes: raw.bytes };
-      if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
+      if (Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
         out.mimeType = raw.mimeType ?? null;
       }
-      return out;
+      return { ok: true, value: out };
     };
 
     /** @type {ImageDelta[]} */
@@ -7102,8 +7102,13 @@ export class DocumentController {
       if (!delta) continue;
       const imageId = String(delta.imageId ?? "").trim();
       if (!imageId) continue;
-      const before = normalizeImageEntryInput(delta.before);
-      const after = normalizeImageEntryInput(delta.after);
+      const beforeNormalized = normalizeImageEntryInput(delta.before);
+      const afterNormalized = normalizeImageEntryInput(delta.after);
+      // If the `after` payload is present but invalid (e.g. non-bytes or oversized), ignore the delta.
+      // Treating it as a delete would allow malformed input to remove existing images.
+      if (!afterNormalized.ok) continue;
+      const before = beforeNormalized.ok ? beforeNormalized.value : null;
+      const after = afterNormalized.value;
       if (imageEntryEquals(before, after)) continue;
       filtered.push({ imageId, before, after });
     }
@@ -7142,15 +7147,15 @@ export class DocumentController {
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
     const normalizeImageEntryInput = (raw) => {
-      if (!raw) return null;
-      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return null;
-      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return null;
+      if (raw == null) return { ok: true, value: null };
+      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return { ok: false, value: null };
+      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, value: null };
       /** @type {ImageEntry} */
       const out = { bytes: raw.bytes };
       if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
         out.mimeType = raw.mimeType ?? null;
       }
-      return out;
+      return { ok: true, value: out };
     };
 
     /** @type {ImageDelta[]} */
@@ -7159,8 +7164,11 @@ export class DocumentController {
       if (!delta) continue;
       const imageId = String(delta.imageId ?? "").trim();
       if (!imageId) continue;
-      const before = normalizeImageEntryInput(delta.before);
-      const after = normalizeImageEntryInput(delta.after);
+      const beforeNormalized = normalizeImageEntryInput(delta.before);
+      const afterNormalized = normalizeImageEntryInput(delta.after);
+      if (!afterNormalized.ok) continue;
+      const before = beforeNormalized.ok ? beforeNormalized.value : null;
+      const after = afterNormalized.value;
       if (imageEntryEquals(before, after)) continue;
       filtered.push({ imageId, before, after });
     }

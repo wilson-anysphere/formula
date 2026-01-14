@@ -84,3 +84,30 @@ test("applyExternalImageDeltas ignores no-op deltas", () => {
   assert.equal(doc.isDirty, false);
 });
 
+test("applyExternalImageDeltas ignores invalid `after` payloads (does not delete existing images)", () => {
+  const doc = new DocumentController();
+  doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+  doc.markSaved();
+  assert.equal(doc.isDirty, false);
+
+  let changeCount = 0;
+  doc.on("change", () => {
+    changeCount += 1;
+  });
+
+  doc.applyExternalImageDeltas(
+    [
+      {
+        imageId: "img1",
+        before: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+        // Invalid bytes payload; should be ignored rather than treated as a delete.
+        after: { bytes: "not-bytes", mimeType: "image/png" },
+      },
+    ],
+    { source: "collab" },
+  );
+
+  assert.equal(changeCount, 0);
+  assert.equal(doc.isDirty, false);
+  assert.deepEqual(Array.from(doc.getImage("img1")?.bytes ?? []), [1, 2, 3]);
+});
