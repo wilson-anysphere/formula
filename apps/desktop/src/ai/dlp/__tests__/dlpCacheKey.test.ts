@@ -139,6 +139,36 @@ describe("computeDlpCacheKey", () => {
     expect(key1).toEqual(key2);
   });
 
+  it("is stable when selector coordinates are numeric strings (vs numbers)", () => {
+    const base = {
+      documentId: "doc",
+      policy: { version: 1, allowDocumentOverrides: true, rules: { a: { maxAllowed: "Internal" } } },
+      includeRestrictedContent: false,
+    };
+
+    const keyNumber = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [
+        {
+          selector: { scope: "cell", documentId: "doc", sheetId: "Sheet1", row: 1, col: 2 },
+          classification: { level: "Confidential", labels: [] },
+        },
+      ],
+    });
+
+    const keyString = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [
+        {
+          selector: { scope: "cell", documentId: "doc", sheetId: "Sheet1", row: "1", col: "2" },
+          classification: { level: "Confidential", labels: [] },
+        },
+      ],
+    });
+
+    expect(keyNumber).toEqual(keyString);
+  });
+
   it("changes when classification changes", () => {
     const base = {
       documentId: "doc",

@@ -68,9 +68,14 @@ function normalizeClassificationForCacheKey(value: unknown): unknown {
 }
 
 function normalizeNonNegativeInt(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  if (!Number.isInteger(value) || value < 0) return null;
-  return value;
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
+  return n;
 }
 
 function selectorKeyForCacheKey(value: unknown): string {
