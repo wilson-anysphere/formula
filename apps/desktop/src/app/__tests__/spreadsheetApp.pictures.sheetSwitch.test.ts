@@ -8,6 +8,22 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
 
+function dispatchPointer(target: EventTarget, type: string, point: { x: number; y: number; pointerId?: number }): void {
+  const event = new Event(type, { bubbles: true, cancelable: true }) as any;
+  const pointerId = point.pointerId ?? 1;
+  Object.defineProperties(event, {
+    clientX: { value: point.x, configurable: true },
+    clientY: { value: point.y, configurable: true },
+    offsetX: { value: point.x, configurable: true },
+    offsetY: { value: point.y, configurable: true },
+    pointerId: { value: pointerId, configurable: true },
+    pointerType: { value: "mouse", configurable: true },
+    button: { value: 0, configurable: true },
+    buttons: { value: 1, configurable: true },
+  });
+  target.dispatchEvent(event);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -153,6 +169,78 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     expect(sheet1After.drawings).toHaveLength(1);
     expect(sheet1After.drawings[0]?.id).toBe(insertedId);
     // Selection should not "carry over" when switching back.
+    expect(sheet1After.selectedId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("cancels an in-progress picture drag when switching sheets (no leakage across sheets)", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Enable the shared-grid drawing interaction controller so pointer gestures
+    // would normally commit via `commitObjects` on pointerup.
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "cat.png", { type: "image/png" });
+    await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
+
+    const sheet1Initial = app.getDrawingsDebugState();
+    expect(sheet1Initial.sheetId).toBe("Sheet1");
+    expect(sheet1Initial.drawings).toHaveLength(1);
+    const inserted = sheet1Initial.drawings[0]!;
+    expect(inserted.rectPx).not.toBeNull();
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const start = {
+      x: inserted.rectPx!.x + inserted.rectPx!.width / 2,
+      y: inserted.rectPx!.y + inserted.rectPx!.height / 2,
+    };
+    const move = { x: start.x + 40, y: start.y + 20 };
+
+    dispatchPointer(selectionCanvas, "pointerdown", { ...start, pointerId: 1 });
+    // Verify the controller is actively dragging so the sheet switch path must cancel it.
+    const controller = (app as any).drawingInteractionController as any;
+    expect(controller?.dragging).not.toBeNull();
+
+    dispatchPointer(selectionCanvas, "pointermove", { ...move, pointerId: 1 });
+
+    // Ensure Sheet2 exists.
+    app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    // Switch sheets while the pointer is still down (mid-gesture).
+    app.activateSheet("Sheet2");
+    expect((app as any).drawingInteractionController?.dragging ?? null).toBeNull();
+
+    // Release the pointer after the sheet switch. This should not commit the picture into Sheet2.
+    dispatchPointer(selectionCanvas, "pointerup", { ...move, pointerId: 1 });
+
+    const sheet2 = app.getDrawingsDebugState();
+    expect(sheet2.sheetId).toBe("Sheet2");
+    expect(sheet2.drawings).toHaveLength(0);
+    expect(sheet2.selectedId).toBe(null);
+
+    const docAny = app.getDocument() as any;
+    const rawSheet2 = (() => {
+      try {
+        return docAny.getSheetDrawings?.("Sheet2");
+      } catch {
+        return null;
+      }
+    })();
+    expect(Array.isArray(rawSheet2) ? rawSheet2 : []).toHaveLength(0);
+
+    app.activateSheet("Sheet1");
+    const sheet1After = app.getDrawingsDebugState();
+    expect(sheet1After.sheetId).toBe("Sheet1");
+    expect(sheet1After.drawings).toHaveLength(1);
     expect(sheet1After.selectedId).toBe(null);
 
     app.destroy();
