@@ -8520,8 +8520,21 @@ function handleRibbonCommand(commandId: string): void {
         openOrganizeSheets();
         return;
       case "home.number.moreFormats.custom":
+        if (isSpreadsheetEditing() || app.isReadOnly()) return;
+        // Guard before prompting so users don't enter a format code only to hit selection size caps on apply.
+        // (Matches `applyFormattingToSelection` behavior.)
+        {
+          const selection = app.getSelectionRanges();
+          const limits = getGridLimitsForFormatting();
+          const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+          if (!decision.allowed) {
+            showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+            app.focus();
+            return;
+          }
+        }
         void promptAndApplyCustomNumberFormat({
-          isEditing: () => isSpreadsheetEditing(),
+          isEditing: () => isSpreadsheetEditing() || app.isReadOnly(),
           showInputBox,
           getActiveCellNumberFormat: activeCellNumberFormat,
           applyFormattingToSelection,
