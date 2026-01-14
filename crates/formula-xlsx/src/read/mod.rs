@@ -800,6 +800,29 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
     .map_err(ReadError::from)
 }
 
+fn part_name_tolerant(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<String> {
+    if parts.contains_key(name) {
+        return Some(name.to_string());
+    }
+
+    // Tolerate leading `/` and Windows-style separators.
+    let normalized = name.strip_prefix('/').unwrap_or(name).replace('\\', "/");
+    if parts.contains_key(&normalized) {
+        return Some(normalized);
+    }
+
+    // Some producers may include a leading `/` despite this loader normalizing entries.
+    let with_slash = format!("/{normalized}");
+    if parts.contains_key(&with_slash) {
+        return Some(with_slash);
+    }
+
+    parts
+        .keys()
+        .find(|key| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+        .cloned()
+}
+
 fn part_bytes_tolerant<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a [u8]> {
     // Fast path: exact match.
     if let Some(bytes) = parts.get(name) {
@@ -999,11 +1022,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             .unwrap_or_else(|| vec![sheet.path.clone()]);
         let worksheet_part = sheet_part_candidates
             .into_iter()
-            .find(|candidate| part_bytes_tolerant(&parts, candidate).is_some())
+            .find_map(|candidate| part_name_tolerant(&parts, &candidate))
             .ok_or(ReadError::MissingPart(
                 "worksheet part referenced from workbook.xml.rels",
             ))?;
-        let sheet_xml = part_bytes_tolerant(&parts, &worksheet_part).ok_or(ReadError::MissingPart(
+        let sheet_xml = parts
+            .get(&worksheet_part)
+            .map(|bytes| bytes.as_slice())
+            .ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
 
@@ -1035,11 +1061,21 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
         // Comment part mapping discovered via the worksheet's `.rels`.
         // We only support *editing* existing comment infrastructure for now.
-        let comment_parts_for_sheet =
+        let mut comment_parts_for_sheet =
             discover_worksheet_comment_part_names(&worksheet_part, rels_xml_bytes);
         let has_comment_parts = comment_parts_for_sheet.legacy_comments.is_some()
             || comment_parts_for_sheet.threaded_comments.is_some();
         if has_comment_parts {
+            if let Some(path) = comment_parts_for_sheet.legacy_comments.clone() {
+                if let Some(actual) = part_name_tolerant(&parts, &path) {
+                    comment_parts_for_sheet.legacy_comments = Some(actual);
+                }
+            }
+            if let Some(path) = comment_parts_for_sheet.threaded_comments.clone() {
+                if let Some(actual) = part_name_tolerant(&parts, &path) {
+                    comment_parts_for_sheet.threaded_comments = Some(actual);
+                }
+            }
             comment_part_names.insert(ws_id, comment_parts_for_sheet.clone());
         }
 

@@ -104,5 +104,18 @@ fn xlsx_document_resolves_worksheet_targets_with_percent_encoding() -> Result<()
         CellValue::String("Bold".to_string())
     );
 
+    // Saving should not introduce duplicate worksheet parts with a percent-encoded name; the
+    // original part names should be preserved.
+    let saved = doc.save_to_vec()?;
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&saved)?;
+    assert!(
+        pkg.part_names().any(|name| name == "xl/worksheets/sheet1.xml"),
+        "expected canonical worksheet part to exist after save"
+    );
+    assert!(
+        !pkg.part_names().any(|name| name == "xl/worksheets/sheet%31.xml"),
+        "expected save_to_vec to not synthesize a percent-encoded duplicate worksheet part"
+    );
+
     Ok(())
 }
