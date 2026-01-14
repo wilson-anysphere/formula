@@ -11,6 +11,21 @@ export function createSqliteFileVectorStore(opts: {
   filePath: string;
   dimension: number;
   autoSave?: boolean;
+  /**
+   * When true (default), failures to load/initialize an existing persisted DB
+   * (e.g. corrupted bytes) will cause the store to clear the persisted payload
+   * and create a fresh empty DB so callers can re-index.
+   *
+   * Set to false to preserve the historical behaviour (throw on corruption).
+   */
+  resetOnCorrupt?: boolean;
+  /**
+   * When true (default), if a persisted DB exists with a different embedding
+   * dimension than requested, the store will wipe the persisted bytes and create
+   * a fresh empty DB so callers can re-index.
+   *
+   * Set to false to preserve the historical behaviour (throw on mismatch).
+   */
+  resetOnDimensionMismatch?: boolean;
   locateFile?: (file: string, prefix?: string) => string;
 }): Promise<SqliteVectorStore>;
-
