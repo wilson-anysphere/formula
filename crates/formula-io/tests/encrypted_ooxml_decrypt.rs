@@ -188,6 +188,65 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package_without_data_int
 }
 
 #[test]
+fn open_workbook_model_with_password_decrypts_agile_encrypted_package_when_size_prefix_high_dword_is_reserved(
+) {
+    // Regression: some producers treat the 8-byte `EncryptedPackage` size prefix as `(u32 size, u32 reserved)`
+    // and may write a non-zero reserved high DWORD. For Agile encryption, the `dataIntegrity` HMAC covers the
+    // entire `EncryptedPackage` stream, so we strip it before mutating header bytes.
+    let password = "password";
+    let plain_xlsx = build_tiny_xlsx();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_xlsx, password);
+    let encrypted_cfb = strip_data_integrity_from_encrypted_cfb(&encrypted_cfb);
+
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_cfb)).expect("parse cfb");
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage stream")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    assert!(
+        encrypted_package.len() >= 8,
+        "EncryptedPackage must include 8-byte size prefix"
+    );
+    encrypted_package[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    // Rebuild the OLE container with the modified EncryptedPackage bytes.
+    let cursor = Cursor::new(Vec::new());
+    let mut out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    out.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    out.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let out_bytes = out.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted_reserved_high_dword.xlsx");
+    std::fs::write(&path, &out_bytes).expect("write encrypted file");
+
+    let model =
+        open_workbook_model_with_password(&path, Some(password)).expect("open decrypted model");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::Number(1.0)
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("Hello".to_string())
+    );
+}
+
+#[test]
 fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
     let password = "password";
     let plain_xlsx = build_tiny_xlsx();
