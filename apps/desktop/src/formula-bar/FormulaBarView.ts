@@ -2253,7 +2253,7 @@ export class FormulaBarView {
       this.#syncErrorPanelActions();
       // Clear view-mode highlights; preserve formula-editing highlights.
       if (hadReferenceHighlights) {
-        this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+        this.#emitOverlays();
       }
       if (opts.restoreFocus) {
         try {
@@ -2553,7 +2553,7 @@ export class FormulaBarView {
     }
 
     this.#syncErrorPanelActions();
-    this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+    this.#emitOverlays();
   }
 
   #syncErrorPanelActions(): void {
