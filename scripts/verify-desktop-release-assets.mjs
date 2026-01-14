@@ -869,6 +869,10 @@ async function sha256OfReleaseAsset(asset, token) {
  */
 function isPrimaryBundleAssetName(name) {
   const lower = name.toLowerCase();
+  // Debug symbol archives are intentionally uploaded separately for crash symbolication.
+  // They are not end-user installer artifacts and should not be included in SHA256SUMS
+  // generation (they can also be very large).
+  if (lower.includes(".dsym") || lower.includes(".pdb")) return false;
   // `.app.tar.gz` is covered by `.tar.gz`.
   const suffixes = [
     ".dmg",

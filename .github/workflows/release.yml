@@ -977,6 +977,9 @@ jobs:
       - name: Package macOS debug symbols (dSYM)
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          ARTIFACT_LABEL: ${{ needs.preflight.outputs.artifact_label }}
+          CACHE_TARGET: ${{ matrix.cache_target }}
         run: |
           set -euo pipefail
 
@@ -1029,7 +1032,7 @@ jobs:
 
           for dsym in "${dsym_dirs[@]}"; do
             base="$(basename "$dsym")"
-            out="debug-symbols/${base}.zip"
+            out="debug-symbols/${ARTIFACT_LABEL}-${CACHE_TARGET}-${base}.zip"
             echo "debug-symbols: zipping $dsym -> $out"
             rm -f "$out"
             # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
@@ -1054,6 +1057,17 @@ jobs:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
           if-no-files-found: error
+
+      - name: Upload debug symbol archives to draft release (macOS)
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true' && vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" debug-symbols/*.zip \
+            --repo "${{ github.repository }}" \
+            --clobber
 
       - name: Desktop dist asset report
         if: runner.os == 'macOS'
@@ -1197,6 +1211,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          $label = "${{ needs.preflight.outputs.artifact_label }}"
+          $cacheTarget = "${{ matrix.cache_target }}"
           $target = "${{ matrix.rust_target }}"
           if ([string]::IsNullOrWhiteSpace($target)) {
             throw "debug-symbols: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
@@ -1217,7 +1233,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "debug-symbols" | Out-Null
           Copy-Item -Force $pdbPath "debug-symbols/formula-desktop.pdb"
 
-          $zipPath = "debug-symbols/formula-desktop.pdb.zip"
+          $zipPath = "debug-symbols/$label-$cacheTarget-formula-desktop.pdb.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path "debug-symbols/formula-desktop.pdb" -DestinationPath $zipPath
 
@@ -1230,6 +1246,22 @@ jobs:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
           if-no-files-found: error
+
+      - name: Upload debug symbol archives to draft release (Windows)
+        if: runner.os == 'Windows' && needs.preflight.outputs.upload == 'true' && vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${{ needs.preflight.outputs.release_tag }}"
+          $files = Get-ChildItem -Path "debug-symbols" -Filter "*.zip" -File | ForEach-Object { $_.FullName }
+          if (-not $files -or $files.Count -eq 0) {
+            throw "No debug symbol archives found under debug-symbols/*.zip"
+          }
+
+          gh release upload $tag $files --repo "${{ github.repository }}" --clobber
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         # Run against the already-built Tauri artifacts from the previous step.

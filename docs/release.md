@@ -1374,6 +1374,21 @@ The release workflow also runs `python scripts/verify_desktop_binary_stripped.py
 fail the workflow if the produced desktop binary is not stripped (or if symbol sidecar files like
 `.pdb`/`.dSYM` end up in the bundle output directory).
 
+### Crash debug symbols (macOS dSYM / Windows PDB)
+
+For post-release crash symbolication, the release workflow packages platform debug symbols separately:
+
+- **macOS:** `*.dSYM.zip` archives (zipped with `ditto` to preserve bundle structure)
+- **Windows:** `*.pdb.zip` archives
+
+These are uploaded as **workflow run artifacts** (so they are downloadable by maintainers without
+bloating installer bundles).
+
+Optional: to also attach symbol archives to the **draft GitHub Release** (for longer-term retention),
+set the GitHub Actions repository variable:
+
+- `FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE=1`
+
 Local note: `scripts/cargo_agent.sh` sets `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` by default for
 stability on multi-agent hosts. If you want local builds to match CI's `codegen-units = 1`, run:
 
