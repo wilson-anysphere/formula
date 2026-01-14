@@ -588,8 +588,8 @@ export function applyLayeredFormatsToCells(cells, layers) {
  * @param {Y.Doc} doc
  * @param {{ sheetId?: string | null }} [opts]
  */
-export function sheetStateFromYjsDoc(doc, opts = {}) {
-  const targetSheetId = opts.sheetId ?? null;
+export function sheetStateFromYjsDoc(doc, opts) {
+  const targetSheetId = opts?.sheetId ?? null;
   const cellsMap = getMapRoot(doc, "cells");
 
   /** @type {Map<string, any>} */
@@ -622,7 +622,7 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
  * @param {Uint8Array} snapshot
  * @param {{ sheetId?: string | null }} [opts]
  */
-export function sheetStateFromYjsSnapshot(snapshot, opts = {}) {
+export function sheetStateFromYjsSnapshot(snapshot, opts) {
   const doc = new Y.Doc();
   Y.applyUpdate(doc, snapshot);
   return sheetStateFromYjsDoc(doc, opts);
