@@ -66,6 +66,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("FIXED", 0), "Expected FIXED number to be a range");
   assert.equal(registry.getArgType("FIXED", 2), "boolean", "Expected FIXED no_commas to be boolean");
 
+  // Common scalar math functions should treat numeric inputs as value-like (often cell-referenced).
+  assert.equal(registry.getArgType("ABS", 0), "value", "Expected ABS number to be value-like");
+  assert.equal(registry.getFunction("ROUND")?.args?.[1]?.name, "num_digits", "Expected ROUND arg2 to be num_digits");
+  assert.equal(registry.getArgType("ROUND", 0), "value", "Expected ROUND number to be value-like");
+  assert.equal(registry.getArgType("ROUNDUP", 0), "value", "Expected ROUNDUP number to be value-like");
+  assert.equal(registry.getArgType("ROUNDDOWN", 0), "value", "Expected ROUNDDOWN number to be value-like");
+  assert.equal(registry.getArgType("INT", 0), "value", "Expected INT number to be value-like");
+  assert.ok(registry.getFunction("TRUNC")?.args?.[1]?.optional, "Expected TRUNC num_digits to be optional");
+
   // TEXTAFTER/TEXTBEFORE are curated (not present in the Rust catalog yet).
   assert.ok(registry.getFunction("TEXTAFTER"), "Expected TEXTAFTER to be present");
   assert.equal(registry.getFunction("TEXTAFTER")?.minArgs, 2, "Expected TEXTAFTER minArgs to be 2");

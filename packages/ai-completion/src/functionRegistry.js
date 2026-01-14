@@ -177,6 +177,52 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ABS",
+    description: "Returns the absolute value of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ROUND",
+    description: "Rounds a number to a specified number of digits.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "num_digits", type: "number" },
+    ],
+  },
+  {
+    name: "ROUNDUP",
+    description: "Rounds a number up, away from zero.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "num_digits", type: "number" },
+    ],
+  },
+  {
+    name: "ROUNDDOWN",
+    description: "Rounds a number down, toward zero.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "num_digits", type: "number" },
+    ],
+  },
+  {
+    name: "INT",
+    description: "Rounds a number down to the nearest integer.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "TRUNC",
+    description: "Truncates a number to an integer by removing the fractional part.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "num_digits", type: "number", optional: true },
+    ],
+  },
+  {
     name: "SUMIF",
     description: "Adds the cells specified by a given condition or criteria.",
     args: [
