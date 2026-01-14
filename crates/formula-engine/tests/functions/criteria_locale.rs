@@ -16,6 +16,38 @@ fn sumif_parses_locale_numeric_criteria_strings() {
 }
 
 #[test]
+fn sumif_parses_nbsp_thousands_separator_in_fr_fr_criteria_strings() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::fr_fr());
+
+    sheet.set("A1", 1234.4);
+    sheet.set("A2", 1234.6);
+    sheet.set("A3", 2000.0);
+
+    // Grouping separator: U+00A0 NO-BREAK SPACE.
+    assert_number(
+        &sheet.eval("=SUMIF(A1:A3,\">1\u{00A0}234,5\",A1:A3)"),
+        3234.6,
+    );
+}
+
+#[test]
+fn sumif_parses_narrow_nbsp_thousands_separator_in_fr_fr_criteria_strings() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::fr_fr());
+
+    sheet.set("A1", 1234.4);
+    sheet.set("A2", 1234.6);
+    sheet.set("A3", 2000.0);
+
+    // Some French locales/spreadsheets use U+202F NARROW NO-BREAK SPACE for grouping.
+    assert_number(
+        &sheet.eval("=SUMIF(A1:A3,\">1\u{202F}234,5\",A1:A3)"),
+        3234.6,
+    );
+}
+
+#[test]
 fn countif_parses_iso_dates_in_criteria_strings() {
     let mut sheet = TestSheet::new();
 
