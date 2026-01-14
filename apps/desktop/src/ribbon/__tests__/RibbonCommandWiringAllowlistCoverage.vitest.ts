@@ -245,6 +245,7 @@ const implementedCommandIds: string[] = [
   "navigation.goTo",
   "pageLayout.arrange.bringForward",
   "pageLayout.arrange.sendBackward",
+  "pageLayout.arrange.selectionPane",
   "pageLayout.export.exportPdf",
   "pageLayout.pageSetup.margins.custom",
   "pageLayout.pageSetup.margins.narrow",
@@ -567,7 +568,6 @@ const knownUnimplementedCommandIds: string[] = [
   "pageLayout.arrange.rotate.flipVertical",
   "pageLayout.arrange.rotate.rotateLeft90",
   "pageLayout.arrange.rotate.rotateRight90",
-  "pageLayout.arrange.selectionPane",
   "pageLayout.pageSetup.background",
   "pageLayout.pageSetup.background.background",
   "pageLayout.pageSetup.background.delete",
@@ -807,7 +807,6 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
       if (id.startsWith(cellStylesPrefix)) implemented.add(id);
     }
   }
-
   const formatAsTablePrefix = "home.styles.formatAsTable.";
   const usesFormatAsTablePrefixParsing =
     combinedSource.includes(`startsWith("${formatAsTablePrefix}")`) ||

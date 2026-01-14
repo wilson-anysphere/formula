@@ -1,12 +1,16 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp";
 import type { DocumentController } from "../document/documentController.js";
+import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/mergedCells.js";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import type { QuickPickItem } from "../extensions/ui.js";
+import { showInputBox, showToast } from "../extensions/ui.js";
 import type { LayoutController } from "../layout/layoutController.js";
 import { t } from "../i18n/index.js";
 import type { ThemeController } from "../theme/themeController.js";
 
 import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
+import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -114,6 +118,20 @@ export function registerDesktopCommands(params: {
   const commandCategoryEditing = t("commandCategory.editing");
   const isEditingFn =
     isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
+  const focusGrid = (): void => {
+    try {
+      (app as any).focus?.();
+    } catch {
+      // ignore (tests/headless)
+    }
+  };
+  const safeShowToast = (message: string, type: Parameters<typeof showToast>[1] = "info"): void => {
+    try {
+      showToast(message, type);
+    } catch {
+      // `showToast` requires a DOM #toast-root; ignore in tests/headless.
+    }
+  };
 
   registerAxisSizingCommands({ commandRegistry, app, isEditing, category: commandCategoryFormat });
 
@@ -176,6 +194,130 @@ export function registerDesktopCommands(params: {
       description: "Fill the selection with a series",
       keywords: ["fill", "series", "auto fill", "autofill", "excel"],
     },
+  );
+
+  // Ribbon schema still uses `home.alignment.mergeCenter.*` ids for Merge & Center menu items.
+  // Register them here so ribbon enable/disable logic can rely on the CommandRegistry baseline.
+  const normalizeSelectionRect = (range: { startRow: number; endRow: number; startCol: number; endCol: number }) => ({
+    startRow: Math.min(range.startRow, range.endRow),
+    endRow: Math.max(range.startRow, range.endRow),
+    startCol: Math.min(range.startCol, range.endCol),
+    endCol: Math.max(range.startCol, range.endCol),
+  });
+  const getSingleSelectionRect = (): { rect: { startRow: number; endRow: number; startCol: number; endCol: number }; multiple: boolean } => {
+    const selectionRanges = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
+    const ranges = Array.isArray(selectionRanges) ? selectionRanges : [];
+    if (ranges.length > 1) return { rect: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, multiple: true };
+    if (ranges.length === 1) return { rect: normalizeSelectionRect(ranges[0]!), multiple: false };
+    const cell = typeof (app as any)?.getActiveCell === "function" ? (app as any).getActiveCell() : { row: 0, col: 0 };
+    return { rect: { startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col }, multiple: false };
+  };
+  const registerMergeCommand = (args: {
+    id: string;
+    title: string;
+    kind: "mergeCenter" | "mergeAcross" | "mergeCells" | "unmergeCells";
+  }): void => {
+    commandRegistry.registerBuiltinCommand(
+      args.id,
+      args.title,
+      () => {
+        if (isEditingFn()) return;
+
+        if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true) {
+          safeShowToast("Read-only: cannot merge cells.", "warning");
+          focusGrid();
+          return;
+        }
+
+        const { rect, multiple } = getSingleSelectionRect();
+        if (multiple) {
+          safeShowToast("Merge commands only support a single selection range.", "warning");
+          focusGrid();
+          return;
+        }
+
+        const rows = rect.endRow - rect.startRow + 1;
+        const cols = rect.endCol - rect.startCol + 1;
+        const totalCells = rows * cols;
+        if (totalCells > DEFAULT_FORMATTING_APPLY_CELL_LIMIT) {
+          safeShowToast(
+            `Selection too large to merge (>${DEFAULT_FORMATTING_APPLY_CELL_LIMIT.toLocaleString()} cells). Select fewer cells and try again.`,
+            "warning",
+          );
+          focusGrid();
+          return;
+        }
+
+        // Merge Across is only meaningful for multi-column selections.
+        if (args.kind === "mergeAcross" && cols <= 1) {
+          focusGrid();
+          return;
+        }
+
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+
+        const beginBatch = typeof (doc as any)?.beginBatch === "function";
+        if (beginBatch) {
+          (doc as any).beginBatch({ label: args.title });
+        }
+        let committed = false;
+        try {
+          switch (args.kind) {
+            case "mergeCenter":
+              mergeCenter(doc, sheetId, rect, { label: args.title });
+              break;
+            case "mergeAcross":
+              mergeAcross(doc, sheetId, rect, { label: args.title });
+              break;
+            case "mergeCells":
+              mergeCells(doc, sheetId, rect, { label: args.title });
+              break;
+            case "unmergeCells":
+              unmergeCells(doc, sheetId, rect, { label: args.title });
+              break;
+            default:
+              break;
+          }
+          committed = true;
+        } finally {
+          if (beginBatch) {
+            if (committed) {
+              (doc as any).endBatch?.();
+            } else {
+              (doc as any).cancelBatch?.();
+            }
+          }
+        }
+        focusGrid();
+      },
+      { category: commandCategoryFormat },
+    );
+  };
+
+  registerMergeCommand({ id: "home.alignment.mergeCenter.mergeCenter", title: "Merge & Center", kind: "mergeCenter" });
+  registerMergeCommand({ id: "home.alignment.mergeCenter.mergeAcross", title: "Merge Across", kind: "mergeAcross" });
+  registerMergeCommand({ id: "home.alignment.mergeCenter.mergeCells", title: "Merge Cells", kind: "mergeCells" });
+  registerMergeCommand({ id: "home.alignment.mergeCenter.unmergeCells", title: "Unmerge Cells", kind: "unmergeCells" });
+
+  // Ribbon schema uses `home.number.moreFormats.custom` for "Custom…" number formats.
+  // Register it so it can be enabled/disabled via CommandRegistry (and used outside the ribbon).
+  commandRegistry.registerBuiltinCommand(
+    "home.number.moreFormats.custom",
+    "Custom number format…",
+    async () => {
+      try {
+        await promptAndApplyCustomNumberFormat({
+          isEditing: isEditingFn,
+          showInputBox,
+          getActiveCellNumberFormat,
+          applyFormattingToSelection: (label, fn) => applyFormattingToSelection(label, fn),
+        });
+      } finally {
+        focusGrid();
+      }
+    },
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(

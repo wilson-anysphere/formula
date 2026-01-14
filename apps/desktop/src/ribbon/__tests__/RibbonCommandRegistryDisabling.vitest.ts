@@ -216,6 +216,33 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
+  it("registers Merge & Center ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "home.alignment.mergeCenter.mergeCenter",
+      "home.alignment.mergeCenter.mergeAcross",
+      "home.alignment.mergeCenter.mergeCells",
+      "home.alignment.mergeCenter.unmergeCells",
+    ] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
+  it("registers Custom number format ribbon id as a CommandRegistry command (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const id = "home.number.moreFormats.custom";
+    expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+    expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+    expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+  });
+
   it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
