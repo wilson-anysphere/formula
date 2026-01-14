@@ -47,6 +47,10 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*event\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*event\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*event\b/,
+      // Bracket access variants: __TAURI__["event"] / __TAURI__?.["event"] / __TAURI__["plugin"]["event"].
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
 
       // Window API access should go through getTauriWindowHandleOr{Null,Throw} or hasTauriWindow* helpers.
       /\b__TAURI__\s*(?:\?\.)\s*window\b/,
@@ -55,6 +59,9 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*window\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*window\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*window\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
 
       // Dialog open/save should go through getTauriDialogOr{Null,Throw}. (Confirm/alert are handled
       // separately by nativeDialogs and are intentionally not included here.)
@@ -64,6 +71,9 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(open|save)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(open|save)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(open|save)\b/,
 
       // Avoid ad-hoc checks for Tauri confirm dialogs; use nativeDialogs or tauri/api helpers.
       /\b__TAURI__\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
@@ -72,6 +82,9 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*confirm\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*confirm\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*confirm\b/,
 
       // Avoid ad-hoc checks for message/alert dialogs too; use nativeDialogs or tauri/api helpers.
       /\b__TAURI__\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
@@ -80,6 +93,9 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]\s*(?:\?\.)\s*(message|alert)\b/,
     ];
 
     for (const absPath of files) {
