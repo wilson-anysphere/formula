@@ -74,7 +74,18 @@ pub fn decrypt_encrypted_package_ole(
     let mut encrypted_package = Vec::new();
     open_stream(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
 
-    decrypt_encrypted_package(&encryption_info, &encrypted_package, password)
+    decrypt_encrypted_package_streams(&encryption_info, &encrypted_package, password)
+}
+
+/// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
+///
+/// This is a convenience wrapper around [`decrypt_encrypted_package_ole`] that matches the
+/// call shape used by `formula-io` and other consumers.
+pub fn decrypt_encrypted_package(
+    ole_bytes: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    decrypt_encrypted_package_ole(ole_bytes, password)
 }
 
 /// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
@@ -111,7 +122,7 @@ pub fn encrypt_package_to_ole(
     Ok(ole.into_inner().into_inner())
 }
 
-fn decrypt_encrypted_package(
+fn decrypt_encrypted_package_streams(
     encryption_info: &[u8],
     encrypted_package: &[u8],
     password: &str,
