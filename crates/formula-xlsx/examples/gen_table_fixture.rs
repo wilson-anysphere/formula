@@ -15,7 +15,6 @@ fn main() {
             formula: None,
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
     sheet.set_cell(
@@ -25,7 +24,6 @@ fn main() {
             formula: None,
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
     sheet.set_cell(
@@ -35,7 +33,6 @@ fn main() {
             formula: None,
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
     sheet.set_cell(
@@ -45,7 +42,6 @@ fn main() {
             formula: None,
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
 
@@ -64,7 +60,6 @@ fn main() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
-                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -74,7 +69,6 @@ fn main() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
-                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -84,7 +78,6 @@ fn main() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
-                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -94,7 +87,6 @@ fn main() {
                 formula: Some("[@Qty]*[@Price]".into()),
                 phonetic: None,
                 style_id: 0,
-                phonetic: None,
             },
         );
     }
@@ -107,7 +99,6 @@ fn main() {
             formula: Some("SUM(Table1[Total])".into()),
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
 
@@ -118,7 +109,6 @@ fn main() {
             formula: Some("Table1[[#Headers],[Qty]]".into()),
             phonetic: None,
             style_id: 0,
-            phonetic: None,
         },
     );
 

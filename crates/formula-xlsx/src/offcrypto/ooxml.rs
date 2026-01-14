@@ -218,12 +218,6 @@ fn decrypt_encrypted_package_stream(
     let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
     size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
     let orig_size = u64::from_le_bytes(size_bytes);
-    let orig_size_usize =
-        usize::try_from(orig_size).map_err(|_| OffCryptoError::InvalidAttribute {
-            element: "EncryptedPackage".to_string(),
-            attr: "origSize".to_string(),
-            reason: "origSize does not fit into usize".to_string(),
-        })?;
 
     let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
     if ciphertext.is_empty() && orig_size == 0 {
@@ -235,6 +229,58 @@ fn decrypt_encrypted_package_stream(
             len: ciphertext.len(),
         });
     }
+
+    // --- Guardrails for malicious `orig_size` ---
+    //
+    // `EncryptedPackage` stores the unencrypted package size (`orig_size`) separately from the
+    // ciphertext bytes. A corrupt/malicious size can otherwise induce large allocations (OOM) or
+    // panics in `Vec::with_capacity` on 64-bit targets.
+    //
+    // Keep checks conservative to avoid rejecting valid-but-unusual files.
+    let plausible_max =
+        (ciphertext.len() as u64).saturating_add(ENCRYPTED_PACKAGE_SEGMENT_LEN as u64);
+    if orig_size > plausible_max {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "origSize".to_string(),
+            reason: format!(
+                "origSize {orig_size} is implausibly large for ciphertext length {}",
+                ciphertext.len()
+            ),
+        });
+    }
+
+    // Guardrail: ciphertext must be long enough to possibly contain `orig_size` bytes (accounting
+    // for AES block padding).
+    let expected_min_ciphertext_len = orig_size
+        .checked_add((AES_BLOCK_SIZE - 1) as u64)
+        .and_then(|v| v.checked_div(AES_BLOCK_SIZE as u64))
+        .and_then(|blocks| blocks.checked_mul(AES_BLOCK_SIZE as u64))
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "origSize".to_string(),
+            reason: format!(
+                "origSize {orig_size} is implausibly large for ciphertext length {}",
+                ciphertext.len()
+            ),
+        })?;
+    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "origSize".to_string(),
+            reason: format!(
+                "ciphertext length {} is too short for declared origSize {orig_size}",
+                ciphertext.len()
+            ),
+        });
+    }
+
+    let orig_size_usize =
+        usize::try_from(orig_size).map_err(|_| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "origSize".to_string(),
+            reason: "origSize does not fit into usize".to_string(),
+        })?;
 
     let mut out = Vec::with_capacity(orig_size_usize);
     let mut offset = 0usize;
@@ -287,4 +333,65 @@ fn read_u32_le(bytes: &[u8], offset: &mut usize) -> Option<u32> {
     let b = bytes.get(*offset..*offset + 4)?;
     *offset += 4;
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_implausible_orig_size_without_panic() {
+        let key = [0u8; 16];
+        let salt = [0u8; 16];
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&u64::MAX.to_le_bytes());
+        stream.extend_from_slice(&[0u8; AES_BLOCK_SIZE]); // 1 AES block of ciphertext
+
+        let err = decrypt_encrypted_package_stream(
+            &stream,
+            &key,
+            &salt,
+            HashAlgorithm::Sha1,
+            AES_BLOCK_SIZE,
+        )
+        .expect_err("expected error");
+
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::InvalidAttribute { ref element, ref attr, .. }
+                    if element == "EncryptedPackage" && attr == "origSize"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_orig_size_near_u64_max_without_overflow() {
+        let key = [0u8; 16];
+        let salt = [0u8; 16];
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(u64::MAX - 4094).to_le_bytes());
+        stream.extend_from_slice(&[0u8; AES_BLOCK_SIZE]);
+
+        let err = decrypt_encrypted_package_stream(
+            &stream,
+            &key,
+            &salt,
+            HashAlgorithm::Sha1,
+            AES_BLOCK_SIZE,
+        )
+        .expect_err("expected error");
+
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::InvalidAttribute { ref element, ref attr, .. }
+                    if element == "EncryptedPackage" && attr == "origSize"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
 }

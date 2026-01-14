@@ -623,12 +623,8 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
 
     let mut size_bytes = [0u8; 8];
     size_bytes.copy_from_slice(&encrypted_package_stream[..8]);
-    let declared_len = u64::from_le_bytes(size_bytes);
-    let declared_len: usize = declared_len.try_into().map_err(|_| OffCryptoError::InvalidAttribute {
-        element: "EncryptedPackage".to_string(),
-        attr: "originalSize".to_string(),
-        reason: format!("orig_size {declared_len} does not fit into usize"),
-    })?;
+    const SEGMENT_LEN: usize = 0x1000;
+    let declared_len_u64 = u64::from_le_bytes(size_bytes);
 
     let ciphertext = &encrypted_package_stream[8..];
     if ciphertext.len() % AES_BLOCK_SIZE != 0 {
@@ -638,8 +634,57 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
         });
     }
 
+    // --- Guardrails for malicious `declared_len` ---
+    //
+    // `EncryptedPackage` stores the unencrypted package size (`declared_len`) separately from the
+    // ciphertext bytes. A corrupt/malicious size can otherwise induce large allocations (OOM) or
+    // panics in `Vec::with_capacity` on 64-bit targets.
+    let plausible_max = (ciphertext.len() as u64).saturating_add(SEGMENT_LEN as u64);
+    if declared_len_u64 > plausible_max {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "originalSize".to_string(),
+            reason: format!(
+                "orig_size {declared_len_u64} is implausibly large for ciphertext length {}",
+                ciphertext.len()
+            ),
+        });
+    }
+
+    // Guardrail: ciphertext must be long enough to possibly contain `declared_len` bytes
+    // (accounting for AES block padding).
+    let expected_min_ciphertext_len = declared_len_u64
+        .checked_add((AES_BLOCK_SIZE - 1) as u64)
+        .and_then(|v| v.checked_div(AES_BLOCK_SIZE as u64))
+        .and_then(|blocks| blocks.checked_mul(AES_BLOCK_SIZE as u64))
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "originalSize".to_string(),
+            reason: format!(
+                "orig_size {declared_len_u64} is implausibly large for ciphertext length {}",
+                ciphertext.len()
+            ),
+        })?;
+    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "originalSize".to_string(),
+            reason: format!(
+                "ciphertext length {} is too short for declared orig_size {declared_len_u64}",
+                ciphertext.len()
+            ),
+        });
+    }
+
+    let declared_len: usize = declared_len_u64
+        .try_into()
+        .map_err(|_| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "originalSize".to_string(),
+            reason: format!("orig_size {declared_len_u64} does not fit into usize"),
+        })?;
+
     // Decrypt segment-by-segment until we have produced `declared_len` bytes.
-    const SEGMENT_LEN: usize = 0x1000;
     let mut out = Vec::with_capacity(declared_len);
     let mut offset = 0usize;
     let mut segment_index: u32 = 0;
@@ -1113,6 +1158,66 @@ mod tests {
         assert_eq!(
             info.warnings,
             vec![AgileEncryptionInfoWarning::MultiplePasswordKeyEncryptors { count: 2 }]
+        );
+    }
+
+    #[test]
+    fn decrypt_agile_encrypted_package_rejects_implausible_orig_size_without_panic() {
+        let key_data = AgileKeyData {
+            salt_value: vec![0u8; 16],
+            hash_algorithm: HashAlgorithm::Sha1,
+            cipher_algorithm: "AES".to_string(),
+            cipher_chaining: "ChainingModeCBC".to_string(),
+            key_bits: 128,
+            block_size: 16,
+            hash_size: 20,
+        };
+        let package_key = [0u8; 16];
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&u64::MAX.to_le_bytes());
+        stream.extend_from_slice(&[0u8; AES_BLOCK_SIZE]); // 1 AES block of ciphertext
+
+        let err = decrypt_agile_encrypted_package_stream_with_key(&stream, &key_data, &package_key)
+            .expect_err("expected error");
+
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::InvalidAttribute { ref element, ref attr, .. }
+                    if element == "EncryptedPackage" && attr == "originalSize"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn decrypt_agile_encrypted_package_rejects_orig_size_near_u64_max_without_overflow() {
+        let key_data = AgileKeyData {
+            salt_value: vec![0u8; 16],
+            hash_algorithm: HashAlgorithm::Sha1,
+            cipher_algorithm: "AES".to_string(),
+            cipher_chaining: "ChainingModeCBC".to_string(),
+            key_bits: 128,
+            block_size: 16,
+            hash_size: 20,
+        };
+        let package_key = [0u8; 16];
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(u64::MAX - 4094).to_le_bytes());
+        stream.extend_from_slice(&[0u8; AES_BLOCK_SIZE]);
+
+        let err = decrypt_agile_encrypted_package_stream_with_key(&stream, &key_data, &package_key)
+            .expect_err("expected error");
+
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::InvalidAttribute { ref element, ref attr, .. }
+                    if element == "EncryptedPackage" && attr == "originalSize"
+            ),
+            "unexpected error: {err:?}"
         );
     }
 }
