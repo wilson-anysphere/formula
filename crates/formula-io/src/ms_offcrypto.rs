@@ -7,6 +7,8 @@
 //! - MS-OFFCRYPTO: https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
 //! - `EncryptionInfo` stream (Standard): `EncryptionInfo` → `EncryptionHeader` → `EncryptionVerifier`
 
+#![allow(dead_code)]
+
 use thiserror::Error;
 
 /// MS-OFFCRYPTO "Standard" encryption version (CryptoAPI).

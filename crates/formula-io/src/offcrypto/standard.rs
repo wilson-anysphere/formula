@@ -34,6 +34,7 @@ pub const CALG_MD5: u32 = 0x0000_8003;
 // Standard EncryptionInfo is identified by `versionMinor == 2`; `versionMajor` varies in the wild.
 //
 // Keep the canonical (commonly-observed) major version constant for tests/fixtures.
+#[cfg(test)]
 const STANDARD_MAJOR_VERSION: u16 = 3;
 const STANDARD_MINOR_VERSION: u16 = 2;
 // MS-OFFCRYPTO identifies Standard (CryptoAPI) encryption via `versionMinor == 2`, but real-world
