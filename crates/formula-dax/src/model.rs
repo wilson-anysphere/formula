@@ -1943,8 +1943,6 @@ impl DataModel {
                         .map(|t| display_name(t))
                         .collect::<Vec<_>>()
                         .join(" -> ");
-                    let start_display = display_name(start_table);
-                    let target_display = display_name(target_table);
                     return Err(DaxError::Eval(format!(
                         "ambiguous active relationship path between {start_display} and {target_display}: {first}; {second}"
                     )));
