@@ -244,7 +244,6 @@ const implementedCommandIds: string[] = [
   "insert.tables.pivotTable.fromTableRange",
   "navigation.goTo",
   "pageLayout.arrange.bringForward",
-  "pageLayout.arrange.selectionPane",
   "pageLayout.arrange.sendBackward",
   "pageLayout.export.exportPdf",
   "pageLayout.pageSetup.margins.custom",
