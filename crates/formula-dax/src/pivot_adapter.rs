@@ -1,4 +1,5 @@
 use crate::engine::{DaxError, DaxResult};
+use crate::ident::{format_dax_column_ref, format_dax_measure_ref, format_dax_table_name};
 use crate::model::normalize_ident;
 use crate::pivot::{GroupByColumn, PivotMeasure};
 use crate::{DataModel, FilterContext};
@@ -131,28 +132,6 @@ fn build_aggregation_expr(agg: AggregationType, table: &str, column: &str) -> Da
         }
     };
     Ok(expr)
-}
-
-fn format_dax_table_name(table: &str) -> String {
-    // Always quote table names to avoid edge cases with spaces/reserved words.
-    let escaped = table.replace('\'', "''");
-    format!("'{escaped}'")
-}
-
-fn escape_dax_bracket_identifier(ident: &str) -> String {
-    // DAX bracket identifiers escape `]` as `]]`.
-    ident.replace(']', "]]")
-}
-
-fn format_dax_column_ref(table: &str, column: &str) -> String {
-    let escaped = escape_dax_bracket_identifier(column);
-    format!("{}[{}]", format_dax_table_name(table), escaped)
-}
-
-fn format_dax_measure_ref(measure: &str) -> String {
-    let name = DataModel::normalize_measure_name(measure);
-    let escaped = escape_dax_bracket_identifier(name);
-    format!("[{escaped}]")
 }
 
 #[cfg(test)]

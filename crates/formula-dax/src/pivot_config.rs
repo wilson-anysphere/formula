@@ -24,6 +24,7 @@
 //! `DaxError::UnknownColumn`.
 
 use crate::engine::{DaxError, DaxResult, FilterContext};
+use crate::ident::{format_dax_column_ref, format_dax_measure_ref};
 use crate::pivot::{pivot_crosstab, GroupByColumn, PivotMeasure, PivotResultGrid};
 use crate::{DataModel, Value};
 use formula_model::pivots::{
@@ -204,21 +205,6 @@ fn resolve_column_ref(field: &PivotFieldRef, base_table: &str) -> DaxResult<(Str
             DataModel::normalize_measure_name(name)
         ))),
     }
-}
-
-fn format_dax_table_name(table: &str) -> String {
-    // Always quote table names to avoid edge cases with spaces/reserved words.
-    let escaped = table.replace('\'', "''");
-    format!("'{escaped}'")
-}
-
-fn format_dax_column_ref(table: &str, column: &str) -> String {
-    format!("{}[{}]", format_dax_table_name(table), column)
-}
-
-fn format_dax_measure_ref(measure: &str) -> String {
-    let name = DataModel::normalize_measure_name(measure);
-    format!("[{name}]")
 }
 
 fn pivot_key_part_to_value(part: &PivotKeyPart) -> Value {
@@ -430,6 +416,71 @@ mod tests {
                     vec![Value::from("Fact[Category]"), Value::from("Sum of Amount")],
                     vec![Value::from("A"), Value::from(10.0)],
                     vec![Value::from("C"), Value::from(7.0)],
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn pivot_config_escapes_bracket_identifiers_in_generated_dax() {
+        let mut model = DataModel::new();
+        let mut fact = Table::new("Fact", vec!["Region]Name", "Amount]USD"]);
+        fact.push_row(vec![Value::from("East"), Value::from(10.0)])
+            .unwrap();
+        fact.push_row(vec![Value::from("East"), Value::from(20.0)])
+            .unwrap();
+        fact.push_row(vec![Value::from("West"), Value::from(5.0)])
+            .unwrap();
+        model.add_table(fact).unwrap();
+
+        model
+            .add_measure("Total]USD", "SUM(Fact[Amount]]USD])")
+            .unwrap();
+
+        let sum_amount_field = ValueField {
+            source_field: PivotFieldRef::CacheFieldName("Amount]USD".to_string()),
+            name: "Sum Amount".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        };
+
+        let total_measure_field = ValueField {
+            source_field: PivotFieldRef::DataModelMeasure("Total]USD".to_string()),
+            name: "Total Measure".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        };
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region]Name")],
+            column_fields: vec![],
+            value_fields: vec![sum_amount_field, total_measure_field],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals::default(),
+        };
+
+        let grid = pivot_crosstab_from_config(&model, "Fact", &cfg).unwrap();
+        assert_eq!(
+            grid,
+            PivotResultGrid {
+                data: vec![
+                    vec![
+                        Value::from("Fact[Region]Name]"),
+                        Value::from("Sum Amount"),
+                        Value::from("Total Measure"),
+                    ],
+                    vec![Value::from("East"), Value::from(30.0), Value::from(30.0)],
+                    vec![Value::from("West"), Value::from(5.0), Value::from(5.0)],
                 ],
             }
         );

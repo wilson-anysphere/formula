@@ -37,6 +37,7 @@
 
 mod backend;
 mod engine;
+mod ident;
 mod model;
 mod parser;
 mod pivot;
