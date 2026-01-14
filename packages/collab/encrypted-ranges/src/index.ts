@@ -66,6 +66,12 @@ function getSheetNameCacheVersionForDoc(doc: unknown, sheets: unknown): SheetNam
         // edits so cached name lookups remain effective even when scroll/frozen pane metadata is
         // updated frequently.
         for (const e of Array.isArray(events) ? events : []) {
+          // Invalidate when the top-level sheet list changes (insert/delete/reorder/replace).
+          if ((e as any)?.target === sheetsAny) {
+            state!.version += 1;
+            return;
+          }
+
           const keysChanged = (e as any)?.keysChanged;
           if (keysChanged && typeof keysChanged.has === "function") {
             if (keysChanged.has("name") || keysChanged.has("id")) {

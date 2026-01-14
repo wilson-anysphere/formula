@@ -526,6 +526,18 @@ describe("@formula/collab-encrypted-ranges", () => {
     });
     expect(policy.shouldEncryptCell({ sheetId: "Budget 2024", row: 0, col: 0 })).toBe(true);
     expect(policy.keyIdForCell({ sheetId: "Budget 2024", row: 0, col: 0 })).toBe("k1");
+
+    // If the sheet entry is replaced (delete+insert with the same array length), the policy
+    // should still resolve the display name for the stable id.
+    const replaced = new Y.Map<unknown>();
+    replaced.set("id", "sheet-123");
+    replaced.set("name", "Budget 2025");
+    doc.transact(() => {
+      sheets.delete(0, 1);
+      sheets.insert(0, [replaced]);
+    });
+    expect(policy.shouldEncryptCell({ sheetId: "Budget 2025", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "Budget 2025", row: 0, col: 0 })).toBe("k1");
   });
 
   it("policy helper does not treat other sheets' stable ids as the active sheet name", () => {
