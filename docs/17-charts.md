@@ -57,12 +57,13 @@ Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_space.rs`.
 - Parses:
   - chart title (`c:title`) and legend (`c:legend`) including basic text styling (`c:txPr`)
   - plot-area chart settings (e.g. `barDir`, `grouping`, `varyColors`, `scatterStyle`)
-  - axes for `c:catAx` and `c:valAx` (id, position, scaling, number format, tick label position,
-      major gridline presence + some inline styling)
+  - axes for `c:catAx`, `c:valAx`, `c:dateAx`, and `c:serAx` (id, position, scaling, number format,
+      tick label position, major gridline presence + some inline styling, plus axis titles)
   - series identity/order metadata (`c:ser/c:idx/@val`, `c:ser/c:order/@val`)
-  - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`) and cached values (`strCache`, `numCache`)
+  - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`, `bubbleSize`) and cached values
+    (`strCache`, `numCache`, plus literal `strLit` / `numLit`)
   - series data label settings (`c:ser/c:dLbls`) including `showVal`, `showCatName`, `showSerName`,
-    `dLblPos`, and `numFmt`
+     `dLblPos`, and `numFmt`
   - some inline formatting: `spPr` shape styles, markers, and per-point `c:dPt` overrides
 - Records non-fatal parse limitations as `ChartModel.diagnostics` warnings (for example:
   `mc:AlternateContent` (branch selection is heuristic), `c:extLst`, unsupported chart/axis types).
@@ -150,11 +151,10 @@ work in `formula-xlsx` + `formula-model`.
 - [ ] **`mc:AlternateContent` handling**: fully honor `mc:Choice/@Requires` (current parsing flattens
       AlternateContent with heuristic Choice/Fallback selection).
 - [ ] **`c:extLst` handling**: model important extensions (today we only record a warning).
-- [ ] **Literal series data**: support `c:strLit` / `c:numLit` (today we only handle `strRef` /
-      `numRef`).
-- [ ] **Multi-level categories**: support `c:multiLvlStrRef` / `c:multiLvlStrCache` and related
+- [x] **Literal series data**: support `c:strLit` / `c:numLit`.
+- [x] **Multi-level categories**: support `c:multiLvlStrRef` / `c:multiLvlStrCache` and related
       hierarchical category structures.
-- [ ] **Axis titles**: parse `c:*Ax/c:title` (currently ignored).
+- [x] **Axis titles**: parse `c:*Ax/c:title`.
 - [x] **Series data labels**: parse `c:ser/c:dLbls` (show value/category/series name, position,
       number format).
 - [ ] **Per-point data label overrides**: parse `c:dLbls/c:dLbl` (per-point overrides, rich text).
