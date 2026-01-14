@@ -15585,10 +15585,10 @@ export class SpreadsheetApp {
     const dt = e.dataTransfer;
     if (!dt) return;
     const types = Array.from(dt.types ?? []);
-    if (!types.includes("Files")) return;
-
     const hasAnyFiles =
-      Array.from(dt.items ?? []).some((item) => item.kind === "file") || Array.from(dt.files ?? []).length > 0;
+      types.includes("Files") ||
+      Array.from(dt.items ?? []).some((item) => item.kind === "file") ||
+      Array.from(dt.files ?? []).length > 0;
     if (!hasAnyFiles) return;
 
     // Prevent the browser/webview from treating the drop as an "open file" navigation.
@@ -15622,7 +15622,11 @@ export class SpreadsheetApp {
     if (!dt) return;
 
     const types = Array.from(dt.types ?? []);
-    if (!types.includes("Files")) return;
+    const hasAnyFiles =
+      types.includes("Files") ||
+      Array.from(dt.files ?? []).length > 0 ||
+      Array.from(dt.items ?? []).some((item) => item.kind === "file");
+    if (!hasAnyFiles) return;
 
     // Prevent the browser/webview from navigating to the dropped file. Even if we don't support
     // the dropped file type (non-image), "open file" navigation is never the desired UX here.
