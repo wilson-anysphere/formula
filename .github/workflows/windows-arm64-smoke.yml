@@ -50,6 +50,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      # Ensure all Cargo builds (including `cargo tauri build`) emit artifacts under the
+      # expected path `apps/desktop/src-tauri/target/**`. This keeps validations deterministic
+      # and matches the tagged release workflow expectations.
+      - name: Set CARGO_TARGET_DIR for desktop builds (Windows)
+        shell: pwsh
+        run: |
+          $targetDir = Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/src-tauri/target'
+          "CARGO_TARGET_DIR=$targetDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         shell: bash
         run: bash scripts/ci/check-rust-toolchain-pins.sh
@@ -363,7 +372,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-arm64-desktop-dist-assets-report
           path: desktop-dist-assets-report.json
