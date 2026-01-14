@@ -218,16 +218,16 @@ function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver |
     return `${formatSheetNameForA1(sheetName)}!${c.cell} (${formatConflictReason(c.reason)})`;
   }
   if (c.type === "sheet") {
-    if (c.reason === "rename") return `sheet rename: ${displayName(c.sheetId)}`;
-    if (c.reason === "order") return "sheet order";
-    if (c.reason === "presence") return `sheet presence: ${displayName(c.sheetId)}`;
-    return "sheet";
+    if (c.reason === "rename") return tWithVars("branchMerge.header.sheetRename", { sheet: displayName(c.sheetId) });
+    if (c.reason === "order") return t("branchMerge.header.sheetOrder");
+    if (c.reason === "presence") return tWithVars("branchMerge.header.sheetPresence", { sheet: displayName(c.sheetId) });
+    return t("branchMerge.header.sheet");
   }
-  if (c.type === "namedRange") return `named range: ${c.key}`;
-  if (c.type === "comment") return `comment: ${c.id}`;
-  if (c.type === "metadata") return `metadata: ${c.key}`;
+  if (c.type === "namedRange") return tWithVars("branchMerge.header.namedRange", { key: c.key });
+  if (c.type === "comment") return tWithVars("branchMerge.header.comment", { id: c.id });
+  if (c.type === "metadata") return tWithVars("branchMerge.header.metadata", { key: c.key });
   // Exhaustive fallback.
-  return "conflict";
+  return t("branchMerge.header.conflict");
 }
 
 function cellHasValue(cell: Cell | null): boolean {
