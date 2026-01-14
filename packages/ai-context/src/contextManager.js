@@ -1331,16 +1331,22 @@ export class ContextManager {
     }
 
     /**
-     * Safe first line for persisted redacted chunks (used to avoid leaking sensitive sheet/title
-     * metadata when a chunk must be blocked/redacted).
+     * Safe first line for persisted redacted chunks (used to avoid leaking sheet/title metadata
+     * when a chunk must be blocked/redacted).
+     *
+     * Note: when DLP redaction is required due to *structured* classification (document/sheet/range),
+     * we must treat metadata tokens (sheet name, title) as disallowed too. Those tokens can contain
+     * user-provided identifiers that are not detectable by heuristic redaction (e.g. "TopSecret").
      *
      * @param {any} metadata
+     * @param {{ redactTokens?: boolean }} [options]
      */
-    const safeChunkFirstLineFromMetadata = (metadata) => {
+    const safeChunkFirstLineFromMetadata = (metadata, options = {}) => {
       const meta = metadata && typeof metadata === "object" ? metadata : {};
       const kind = String(meta.kind ?? "chunk").toUpperCase();
-      const title = redactChunkToken(meta.title ?? "");
-      const sheetName = redactChunkToken(meta.sheetName ?? "");
+      const shouldRedactTokens = options.redactTokens === true;
+      const title = shouldRedactTokens ? "[REDACTED]" : redactChunkToken(meta.title ?? "");
+      const sheetName = shouldRedactTokens ? "[REDACTED]" : redactChunkToken(meta.sheetName ?? "");
       const rectA1 = rectToA1WithoutSheet(meta.rect);
       const sheetPart = `sheet="${sheetName}"`;
       const rangePart = rectA1 ? `, range="${rectA1}"` : "";
@@ -1402,23 +1408,32 @@ export class ContextManager {
                   options: { includeRestrictedContent },
                 });
 
+                const shouldRedactStructuredMetadataTokens =
+                  decision.decision === DLP_DECISION.BLOCK || recordDecision.decision !== DLP_DECISION.ALLOW;
+
                 let safeText = rawText;
                 if (decision.decision !== DLP_DECISION.ALLOW) {
                   if (decision.decision === DLP_DECISION.BLOCK) {
                     // If the policy blocks cloud AI processing for this chunk, do not send any
                     // workbook content to the embedder. Persist only a minimal placeholder so
                     // the vector store cannot contain raw restricted data.
-                    safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
+                    safeText = this.redactor(
+                      `${safeChunkFirstLineFromMetadata(record.metadata, { redactTokens: true })}\n[REDACTED]`,
+                    );
                   } else {
                     // If DLP redaction is required due to explicit document/sheet/range classification,
                     // redact the entire content; pattern-based redaction isn't sufficient in that case.
                     if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-                      safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
+                      safeText = this.redactor(
+                        `${safeChunkFirstLineFromMetadata(record.metadata, { redactTokens: true })}\n[REDACTED]`,
+                      );
                     } else {
                       safeText = this.redactor(rawText);
                     }
                     if (!restrictedAllowed && classifyTextForDlp(safeText).level === "sensitive") {
-                      safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
+                      safeText = this.redactor(
+                        `${safeChunkFirstLineFromMetadata(record.metadata, { redactTokens: true })}\n[REDACTED]`,
+                      );
                     }
                   }
                 }
@@ -1433,6 +1448,14 @@ export class ContextManager {
                   text: safeText,
                   metadata: {
                     ...(record.metadata ?? {}),
+                    ...(sheetId ? { dlpSheetId: sheetId } : null),
+                    ...(shouldRedactStructuredMetadataTokens
+                      ? {
+                          // Strip potentially sensitive, user-controlled metadata tokens under structured DLP.
+                          sheetName: "[REDACTED]",
+                          title: "[REDACTED]",
+                        }
+                      : null),
                     // Store the heuristic classification computed on the *raw* chunk text so policy
                     // enforcement can still detect sensitive chunks even if `text` is redacted before
                     // embedding / persistence.
@@ -1562,7 +1585,8 @@ export class ContextManager {
       if (dlp) {
         const range = rectToRange(meta.rect);
         const sheetName = meta.sheetName;
-        const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+        const storedSheetId = typeof meta.dlpSheetId === "string" ? meta.dlpSheetId.trim() : "";
+        const sheetId = storedSheetId || (sheetName ? resolveDlpSheetId(sheetName) : "");
         if (range && sheetId) {
           const index = getDlpDocumentIndex();
           recordClassification = index
@@ -1650,15 +1674,24 @@ export class ContextManager {
       const meta = hit.metadata ?? {};
       const title = meta.title ?? hit.id;
       const kind = meta.kind ?? "chunk";
-      const safeSheetName = dlp ? redactChunkToken(meta.sheetName ?? "") : String(meta.sheetName ?? "");
-      const safeTitle = dlp ? redactChunkToken(title) : String(title ?? "");
-      const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${safeSheetName} title="${safeTitle}"`;
-      const text = meta.text ?? "";
-      const raw = `${header}\n${text}`;
-
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
       const recordDecision = audit?.recordDecision ?? null;
+      const shouldRedactStructuredMetadataTokens =
+        Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
+      const safeSheetName = shouldRedactStructuredMetadataTokens
+        ? "[REDACTED]"
+        : dlp
+          ? redactChunkToken(meta.sheetName ?? "")
+          : String(meta.sheetName ?? "");
+      const safeTitle = shouldRedactStructuredMetadataTokens
+        ? "[REDACTED]"
+        : dlp
+          ? redactChunkToken(title)
+          : String(title ?? "");
+      const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${safeSheetName} title="${safeTitle}"`;
+      const text = meta.text ?? "";
+      const raw = `${header}\n${text}`;
 
       let outText = this.redactor(raw);
       let redacted = false;
@@ -1691,12 +1724,19 @@ export class ContextManager {
       // `text` field is already provided separately, and returning unredacted metadata
       // creates an easy footgun for callers that might serialize metadata into cloud LLM
       // prompts.
-      const { text: _metaText, ...safeMeta } = meta;
+      const { text: _metaText, dlpSheetId: _metaSheetId, ...safeMeta } = meta;
+      const safeMetaOut = shouldRedactStructuredMetadataTokens
+        ? {
+            ...safeMeta,
+            sheetName: "[REDACTED]",
+            title: "[REDACTED]",
+          }
+        : safeMeta;
 
       return {
-        id: hit.id,
+        id: shouldRedactStructuredMetadataTokens ? `redacted:${idx + 1}` : hit.id,
         score: hit.score,
-        metadata: safeMeta,
+        metadata: safeMetaOut,
         text: outText,
         dlp: mergeHeuristics(heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic, classifyTextForDlp(outText)),
       };
@@ -1803,6 +1843,22 @@ export class ContextManager {
       };
 
       /**
+       * Deterministically format an A1 range for a rect while forcing a redacted sheet name.
+       * @param {any} rect
+       */
+      const redactedSheetRangeA1ForRect = (rect) => {
+        if (!rect || typeof rect !== "object") return "";
+        const { r0, c0, r1, c1 } = rect;
+        if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) return "";
+        if (r1 < r0 || c1 < c0) return "";
+        try {
+          return rangeToA1({ sheetName: "[REDACTED]", startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
+        } catch {
+          return "";
+        }
+      };
+
+      /**
        * Redact a workbook RAG `COLUMNS:` detail string while preserving inferred types.
        * @param {string} columnsLine
        */
@@ -1883,7 +1939,8 @@ export class ContextManager {
               options: { includeRestrictedContent },
             });
             if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-              schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): [REDACTED]`);
+              const redactedRange = redactedSheetRangeA1ForRect(rect) || "[REDACTED]";
+              schemaLines.push(`- Table [REDACTED] (range="${redactedRange}"): [REDACTED]`);
               continue;
             }
           }
@@ -1915,6 +1972,30 @@ export class ContextManager {
         const safeName = redactSchemaToken(name);
         const rangeA1 = redactRangeA1(nr?.rangeA1 ?? "");
         if (!name) continue;
+        if (dlp) {
+          const rect = nr?.rect;
+          const sheetName = nr?.sheetName ?? "";
+          const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+          const range = rectToRange(rect);
+          if (sheetId && range) {
+            const index = getDlpDocumentIndex();
+            const recordClassification = index
+              ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+              : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+            const recordDecision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification: recordClassification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+            if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+              const redactedRange = redactedSheetRangeA1ForRect(rect) || "[REDACTED]";
+              schemaLines.push(`- Named range [REDACTED] (range="${redactedRange}")`);
+              continue;
+            }
+          }
+        }
+
         schemaLines.push(`- Named range ${safeName} (range="${rangeA1}")`);
       }
 
@@ -1992,7 +2073,8 @@ export class ContextManager {
             // document/sheet/range selectors, do not include any derived header/type strings.
             if (dlp) {
               const range = rectToRange({ r0, c0, r1, c1 });
-              const sheetId = resolveDlpSheetId(sheetName);
+              const storedSheetId = typeof meta.dlpSheetId === "string" ? meta.dlpSheetId.trim() : "";
+              const sheetId = storedSheetId || resolveDlpSheetId(sheetName);
               if (range && sheetId) {
                 const index = getDlpDocumentIndex();
                 const recordClassification = index
@@ -2006,8 +2088,9 @@ export class ContextManager {
                 });
                 if (recordDecision.decision !== DLP_DECISION.ALLOW) {
                   const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
-                  const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${safeTitle}` : "";
-                  schemaLines.push(`- ${label}${nameSuffix} (range="${rangeA1}"): [REDACTED]`);
+                  const redactedRange = redactedSheetRangeA1ForRect({ r0, c0, r1, c1 }) || "[REDACTED]";
+                  const nameSuffix = kind === "dataRegion" ? "" : title ? ` [REDACTED]` : "";
+                  schemaLines.push(`- ${label}${nameSuffix} (range="${redactedRange}"): [REDACTED]`);
                   continue;
                 }
               }
@@ -2059,22 +2142,105 @@ export class ContextManager {
               })),
             };
 
-            const safeSummary = dlp
-              ? {
-                  id: redactSchemaToken(summary.id, "workbook_summary"),
-                  sheets: (summary.sheets ?? []).map((name) => redactSchemaToken(name, "workbook_summary")),
-                  tables: (summary.tables ?? []).map((t) => ({
-                    ...t,
-                    name: redactSchemaToken(t?.name, "workbook_summary"),
-                    sheetName: redactSchemaToken(t?.sheetName, "workbook_summary"),
-                  })),
-                  namedRanges: (summary.namedRanges ?? []).map((r) => ({
-                    ...r,
-                    name: redactSchemaToken(r?.name, "workbook_summary"),
-                    sheetName: redactSchemaToken(r?.sheetName, "workbook_summary"),
-                  })),
+            const safeSummary = (() => {
+              if (!dlp) return summary;
+              throwIfAborted(signal);
+
+              const index = getDlpDocumentIndex();
+
+              /**
+               * @param {string} sheetName
+               */
+              const sheetNameDisallowed = (sheetName) => {
+                const raw = String(sheetName ?? "");
+                if (!raw) return false;
+                const sheetId = resolveDlpSheetId(raw);
+                let classification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+                if (index?.docClassificationMax) {
+                  classification = maxClassification(classification, index.docClassificationMax);
                 }
-              : summary;
+                const sheetMax = sheetId ? index?.sheetClassificationMaxBySheetId?.get?.(sheetId) : null;
+                if (sheetMax) classification = maxClassification(classification, sheetMax);
+                const decision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+                return decision.decision !== DLP_DECISION.ALLOW;
+              };
+
+              /**
+               * @param {string} sheetName
+               * @param {any} rect
+               */
+              const rectDisallowed = (sheetName, rect) => {
+                const rawSheet = String(sheetName ?? "");
+                if (!rawSheet) return false;
+                const sheetId = resolveDlpSheetId(rawSheet);
+                if (!sheetId) return false;
+                const range = rectToRange(rect);
+                if (!range) return false;
+                const recordClassification = index
+                  ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+                  : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+                const recordDecision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification: recordClassification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+                return recordDecision.decision !== DLP_DECISION.ALLOW;
+              };
+
+              const safeWorkbookId = (() => {
+                // If the document itself is explicitly classified above the allowed threshold, treat the id
+                // as part of that restricted metadata.
+                const classification = index?.docClassificationMax ?? { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+                const decision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+                return decision.decision === DLP_DECISION.ALLOW
+                  ? redactSchemaToken(summary.id, "workbook_summary")
+                  : "[REDACTED]";
+              })();
+
+              return {
+                id: safeWorkbookId,
+                sheets: (summary.sheets ?? []).map((name) =>
+                  sheetNameDisallowed(String(name ?? "")) ? "[REDACTED]" : redactSchemaToken(name, "workbook_summary"),
+                ),
+                tables: (summary.tables ?? []).map((t) => {
+                  const sheetName = String(t?.sheetName ?? "");
+                  const safeSheetName = sheetNameDisallowed(sheetName)
+                    ? "[REDACTED]"
+                    : redactSchemaToken(sheetName, "workbook_summary");
+                  const disallowed = rectDisallowed(sheetName, t?.rect);
+                  const safeName = disallowed ? "[REDACTED]" : redactSchemaToken(t?.name, "workbook_summary");
+                  return {
+                    ...t,
+                    name: safeName,
+                    sheetName: safeSheetName,
+                  };
+                }),
+                namedRanges: (summary.namedRanges ?? []).map((r) => {
+                  const sheetName = String(r?.sheetName ?? "");
+                  const safeSheetName = sheetNameDisallowed(sheetName)
+                    ? "[REDACTED]"
+                    : redactSchemaToken(sheetName, "workbook_summary");
+                  const disallowed = rectDisallowed(sheetName, r?.rect);
+                  const safeName = disallowed ? "[REDACTED]" : redactSchemaToken(r?.name, "workbook_summary");
+                  return {
+                    ...r,
+                    name: safeName,
+                    sheetName: safeSheetName,
+                  };
+                }),
+              };
+            })();
 
             return this.redactor(`Workbook summary:\n${stableJsonStringify(safeSummary)}`);
           })(),

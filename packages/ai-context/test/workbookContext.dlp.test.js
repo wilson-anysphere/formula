@@ -838,6 +838,58 @@ test("buildWorkbookContext: structured Restricted classifications fully redact r
   assert.equal(auditEvents[0].decision.decision, "redact");
 });
 
+test("buildWorkbookContext: structured DLP redaction does not leak non-heuristic table/namedRange names (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-metadata-tokens",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }]],
+      },
+    ],
+    tables: [{ name: "TopSecret", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } }],
+    namedRanges: [{ name: "TopSecretRange", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } }],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 10 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 10,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /TopSecret/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: structured Restricted classifications can block when policy requires", async () => {
   const workbook = makeSensitiveWorkbook();
   workbook.sheets[0].cells[1][0].v = "TopSecret";
