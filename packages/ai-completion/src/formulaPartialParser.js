@@ -100,6 +100,12 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   }
 
   if (openParens.length === 0) {
+    // When the cursor is inside a string literal / quoted sheet name / structured reference,
+    // do not attempt function-name completion. Tab completion should not suggest functions while
+    // the user is typing plain text or table column names.
+    if (inString || inSheetQuote || bracketDepth !== 0) {
+      return { isFormula: true, inFunctionCall: false };
+    }
     // Not in a function call; still might be typing a function name.
     const functionPrefix = findTokenAtCursor(prefix, safeCursor);
     if (functionPrefix && functionPrefix.text.length > 0) {
@@ -303,7 +309,7 @@ function findTokenAtCursor(inputPrefix, cursorPosition) {
 
   // Must be preceded by '=' or an operator/whitespace.
   const before = start - 1 >= 0 ? inputPrefix[start - 1] : "";
-  if (before && !/[=\s(,;{+\-*/^]/.test(before)) return null;
+  if (before && !/[=\s(,;{+\\\-*/^]/.test(before)) return null;
 
   if (!text) return null;
   if (/^\d+$/.test(text)) return null;

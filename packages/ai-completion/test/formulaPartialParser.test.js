@@ -119,3 +119,24 @@ test("parsePartialFormula supports non-ASCII function names (localized identifie
   assert.equal(parsed.argIndex, 1);
   assert.equal(parsed.currentArg?.text, "");
 });
+
+test("parsePartialFormula allows function-name completion after '\\\\' (array constant col separator in some locales)", () => {
+  const registry = new FunctionRegistry();
+  // Note: in a JS string literal, `\\` is a single backslash.
+  const input = "={1\\VLO";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 4, end: 7 });
+});
+
+test("parsePartialFormula does not treat identifiers inside unterminated strings as function prefixes", () => {
+  const registry = new FunctionRegistry();
+  const input = '="VLO';
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.equal(parsed.functionNamePrefix, undefined);
+});
