@@ -229,6 +229,23 @@ fn var_is_visible_in_calculate_expression_and_filter_arguments() {
 }
 
 #[test]
+fn var_is_visible_in_calculate_boolean_filter_arguments() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Medium Sales via Var",
+            "VAR low = 9 RETURN CALCULATE(SUM(Orders[Amount]), Orders[Amount] > low && Orders[Amount] < 20)",
+        )
+        .unwrap();
+
+    // Only the 10.0 order satisfies >9 && <20.
+    let value = model
+        .evaluate_measure("Medium Sales via Var", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 10.0.into());
+}
+
+#[test]
 fn calculate_can_reference_scalar_var_in_expression_argument() {
     let mut model = build_model();
     model
