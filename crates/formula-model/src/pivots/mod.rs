@@ -8,12 +8,14 @@ use uuid::Uuid;
 mod model;
 mod schema;
 pub mod slicers;
+pub mod workbook;
 
 pub use model::{
     DefinedNameIdentifier, FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig,
     PivotDestination, PivotSource, PivotTableModel, SubtotalPosition,
 };
 pub use schema::{CalculatedField, CalculatedItem};
+pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;

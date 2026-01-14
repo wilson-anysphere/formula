@@ -1,6 +1,6 @@
 use core::fmt;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,10 @@ use crate::drawings::ImageStore;
 use crate::names::{
     validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
 };
-use crate::pivots::PivotTableModel;
+use crate::pivots::{
+    PivotCacheId, PivotCacheModel, PivotChartModel, PivotDestination, PivotSource, PivotTableModel,
+    SlicerModel, TimelineModel,
+};
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::table::{validate_table_name, TableError, TableIdentifier};
 use crate::{
@@ -91,6 +94,32 @@ pub struct Workbook {
         alias = "pivot_tables"
     )]
     pub pivot_tables: Vec<PivotTableModel>,
+
+    /// Pivot caches (shared across pivot tables and slicers).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        rename = "pivotCaches",
+        alias = "pivot_caches"
+    )]
+    pub pivot_caches: Vec<PivotCacheModel>,
+
+    /// Pivot chart definitions bound to pivot tables.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        rename = "pivotCharts",
+        alias = "pivot_charts"
+    )]
+    pub pivot_charts: Vec<PivotChartModel>,
+
+    /// Workbook slicers connected to pivots and placed on worksheets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slicers: Vec<SlicerModel>,
+
+    /// Workbook timelines connected to pivots and placed on worksheets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timelines: Vec<TimelineModel>,
 
     /// Workbook print settings (print area/titles, page setup, margins, scaling, manual breaks).
     #[serde(default, skip_serializing_if = "WorkbookPrintSettings::is_empty")]
@@ -204,6 +233,10 @@ impl Workbook {
             workbook_protection: WorkbookProtection::default(),
             defined_names: Vec::new(),
             pivot_tables: Vec::new(),
+            pivot_caches: Vec::new(),
+            pivot_charts: Vec::new(),
+            slicers: Vec::new(),
+            timelines: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             view: WorkbookView::default(),
             next_sheet_id: 1,
@@ -350,6 +383,10 @@ impl Workbook {
     ///
     /// - If `new_name` is `None`, the new sheet is named like Excel would: `Sheet1` → `Sheet1 (2)`.
     /// - Tables are deep-copied and renamed to maintain workbook-wide table name uniqueness.
+    /// - Pivot tables whose destination is on the duplicated sheet are duplicated and re-targeted
+    ///   to the new sheet. If a duplicated pivot's source points at data that was also duplicated
+    ///   (range/table on the source sheet), the pivot cache is duplicated and marked to be
+    ///   rebuilt on the next refresh.
     /// - Formulas within the duplicated sheet are rewritten so any explicit reference to the
     ///   source sheet name points at the new sheet, and structured references to duplicated
     ///   tables refer to the renamed copies.
@@ -390,8 +427,10 @@ impl Workbook {
         let mut used_table_names = collect_table_names(&self.sheets);
         let mut next_table_id = next_table_id(&self.sheets);
         let mut table_renames: Vec<(String, String)> = Vec::new();
+        let mut table_id_renames: Vec<(u32, u32)> = Vec::new();
 
         for table in &mut new_sheet.tables {
+            let old_id = table.id;
             let old_name = table.name.clone();
             let old_display_name = table.display_name.clone();
             let new_table_name =
@@ -408,6 +447,7 @@ impl Workbook {
             if add_display_name_mapping {
                 table_renames.push((old_display_name, new_table_name));
             }
+            table_id_renames.push((old_id, table.id));
         }
 
         // Rewrite formulas within the duplicated sheet only.
@@ -482,6 +522,15 @@ impl Workbook {
         // Excel inserts the copy immediately after the source sheet.
         self.sheets.insert(source_index + 1, new_sheet);
 
+        self.duplicate_pivots_for_sheet(
+            source_id,
+            &source_name,
+            new_sheet_id,
+            &target_name,
+            &table_renames,
+            &table_id_renames,
+        );
+
         // Copy print settings (print area/titles, page setup, manual breaks) if present.
         if let Some(settings) = self
             .print_settings
@@ -505,6 +554,166 @@ impl Workbook {
         self.view.active_sheet_id = Some(new_sheet_id);
 
         Ok(new_sheet_id)
+    }
+
+    fn duplicate_pivots_for_sheet(
+        &mut self,
+        source_sheet_id: WorksheetId,
+        source_sheet_name: &str,
+        new_sheet_id: WorksheetId,
+        new_sheet_name: &str,
+        table_renames: &[(String, String)],
+        table_id_renames: &[(u32, u32)],
+    ) {
+        let pivots_to_duplicate: Vec<PivotTableModel> = self
+            .pivot_tables
+            .iter()
+            .filter(|pivot| {
+                pivot_destination_is_on_sheet(&pivot.destination, source_sheet_id, source_sheet_name)
+            })
+            .cloned()
+            .collect();
+
+        if pivots_to_duplicate.is_empty() {
+            return;
+        }
+
+        let mut used_names = collect_pivot_table_names(&self.pivot_tables);
+        let table_id_map: HashMap<u32, u32> = table_id_renames.iter().copied().collect();
+
+        for pivot in pivots_to_duplicate {
+            let mut duplicated = pivot.clone();
+            duplicated.id = crate::new_uuid();
+            duplicated.name = generate_duplicate_pivot_table_name(&pivot.name, &mut used_names);
+
+            // Retarget the destination to the new sheet.
+            match &mut duplicated.destination {
+                PivotDestination::Cell { sheet_id, .. }
+                | PivotDestination::Range { sheet_id, .. } => {
+                    if *sheet_id == source_sheet_id {
+                        *sheet_id = new_sheet_id;
+                    }
+                }
+                PivotDestination::CellName { sheet_name, .. }
+                | PivotDestination::RangeName { sheet_name, .. } => {
+                    if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                        sheet_name,
+                        source_sheet_name,
+                    ) {
+                        *sheet_name = new_sheet_name.to_string();
+                    }
+                }
+            }
+
+            // Rewrite the source when it points at duplicated data and split the cache.
+            let mut source_changed = false;
+            match &mut duplicated.source {
+                PivotSource::Range { sheet_id, .. } => {
+                    if *sheet_id == source_sheet_id {
+                        *sheet_id = new_sheet_id;
+                        source_changed = true;
+                    }
+                }
+                PivotSource::RangeName { sheet_name, .. } => {
+                    if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                        sheet_name,
+                        source_sheet_name,
+                    ) {
+                        *sheet_name = new_sheet_name.to_string();
+                        source_changed = true;
+                    }
+                }
+                PivotSource::Table { table } => match table {
+                    TableIdentifier::Name(name) => {
+                        for (old, new) in table_renames {
+                            if name.eq_ignore_ascii_case(old) {
+                                *name = new.clone();
+                                source_changed = true;
+                                break;
+                            }
+                        }
+                    }
+                    TableIdentifier::Id(id) => {
+                        if let Some(new_id) = table_id_map.get(id).copied() {
+                            *id = new_id;
+                            source_changed = true;
+                        }
+                    }
+                },
+                PivotSource::NamedRange { .. } => {
+                    // Intentional: keep named-range sources referencing the original defined name,
+                    // mirroring Excel behavior for workbook-scoped names.
+                }
+                PivotSource::DataModel { .. } => {}
+            }
+
+            if source_changed {
+                let cache_id: PivotCacheId = crate::new_uuid();
+                duplicated.cache_id = Some(cache_id);
+                self.pivot_caches.push(PivotCacheModel {
+                    id: cache_id,
+                    source: duplicated.source.clone(),
+                    needs_refresh: true,
+                });
+            }
+
+            self.pivot_tables.push(duplicated);
+        }
+    }
+
+    fn delete_pivots_for_sheet(&mut self, sheet_id: WorksheetId, sheet_name: &str) {
+        let removed_pivots: HashSet<crate::pivots::PivotTableId> = self
+            .pivot_tables
+            .iter()
+            .filter(|pivot| pivot_destination_is_on_sheet(&pivot.destination, sheet_id, sheet_name))
+            .map(|pivot| pivot.id)
+            .collect();
+
+        if !removed_pivots.is_empty() {
+            self.pivot_tables
+                .retain(|pivot| !removed_pivots.contains(&pivot.id));
+
+            // Remove pivot charts bound to removed pivot tables.
+            self.pivot_charts
+                .retain(|chart| !removed_pivots.contains(&chart.pivot_table_id));
+        }
+
+        // Remove pivot charts explicitly placed on the deleted sheet.
+        self.pivot_charts
+            .retain(|chart| chart.sheet_id != Some(sheet_id));
+
+        // Remove slicers/timelines placed on the deleted sheet or left with no remaining pivot
+        // connections after pivot deletion.
+        self.slicers.retain_mut(|slicer| {
+            if slicer.sheet_id == sheet_id {
+                return false;
+            }
+            slicer
+                .connected_pivots
+                .retain(|pivot_id| !removed_pivots.contains(pivot_id));
+            !slicer.connected_pivots.is_empty()
+        });
+
+        self.timelines.retain_mut(|timeline| {
+            if timeline.sheet_id == sheet_id {
+                return false;
+            }
+            timeline
+                .connected_pivots
+                .retain(|pivot_id| !removed_pivots.contains(pivot_id));
+            !timeline.connected_pivots.is_empty()
+        });
+
+        self.garbage_collect_pivot_caches();
+    }
+
+    fn garbage_collect_pivot_caches(&mut self) {
+        let used: HashSet<PivotCacheId> = self
+            .pivot_tables
+            .iter()
+            .filter_map(|p| p.cache_id)
+            .collect();
+        self.pivot_caches.retain(|cache| used.contains(&cache.id));
     }
 
     /// Rename a worksheet and rewrite formulas that reference it.
@@ -536,6 +745,9 @@ impl Workbook {
         for pivot in &mut self.pivot_tables {
             pivot.source.rewrite_sheet_name(&old_name, new_name);
             pivot.destination.rewrite_sheet_name(&old_name, new_name);
+        }
+        for cache in &mut self.pivot_caches {
+            cache.source.rewrite_sheet_name(&old_name, new_name);
         }
 
         self.sheets[sheet_index].name = new_name.to_string();
@@ -600,6 +812,10 @@ impl Workbook {
             !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name)
         });
         self.sort_print_settings_by_sheet_order();
+
+        // Remove pivot-related objects owned by the deleted sheet and garbage-collect any caches
+        // that become unused.
+        self.delete_pivots_for_sheet(id, &deleted_name);
 
         for sheet in &mut self.sheets {
             for (_, cell) in sheet.iter_cells_mut() {
@@ -837,6 +1053,11 @@ impl Workbook {
                 pivot.source.rewrite_table_name(old, new);
             }
         }
+        for cache in &mut self.pivot_caches {
+            for (old, new) in &renames {
+                cache.source.rewrite_table_name(old, new);
+            }
+        }
 
         let renamed = &mut self.sheets[sheet_idx].tables[table_idx];
         renamed.name = new_name.to_string();
@@ -932,6 +1153,11 @@ impl Workbook {
 
         for pivot in &mut self.pivot_tables {
             pivot
+                .source
+                .rewrite_defined_name(&old_name, &self.defined_names[idx].name);
+        }
+        for cache in &mut self.pivot_caches {
+            cache
                 .source
                 .rewrite_defined_name(&old_name, &self.defined_names[idx].name);
         }
@@ -1194,6 +1420,13 @@ fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
     out
 }
 
+fn collect_pivot_table_names(pivots: &[PivotTableModel]) -> HashSet<String> {
+    pivots
+        .iter()
+        .map(|pivot| pivot.name.to_ascii_lowercase())
+        .collect()
+}
+
 fn next_table_id(sheets: &[Worksheet]) -> u32 {
     sheets
         .iter()
@@ -1214,6 +1447,33 @@ fn generate_duplicate_table_name(base: &str, used_names: &mut HashSet<String>) -
     }
 
     unreachable!("monotonic counter must eventually produce an unused table name")
+}
+
+fn generate_duplicate_pivot_table_name(base: &str, used_names: &mut HashSet<String>) -> String {
+    // Match Excel-style name collision behavior: `PivotTable1` -> `PivotTable1 (2)`.
+    for i in 2u32.. {
+        let candidate = format!("{base} ({i})");
+        if used_names.insert(candidate.to_ascii_lowercase()) {
+            return candidate;
+        }
+    }
+
+    unreachable!("monotonic counter must eventually produce an unused pivot table name")
+}
+
+fn pivot_destination_is_on_sheet(
+    destination: &PivotDestination,
+    sheet_id: WorksheetId,
+    sheet_name: &str,
+) -> bool {
+    match destination {
+        PivotDestination::Cell { sheet_id: id, .. }
+        | PivotDestination::Range { sheet_id: id, .. } => *id == sheet_id,
+        PivotDestination::CellName { sheet_name: name, .. }
+        | PivotDestination::RangeName { sheet_name: name, .. } => {
+            crate::formula_rewrite::sheet_name_eq_case_insensitive(name, sheet_name)
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Workbook {
@@ -1247,6 +1507,14 @@ impl<'de> Deserialize<'de> for Workbook {
             defined_names: Vec<DefinedName>,
             #[serde(default, rename = "pivotTables", alias = "pivot_tables")]
             pivot_tables: Vec<PivotTableModel>,
+            #[serde(default, rename = "pivotCaches", alias = "pivot_caches")]
+            pivot_caches: Vec<PivotCacheModel>,
+            #[serde(default, rename = "pivotCharts", alias = "pivot_charts")]
+            pivot_charts: Vec<PivotChartModel>,
+            #[serde(default)]
+            slicers: Vec<SlicerModel>,
+            #[serde(default)]
+            timelines: Vec<TimelineModel>,
             #[serde(default)]
             print_settings: WorkbookPrintSettings,
             #[serde(default)]
@@ -1266,6 +1534,10 @@ impl<'de> Deserialize<'de> for Workbook {
         let sheets = helper.sheets;
         let defined_names = helper.defined_names;
         let pivot_tables = helper.pivot_tables;
+        let pivot_caches = helper.pivot_caches;
+        let pivot_charts = helper.pivot_charts;
+        let slicers = helper.slicers;
+        let timelines = helper.timelines;
 
         let next_sheet_id = sheets
             .iter()
@@ -1313,6 +1585,10 @@ impl<'de> Deserialize<'de> for Workbook {
             workbook_protection: helper.workbook_protection,
             defined_names,
             pivot_tables,
+            pivot_caches,
+            pivot_charts,
+            slicers,
+            timelines,
             print_settings,
             view,
             next_sheet_id,
