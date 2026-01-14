@@ -228,6 +228,105 @@ fn build_snowflake_model_with_alternate_product_category_relationship() -> DataM
     model
 }
 
+fn build_snowflake_model_with_columnar_sales_and_alternate_product_category_relationship() -> DataModel {
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories
+        .push_row(vec![1.into(), Value::from("A")])
+        .unwrap();
+    categories
+        .push_row(vec![2.into(), Value::from("B")])
+        .unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId", "AltCategoryId"]);
+    // Product 10: default category A, alternate category B.
+    products.push_row(vec![10.into(), 1.into(), 2.into()]).unwrap();
+    // Product 20: default category B, alternate category A.
+    products.push_row(vec![20.into(), 2.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(10.0),
+    ]); // default A, alt B
+    sales.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::Number(7.0),
+    ]); // default B, alt A
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Default active relationship.
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Alternate inactive relationship.
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories_Alt".into(),
+            from_table: "Products".into(),
+            from_column: "AltCategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+}
+
 #[test]
 fn related_supports_multi_hop_snowflake_navigation() {
     let mut model = build_snowflake_model();
@@ -267,6 +366,37 @@ fn related_supports_multi_hop_snowflake_navigation_columnar_fact() {
 #[test]
 fn related_supports_userelationship_override_across_snowflake_hops() {
     let mut model = build_snowflake_model_with_alternate_product_category_relationship();
+
+    model
+        .add_calculated_column("Sales", "DefaultCategory", "RELATED(Categories[CategoryName])")
+        .unwrap();
+    model
+        .add_calculated_column(
+            "Sales",
+            "AltCategory",
+            "CALCULATE(RELATED(Categories[CategoryName]), USERELATIONSHIP(Products[AltCategoryId], Categories[CategoryId]))",
+        )
+        .unwrap();
+
+    let sales = model.table("Sales").unwrap();
+    let values: Vec<(Value, Value)> = (0..sales.row_count())
+        .map(|row| {
+            (
+                sales.value(row, "DefaultCategory").unwrap(),
+                sales.value(row, "AltCategory").unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        values,
+        vec![(Value::from("A"), Value::from("B")), (Value::from("B"), Value::from("A"))]
+    );
+}
+
+#[test]
+fn related_supports_userelationship_override_across_snowflake_hops_columnar_fact() {
+    let mut model = build_snowflake_model_with_columnar_sales_and_alternate_product_category_relationship();
 
     model
         .add_calculated_column("Sales", "DefaultCategory", "RELATED(Categories[CategoryName])")
@@ -355,6 +485,34 @@ fn pivot_grouping_supports_multi_hop_snowflake_dimensions_columnar_fact() {
 #[test]
 fn pivot_grouping_respects_userelationship_override_for_snowflake_dimensions() {
     let model = build_snowflake_model_with_alternate_product_category_relationship();
+    let engine = DaxEngine::new();
+
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &["USERELATIONSHIP(Products[AltCategoryId], Categories[CategoryId])"],
+        )
+        .unwrap();
+
+    let group_by = vec![GroupByColumn::new("Categories", "CategoryName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+
+    let result = pivot(&model, "Sales", &group_by, &measures, &filter).unwrap();
+
+    // Under the alternate relationship, the category mapping is swapped.
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("A"), 7.0.into()],
+            vec![Value::from("B"), 10.0.into()],
+        ]
+    );
+}
+
+#[test]
+fn pivot_grouping_respects_userelationship_override_for_snowflake_dimensions_columnar_fact() {
+    let model = build_snowflake_model_with_columnar_sales_and_alternate_product_category_relationship();
     let engine = DaxEngine::new();
 
     let filter = engine
@@ -525,6 +683,39 @@ fn relatedtable_supports_multi_hop_snowflake_navigation_columnar_fact() {
 #[test]
 fn relatedtable_supports_userelationship_override_across_snowflake_hops() {
     let mut model = build_snowflake_model_with_alternate_product_category_relationship();
+
+    model
+        .add_calculated_column(
+            "Categories",
+            "Default Total Amount",
+            "SUMX(RELATEDTABLE(Sales), Sales[Amount])",
+        )
+        .unwrap();
+    model
+        .add_calculated_column(
+            "Categories",
+            "Alt Total Amount",
+            "CALCULATE(SUMX(RELATEDTABLE(Sales), Sales[Amount]), USERELATIONSHIP(Products[AltCategoryId], Categories[CategoryId]))",
+        )
+        .unwrap();
+
+    let categories = model.table("Categories").unwrap();
+    let values: Vec<(Value, Value)> = (0..categories.row_count())
+        .map(|row| {
+            (
+                categories.value(row, "Default Total Amount").unwrap(),
+                categories.value(row, "Alt Total Amount").unwrap(),
+            )
+        })
+        .collect();
+
+    // Category A: default is 10, alternate is 7. Category B: default is 7, alternate is 10.
+    assert_eq!(values, vec![(10.0.into(), 7.0.into()), (7.0.into(), 10.0.into())]);
+}
+
+#[test]
+fn relatedtable_supports_userelationship_override_across_snowflake_hops_columnar_fact() {
+    let mut model = build_snowflake_model_with_columnar_sales_and_alternate_product_category_relationship();
 
     model
         .add_calculated_column(
