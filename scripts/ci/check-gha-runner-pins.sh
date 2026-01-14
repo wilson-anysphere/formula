@@ -36,6 +36,7 @@ matches="$(
       in_block = 0;
       block_indent = 0;
       re = "(macos-latest|windows-latest|ubuntu-latest)";
+      block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
     }
 
     {
@@ -58,6 +59,14 @@ matches="$(
       line = raw;
       sub(/#.*/, "", line);
 
+      is_block = (line ~ block_re);
+
+      # Ignore single-line `run:` steps. We only want to catch runner label usage
+      # in the workflow configuration, not within inline shell snippets.
+      if (!is_block && line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) {
+        next;
+      }
+
       if (line ~ re) {
         printf "%d:%s\n", NR, raw;
       }
@@ -65,7 +74,7 @@ matches="$(
       # Detect YAML block scalars (e.g. `run: |` / `releaseBody: >-`) so we can skip
       # their content lines.
       # YAML allows both orders for chomping/indentation indicators (e.g. `|2-`, `|-2`).
-      if (line ~ /:[[:space:]]*[>|][0-9+-]*[[:space:]]*$/) {
+      if (is_block) {
         in_block = 1;
         block_indent = ind;
       }

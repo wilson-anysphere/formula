@@ -97,6 +97,17 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("ignores *-latest occurrences inside single-line run commands", { skip: !hasBash }, () => {
+  const proc = run(`
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ubuntu-latest
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("ignores *-latest occurrences inside block scalars with indentation/chomp indicators", { skip: !hasBash }, () => {
   const proc = run(`
 jobs:
