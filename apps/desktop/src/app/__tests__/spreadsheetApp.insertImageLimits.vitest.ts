@@ -175,4 +175,56 @@ describe("SpreadsheetApp image insertion limits", () => {
     app.destroy();
     root.remove();
   });
+
+  it("inserts the valid images and toasts about skipped oversized files", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    const bigArrayBuffer = vi.fn(async () => {
+      throw new Error("should not read oversized files");
+    });
+    const oversized1 = {
+      name: "big1.png",
+      type: "image/png",
+      size: MAX_INSERT_IMAGE_BYTES + 1,
+      arrayBuffer: bigArrayBuffer,
+    } as any as File;
+    const oversized2 = {
+      name: "big2.png",
+      type: "image/png",
+      size: MAX_INSERT_IMAGE_BYTES + 2,
+      arrayBuffer: bigArrayBuffer,
+    } as any as File;
+
+    const smallArrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer);
+    const small = {
+      name: "small.png",
+      type: "image/png",
+      size: 3,
+      arrayBuffer: smallArrayBuffer,
+    } as any as File;
+
+    await app.insertPicturesFromFiles([oversized1, small, oversized2]);
+
+    expect(bigArrayBuffer).not.toHaveBeenCalled();
+    expect(smallArrayBuffer).toHaveBeenCalledTimes(1);
+
+    const doc: any = app.getDocument();
+    expect(doc.getSheetDrawings(sheetId)).toHaveLength(1);
+
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    expect(toastSpy).toHaveBeenCalledWith("Skipped 2 images larger than 10MB: big1.png, big2.png", "warning");
+
+    app.destroy();
+    root.remove();
+  });
 });
