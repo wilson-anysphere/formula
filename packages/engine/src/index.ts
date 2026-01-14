@@ -6,6 +6,7 @@ export type {
   IterativeCalcSettings,
   CellChange,
   CellData,
+  CellDataCompact,
   CellDataRich,
   CellScalar,
   CellValueRich,
