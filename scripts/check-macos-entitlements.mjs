@@ -58,7 +58,8 @@ function hasTrueEntitlement(xml, key) {
     }
 
     // `<true/>` is typically short, but tolerate weird formatting like `<true     />`.
-    if (/<true\s*\/>/.test(xml.slice(i, i + 64))) return true;
+    // Anchor at the start so we don't accidentally match the `<true/>` value for a different key.
+    if (/^<true\s*\/>/.test(xml.slice(i, i + 64))) return true;
     start = xml.indexOf(marker, i);
   }
 
