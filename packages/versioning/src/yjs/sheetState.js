@@ -1,6 +1,5 @@
 import * as Y from "yjs";
 import { cellKey } from "../diff/semanticDiff.js";
-import { parseCellKey } from "../../../collab/session/src/cell-key.js";
 import { getArrayRoot, getMapRoot, getYMap, yjsValueToJson } from "../../../collab/yjs-utils/src/index.ts";
 
 function isPlainObject(value) {
@@ -258,9 +257,38 @@ function findSheetEntryById(doc, sheetId) {
  * @returns {{ sheetId: string, row: number, col: number } | null}
  */
 export function parseSpreadsheetCellKey(key, opts = {}) {
-  const parsed = parseCellKey(key, { defaultSheetId: opts.defaultSheetId ?? "Sheet1" });
-  if (!parsed) return null;
-  return { sheetId: parsed.sheetId, row: parsed.row, col: parsed.col };
+  const defaultSheetId = opts.defaultSheetId ?? "Sheet1";
+  if (typeof key !== "string" || key.length === 0) return null;
+
+  // Fast path: avoid `key.split(":")` to keep workbook snapshot extraction cheap
+  // (millions of cell keys) while preserving the exact legacy encodings.
+  const firstColon = key.indexOf(":");
+  if (firstColon !== -1) {
+    const secondColon = key.indexOf(":", firstColon + 1);
+    if (secondColon !== -1) {
+      // Reject 3+ colon encodings (unsupported).
+      if (key.indexOf(":", secondColon + 1) !== -1) return null;
+      const sheetId = key.slice(0, firstColon) || defaultSheetId;
+      const row = Number(key.slice(firstColon + 1, secondColon));
+      const col = Number(key.slice(secondColon + 1));
+      if (!Number.isInteger(row) || row < 0) return null;
+      if (!Number.isInteger(col) || col < 0) return null;
+      return { sheetId, row, col };
+    }
+
+    // Legacy `${sheetId}:${row},${col}` encoding.
+    const sheetId = key.slice(0, firstColon) || defaultSheetId;
+    const rest = key.slice(firstColon + 1);
+    const m = rest.match(/^(\d+),(\d+)$/);
+    if (!m) return null;
+    return { sheetId, row: Number(m[1]), col: Number(m[2]) };
+  }
+
+  // Unit-test convenience `r{row}c{col}` encoding.
+  const m = key.match(/^r(\d+)c(\d+)$/);
+  if (m) return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]) };
+
+  return null;
 }
 
 /**
