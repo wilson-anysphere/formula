@@ -209,5 +209,5 @@ echo "╠═══════════════════════�
 echo "║  Next Steps:                                                    ║"
 echo "║  1. Reboot or re-login for limits to take effect                ║"
 echo "║  2. Ensure Node.js and Rust are installed                       ║"
-echo "║  3. Agents should run: source scripts/agent-init.sh             ║"
+echo "║  3. Agents should run: . scripts/agent-init.sh                  ║"
 echo "╚════════════════════════════════════════════════════════════════╝"

@@ -295,7 +295,7 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
 
 ```bash
 # Initialize safe defaults (required for agents)
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 
 # Install dependencies
 pnpm install
@@ -325,7 +325,7 @@ cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev
 
 ```bash
 # Initialize safe defaults (required for agents)
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 
 # Build web assets
 pnpm build:desktop

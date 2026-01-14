@@ -115,7 +115,7 @@ fi
 # Defaults
 #
 # Prefer the wrapper-specific override, but fall back to the standard Cargo env var so
-# `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
+# `. scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
 caller_jobs_env="${FORMULA_CARGO_JOBS:-${FORMULA_CARGO_TEST_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 # Fail fast when callers explicitly configure an invalid job count. (We keep a more forgiving

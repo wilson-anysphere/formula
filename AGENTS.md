@@ -125,10 +125,10 @@ cargo test
 
 ```bash
 # Initialize safe defaults (do this first)
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 
 # Optional: override default Cargo parallelism for the session
-FORMULA_CARGO_JOBS=8 source scripts/agent-init.sh
+FORMULA_CARGO_JOBS=8 . scripts/agent-init.sh
 ```
 
 ### Helper Scripts
@@ -270,7 +270,7 @@ Regardless of workstream, these integration points require coordination:
 
 ```bash
 # Setup
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 pnpm install
 
 # Build WASM engine

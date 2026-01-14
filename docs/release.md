@@ -59,7 +59,7 @@ same version.
 
 Note: the `RUSTUP_TOOLCHAIN` environment variable has higher precedence than `rust-toolchain.toml`.
 If it is set globally (often to `stable`), it can accidentally bypass the pin for local builds and
-preflight scripts. Unset it (or `source scripts/agent-init.sh` / use `scripts/cargo_agent.sh`) when
+preflight scripts. Unset it (or `. scripts/agent-init.sh` / use `scripts/cargo_agent.sh`) when
 running release steps locally.
 
 To upgrade Rust, open a PR that bumps `rust-toolchain.toml` (and any workflow pins/comments that the
@@ -145,7 +145,7 @@ If you need to build release bundles locally, install the same versions (agents:
 wrapper):
 
 ```bash
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 
 WASM_PACK_VERSION=0.13.1
 TAURI_CLI_VERSION=2.9.5
@@ -460,7 +460,7 @@ use the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
 
 ```bash
 # (Agents) Initialize safe defaults (memory limits, isolated CARGO_HOME, etc.)
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 
 TAURI_CLI_VERSION=2.9.5
 
@@ -1768,7 +1768,7 @@ variables in **Settings → Secrets and variables → Actions → Variables**:
 1. Build the desktop bundles for your platform:
 
     ```bash
-    source scripts/agent-init.sh
+    . scripts/agent-init.sh
 
     TAURI_CLI_VERSION=2.9.5
     bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --locked --force

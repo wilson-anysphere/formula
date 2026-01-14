@@ -1,6 +1,7 @@
 #!/bin/bash
 # Initialize agent environment with safe memory defaults
-# Source this at the start of each agent session: source scripts/agent-init.sh
+# Source this at the start of each agent session: . scripts/agent-init.sh
+# (bash/zsh also support: source scripts/agent-init.sh)
 
 set -e
 

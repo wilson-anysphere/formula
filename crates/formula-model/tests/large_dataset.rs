@@ -8,7 +8,7 @@
 //!   performance regressions.
 //!
 //! To run the ignored stress test via the standard agent wrapper:
-//! `bash -lc 'source scripts/agent-init.sh && bash scripts/cargo_agent.sh test -p formula-model --test large_dataset -- --ignored'`
+//! `bash -lc '. scripts/agent-init.sh && bash scripts/cargo_agent.sh test -p formula-model --test large_dataset -- --ignored'`
 use formula_columnar::{
     ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions, Value,
 };
@@ -140,7 +140,7 @@ fn stream_100k_rows_and_render_viewport_smoke() {
 ///
 /// This is ignored by default because it can take a while in debug mode.
 /// Run with:
-/// `bash -lc 'source scripts/agent-init.sh && bash scripts/cargo_agent.sh test -p formula-model --test large_dataset -- --ignored'`
+/// `bash -lc '. scripts/agent-init.sh && bash scripts/cargo_agent.sh test -p formula-model --test large_dataset -- --ignored'`
 fn stream_10m_rows_and_render_first_viewport_without_oom() {
     let rows: usize = std::env::var("FORMULA_LARGE_TEST_ROWS_STRESS")
         .ok()

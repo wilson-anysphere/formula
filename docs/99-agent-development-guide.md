@@ -86,10 +86,10 @@ toolchain.
 
 ```bash
 # Initialize safe defaults (sets NODE_OPTIONS, CARGO_BUILD_JOBS, MAKEFLAGS, RAYON_NUM_THREADS, etc.)
-source scripts/agent-init.sh  # or: . scripts/agent-init.sh
+. scripts/agent-init.sh  # bash/zsh: source scripts/agent-init.sh
 
 # Optional: override default Cargo parallelism for the session
-FORMULA_CARGO_JOBS=8 source scripts/agent-init.sh
+FORMULA_CARGO_JOBS=8 . scripts/agent-init.sh
 ```
 
 ### Rust formatting (avoid noisy diffs)
@@ -137,7 +137,7 @@ Environment variables to tune behavior:
 
 ```bash
 # GOOD: Memory-limited (NODE_OPTIONS set by agent-init.sh)
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 npm install
 npm run build
 
@@ -485,7 +485,7 @@ sudo sysctl -p
 
 ```bash
 # Install sccache
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 bash scripts/cargo_agent.sh install sccache
 
 # Configure (add to ~/.bashrc)
@@ -540,7 +540,7 @@ This is **simpler and more reliable** than cgroups/systemd-run:
 ### Before Any Build
 
 ```bash
-source scripts/agent-init.sh
+. scripts/agent-init.sh
 ```
 
 ### Safe Commands
