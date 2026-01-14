@@ -45,13 +45,13 @@
   requires at least one installer of either type.
 
 .EXAMPLE
-  pwsh ./scripts/validate-windows-bundles.ps1
+  pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1
 
 .EXAMPLE
-  pwsh ./scripts/validate-windows-bundles.ps1 -ExePath apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+  pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1 -ExePath apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
 
 .EXAMPLE
-  pwsh ./scripts/validate-windows-bundles.ps1 -BundleDir apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle -RequireExe -RequireMsi
+  pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1 -BundleDir apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle -RequireExe -RequireMsi
 
 .NOTES
   If the environment variable WINDOWS_CERTIFICATE is set (non-empty), this
