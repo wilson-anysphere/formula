@@ -711,7 +711,37 @@ pub fn decrypt_agile_keys(
     info: &AgileEncryptionInfo,
     password: &str,
 ) -> Result<AgileDecryptedKeys> {
+    decrypt_agile_keys_with_options(info, password, &DecryptOptions::default())
+}
+
+/// Like [`decrypt_agile_keys`] but with configurable [`DecryptOptions`].
+///
+/// This enforces [`DecryptOptions::max_spin_count`] before running the expensive password KDF loop
+/// to avoid CPU DoS via attacker-controlled `spinCount` values.
+pub fn decrypt_agile_keys_with_options(
+    info: &AgileEncryptionInfo,
+    password: &str,
+    opts: &DecryptOptions,
+) -> Result<AgileDecryptedKeys> {
     let key_encryptor = &info.password_key_encryptor;
+    if key_encryptor.spin_count > opts.max_spin_count {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count: key_encryptor.spin_count,
+            max: opts.max_spin_count,
+        });
+    }
+
+    // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
+    // avoid spending time in the expensive password KDF when the file is already malformed.
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashInput",
+        &key_encryptor.encrypted_verifier_hash_input,
+    )?;
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashValue",
+        &key_encryptor.encrypted_verifier_hash_value,
+    )?;
+    validate_ciphertext_block_aligned("encryptedKeyValue", &key_encryptor.encrypted_key_value)?;
 
     let password_hash = hash_password(
         password,
@@ -738,16 +768,6 @@ pub fn decrypt_agile_keys(
     // `saltValue` as the AES-CBC IV, but some producers appear to derive per-blob IVs using the
     // standard `derive_iv` algorithm. Try both strategies for compatibility (mirrors
     // `agile_decrypt.rs`).
-    validate_ciphertext_block_aligned(
-        "encryptedVerifierHashInput",
-        &key_encryptor.encrypted_verifier_hash_input,
-    )?;
-    validate_ciphertext_block_aligned(
-        "encryptedVerifierHashValue",
-        &key_encryptor.encrypted_verifier_hash_value,
-    )?;
-    validate_ciphertext_block_aligned("encryptedKeyValue", &key_encryptor.encrypted_key_value)?;
-
     let package_key_len = (info.key_data.key_bits / 8) as usize;
 
     let decrypt_package_key = |iv_derivation: PasswordKeyIvDerivation| -> Result<Vec<u8>> {
@@ -2235,4 +2255,99 @@ mod tests {
         let parsed = parse_agile_encrypted_key(xml, &opts).expect("should accept with override");
         assert_eq!(parsed.spin_count, u32::MAX);
     }
-}
+
+    #[test]
+    fn decrypt_agile_keys_rejects_spin_count_above_default_max() {
+        let key_data = AgileKeyData {
+            salt_value: vec![0u8; 16],
+            hash_algorithm: HashAlgorithm::Sha1,
+            cipher_algorithm: "AES".to_string(),
+            cipher_chaining: "ChainingModeCBC".to_string(),
+            key_bits: 128,
+            block_size: 16,
+            hash_size: 20,
+        };
+
+        let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+        let info = AgileEncryptionInfo {
+            key_data,
+            data_integrity: None,
+            password_key_encryptor: AgilePasswordKeyEncryptor {
+                salt_value: vec![0u8; 16],
+                spin_count,
+                hash_algorithm: HashAlgorithm::Sha1,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+                key_bits: 128,
+                block_size: 16,
+                hash_size: 20,
+                encrypted_verifier_hash_input: vec![0u8; 16],
+                encrypted_verifier_hash_value: vec![0u8; 16],
+                encrypted_key_value: vec![0u8; 16],
+            },
+            warnings: Vec::new(),
+        };
+
+        let err = decrypt_agile_keys(&info, "pw").expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::SpinCountTooLarge {
+                    spin_count: s,
+                    max
+                } if s == spin_count && max == DEFAULT_MAX_SPIN_COUNT
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn decrypt_agile_keys_allows_overriding_max_spin_count() {
+        let key_data = AgileKeyData {
+            salt_value: vec![0u8; 16],
+            hash_algorithm: HashAlgorithm::Sha1,
+            cipher_algorithm: "AES".to_string(),
+            cipher_chaining: "ChainingModeCBC".to_string(),
+            key_bits: 128,
+            block_size: 16,
+            hash_size: 20,
+        };
+
+        let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+        let info = AgileEncryptionInfo {
+            key_data,
+            data_integrity: None,
+            password_key_encryptor: AgilePasswordKeyEncryptor {
+                salt_value: vec![0u8; 16],
+                spin_count,
+                hash_algorithm: HashAlgorithm::Sha1,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+                key_bits: 128,
+                block_size: 16,
+                hash_size: 20,
+                // Malformed ciphertext: not AES-block aligned. This should be reported before
+                // running the expensive password KDF loop.
+                encrypted_verifier_hash_input: vec![0u8; 15],
+                encrypted_verifier_hash_value: vec![0u8; 16],
+                encrypted_key_value: vec![0u8; 16],
+            },
+            warnings: Vec::new(),
+        };
+
+        let opts = DecryptOptions {
+            max_spin_count: u32::MAX,
+        };
+        let err = decrypt_agile_keys_with_options(&info, "pw", &opts).expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::CiphertextNotBlockAligned {
+                    field: "encryptedVerifierHashInput",
+                    len: 15
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+} 

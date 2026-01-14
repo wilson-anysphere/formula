@@ -76,7 +76,7 @@ pub use aes_cbc::{
 
 pub use agile::{
     decrypt_agile_encrypted_package_stream as decrypt_agile_encrypted_package_bytes,
-    decrypt_agile_encrypted_package_stream_with_key, decrypt_agile_keys,
+    decrypt_agile_encrypted_package_stream_with_key, decrypt_agile_keys, decrypt_agile_keys_with_options,
     parse_agile_encryption_info_stream, parse_agile_encryption_info_stream_with_options,
     parse_agile_encryption_info_stream_with_options_and_decrypt_options,
     parse_agile_encrypted_key, AgileDataIntegrity, AgileDecryptedKeys, AgileEncryptedKey,
