@@ -245,6 +245,35 @@ describe("extractFormulaReferences", () => {
     });
   });
 
+  it("extracts structured references even when they are followed by operators", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=Table1[[#All],[Amount]]+1";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[[#All],[Amount]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 1 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#All],[Amount]]".length
+    });
+  });
+
   it("extracts structured table references with explicit selectors (#Headers/#Data)", () => {
     const tables = new Map([
       [

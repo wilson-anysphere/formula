@@ -409,7 +409,18 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
         let k = j + 2;
         while (k < input.length && isWhitespace(input[k] ?? "")) k += 1;
         const after = input[k] ?? "";
-        const isDelimiterAfterClose = after === "" || after === "," || after === "]" || after === ")" || after === ";";
+        // After a structured reference closes, we can see a wide range of delimiters/operators:
+        // - argument separators: `,` / `;`
+        // - closing parens/brackets: `)` / `]`
+        // - operators: `+`, `-`, `*`, `/`, `^`, `&`, comparisons, `%`, spill `#`, etc.
+        //
+        // Treating these as delimiters prevents us from incorrectly classifying the final `]]`
+        // in `Table1[[#All],[Amount]]+1` as an escaped `]` sequence.
+        const isDelimiterAfterClose =
+          after === "" ||
+          "+-*/^&=><%@".includes(after) ||
+          "(),;:[]{}.!".includes(after) ||
+          after === "#";
         if (!isDelimiterAfterClose) {
           // Treat as escaped `]` inside the group.
           j += 2;

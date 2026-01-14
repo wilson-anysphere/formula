@@ -135,6 +135,18 @@ describe("tokenizeFormula", () => {
     expect(totalsRefs.map((t) => t.text)).toEqual(["Table1[[#Totals],[Amount]]"]);
   });
 
+  it("tokenizes structured references followed by operators (no trailing parens/commas)", () => {
+    // Regression: bracket escaping logic should not prevent recognizing structured refs when they
+    // are followed by an operator (e.g. `...]]+1`).
+    const tokens = tokenizeFormula("=Table1[[#All],[Amount]]+1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["reference", "Table1[[#All],[Amount]]"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
   it("tokenizes structured table specifiers (#All/#Headers/#Data/#Totals) as single reference tokens", () => {
     const input = "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals])";
     const refs = tokenizeFormula(input)
