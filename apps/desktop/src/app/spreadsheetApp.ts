@@ -1,5 +1,5 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
-import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
+import type { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
@@ -96,6 +96,7 @@ import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
 import { showToast, showQuickPick } from "../extensions/ui.js";
 import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleStrikethrough, toggleUnderline } from "../formatting/toolbar.js";
+import { createLazyImport } from "../startup/lazyImport.js";
 import {
   DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
   evaluateFormattingSelectionSize,
@@ -199,6 +200,21 @@ type AuditingCacheEntry = {
   precedentsError: string | null;
   dependentsError: string | null;
 };
+
+function reportLazyImportFailure(featureLabel: string, err: unknown): void {
+  console.error(`[formula][desktop] Failed to load ${featureLabel}:`, err);
+  try {
+    showToast(`Failed to load ${featureLabel}. Please reload the app.`, "error");
+  } catch {
+    // ignore (toast root missing / non-DOM contexts)
+  }
+}
+
+const loadFormulaBarTabCompletionModule = createLazyImport(() => import("../ai/completion/formulaBarTabCompletion.js"), {
+  label: "Formula bar tab completion",
+  onError: (err) => reportLazyImportFailure("formula bar tab completion", err),
+});
+
 const MAX_KEYBOARD_FORMATTING_CELLS = DEFAULT_FORMATTING_APPLY_CELL_LIMIT;
 // Copying a large rectangle requires allocating a per-cell clipboard payload (TSV/HTML/RTF)
 // and (for internal pastes) a per-cell snapshot of effective formats. Keep this bounded so
@@ -3776,49 +3792,75 @@ export class SpreadsheetApp {
         this.updateFormulaRangePreviewTooltip(range, this.formulaRangePreviewTooltipLastRefText);
       });
 
-      this.formulaBarCompletion = new FormulaBarTabCompletionController({
-        formulaBar: this.formulaBar,
-        document: this.document,
-        getSheetId: () => this.sheetId,
-        getWorkbookFileMetadata: () => this.workbookFileMetadata,
-        getEngineClient: () => this.wasmEngine,
-        sheetNameResolver: this.sheetNameResolver ?? undefined,
-        limits: this.limits,
-        schemaProvider: {
-          getNamedRanges: () => {
-            const formatSheetPrefix = (id: string): string => {
+      // Tab completion is a heavy dependency (function catalog + suggestion engine). Load it lazily so
+      // the grid can become visible with less upfront JS parsing/execution.
+      const ensureFormulaBarCompletion = () => {
+        if (this.disposed) return;
+        if (!this.formulaBar) return;
+        if (this.formulaBarCompletion) return;
 
-              const token = formatSheetNameForA1(id);
-              return token ? `${token}!` : "";
-            };
+        void loadFormulaBarTabCompletionModule().then((mod) => {
+          if (!mod) return;
+          if (this.disposed) return;
+          if (!this.formulaBar) return;
+          if (this.formulaBarCompletion) return;
 
-            const out: Array<{ name: string; range?: string }> = [];
-            for (const entry of this.searchWorkbook.names.values()) {
-              const e: any = entry as any;
-              const name = typeof e?.name === "string" ? (e.name as string) : "";
-              if (!name) continue;
-              const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
-              const range = e?.range;
-              const rangeText = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
-              out.push({ name, range: rangeText });
-            }
-            return out;
-          },
-          getTables: () =>
-            Array.from(this.searchWorkbook.tables.values())
-              .map((table: any) => ({
-                name: typeof table?.name === "string" ? table.name : "",
-                sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
-                startRow: typeof table?.startRow === "number" ? table.startRow : undefined,
-                startCol: typeof table?.startCol === "number" ? table.startCol : undefined,
-                endRow: typeof table?.endRow === "number" ? table.endRow : undefined,
-                endCol: typeof table?.endCol === "number" ? table.endCol : undefined,
-                columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
-              }))
-              .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
-          getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
-        },
-      });
+          this.formulaBarCompletion = new mod.FormulaBarTabCompletionController({
+            formulaBar: this.formulaBar,
+            document: this.document,
+            getSheetId: () => this.sheetId,
+            getWorkbookFileMetadata: () => this.workbookFileMetadata,
+            getEngineClient: () => this.wasmEngine,
+            sheetNameResolver: this.sheetNameResolver ?? undefined,
+            limits: this.limits,
+            schemaProvider: {
+              getNamedRanges: () => {
+                const formatSheetPrefix = (id: string): string => {
+                  const token = formatSheetNameForA1(id);
+                  return token ? `${token}!` : "";
+                };
+
+                const out: Array<{ name: string; range?: string }> = [];
+                for (const entry of this.searchWorkbook.names.values()) {
+                  const e: any = entry as any;
+                  const name = typeof e?.name === "string" ? (e.name as string) : "";
+                  if (!name) continue;
+                  const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
+                  const range = e?.range;
+                  const rangeText = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
+                  out.push({ name, range: rangeText });
+                }
+                return out;
+              },
+              getTables: () =>
+                Array.from(this.searchWorkbook.tables.values())
+                  .map((table: any) => ({
+                    name: typeof table?.name === "string" ? table.name : "",
+                    sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
+                    startRow: typeof table?.startRow === "number" ? table.startRow : undefined,
+                    startCol: typeof table?.startCol === "number" ? table.startCol : undefined,
+                    endRow: typeof table?.endRow === "number" ? table.endRow : undefined,
+                    endCol: typeof table?.endCol === "number" ? table.endCol : undefined,
+                    columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
+                  }))
+                  .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
+              getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
+            },
+          });
+        });
+      };
+
+      // Preload after first paint, but also ensure user interaction triggers initialization immediately.
+      const scheduleCompletionInit = () => {
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => ensureFormulaBarCompletion());
+        } else {
+          setTimeout(() => ensureFormulaBarCompletion(), 0);
+        }
+      };
+
+      this.formulaBar.textarea.addEventListener("focus", scheduleCompletionInit, { signal: this.domAbort.signal });
+      scheduleCompletionInit();
     }
 
     // Apply initial read-only UI state now that optional UI surfaces (formula bar)
