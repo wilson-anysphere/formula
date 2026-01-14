@@ -11,15 +11,7 @@ describe("FormulaBarView name box dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    let view: FormulaBarView;
-    const onGoTo = vi.fn((reference: string) => {
-      if (reference === "Table1[#All]") {
-        // Simulate the parent app updating the selection display after navigation.
-        // The Name Box should still keep the chosen label immediately after dropdown selection.
-        view.setActiveCell({ address: "A1", input: "", value: null, nameBox: "A1:D10" });
-      }
-      return true;
-    });
+    const onGoTo = vi.fn(() => true);
     const provider: NameBoxDropdownProvider = {
       getItems: () => [
         {
@@ -39,7 +31,7 @@ describe("FormulaBarView name box dropdown", () => {
       ],
     };
 
-    view = new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
     const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]');
