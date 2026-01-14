@@ -72,6 +72,27 @@ fn pivot_grand_totals_defaults_true_when_fields_missing() {
 }
 
 #[test]
+fn pivot_grand_totals_partial_payload_defaults_missing_keys_to_true() {
+    let decoded: GrandTotals = serde_json::from_value(json!({ "rows": false })).unwrap();
+    assert_eq!(
+        decoded,
+        GrandTotals {
+            rows: false,
+            columns: true,
+        }
+    );
+
+    let decoded: GrandTotals = serde_json::from_value(json!({ "columns": false })).unwrap();
+    assert_eq!(
+        decoded,
+        GrandTotals {
+            rows: true,
+            columns: false,
+        }
+    );
+}
+
+#[test]
 fn pivot_value_to_key_part_canonicalizes_numbers() {
     assert_eq!(
         PivotValue::Number(0.0).to_key_part(),
