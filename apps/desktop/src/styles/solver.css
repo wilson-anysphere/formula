@@ -8,18 +8,18 @@
 .solver-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .solver-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
 }
 
 .solver-panel__title {
-  margin: 0;
+  margin: var(--space-0);
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
@@ -27,7 +27,7 @@
 
 .solver-panel__configure-button {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -61,4 +61,3 @@
 .solver-panel__error {
   color: var(--error);
 }
-
