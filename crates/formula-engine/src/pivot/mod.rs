@@ -3174,6 +3174,7 @@ impl FieldIndices {
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
+
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
             let field_name = f
@@ -3186,6 +3187,7 @@ impl FieldIndices {
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
+
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
             let field_name = f
@@ -3198,6 +3200,7 @@ impl FieldIndices {
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
+
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
             let field_name = f
@@ -3209,6 +3212,7 @@ impl FieldIndices {
                 .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             filter_indices.push((idx, f.allowed.clone()));
         }
+
         Ok(Self {
             row_indices,
             col_indices,
