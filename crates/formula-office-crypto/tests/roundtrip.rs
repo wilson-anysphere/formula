@@ -337,7 +337,10 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let version_major = 4u16;
     let version_minor = 2u16;
     let flags = 0x0000_0000u32;
-    let header_flags = 0u32;
+    // MS-OFFCRYPTO Standard `EncryptionHeader.Flags`:
+    // - fCryptoAPI must be set for CryptoAPI (Standard) encryption.
+    // - fAES must be unset for RC4.
+    let header_flags = 0x0000_0004u32; // fCryptoAPI
     let size_extra = 0u32;
     let alg_id = 0x0000_6801u32; // CALG_RC4
     let alg_id_hash = rc4_hash_alg_id(hash_alg);
@@ -414,7 +417,10 @@ fn encrypt_standard_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     let version_minor = 2u16;
     let flags = 0x0000_0040u32;
 
-    let header_flags = 0u32;
+    // MS-OFFCRYPTO Standard `EncryptionHeader.Flags`:
+    // - fCryptoAPI indicates CryptoAPI/Standard encryption.
+    // - fAES must be set for AES algorithms.
+    let header_flags = 0x0000_0004u32 | 0x0000_0020u32; // fCryptoAPI | fAES
     let size_extra = 0u32;
     let alg_id = 0x0000_660Eu32; // CALG_AES_128
     let alg_id_hash = 0x0000_8004u32; // CALG_SHA1
