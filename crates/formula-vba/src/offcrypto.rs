@@ -606,6 +606,9 @@ pub(crate) fn standard_cryptoapi_rc4_block_key(
     block: u32,
     key_size_bits: usize,
 ) -> Option<Vec<u8>> {
+    // MS-OFFCRYPTO specifies that for Standard/CryptoAPI RC4, `EncryptionHeader.keySize == 0` MUST
+    // be interpreted as 40-bit.
+    let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
     if !key_size_bits.is_multiple_of(8) {
         return None;
     }
@@ -1173,6 +1176,18 @@ mod tests {
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
             .expect("should derive sha1 rc4 block key");
         assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
+    }
+
+    #[test]
+    fn standard_cryptoapi_rc4_key_derivation_sha1_keysize_0_is_interpreted_as_40bit() {
+        // MS-OFFCRYPTO specifies that for Standard/CryptoAPI RC4, `keySize==0` MUST be interpreted
+        // as 40-bit.
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+
+        let key_0 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 0)
+            .expect("should derive sha1 rc4 block key");
+        assert_eq!(hex_lower(&key_0), "6ad7dedf2d0000000000000000000000");
     }
 
     #[test]

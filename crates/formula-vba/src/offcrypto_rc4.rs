@@ -58,6 +58,9 @@ pub(crate) fn derive_rc4_key_b(
     block_index: u32,
     hash_alg: HashAlg,
 ) -> Vec<u8> {
+    // MS-OFFCRYPTO specifies that for Standard/CryptoAPI RC4, `EncryptionHeader.keySize == 0` MUST
+    // be interpreted as 40-bit.
+    let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
     debug_assert!(
         key_size_bits % 8 == 0,
         "key_size_bits must be a whole number of bytes"
@@ -156,6 +159,21 @@ mod tests {
             decode_hex("6ad7dedf2d0000000000000000000000")
         );
         assert_eq!(derived.len(), 16);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_0_is_interpreted_as_40bit() {
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        let derived_0 = derive_rc4_key_b(password, &salt, 0, 0, HashAlg::Sha1);
+        let derived_40 = derive_rc4_key_b(password, &salt, 40, 0, HashAlg::Sha1);
+        assert_eq!(derived_0, derived_40);
+        assert_eq!(derived_0, decode_hex("6ad7dedf2d0000000000000000000000"));
+        assert_eq!(derived_0.len(), 16);
     }
 
     #[test]
