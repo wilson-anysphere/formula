@@ -434,6 +434,66 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     root.remove();
   });
 
+  it("keeps selection, tags context-click, and focuses the grid when right-clicking a selection handle (drawing interactions enabled)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+
+    // Move the active cell away from A1 so we can detect selection changes.
+    app.activateCell({ row: 5, col: 5 }, { scrollIntoView: false, focus: false });
+    const beforeActive = app.getActiveCell();
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(1);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    // jsdom returns a zero-sized client rect for canvases by default; the drawing interaction controller
+    // uses `getBoundingClientRect()` to convert clientX/Y into local coordinates. Ensure the selection
+    // canvas reports the same rect as the grid root so hit testing works deterministically.
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+    const focusSpy = vi.spyOn(root, "focus");
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    // Right-click just outside the drawing bounds, but still within the top-left resize handle square.
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: rowHeaderWidth + 100 - 1,
+      clientY: colHeaderHeight + 100 - 1,
+      button: 2,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect(app.getActiveCell()).toEqual(beforeActive);
+    expect((down as any).__formulaDrawingContextClick).toBe(true);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
+    expect(focusSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("hitTestDrawingAtClientPoint treats selection handles as drawing hits", () => {
     const root = createRoot();
     const status = {
