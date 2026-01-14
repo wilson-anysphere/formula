@@ -68,6 +68,20 @@ export interface WorkbookRagRect {
   c1: number;
 }
 
+export interface WorkbookRagTable {
+  name: string;
+  sheetName: string;
+  rect: WorkbookRagRect;
+  [key: string]: unknown;
+}
+
+export interface WorkbookRagNamedRange {
+  name: string;
+  sheetName: string;
+  rect: WorkbookRagRect;
+  [key: string]: unknown;
+}
+
 export interface WorkbookRagSheet {
   name: string;
   /**
@@ -90,8 +104,8 @@ export interface WorkbookRagSheet {
 export interface WorkbookRagWorkbook {
   id: string;
   sheets: WorkbookRagSheet[];
-  tables?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
-  namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
+  tables?: WorkbookRagTable[];
+  namedRanges?: WorkbookRagNamedRange[];
   [key: string]: unknown;
 }
 
@@ -195,11 +209,11 @@ export interface DlpOptions {
   policy: unknown;
   classificationRecords?: DlpClassificationRecord[];
   classification_records?: DlpClassificationRecord[];
-  classificationStore?: { list(documentId: string): DlpClassificationRecord[] } | null;
-  classification_store?: { list(documentId: string): DlpClassificationRecord[] } | null;
+  classificationStore?: { list(documentId: string): DlpClassificationRecord[]; [key: string]: unknown } | null;
+  classification_store?: { list(documentId: string): DlpClassificationRecord[]; [key: string]: unknown } | null;
   includeRestrictedContent?: boolean;
   include_restricted_content?: boolean;
-  auditLogger?: { log(event: unknown): void };
+  auditLogger?: { log(event: unknown): void; [key: string]: unknown };
   /**
    * Optional sheet name <-> id resolver used for structured DLP enforcement.
    */

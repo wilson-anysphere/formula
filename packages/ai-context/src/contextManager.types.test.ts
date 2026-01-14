@@ -26,6 +26,8 @@ import {
   type RetrievedWorkbookChunk,
   type WorkbookChunkMetadata,
   type WorkbookIndexStats,
+  type WorkbookRagTable,
+  type WorkbookRagNamedRange,
   type SheetNameResolverLike,
   type SpreadsheetApiLike,
   type SpreadsheetApiWithNonEmptyCells,
@@ -62,6 +64,8 @@ type _DlpOptionsInputNotAny = Assert<IsAny<DlpOptionsInput> extends false ? true
 type _SheetNameResolverNotAny = Assert<IsAny<SheetNameResolverLike> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _SpreadsheetWithCellsNotAny = Assert<IsAny<SpreadsheetApiWithNonEmptyCells> extends false ? true : false>;
+type _WorkbookRagTableNotAny = Assert<IsAny<WorkbookRagTable> extends false ? true : false>;
+type _WorkbookRagNamedRangeNotAny = Assert<IsAny<WorkbookRagNamedRange> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
 type _ClearCacheOptionsNotAny = Assert<
