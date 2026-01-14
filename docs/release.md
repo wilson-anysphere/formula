@@ -1667,6 +1667,10 @@ To catch regressions before tagging, Linux PRs/main also run `.github/workflows/
 which builds the Linux AppImage/DEB bundles and reports sizes in the workflow summary (optional gating
 via `FORMULA_ENFORCE_BUNDLE_SIZE` / `FORMULA_BUNDLE_SIZE_LIMIT_MB`).
 
+That workflow also runs `python scripts/verify_desktop_binary_stripped.py` after the Tauri build step
+to fail early if the produced `formula-desktop` binary is not stripped or if debug/symbol sidecar
+files accidentally end up in `**/release/bundle/**`.
+
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
 download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
 and `pnpm -C apps/desktop check:bundle-size`).
