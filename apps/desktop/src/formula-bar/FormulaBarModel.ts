@@ -789,7 +789,27 @@ export class FormulaBarModel {
       };
     }
 
-    const activeIndex = findActiveReferenceIndex(references, this.#cursorStart, this.#cursorEnd);
+    // Cursor moves within the same reference token are extremely common (especially while
+    // the user edits/steps through a ref like `A1:B2`). Avoid the O(log n) binary search in
+    // that hot path by checking the previously-active reference first.
+    const prevActiveIndex = this.#activeReferenceIndex;
+    let activeIndex: number | null | undefined = undefined;
+    if (cacheHit && prevActiveIndex != null && this.#coloredReferences.length === references.length) {
+      const prevRef = this.#coloredReferences[prevActiveIndex] ?? null;
+      if (prevRef) {
+        const start = Math.min(this.#cursorStart, this.#cursorEnd);
+        const end = Math.max(this.#cursorStart, this.#cursorEnd);
+        if (start !== end) {
+          if (prevRef.start <= start && end <= prevRef.end) activeIndex = prevRef.index;
+        } else {
+          // Caret: treat the reference as active if the caret is inside (including at end).
+          if (prevRef.start <= start && start <= prevRef.end) activeIndex = prevRef.index;
+        }
+      }
+    }
+    if (activeIndex === undefined) {
+      activeIndex = findActiveReferenceIndex(references, this.#cursorStart, this.#cursorEnd);
+    }
 
     // Reference colors and ranges are determined by the formula text. When only the cursor/selection
     // moves, we can keep the existing colored reference list and update just the active index.
