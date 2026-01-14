@@ -499,7 +499,7 @@ validate_appimage() {
   done
 
   if [ "${#matched_desktop_files[@]}" -eq 0 ]; then
-    echo "${SCRIPT_NAME}: error: No .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' (or AppRun) in its Exec= entry." >&2
+    echo "${SCRIPT_NAME}: error: No .desktop files appear to target the expected executable '${EXPECTED_MAIN_BINARY}' (or AppRun) in their Exec= entry." >&2
     echo "${SCRIPT_NAME}: error: .desktop files inspected:" >&2
     for desktop_file in "${desktop_files[@]}"; do
       local rel
@@ -511,7 +511,7 @@ validate_appimage() {
       fi
       echo "  - ${rel}: ${exec_line}" >&2
     done
-    die "No .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' (or AppRun) in Exec=."
+    die "No .desktop files appear to target the expected executable '${EXPECTED_MAIN_BINARY}' (or AppRun) in Exec=."
   fi
 
   desktop_files=("${matched_desktop_files[@]}")

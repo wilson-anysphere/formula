@@ -225,6 +225,20 @@ test("validate-linux-appimage honors FORMULA_APPIMAGE_MAIN_BINARY override", { s
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("validate-linux-appimage accepts when .desktop Exec= wraps the binary in quotes", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, {
+    withDesktopFile: true,
+    withXlsxMime: true,
+    execLine: `\"/usr/bin/${expectedMainBinaryName}\" %U`,
+    appImageVersion: expectedVersion,
+  });
+
+  const proc = runValidator(appImagePath);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("validate-linux-appimage auto-discovery validates newest AppImage by default (and --all validates all)", { skip: !hasBash }, () => {
   const tmpTarget = mkdtempSync(join(tmpdir(), "formula-appimage-target-"));
   const bundleDir = join(tmpTarget, "release", "bundle", "appimage");
@@ -463,7 +477,7 @@ test("validate-linux-appimage fails when .desktop Exec= does not reference AppRu
 
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
-  assert.match(proc.stderr, /referenced expected main binary/i);
+  assert.match(proc.stderr, /target the expected executable/i);
   assert.match(proc.stderr, /AppRun/i);
 });
 
