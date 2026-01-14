@@ -1,4 +1,4 @@
-use formula_biff::{decode_rgce, decode_rgce_with_rgcb, DecodeRgceError};
+use formula_biff::{decode_rgce, decode_rgce_with_base, decode_rgce_with_rgcb, DecodeRgceError};
 
 #[test]
 fn decode_rgce_reports_offset_for_truncated_ptgstr() {
@@ -164,4 +164,83 @@ fn decode_rgce_error_messages_include_ptg_and_offset() {
             "expected error message to contain ptg and offset, got: {msg}"
         );
     }
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_truncated_ptgattr_header() {
+    // PtgAttr requires [grbit: u8][wAttr: u16] after the ptg byte.
+    let err = decode_rgce(&[0x19]).expect_err("expected truncated PtgAttr");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::UnexpectedEof {
+                offset: 0,
+                ptg: 0x19,
+                needed: 3,
+                remaining: 0
+            }
+        ),
+        "expected UnexpectedEof at offset 0 for ptg=0x19, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_truncated_tattrchoose_jump_table() {
+    // PtgAttr(tAttrChoose, wAttr=2) requires 4 jump-table bytes after the 3-byte attr header.
+    // Provide only 2.
+    let rgce = [
+        0x1E, 0x01, 0x00, // PtgInt(1) (prefix)
+        0x19, 0x04, 0x02, 0x00, // PtgAttr(tAttrChoose, wAttr=2)
+        0xFF, 0xFF, // truncated jump table (needs 4 bytes)
+    ];
+    let err = decode_rgce(&rgce).expect_err("expected truncated tAttrChoose jump table");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::UnexpectedEof {
+                offset: 3,
+                ptg: 0x19,
+                needed: 4,
+                remaining: 2
+            }
+        ),
+        "expected UnexpectedEof at offset 3 for ptg=0x19, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_tattrsum_stack_underflow() {
+    // PtgAttr(tAttrSum) rewrites the previous arg as SUM(arg). With an empty stack, this is a
+    // stack underflow.
+    let rgce = [0x19, 0x10, 0x00, 0x00];
+    let err = decode_rgce(&rgce).expect_err("expected stack underflow");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::StackUnderflow {
+                offset: 0,
+                ptg: 0x19
+            }
+        ),
+        "expected StackUnderflow at offset 0 for ptg=0x19, got {err:?}"
+    );
+}
+
+#[test]
+fn decode_rgce_reports_offset_for_truncated_ptgrefn_payload() {
+    // PtgRefN requires 6 bytes of payload after the ptg. Truncated payload should be EOF even
+    // when using the base-aware decoder.
+    let err = decode_rgce_with_base(&[0x2C], 0, 0).expect_err("expected truncated PtgRefN");
+    assert!(
+        matches!(
+            err,
+            DecodeRgceError::UnexpectedEof {
+                offset: 0,
+                ptg: 0x2C,
+                needed: 6,
+                remaining: 0
+            }
+        ),
+        "expected UnexpectedEof at offset 0 for ptg=0x2C, got {err:?}"
+    );
 }
