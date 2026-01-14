@@ -1,12 +1,57 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ed25519_dalek::{Signature, VerifyingKey};
 use pkcs8::DecodePublicKey;
+use serde::{de, Deserialize};
+use std::fmt;
 
 // NOTE: Keep these limits in sync with the browser verifier in
 // `shared/extension-package/v2-browser.mjs`.
 const MAX_SIGNATURE_PAYLOAD_BYTES: usize = 5 * 1024 * 1024; // 5MB
 const MAX_PUBLIC_KEY_PEM_BYTES: usize = 64 * 1024; // 64KB
 const MAX_SIGNATURE_BASE64_BYTES: usize = 1024;
+
+/// IPC-deserialized byte array with a maximum length enforced during deserialization.
+///
+/// This is a defense-in-depth guard to prevent a compromised webview from attempting to allocate an
+/// unbounded `Vec<u8>` via a giant JSON array before we can validate the payload size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitedByteVec<const MAX: usize>(pub Vec<u8>);
+
+impl<'de, const MAX: usize> Deserialize<'de> for LimitedByteVec<MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitedByteVecVisitor<const MAX: usize>;
+
+        impl<'de, const MAX: usize> de::Visitor<'de> for LimitedByteVecVisitor<MAX> {
+            type Value = LimitedByteVec<MAX>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of bytes")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let capacity = seq.size_hint().unwrap_or(0).min(MAX);
+                let mut out = Vec::with_capacity(capacity);
+                while let Some(v) = seq.next_element::<u8>()? {
+                    if out.len() >= MAX {
+                        return Err(de::Error::custom(format!(
+                            "Payload is too large (max {MAX} bytes)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedByteVec(out))
+            }
+        }
+
+        deserializer.deserialize_seq(LimitedByteVecVisitor::<MAX>)
+    }
+}
 
 pub fn verify_ed25519_signature_payload(
     payload: &[u8],
@@ -62,11 +107,18 @@ pub fn verify_ed25519_signature_payload(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn verify_ed25519_signature(
-    payload: Vec<u8>,
+    window: tauri::WebviewWindow,
+    payload: LimitedByteVec<MAX_SIGNATURE_PAYLOAD_BYTES>,
     signature_base64: String,
     public_key_pem: String,
 ) -> Result<bool, String> {
-    verify_ed25519_signature_payload(&payload, &signature_base64, &public_key_pem)
+    use crate::ipc_origin::Verb;
+
+    crate::ipc_origin::ensure_main_window(window.label(), "ed25519 verification", Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    crate::ipc_origin::ensure_trusted_origin(&url, "ed25519 verification", Verb::Is)?;
+
+    verify_ed25519_signature_payload(&payload.0, &signature_base64, &public_key_pem)
 }
 
 #[cfg(test)]
