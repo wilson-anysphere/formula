@@ -159,7 +159,7 @@ test("fails when Linux updater assets do not include an arch token in the filena
   const { platforms, assetNames } = baseline();
   platforms["linux-x86_64"].url =
     "https://github.com/example/repo/releases/download/v0.1.0/Formula.AppImage";
-  assetNames.delete("Formula_0.1.0_amd64.AppImage");
+  assetNames.delete("Formula_0.1.0_x86_64.AppImage");
   assetNames.add("Formula.AppImage");
 
   const result = validatePlatformEntries({ platforms, assetNames });
@@ -182,6 +182,34 @@ test("fails when latest.json.platforms is missing a required platform key", () =
   );
   assert.match(message, /Missing \(1\):/);
   assert.match(message, /linux-x86_64/);
+});
+
+test("fails when latest.json.platforms is missing linux-aarch64", () => {
+  const { platforms, assetNames } = baseline();
+  delete platforms["linux-aarch64"];
+  assetNames.delete("Formula_0.1.0_arm64.AppImage");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  const message = result.errors.join("\n");
+  assert.ok(
+    result.errors.some((e) => e.includes("Missing required latest.json.platforms keys")),
+    `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
+  assert.match(message, /Missing \(1\):/);
+  assert.match(message, /linux-aarch64/);
+});
+
+test("fails when latest.json.platforms is missing darwin-aarch64 (macOS universal per-arch key)", () => {
+  const { platforms, assetNames } = baseline();
+  delete platforms["darwin-aarch64"];
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  const message = result.errors.join("\n");
+  assert.ok(
+    result.errors.some((e) => e.includes("Missing required latest.json.platforms keys")),
+    `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
+  assert.match(message, /darwin-aarch64/);
 });
 
 test("accepts additional installer-specific platform keys (e.g. windows-x86_64-msi)", () => {
