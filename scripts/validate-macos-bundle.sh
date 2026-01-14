@@ -73,7 +73,7 @@ This repo ships **universal** macOS artifacts (Intel + Apple Silicon). This scri
 app binary contains both `x86_64` and `arm64` slices (via `lipo -info`).
 
 Options:
-  --dmg <path>   Validate a specific DMG (skip artifact discovery)
+  --dmg <path>   Validate a specific DMG (skip DMG discovery; still validates updater tarballs when found)
   -h, --help     Show help
 
 Artifact discovery (when --dmg is not provided):
