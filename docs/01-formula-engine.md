@@ -154,7 +154,9 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
     * The `sheet` portion is the worksheet display name with any formula quoting removed
       (e.g. `'Sheet 1'` in a formula becomes `Sheet 1` in the key).
     * The engine preserves the formula’s casing for single-sheet external keys; providers that want
-      Excel-compatible behavior should generally match sheet keys case-insensitively.
+      Excel-compatible behavior should generally match sheet keys using Excel’s Unicode-aware,
+      NFKC + case-insensitive comparison semantics (see
+      `formula_model::sheet_name_eq_case_insensitive`).
 
 Example (quoted external sheet name):
 
@@ -224,8 +226,10 @@ Expansion rules:
 * The returned sheet names must be **plain sheet display names**:
   * No `[workbook]` prefix.
   * No formula quoting (e.g. return `Sheet 1`, not `'Sheet 1'`).
-  * Each sheet should appear **exactly once** (Excel sheet names are case-insensitive).
-* Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
+  * Each sheet should appear **exactly once** (Excel sheet names are compared case-insensitively
+    across Unicode, using NFKC + case folding).
+* Endpoint matching (`Sheet1` / `Sheet3`) uses Excel’s Unicode-aware, NFKC + case-insensitive
+  comparison semantics (see `formula_model::sheet_name_eq_case_insensitive`).
 * The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys
   for `get` calls.
 * Spans are resolved by workbook sheet order regardless of whether the user writes them “forward”

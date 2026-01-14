@@ -8945,9 +8945,10 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// edges from formula cells to individual external cells, so hosts should call `recalculate()` when
 /// external values may have changed.
 ///
-/// Note: Excel treats sheet names case-insensitively. The engine preserves the formula's casing in
-/// the sheet key for single-sheet external references, so providers that want Excel-compatible
-/// behavior should generally match sheet keys case-insensitively.
+/// Note: Excel compares sheet names case-insensitively across Unicode and applies compatibility
+/// normalization (NFKC). The engine preserves the formula's casing in the sheet key for single-sheet
+/// external references, so providers that want Excel-compatible behavior should generally match
+/// sheet keys using the same semantics (see [`formula_model::sheet_name_eq_case_insensitive`]).
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
 
@@ -8962,8 +8963,8 @@ pub trait ExternalValueProvider: Send + Sync {
     /// prefix). Sheet names should be unquoted display names (e.g. return `Sheet 1`, not
     /// `'Sheet 1'`) and each sheet should appear exactly once.
     ///
-    /// Endpoint matching (`Sheet1` / `Sheet3`) uses Excel-like Unicode-aware, NFKC +
-    /// case-insensitive comparison (see [`formula_model::sheet_name_eq_case_insensitive`]).
+    /// Endpoint matching (`Sheet1` / `Sheet3`) uses Excel’s Unicode-aware, NFKC + case-insensitive
+    /// comparison semantics (see [`formula_model::sheet_name_eq_case_insensitive`]).
     ///
     /// Spans are resolved by workbook sheet order regardless of whether the user writes them
     /// “forward” or “reversed” in the formula (e.g. `Sheet3:Sheet1` is treated the same as
