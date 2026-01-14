@@ -5127,21 +5127,37 @@ if (
         const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : DEFAULT_DESKTOP_LOAD_MAX_ROWS + 1;
         const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : DEFAULT_DESKTOP_LOAD_MAX_COLS + 1;
 
-        const view = new mod.SecondaryGridView({
-          container: gridSecondaryEl,
-          provider: app.getSharedGridProvider() ?? undefined,
-          imageResolver: app.getSharedGridImageResolver() ?? undefined,
-          document: app.getDocument(),
-          getSheetId: getSecondarySheetId,
-          rowCount,
-          colCount,
-          showFormulas: () => app.getShowFormulas(),
-          getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
-          getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
-          images: app.getDrawingImages(),
-          chartRenderer: app.getDrawingChartRenderer(),
-          getSelectedDrawingId: () => app.getSelectedDrawingId(),
-          onRequestRefresh: () => app.refresh(),
+          const view = new mod.SecondaryGridView({
+            container: gridSecondaryEl,
+            provider: app.getSharedGridProvider() ?? undefined,
+            imageResolver: app.getSharedGridImageResolver() ?? undefined,
+            document: app.getDocument(),
+            getSheetId: getSecondarySheetId,
+            rowCount,
+            colCount,
+            showFormulas: () => app.getShowFormulas(),
+            getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
+            inferCollabEditRejection: (cell) => {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const appAny = app as any;
+                const infer = appAny?.inferCollabEditRejection;
+                if (typeof infer === "function") {
+                  const inferred = infer.call(appAny, cell);
+                  if (inferred && typeof inferred === "object" && typeof (inferred as any).rejectionReason === "string") {
+                    return inferred as any;
+                  }
+                }
+              } catch {
+                // ignore
+              }
+              return { rejectionReason: "permission" as const };
+            },
+            getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+            images: app.getDrawingImages(),
+            chartRenderer: app.getDrawingChartRenderer(),
+            getSelectedDrawingId: () => app.getSelectedDrawingId(),
+            onRequestRefresh: () => app.refresh(),
           onSelectionChange: () => syncPrimarySelectionFromSecondary(),
           onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
           callbacks: app.getSharedGridRangeSelectionCallbacks(),

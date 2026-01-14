@@ -23,6 +23,12 @@ type ScrollState = { scrollX: number; scrollY: number };
 
 const MAX_FILL_CELLS = 200_000;
 
+type CollabEditRejection = {
+  rejectionReason: "permission" | "encryption" | "unknown";
+  encryptionKeyId?: string;
+  encryptionPayloadUnsupported?: boolean;
+};
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
@@ -124,6 +130,7 @@ export class SecondaryGridView {
 
   private readonly persistScroll?: (scroll: ScrollState) => void;
   private readonly persistZoom?: (zoom: number) => void;
+  private readonly inferCollabEditRejection?: (cell: { sheetId: string; row: number; col: number }) => CollabEditRejection;
 
   private readonly drawingsCanvas: HTMLCanvasElement;
   private readonly drawingsOverlay: DrawingOverlay;
@@ -230,6 +237,13 @@ export class SecondaryGridView {
      * shell uses this to keep UI state (status bar, shortcut gating, etc) in sync.
      */
     onEditStateChange?: (isEditing: boolean) => void;
+    /**
+     * Optional hook to infer why a cell edit is blocked (permission vs missing encryption key).
+     *
+     * The split-view secondary pane does not own the CollabSession/encryption state; SpreadsheetApp
+     * passes this down so we can show encryption-aware rejection toasts for bulk operations.
+     */
+    inferCollabEditRejection?: (cell: { sheetId: string; row: number; col: number }) => CollabEditRejection;
   }) {
     this.container = options.container;
     this.document = options.document;
@@ -241,6 +255,8 @@ export class SecondaryGridView {
     this.persistScroll = options.persistScroll;
     this.persistZoom = options.persistZoom;
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
+    this.inferCollabEditRejection =
+      typeof options.inferCollabEditRejection === "function" ? options.inferCollabEditRejection : undefined;
     this.sheetId = options.getSheetId();
     this.onRequestRefresh = options.onRequestRefresh;
     this.onEditStateChange = options.onEditStateChange;
@@ -681,13 +697,14 @@ export class SecondaryGridView {
     if (typeof canEditCell === "function") {
       let allowed = true;
       try {
-        allowed = Boolean(canEditCell({ sheetId, row: cell.row, col: cell.col }));
+        allowed = Boolean(canEditCell.call(this.document, { sheetId, row: cell.row, col: cell.col }));
       } catch {
         allowed = true;
       }
       if (!allowed) {
+        const rejection = this.inferRejection({ sheetId, row: cell.row, col: cell.col });
         showCollabEditRejectedToast([
-          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", ...rejection },
         ]);
         return;
       }
@@ -725,13 +742,14 @@ export class SecondaryGridView {
     if (typeof canEditCell === "function") {
       let allowed = true;
       try {
-        allowed = Boolean(canEditCell({ sheetId, row: cell.row, col: cell.col }));
+        allowed = Boolean(canEditCell.call(this.document, { sheetId, row: cell.row, col: cell.col }));
       } catch {
         allowed = true;
       }
       if (!allowed) {
+        const rejection = this.inferRejection({ sheetId, row: cell.row, col: cell.col });
         showCollabEditRejectedToast([
-          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+          { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", ...rejection },
         ]);
         return;
       }
@@ -993,6 +1011,24 @@ export class SecondaryGridView {
     const prevSelection = this.grid.renderer.getSelection();
     const prevRanges = this.grid.renderer.getSelectionRanges().map((r) => ({ ...r }));
     const prevActiveIndex = this.grid.renderer.getActiveSelectionIndex();
+ 
+     const restoreSelection = () => {
+       // DesktopSharedGrid will still expand selection to the dragged target range even if
+       // we skip applying edits. Suppress selection sync callbacks and restore the prior
+       // selection on the next microtask turn so split-view panes stay consistent.
+       this.suppressSelectionCallbacks = true;
+       queueMicrotask(() => {
+         try {
+           this.grid.setSelectionRanges(prevRanges, {
+             activeIndex: prevActiveIndex,
+             activeCell: prevSelection,
+             scrollIntoView: false,
+           });
+         } finally {
+           this.suppressSelectionCallbacks = false;
+         }
+       });
+     };
 
     const toFillRange = (range: GridCellRange): FillEngineRange | null => {
       const startRow = Math.max(0, range.startRow - this.headerRows);
@@ -1012,62 +1048,28 @@ export class SecondaryGridView {
     const spreadsheetEditing =
       this.editor.isOpen() || ((globalThis as any).__formulaSpreadsheetIsEditing as boolean | undefined) === true;
     if (spreadsheetEditing) {
-      // DesktopSharedGrid will still expand selection to the dragged target range even if
-      // we skip applying edits. Suppress selection sync callbacks and restore the prior
-      // selection on the next microtask turn so split-view panes stay consistent.
-      this.suppressSelectionCallbacks = true;
-      queueMicrotask(() => {
-        try {
-          this.grid.setSelectionRanges(prevRanges, {
-            activeIndex: prevActiveIndex,
-            activeCell: prevSelection,
-            scrollIntoView: false,
-          });
-        } finally {
-          this.suppressSelectionCallbacks = false;
-        }
-      });
+      restoreSelection();
       return;
     }
 
-    // In collab read-only roles (viewer/commenter), block fill operations in the secondary pane.
-    // DocumentController silently filters disallowed cell deltas via `canEditCell`, so guard here
-    // to avoid a confusing "selection expanded but nothing happened" outcome.
+    // Respect per-cell permissions/encryption. `DocumentController` filters writes per-cell via
+    // `canEditCell`, but for fill we want deterministic skipping and a clear UX outcome when
+    // nothing can be applied (avoid "selection expanded but nothing happened").
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const canEditCell = (this.document as any).canEditCell as
+    const canEditCellFn = (this.document as any).canEditCell as
       | ((cell: { sheetId: string; row: number; col: number }) => boolean)
       | null
       | undefined;
-    if (typeof canEditCell === "function") {
-      let allowed = true;
-      try {
-        allowed = Boolean(canEditCell({ sheetId, row: source.startRow, col: source.startCol }));
-      } catch {
-        allowed = true;
-      }
-      if (!allowed) {
-        showCollabEditRejectedToast([
-          { sheetId, row: source.startRow, col: source.startCol, rejectionKind: "cell", rejectionReason: "permission" },
-        ]);
-
-        // DesktopSharedGrid will still expand selection to the dragged target range even if
-        // we skip applying edits. Suppress selection sync callbacks and restore the prior
-        // selection on the next microtask turn so split-view panes stay consistent.
-        this.suppressSelectionCallbacks = true;
-        queueMicrotask(() => {
-          try {
-            this.grid.setSelectionRanges(prevRanges, {
-              activeIndex: prevActiveIndex,
-              activeCell: prevSelection,
-              scrollIntoView: false,
-            });
-          } finally {
-            this.suppressSelectionCallbacks = false;
+    const canWriteCell =
+      typeof canEditCellFn === "function"
+        ? (row: number, col: number) => {
+            try {
+              return Boolean(canEditCellFn.call(this.document, { sheetId, row, col }));
+            } catch {
+              return true;
+            }
           }
-        });
-        return;
-      }
-    }
+        : undefined;
 
     const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
     const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
@@ -1081,25 +1083,11 @@ export class SecondaryGridView {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
 
-      // DesktopSharedGrid will still expand selection to the dragged target range even if
-      // we skip applying edits. Suppress selection sync callbacks and restore the prior
-      // selection on the next microtask turn so split-view panes stay consistent.
-      this.suppressSelectionCallbacks = true;
-      queueMicrotask(() => {
-        try {
-          this.grid.setSelectionRanges(prevRanges, {
-            activeIndex: prevActiveIndex,
-            activeCell: prevSelection,
-            scrollIntoView: false,
-          });
-        } finally {
-          this.suppressSelectionCallbacks = false;
-        }
-      });
+      restoreSelection();
       return;
     }
     const fillCoordScratch = { row: 0, col: 0 };
-    applyFillCommitToDocumentController({
+    const { editsApplied } = applyFillCommitToDocumentController({
       document: this.document,
       sheetId,
       sourceRange: source,
@@ -1110,12 +1098,42 @@ export class SecondaryGridView {
         fillCoordScratch.col = col;
         return this.getComputedValue(fillCoordScratch) as any;
       },
+      ...(canWriteCell ? { canWriteCell } : {}),
     });
+    if (editsApplied === 0 && canWriteCell) {
+      const rejection = this.inferRejection({ sheetId, row: target.startRow, col: target.startCol });
+      showCollabEditRejectedToast([
+        {
+          rejectionKind: "fillCells",
+          ...rejection,
+        },
+      ]);
+      restoreSelection();
+      return;
+    }
 
     // Ensure the secondary pane repaints immediately after the mutation. The primary
     // pane observes DocumentController changes via its shared provider.
     this.onRequestRefresh?.();
     this.grid.renderer.requestRender();
+  }
+
+  private inferRejection(cell: { sheetId: string; row: number; col: number }): CollabEditRejection {
+    const infer = this.inferCollabEditRejection;
+    if (typeof infer === "function") {
+      try {
+        const inferred = infer(cell) as any;
+        if (inferred && typeof inferred === "object" && typeof inferred.rejectionReason === "string") {
+          const reason = inferred.rejectionReason;
+          if (reason === "permission" || reason === "encryption" || reason === "unknown") {
+            return inferred as CollabEditRejection;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { rejectionReason: "permission" };
   }
 
   private advanceSelectionAfterEdit(commit: EditorCommit): void {
