@@ -10036,6 +10036,22 @@ const ribbonActions = createRibbonActions({
       getSheetId: () => app.getCurrentSheetId(),
       getSelectionRanges: () => app.getSelectionRanges(),
       getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+      inferCollabEditRejection: (cell) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const appAny = app as any;
+          const infer = appAny?.inferCollabEditRejection;
+          if (typeof infer === "function") {
+            const inferred = infer.call(appAny, cell);
+            if (inferred && typeof inferred === "object" && typeof (inferred as any).rejectionReason === "string") {
+              return inferred as any;
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return { rejectionReason: "permission" as const };
+      },
       focusGrid: () => app.focus(),
     });
   },
