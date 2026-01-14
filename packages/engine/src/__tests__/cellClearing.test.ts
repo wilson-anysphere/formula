@@ -230,6 +230,8 @@ describeWasm("EngineWorker null clear semantics", () => {
       await engine.setCell("A1", 1, "Å");
 
       const exported = JSON.parse(await engine.toJson());
+      // `toJson()` should include sheetOrder so sheet tab order round-trips (3D references / SHEET()).
+      expect(exported.sheetOrder).toEqual(["Å"]);
       expect(Object.keys(exported.sheets)).toEqual(["Å"]);
       expect(exported.sheets["Å"].cells.A1).toBe(1);
     } finally {
