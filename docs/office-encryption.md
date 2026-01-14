@@ -273,11 +273,17 @@ Each segment is independently AES-CBC encrypted; segment ciphertext is padded to
 Agile includes a `dataIntegrity` block that authenticates the package bytes:
 
 * `encryptedHmacKey` is AES-CBC-decrypted using **`package_key` as the AES key**, and an IV derived
-  from `keyData.saltValue` and `HMAC_KEY_BLOCK` (truncate/pad to `blockSize`).
+   from `keyData.saltValue` and `HMAC_KEY_BLOCK` (truncate/pad to `blockSize`).
 * `encryptedHmacValue` is AES-CBC-decrypted using **`package_key` as the AES key**, and an IV derived
-  from `keyData.saltValue` and `HMAC_VALUE_BLOCK` (truncate/pad to `blockSize`).
+   from `keyData.saltValue` and `HMAC_VALUE_BLOCK` (truncate/pad to `blockSize`).
 * Compute `HMAC-(keyData.hashAlgorithm)(hmacKey, EncryptedPackageStreamBytes)` and compare it to the
-  decrypted `hmacValue` (constant-time compare).
+   decrypted `hmacValue` (constant-time compare).
+  - The decrypted `hmacKey` / `hmacValue` buffers may include AES-CBC padding:
+    - Compare only the first `hashSize` bytes of `hmacValue`.
+    - Ignore any bytes beyond `hashSize` in `hmacKey` (treat them as padding).
+    - Some producers emit a decrypted `hmacKey` shorter than `hashSize`; HMAC accepts any key size,
+      so Formula treats this as valid as long as the computed digest matches `hmacValue` (digest
+      prefix).
   - Note: MS-OFFCRYPTO/Excel authenticates the **entire `EncryptedPackage` stream bytes** (8-byte
     length prefix + ciphertext). For compatibility with some non-Excel producers, our decryptors may
     also accept alternative HMAC targets (e.g. plaintext ZIP bytes, ciphertext-only, or header +
