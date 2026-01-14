@@ -326,6 +326,38 @@ describe("imageBytesBinder", () => {
     binder.destroy();
   });
 
+  it("rejects whitespace-bloated base64 strings to avoid expensive normalization", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const bytes = new Uint8Array([1, 2, 3]);
+    const base64 = Buffer.from(bytes).toString("base64"); // "AQID"
+    // Make the raw payload far larger than necessary while still normalizing to a valid base64 string.
+    // This simulates a malicious collaborator attempting to force clients to allocate/scan huge strings.
+    const bloated = base64.split("").join(" ".repeat(100));
+
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: bloated,
+      },
+    });
+
+    const store = createMemoryImageStore();
+    let sets = 0;
+    store.set = () => {
+      sets += 1;
+    };
+
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const binder = bindImageBytesToCollabSession({ session, images: store, maxImageBytes: 10 });
+
+    expect(store.get("img-1")).toBeUndefined();
+    expect(sets).toBe(0);
+
+    binder.destroy();
+  });
+
   it("enforces maxImageBytes when hydrating remote base64 payloads", () => {
     const doc = new Y.Doc();
     const metadata = doc.getMap("metadata");
