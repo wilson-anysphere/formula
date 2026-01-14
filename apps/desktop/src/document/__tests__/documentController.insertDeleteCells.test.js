@@ -142,3 +142,61 @@ test("insertCellsShiftDown applies formula rewrites (Excel-style) when provided"
   assert.equal(doc.getCell("Sheet1", "B1").formula, "=A2");
 });
 
+test("insert/delete cells shifts are undoable + redoable", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", "A");
+  doc.setCellValue("Sheet1", "B1", "B");
+  doc.setCellValue("Sheet1", "C1", "C");
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  doc.setRangeFormat("Sheet1", "B1", { font: { italic: true } });
+  doc.setRangeFormat("Sheet1", "C1", { font: { underline: true } });
+
+  const before = {
+    A1: doc.getCell("Sheet1", "A1"),
+    B1: doc.getCell("Sheet1", "B1"),
+    C1: doc.getCell("Sheet1", "C1"),
+  };
+
+  doc.insertCellsShiftRight("Sheet1", "A1:B1");
+  const afterInsert = {
+    A1: doc.getCell("Sheet1", "A1"),
+    B1: doc.getCell("Sheet1", "B1"),
+    C1: doc.getCell("Sheet1", "C1"),
+    D1: doc.getCell("Sheet1", "D1"),
+    E1: doc.getCell("Sheet1", "E1"),
+  };
+
+  assert.ok(doc.undo());
+  assert.equal(doc.getCell("Sheet1", "A1").value, before.A1.value);
+  assert.equal(doc.getCell("Sheet1", "A1").styleId, before.A1.styleId);
+  assert.equal(doc.getCell("Sheet1", "B1").value, before.B1.value);
+  assert.equal(doc.getCell("Sheet1", "B1").styleId, before.B1.styleId);
+  assert.equal(doc.getCell("Sheet1", "C1").value, before.C1.value);
+  assert.equal(doc.getCell("Sheet1", "C1").styleId, before.C1.styleId);
+
+  assert.ok(doc.redo());
+  assert.equal(doc.getCell("Sheet1", "A1").value, afterInsert.A1.value);
+  assert.equal(doc.getCell("Sheet1", "B1").value, afterInsert.B1.value);
+  assert.equal(doc.getCell("Sheet1", "C1").value, afterInsert.C1.value);
+  assert.equal(doc.getCell("Sheet1", "D1").value, afterInsert.D1.value);
+  assert.equal(doc.getCell("Sheet1", "E1").value, afterInsert.E1.value);
+
+  // Now verify delete shift undo/redo on top of the inserted state.
+  doc.deleteCellsShiftLeft("Sheet1", "A1:B1");
+  const afterDelete = {
+    A1: doc.getCell("Sheet1", "A1"),
+    B1: doc.getCell("Sheet1", "B1"),
+    C1: doc.getCell("Sheet1", "C1"),
+  };
+
+  assert.ok(doc.undo());
+  assert.equal(doc.getCell("Sheet1", "A1").value, afterInsert.A1.value);
+  assert.equal(doc.getCell("Sheet1", "B1").value, afterInsert.B1.value);
+  assert.equal(doc.getCell("Sheet1", "C1").value, afterInsert.C1.value);
+
+  assert.ok(doc.redo());
+  assert.equal(doc.getCell("Sheet1", "A1").value, afterDelete.A1.value);
+  assert.equal(doc.getCell("Sheet1", "B1").value, afterDelete.B1.value);
+  assert.equal(doc.getCell("Sheet1", "C1").value, afterDelete.C1.value);
+});
