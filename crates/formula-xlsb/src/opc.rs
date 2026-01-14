@@ -3673,6 +3673,7 @@ fn sheet_cell_records_streaming<R: Read>(
     sheet_bin: &mut R,
     targets: &HashSet<(u32, u32)>,
 ) -> Result<HashMap<(u32, u32), CellRecordInfo>, ParseError> {
+    const READ_CHUNK_BYTES: usize = 16 * 1024;
     let mut in_sheet_data = false;
     let mut current_row = 0u32;
     let mut found: HashMap<(u32, u32), CellRecordInfo> = HashMap::new();
@@ -3712,11 +3713,19 @@ fn sheet_cell_records_streaming<R: Read>(
                     let col = u32::from_le_bytes(head);
                     let coord = (current_row, col);
                     if targets.contains(&coord) {
-                        let mut payload = Vec::with_capacity(len);
+                        // Record lengths are attacker-controlled; grow the buffer as we successfully
+                        // read bytes rather than pre-reserving/zero-filling the full length.
+                        let mut payload = Vec::new();
                         payload.extend_from_slice(&head);
                         if len > 4 {
-                            payload.resize(len, 0);
-                            sheet_bin.read_exact(&mut payload[4..])?;
+                            let mut remaining = len - 4;
+                            let mut buf = [0u8; READ_CHUNK_BYTES];
+                            while remaining > 0 {
+                                let chunk_len = buf.len().min(remaining);
+                                sheet_bin.read_exact(&mut buf[..chunk_len])?;
+                                payload.extend_from_slice(&buf[..chunk_len]);
+                                remaining = remaining.saturating_sub(chunk_len);
+                            }
                         }
                         found.insert(coord, CellRecordInfo { id, payload });
                         if found.len() == targets.len() {

@@ -264,6 +264,13 @@ impl<R: Read> Biff12Reader<R> {
         }
     }
 
+    /// Chunk size used when reading BIFF record payloads into memory.
+    ///
+    /// BIFF record lengths are attacker-controlled and the underlying reader may be truncated
+    /// (e.g. a size-limited wrapper around a ZIP entry). Avoid a single large `Vec::resize(len)`
+    /// allocation up front; instead grow the buffer as bytes are successfully read.
+    const READ_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
+
     pub fn read_record<'a>(
         &mut self,
         buf: &'a mut Vec<u8>,
@@ -277,8 +284,18 @@ impl<R: Read> Biff12Reader<R> {
 
         let len = len as usize;
         buf.clear();
-        buf.resize(len, 0);
-        self.inner.read_exact(buf)?;
+        let mut remaining = len;
+        while remaining > 0 {
+            let chunk = remaining.min(Self::READ_CHUNK_BYTES);
+            let start = buf.len();
+            buf.resize(start + chunk, 0);
+            if let Err(err) = self.inner.read_exact(&mut buf[start..]) {
+                // Don't leave trailing zero bytes in `buf` when the stream ends early.
+                buf.truncate(start);
+                return Err(err.into());
+            }
+            remaining = remaining.saturating_sub(chunk);
+        }
         Ok(Some(Biff12Record { id, data: buf }))
     }
 
