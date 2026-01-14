@@ -1420,10 +1420,19 @@ jobs:
             fi
 
             echo "::group::ldd ${bin}"
-            ldd "${bin}" | tee ldd.txt
+            set +e
+            ldd_out="$(ldd "${bin}" 2>&1)"
+            ldd_status=$?
+            set -e
+            echo "${ldd_out}"
             echo "::endgroup::"
-            if grep -q "not found" ldd.txt; then
+            if grep -q "not found" <<<"${ldd_out}"; then
               echo "::error::Missing shared library dependencies detected by ldd for ${bin}"
+              echo "${ldd_out}" | grep "not found" || true
+              exit 1
+            fi
+            if [[ "${ldd_status}" -ne 0 ]] && ! grep -qF "not a dynamic executable" <<<"${ldd_out}"; then
+              echo "::error::ldd exited with status ${ldd_status} for ${bin}"
               exit 1
             fi
 
