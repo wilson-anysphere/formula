@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, FormatRun as EngineFormatRun,
-    NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
-    Value as EngineValue,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
+    ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     iter_locales, ValueLocaleConfig, EN_US,
 };
+use formula_engine::metadata::FormatRun as EngineFormatRun;
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
