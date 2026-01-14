@@ -392,7 +392,9 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
     a.len().cmp(&b.len())
 }
 
+#[derive(Clone, Copy)]
 struct RelatedHop<'a> {
+    relationship_idx: usize,
     from_idx: usize,
     to_index: &'a std::collections::HashMap<Value, RowSet>,
     to_table: &'a crate::model::Table,
@@ -473,11 +475,12 @@ fn build_group_key_accessors<'a>(
                 .table(&rel_info.rel.to_table)
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
-            hops.push(RelatedHop {
-                from_idx,
-                to_index: &rel_info.to_index,
-                to_table: to_table_ref,
-            });
+             hops.push(RelatedHop {
+                 relationship_idx: rel_idx,
+                 from_idx,
+                 to_index: &rel_info.to_index,
+                 to_table: to_table_ref,
+             });
         }
 
         let to_table_ref = model
@@ -591,20 +594,28 @@ fn requires_many_to_many_grouping(
     Ok(false)
 }
 
-fn insert_cartesian_keys(
-    values: &[Vec<Value>],
+fn insert_cartesian_key_positions(
+    positions: &[Vec<usize>],
+    values: &[Vec<Vec<Value>>],
     idx: usize,
-    buf: &mut Vec<Value>,
+    key: &mut Vec<Value>,
     out: &mut HashSet<Vec<Value>>,
 ) {
-    if idx == values.len() {
-        out.insert(buf.clone());
+    if idx == positions.len() {
+        out.insert(key.clone());
         return;
     }
-    for v in &values[idx] {
-        buf.push(v.clone());
-        insert_cartesian_keys(values, idx + 1, buf, out);
-        buf.pop();
+
+    for tuple in values.get(idx).into_iter().flatten() {
+        for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
+            key[*pos] = value.clone();
+        }
+        insert_cartesian_key_positions(positions, values, idx + 1, key, out);
+    }
+
+    // Restore the slice to blank for the next tuple.
+    for pos in &positions[idx] {
+        key[*pos] = Value::Blank;
     }
 }
 
@@ -2073,20 +2084,78 @@ fn pivot_row_scan_many_to_many(
     }
 
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
-    let mut per_col_values: Vec<Vec<Value>> =
-        (0..group_by.len()).map(|_| Vec::new()).collect();
-    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+    #[derive(Clone)]
+    enum GroupSpec<'a> {
+        Base { idxs: Vec<usize> },
+        Related {
+            hops: Vec<RelatedHop<'a>>,
+            to_column_idxs: Vec<usize>,
+        },
+    }
+
+    // Group columns that share an identical relationship path so we preserve row-level correlation
+    // between columns coming from the same related table. Without this, we would take the cartesian
+    // product of per-column value sets and could generate invalid group keys like
+    // (Category="A", Color="Blue") when the only related rows are (A,Red) and (B,Blue).
+    let mut group_positions: Vec<Vec<usize>> = Vec::new();
+    let mut group_specs: Vec<GroupSpec<'_>> = Vec::new();
+    let mut related_groups: HashMap<Vec<usize>, usize> = HashMap::new();
+    let mut base_positions: Vec<usize> = Vec::new();
+    let mut base_idxs: Vec<usize> = Vec::new();
+
+    for (pos, accessor) in group_key_accessors.iter().enumerate() {
+        match accessor {
+            GroupKeyAccessor::Base { idx } => {
+                base_positions.push(pos);
+                base_idxs.push(*idx);
+            }
+            GroupKeyAccessor::RelatedPath {
+                hops,
+                to_column_idx,
+            } => {
+                let path_key: Vec<usize> = hops.iter().map(|h| h.relationship_idx).collect();
+                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
+                    let idx = group_specs.len();
+                    group_positions.push(Vec::new());
+                    group_specs.push(GroupSpec::Related {
+                        hops: hops.clone(),
+                        to_column_idxs: Vec::new(),
+                    });
+                    idx
+                });
+
+                group_positions[group_idx].push(pos);
+                let GroupSpec::Related { to_column_idxs, .. } = &mut group_specs[group_idx] else {
+                    unreachable!("group_specs/group_positions stay in sync for related groups")
+                };
+                to_column_idxs.push(*to_column_idx);
+            }
+        }
+    }
+
+    if !base_positions.is_empty() {
+        group_positions.insert(0, base_positions);
+        group_specs.insert(0, GroupSpec::Base { idxs: base_idxs });
+    }
+
+    let mut group_values: Vec<Vec<Vec<Value>>> = (0..group_specs.len()).map(|_| Vec::new()).collect();
+    let mut key_buf: Vec<Value> = vec![Value::Blank; group_by.len()];
+    let mut unique_tuples: HashSet<Vec<Value>> = HashSet::new();
 
     let mut process_row = |row: usize| -> DaxResult<()> {
-        for (out, accessor) in per_col_values.iter_mut().zip(group_key_accessors.iter()) {
+        for (out, spec) in group_values.iter_mut().zip(group_specs.iter()) {
             out.clear();
-            match accessor {
-                GroupKeyAccessor::Base { idx } => {
-                    out.push(table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank));
+            match spec {
+                GroupSpec::Base { idxs } => {
+                    let mut tuple = Vec::with_capacity(idxs.len());
+                    for idx in idxs {
+                        tuple.push(table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank));
+                    }
+                    out.push(tuple);
                 }
-                GroupKeyAccessor::RelatedPath {
+                GroupSpec::Related {
                     hops,
-                    to_column_idx,
+                    to_column_idxs,
                 } => {
                     // Walk the relationship path, expanding many-to-many matches into multiple
                     // candidate rows.
@@ -2125,30 +2194,36 @@ fn pivot_row_scan_many_to_many(
                     }
 
                     if current_rows.is_empty() {
-                        out.push(Value::Blank);
+                        out.push(vec![Value::Blank; to_column_idxs.len()]);
                         continue;
                     }
 
-                    let mut unique = HashSet::new();
+                    unique_tuples.clear();
                     for &to_row in &current_rows {
-                        unique.insert(
-                            current_table
-                                .value_by_idx(to_row, *to_column_idx)
-                                .unwrap_or(Value::Blank),
-                        );
+                        let mut tuple = Vec::with_capacity(to_column_idxs.len());
+                        for col_idx in to_column_idxs {
+                            tuple.push(
+                                current_table
+                                    .value_by_idx(to_row, *col_idx)
+                                    .unwrap_or(Value::Blank),
+                            );
+                        }
+                        unique_tuples.insert(tuple);
                     }
 
-                    if unique.is_empty() {
-                        out.push(Value::Blank);
+                    if unique_tuples.is_empty() {
+                        out.push(vec![Value::Blank; to_column_idxs.len()]);
                     } else {
-                        out.extend(unique.into_iter());
+                        out.extend(unique_tuples.drain());
                     }
                 }
             }
         }
 
-        key_buf.clear();
-        insert_cartesian_keys(&per_col_values, 0, &mut key_buf, &mut seen);
+        for v in &mut key_buf {
+            *v = Value::Blank;
+        }
+        insert_cartesian_key_positions(&group_positions, &group_values, 0, &mut key_buf, &mut seen);
         Ok(())
     };
 

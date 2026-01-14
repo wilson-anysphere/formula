@@ -3042,6 +3042,7 @@ impl DaxEngine {
                             is_active && !filter.is_relationship_disabled(idx)
                         };
 
+                    #[derive(Clone, Copy)]
                     struct RelatedHop {
                         relationship_idx: usize,
                         from_idx: usize,
@@ -3129,28 +3130,130 @@ impl DaxEngine {
 
                     let row_sets = resolve_row_sets(model, filter)?;
 
+                    #[derive(Clone)]
+                    enum GroupSpec {
+                        Base { idxs: Vec<usize> },
+                        Related {
+                            hops: Vec<RelatedHop>,
+                            to_table: String,
+                            to_col_idxs: Vec<usize>,
+                        },
+                    }
+
+                    // Group accessors that traverse the same relationship path so we preserve
+                    // row-level correlation between multiple columns coming from the same related
+                    // table (e.g. Products[Category] + Products[Color] should expand as (A,Red) +
+                    // (B,Blue), not {A,B}×{Red,Blue}).
+                    let mut group_positions: Vec<Vec<usize>> = Vec::new();
+                    let mut group_specs: Vec<GroupSpec> = Vec::new();
+                    let mut related_groups: HashMap<Vec<usize>, usize> = HashMap::new();
+                    let mut base_positions: Vec<usize> = Vec::new();
+                    let mut base_idxs: Vec<usize> = Vec::new();
+
+                    for (pos, accessor) in accessors.iter().enumerate() {
+                        match accessor {
+                            GroupAccessor::BaseColumn(idx) => {
+                                base_positions.push(pos);
+                                base_idxs.push(*idx);
+                            }
+                            GroupAccessor::RelatedPath {
+                                hops,
+                                to_table,
+                                to_col_idx,
+                            } => {
+                                let path_key: Vec<usize> =
+                                    hops.iter().map(|h| h.relationship_idx).collect();
+                                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
+                                    let idx = group_specs.len();
+                                    group_positions.push(Vec::new());
+                                    group_specs.push(GroupSpec::Related {
+                                        hops: hops.clone(),
+                                        to_table: to_table.clone(),
+                                        to_col_idxs: Vec::new(),
+                                    });
+                                    idx
+                                });
+
+                                group_positions[group_idx].push(pos);
+                                let GroupSpec::Related { to_col_idxs, .. } =
+                                    &mut group_specs[group_idx]
+                                else {
+                                    unreachable!("group_specs/group_positions stay in sync")
+                                };
+                                to_col_idxs.push(*to_col_idx);
+                            }
+                        }
+                    }
+
+                    if !base_positions.is_empty() {
+                        group_positions.insert(0, base_positions);
+                        group_specs.insert(0, GroupSpec::Base { idxs: base_idxs });
+                    }
+
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut rows = Vec::new();
 
                     // Reuse buffers across base rows to avoid repeated allocations.
-                    let mut per_col_values: Vec<Vec<Value>> =
-                        (0..accessors.len()).map(|_| Vec::new()).collect();
-                    let mut partials: Vec<Vec<Value>> = Vec::new();
+                    let mut group_values: Vec<Vec<Vec<Value>>> =
+                        (0..group_specs.len()).map(|_| Vec::new()).collect();
+                    let mut key_buf: Vec<Value> = vec![Value::Blank; accessors.len()];
+                    let mut unique_tuples: HashSet<Vec<Value>> = HashSet::new();
+
+                    fn insert_group_keys_for_row(
+                        row: usize,
+                        positions: &[Vec<usize>],
+                        values: &[Vec<Vec<Value>>],
+                        idx: usize,
+                        key: &mut Vec<Value>,
+                        seen: &mut HashSet<Vec<Value>>,
+                        out_rows: &mut Vec<usize>,
+                    ) {
+                        if idx == positions.len() {
+                            if seen.insert(key.clone()) {
+                                out_rows.push(row);
+                            }
+                            return;
+                        }
+
+                        for tuple in values.get(idx).into_iter().flatten() {
+                            for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
+                                key[*pos] = value.clone();
+                            }
+                            insert_group_keys_for_row(
+                                row,
+                                positions,
+                                values,
+                                idx + 1,
+                                key,
+                                seen,
+                                out_rows,
+                            );
+                        }
+
+                        for pos in &positions[idx] {
+                            key[*pos] = Value::Blank;
+                        }
+                    }
 
                     for row in base.rows {
-                        // Collect candidate values per grouping column for this base row.
-                        for (out, accessor) in per_col_values.iter_mut().zip(accessors.iter()) {
+                        for (out, spec) in group_values.iter_mut().zip(group_specs.iter()) {
                             out.clear();
-                            match accessor {
-                                GroupAccessor::BaseColumn(idx) => {
-                                    out.push(
-                                        table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
-                                    );
+                            match spec {
+                                GroupSpec::Base { idxs } => {
+                                    let mut tuple = Vec::with_capacity(idxs.len());
+                                    for idx in idxs {
+                                        tuple.push(
+                                            table_ref
+                                                .value_by_idx(row, *idx)
+                                                .unwrap_or(Value::Blank),
+                                        );
+                                    }
+                                    out.push(tuple);
                                 }
-                                GroupAccessor::RelatedPath {
+                                GroupSpec::Related {
                                     hops,
                                     to_table,
-                                    to_col_idx,
+                                    to_col_idxs,
                                 } => {
                                     // Track all reachable row indices along the relationship path,
                                     // expanding many-to-many hops as needed.
@@ -3206,7 +3309,7 @@ impl DaxEngine {
                                     }
 
                                     if current_rows.is_empty() {
-                                        out.push(Value::Blank);
+                                        out.push(vec![Value::Blank; to_col_idxs.len()]);
                                         continue;
                                     }
 
@@ -3214,44 +3317,40 @@ impl DaxEngine {
                                         .table(to_table)
                                         .ok_or_else(|| DaxError::UnknownTable(to_table.clone()))?;
 
-                                    let mut unique = HashSet::new();
+                                    unique_tuples.clear();
                                     for &to_row in &current_rows {
-                                        unique.insert(
-                                            to_table_ref
-                                                .value_by_idx(to_row, *to_col_idx)
-                                                .unwrap_or(Value::Blank),
-                                        );
+                                        let mut tuple = Vec::with_capacity(to_col_idxs.len());
+                                        for col_idx in to_col_idxs {
+                                            tuple.push(
+                                                to_table_ref
+                                                    .value_by_idx(to_row, *col_idx)
+                                                    .unwrap_or(Value::Blank),
+                                            );
+                                        }
+                                        unique_tuples.insert(tuple);
                                     }
 
-                                    if unique.is_empty() {
-                                        out.push(Value::Blank);
+                                    if unique_tuples.is_empty() {
+                                        out.push(vec![Value::Blank; to_col_idxs.len()]);
                                     } else {
-                                        out.extend(unique.into_iter());
+                                        out.extend(unique_tuples.drain());
                                     }
                                 }
                             }
                         }
 
-                        // Expand per-column value sets into full group key tuples.
-                        partials.clear();
-                        partials.push(Vec::new());
-                        for values in &per_col_values {
-                            let mut next: Vec<Vec<Value>> = Vec::new();
-                            for partial in &partials {
-                                for value in values {
-                                    let mut key = partial.clone();
-                                    key.push(value.clone());
-                                    next.push(key);
-                                }
-                            }
-                            partials = next;
+                        for v in &mut key_buf {
+                            *v = Value::Blank;
                         }
-
-                        for key in partials.drain(..) {
-                            if seen.insert(key) {
-                                rows.push(row);
-                            }
-                        }
+                        insert_group_keys_for_row(
+                            row,
+                            &group_positions,
+                            &group_values,
+                            0,
+                            &mut key_buf,
+                            &mut seen,
+                            &mut rows,
+                        );
                     }
 
                     // Restrict the iterator row context to only the base-table grouping columns.
@@ -3525,74 +3624,218 @@ impl DaxEngine {
                         base_rows.push(base_table_ref.row_count());
                     }
 
+                    let row_sets = resolve_row_sets(model, &summarize_filter)?;
+
+                    #[derive(Clone)]
+                    enum GroupSpec {
+                        Base { idxs: Vec<usize> },
+                        Related {
+                            hops: Vec<Hop>,
+                            to_table: String,
+                            to_col_idxs: Vec<usize>,
+                        },
+                    }
+
+                    let mut group_positions: Vec<Vec<usize>> = Vec::new();
+                    let mut group_specs: Vec<GroupSpec> = Vec::new();
+                    let mut related_groups: HashMap<Vec<usize>, usize> = HashMap::new();
+                    let mut base_positions: Vec<usize> = Vec::new();
+                    let mut base_idxs: Vec<usize> = Vec::new();
+
+                    for (pos, accessor) in accessors.iter().enumerate() {
+                        match accessor {
+                            GroupAccessor::BaseColumn(idx) => {
+                                base_positions.push(pos);
+                                base_idxs.push(*idx);
+                            }
+                            GroupAccessor::RelatedColumn { hops, to_col_idx } => {
+                                let to_table = group_cols[pos].0.clone();
+                                let path_key: Vec<usize> =
+                                    hops.iter().map(|h| h.relationship_idx).collect();
+                                let group_idx = *related_groups.entry(path_key).or_insert_with(|| {
+                                    let idx = group_specs.len();
+                                    group_positions.push(Vec::new());
+                                    group_specs.push(GroupSpec::Related {
+                                        hops: hops.clone(),
+                                        to_table,
+                                        to_col_idxs: Vec::new(),
+                                    });
+                                    idx
+                                });
+
+                                group_positions[group_idx].push(pos);
+                                let GroupSpec::Related { to_col_idxs, .. } =
+                                    &mut group_specs[group_idx]
+                                else {
+                                    unreachable!("group_specs/group_positions stay in sync")
+                                };
+                                to_col_idxs.push(*to_col_idx);
+                            }
+                        }
+                    }
+
+                    if !base_positions.is_empty() {
+                        group_positions.insert(0, base_positions);
+                        group_specs.insert(0, GroupSpec::Base { idxs: base_idxs });
+                    }
+
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut rows = Vec::new();
+
+                    let mut group_values: Vec<Vec<Vec<Value>>> =
+                        (0..group_specs.len()).map(|_| Vec::new()).collect();
+                    let mut key_buf: Vec<Value> = vec![Value::Blank; accessors.len()];
+                    let mut unique_tuples: HashSet<Vec<Value>> = HashSet::new();
+
+                    fn insert_group_keys_for_row(
+                        row: usize,
+                        positions: &[Vec<usize>],
+                        values: &[Vec<Vec<Value>>],
+                        idx: usize,
+                        key: &mut Vec<Value>,
+                        seen: &mut HashSet<Vec<Value>>,
+                        out_rows: &mut Vec<usize>,
+                    ) {
+                        if idx == positions.len() {
+                            if seen.insert(key.clone()) {
+                                out_rows.push(row);
+                            }
+                            return;
+                        }
+
+                        for tuple in values.get(idx).into_iter().flatten() {
+                            for (pos, value) in positions[idx].iter().zip(tuple.iter()) {
+                                key[*pos] = value.clone();
+                            }
+                            insert_group_keys_for_row(
+                                row,
+                                positions,
+                                values,
+                                idx + 1,
+                                key,
+                                seen,
+                                out_rows,
+                            );
+                        }
+
+                        for pos in &positions[idx] {
+                            key[*pos] = Value::Blank;
+                        }
+                    }
+
                     for row in base_rows {
-                        let mut key = Vec::with_capacity(accessors.len());
-                        for accessor in &accessors {
-                            match accessor {
-                                GroupAccessor::BaseColumn(idx) => key.push(
-                                    base_table_ref
-                                        .value_by_idx(row, *idx)
-                                        .unwrap_or(Value::Blank),
-                                ),
-                                GroupAccessor::RelatedColumn { hops, to_col_idx } => {
-                                    let mut current_row = row;
-                                    let mut current_table_ref = base_table_ref;
-                                    let mut failed = false;
+                        for (out, spec) in group_values.iter_mut().zip(group_specs.iter()) {
+                            out.clear();
+                            match spec {
+                                GroupSpec::Base { idxs } => {
+                                    let mut tuple = Vec::with_capacity(idxs.len());
+                                    for idx in idxs {
+                                        tuple.push(
+                                            base_table_ref
+                                                .value_by_idx(row, *idx)
+                                                .unwrap_or(Value::Blank),
+                                        );
+                                    }
+                                    out.push(tuple);
+                                }
+                                GroupSpec::Related {
+                                    hops,
+                                    to_table,
+                                    to_col_idxs,
+                                } => {
+                                    let mut current_rows: Vec<usize> = vec![row];
                                     for hop in hops {
-                                        let fk = current_table_ref
-                                            .value_by_idx(current_row, hop.from_idx)
-                                            .unwrap_or(Value::Blank);
-                                        if fk.is_blank() {
-                                            failed = true;
-                                            break;
-                                        }
                                         let rel_info = model
                                             .relationships()
                                             .get(hop.relationship_idx)
                                             .expect("valid relationship idx");
-                                        let Some(to_row_set) = rel_info.to_index.get(&fk) else {
-                                            failed = true;
-                                            break;
-                                        };
-                                        let to_row = match to_row_set {
-                                            RowSet::One(row) => *row,
-                                            RowSet::Many(rows) => {
-                                                if rows.len() == 1 {
-                                                    rows[0]
-                                                } else {
-                                                    return Err(DaxError::Eval(format!(
-                                                        "SUMMARIZECOLUMNS grouping is ambiguous: key {fk} matches multiple rows in {} (relationship {})",
-                                                        rel_info.rel.to_table, rel_info.rel.name
-                                                    )));
-                                                }
-                                            }
-                                        };
-                                        current_row = to_row;
-                                        current_table_ref = model
-                                            .table(&rel_info.rel.to_table)
+
+                                        let from_table_ref = model
+                                            .table(&rel_info.rel.from_table)
                                             .ok_or_else(|| {
                                                 DaxError::UnknownTable(
-                                                    rel_info.rel.to_table.clone(),
+                                                    rel_info.rel.from_table.clone(),
                                                 )
                                             })?;
+
+                                        let allowed_to = row_sets
+                                            .get(rel_info.rel.to_table.as_str())
+                                            .ok_or_else(|| {
+                                                DaxError::UnknownTable(rel_info.rel.to_table.clone())
+                                            })?;
+
+                                        let mut next_rows: HashSet<usize> = HashSet::new();
+                                        for &current_row in &current_rows {
+                                            let fk = from_table_ref
+                                                .value_by_idx(current_row, hop.from_idx)
+                                                .unwrap_or(Value::Blank);
+                                            if fk.is_blank() {
+                                                continue;
+                                            }
+                                            let Some(to_row_set) = rel_info.to_index.get(&fk) else {
+                                                continue;
+                                            };
+                                            to_row_set.for_each_row(|to_row| {
+                                                if allowed_to
+                                                    .get(to_row)
+                                                    .copied()
+                                                    .unwrap_or(false)
+                                                {
+                                                    next_rows.insert(to_row);
+                                                }
+                                            });
+                                        }
+
+                                        if next_rows.is_empty() {
+                                            current_rows.clear();
+                                            break;
+                                        }
+                                        current_rows = next_rows.into_iter().collect();
                                     }
 
-                                    let value = if failed {
-                                        Value::Blank
+                                    if current_rows.is_empty() {
+                                        out.push(vec![Value::Blank; to_col_idxs.len()]);
+                                        continue;
+                                    }
+
+                                    let to_table_ref = model
+                                        .table(to_table)
+                                        .ok_or_else(|| DaxError::UnknownTable(to_table.clone()))?;
+
+                                    unique_tuples.clear();
+                                    for &to_row in &current_rows {
+                                        let mut tuple = Vec::with_capacity(to_col_idxs.len());
+                                        for col_idx in to_col_idxs {
+                                            tuple.push(
+                                                to_table_ref
+                                                    .value_by_idx(to_row, *col_idx)
+                                                    .unwrap_or(Value::Blank),
+                                            );
+                                        }
+                                        unique_tuples.insert(tuple);
+                                    }
+
+                                    if unique_tuples.is_empty() {
+                                        out.push(vec![Value::Blank; to_col_idxs.len()]);
                                     } else {
-                                        current_table_ref
-                                            .value_by_idx(current_row, *to_col_idx)
-                                            .unwrap_or(Value::Blank)
-                                    };
-                                    key.push(value);
+                                        out.extend(unique_tuples.drain());
+                                    }
                                 }
                             }
                         }
-                        if seen.insert(key) {
-                            rows.push(row);
+
+                        for v in &mut key_buf {
+                            *v = Value::Blank;
                         }
+                        insert_group_keys_for_row(
+                            row,
+                            &group_positions,
+                            &group_values,
+                            0,
+                            &mut key_buf,
+                            &mut seen,
+                            &mut rows,
+                        );
                     }
 
                     // Restrict the iterator row context to only grouping columns that come from
