@@ -2928,8 +2928,10 @@ const RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING: Record<string, true> = Object
 // fall back to a noisy `showToast("Ribbon: <id>")`. Use the CommandRegistry as the source of
 // truth for which command ids exist, and disable missing ids by default.
 //
-// The allowlist lives in `ribbonCommandRegistryDisabling.ts` for controls intentionally handled
-// outside the registry (AutoSave, view/layout toggles, etc).
+// NOTE: `COMMAND_REGISTRY_EXEMPT_IDS` (in `ribbonCommandRegistryDisabling.ts`) is intentionally
+// empty. Prefer registering UI-specific ribbon ids (e.g. `file.*`) as hidden CommandRegistry
+// aliases so ribbon enable/disable, command palette, and keybindings can share a single source
+// of truth.
 let ribbonCommandRegistryRefreshScheduled = false;
 const scheduleRibbonCommandRegistryDisabledRefresh = (): void => {
   if (ribbonCommandRegistryRefreshScheduled) return;
