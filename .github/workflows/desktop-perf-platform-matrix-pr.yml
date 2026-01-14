@@ -732,6 +732,14 @@ jobs:
           name: desktop-perf-platform-matrix
           path: artifacts/desktop-perf-platform-matrix
 
+      - name: Download per-OS perf artifacts (fallback)
+        if: steps.download.outcome != 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: desktop-perf-*
+          path: artifacts/desktop-perf
+
       - name: Create/update PR comment
         continue-on-error: true
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -784,7 +792,19 @@ jobs:
               merged = readJsonMaybe(candidate);
               if (merged) break;
             }
-            const artifacts = merged?.artifacts ?? {};
+            let artifacts = merged?.artifacts ?? null;
+            if (!artifacts || typeof artifacts !== "object") {
+              // Fallback: read directly from per-OS artifacts if the merged artifact is missing.
+              artifacts = {};
+              for (const name of [
+                "desktop-perf-ubuntu-24.04",
+                "desktop-perf-windows-latest",
+                "desktop-perf-macos-latest",
+              ]) {
+                const p = path.join("artifacts", "desktop-perf", name, "perf-artifacts", "desktop-perf-metrics.json");
+                artifacts[name] = readJsonMaybe(p);
+              }
+            }
             
             const byOs = [
               { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
