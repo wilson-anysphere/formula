@@ -497,8 +497,10 @@ def main() -> int:
         default=_PRIVACY_PUBLIC,
         help=(
             "Control redaction of outputs. `private` hashes non-`github.com` run URLs (e.g. GitHub "
-            "Enterprise Server domains) and hashes absolute filesystem paths embedded in inputs "
-            "(e.g. oracle expectedPath/actualPath). Repo-relative paths are preserved."
+            "Enterprise Server domains) and hashes potentially sensitive strings embedded in inputs "
+            "(paths/URIs, domain-like strings, spreadsheet-ish filenames). It also hashes non-"
+            "allowlisted Excel-oracle include/exclude tags (to avoid leaking custom/UDF names). "
+            "Repo-relative paths and known Excel function tags are preserved."
         ),
     )
     parser.add_argument(
