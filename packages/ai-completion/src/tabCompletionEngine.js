@@ -402,19 +402,23 @@ export class TabCompletionEngine {
     if (!hasValidCellRef) return [];
 
     const typedArgText = parsed.currentArg.text ?? "";
-    // If the user has typed trailing whitespace *after* a token (e.g. "A " or
-    // "Sheet2!A1 "), avoid emitting completions. Most completions would need to
-    // delete that whitespace to be valid, which violates the formula bar’s
-    // "pure insertion" constraint.
-    if (typedArgText.length > 0 && /\s$/.test(typedArgText)) return [];
+    // If the user has typed trailing whitespace *after* an A1 token (e.g. "A "),
+    // avoid emitting A1 range completions: they would need to delete that whitespace
+    // to be valid, violating the formula bar’s "pure insertion" constraint.
+    //
+    // Note: we still allow schema-based completions (e.g. quoted sheet names with
+    // spaces like "'My "), which are representable as pure insertions.
+    const hasTrailingWhitespace = typedArgText.length > 0 && /\s$/.test(typedArgText);
     const isEmptyArg = typedArgText.trim().length === 0;
     const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : typedArgText;
 
-    const rangeCandidates = safeSuggestRanges({
-      currentArgText,
-      cellRef,
-      surroundingCells: context?.surroundingCells,
-    });
+    const rangeCandidates = hasTrailingWhitespace
+      ? []
+      : safeSuggestRanges({
+          currentArgText,
+          cellRef,
+          surroundingCells: context?.surroundingCells,
+        });
 
     // Some functions (VLOOKUP table_array, TAKE array, etc.) almost always want
     // a 2D rectangular range when the surrounding data forms a table. When we

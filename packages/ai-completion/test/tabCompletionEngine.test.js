@@ -384,6 +384,29 @@ test("Range suggestions do not delete trailing whitespace (pure insertion)", asy
   assert.equal(suggestions.length, 0);
 });
 
+test("Sheet-prefix completions still work when the user types a space inside a quoted sheet name", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('My ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('My Sheet'!"),
+    `Expected a quoted sheet-prefix completion for an in-name space, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range below the current cell when the formula is above the data block", async () => {
   const engine = new TabCompletionEngine();
 
