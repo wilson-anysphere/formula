@@ -1721,11 +1721,21 @@ fn main() {
       }
     });
 
-  let started = false;
-  const tick = async () => {
-    if (started) return;
+   let started = false;
+   const tick = async () => {
+     if (started) return;
 
-    const invoke = globalThis.__TAURI__?.core?.invoke ?? globalThis.__TAURI_INTERNALS__?.invoke;
+    // Some hardened environments (or tests) may define `__TAURI__` with a throwing getter. Treat
+    // that as "unavailable" and keep polling rather than aborting the startup benchmark.
+    let invoke = null;
+    try {
+      invoke = globalThis.__TAURI__?.core?.invoke ?? null;
+    } catch {}
+    if (!invoke) {
+      try {
+        invoke = globalThis.__TAURI_INTERNALS__?.invoke ?? null;
+      } catch {}
+    }
     if (typeof invoke !== "function") {
       if (Date.now() > deadline) return;
       setTimeout(tick, 10);
