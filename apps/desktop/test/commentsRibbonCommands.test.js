@@ -49,8 +49,13 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
     "Expected main.ts to sync ribbon pressed state from app.isCommentsPanelVisible()",
   );
 
-  // Comments commands are registered as builtin commands, and are dispatched via
-  // `createRibbonActionsFromCommands` (so they share the same execution path as command palette / keybindings).
+  // Ribbon command activation should execute registered commands via the CommandRegistry
+  // bridge (createRibbonActionsFromCommands). Avoid bespoke `handleRibbonCommand` routing for
+  // comments.* ids so command palette recents + keybindings share the same path.
+  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
+  assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
+  assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.addComment/m);
   assert.doesNotMatch(
     main,
     /\bcase\s+["']comments\.togglePanel["']:/,

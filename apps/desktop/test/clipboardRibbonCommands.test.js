@@ -52,9 +52,9 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial["']:/);
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.dialog["']:/);
 
-  // Clipboard command IDs should be registered as built-in commands (so Ribbon + command palette + keybindings
-  // share the same execution/guardrails).
-  for (const id of [
+  // Clipboard commands should be registered as built-in commands so ribbon, command palette,
+  // and keybindings all share the same execution path.
+  const commandIds = [
     "clipboard.cut",
     "clipboard.copy",
     "clipboard.paste",
@@ -63,7 +63,8 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
     "clipboard.pasteSpecial.formulas",
     "clipboard.pasteSpecial.formats",
     "clipboard.pasteSpecial.transpose",
-  ]) {
+  ];
+  for (const id of commandIds) {
     assert.match(
       builtins,
       new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
@@ -75,4 +76,10 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
       `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
     );
   }
+
+  // The ribbon should be mounted through the CommandRegistry bridge so registered commands
+  // are executed via commandRegistry.executeCommand(...).
+  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  // Guardrail: we should not reintroduce bespoke clipboard routing in the ribbon fallback.
+  assert.doesNotMatch(main, /\bcommandId\.startsWith\(\s*["']clipboard\./);
 });

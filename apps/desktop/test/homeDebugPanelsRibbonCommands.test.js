@@ -129,5 +129,28 @@ test("Home → Debug → Panels commands are registered in CommandRegistry (not 
       `Did not expect main.ts to handle ribbon-only command case ${legacy}`,
     );
   }
-});
 
+  // Pressed state sync should reflect whether the panels are open so the debug buttons
+  // visually track the current layout state (Excel-style toggle behavior).
+  const expectedPressedMappings = [
+    { commandId: "view.togglePanel.aiAudit", panelId: "AI_AUDIT" },
+    { commandId: "view.togglePanel.dataQueries", panelId: "DATA_QUERIES" },
+    { commandId: "view.togglePanel.macros", panelId: "MACROS" },
+    { commandId: "view.togglePanel.scriptEditor", panelId: "SCRIPT_EDITOR" },
+    { commandId: "view.togglePanel.python", panelId: "PYTHON" },
+    { commandId: "view.togglePanel.extensions", panelId: "EXTENSIONS" },
+    { commandId: "view.togglePanel.vbaMigrate", panelId: "VBA_MIGRATE" },
+  ];
+  for (const { commandId, panelId } of expectedPressedMappings) {
+    assert.match(
+      main,
+      new RegExp(`["']${escapeRegExp(commandId)}["']:\\s*isPanelOpen\\(\\s*PanelIds\\.${escapeRegExp(panelId)}\\s*\\)`),
+      `Expected main.ts to sync pressed state for ${commandId} via PanelIds.${panelId}`,
+    );
+  }
+  assert.match(
+    main,
+    /["']comments\.togglePanel["']:\s*app\.isCommentsPanelVisible\(\)/,
+    "Expected main.ts to sync pressed state for comments.togglePanel",
+  );
+});
