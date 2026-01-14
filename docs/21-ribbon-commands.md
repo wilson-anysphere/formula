@@ -57,7 +57,8 @@ Examples of real command ids already in use:
 
 - `clipboard.copy`, `clipboard.paste`, `clipboard.pasteSpecial.values` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
 - `edit.undo`, `edit.redo` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
-- `format.toggleBold`, `format.numberFormat.currency` (registered in `apps/desktop/src/main.ts`)
+- `format.toggleBold` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts` via `registerDesktopCommands.ts`)
+- `format.numberFormat.currency` (registered in `apps/desktop/src/commands/registerNumberFormatCommands.ts` via `registerDesktopCommands.ts`)
 - Data → Queries & Connections ribbon actions (currently non-canonical ribbon ids, but registered as commands):\
   `data.queriesConnections.queriesConnections`, `data.queriesConnections.refreshAll` (registered in `apps/desktop/src/commands/registerDataQueriesCommands.ts`)
 
