@@ -9942,7 +9942,20 @@ export class SpreadsheetApp {
         })();
 
         if (derivedSize != null) {
-          next.size = derivedSize;
+          // DrawingML EMU values are integers; preserve integer semantics when we can.
+          if (
+            derivedSize &&
+            typeof derivedSize === "object" &&
+            typeof (derivedSize as any).cx === "number" &&
+            typeof (derivedSize as any).cy === "number" &&
+            Number.isFinite((derivedSize as any).cx) &&
+            Number.isFinite((derivedSize as any).cy)
+          ) {
+            next.size = { ...(derivedSize as any), cx: Math.round((derivedSize as any).cx), cy: Math.round((derivedSize as any).cy) };
+          } else {
+            // Preserve non-EMU encodings (e.g. legacy pixel `{width,height}` sizes) as-is.
+            next.size = derivedSize;
+          }
         } else if ("size" in next) {
           delete next.size;
         }
