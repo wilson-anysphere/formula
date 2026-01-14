@@ -13,6 +13,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 package_json="package.json"
+mise_file="mise.toml"
 
 extract_package_manager_pnpm_version() {
   local file="$1"
@@ -37,6 +38,36 @@ if [ -z "$expected_pnpm_version" ]; then
   echo "Failed to parse pnpm version from ${package_json} packageManager field (expected pnpm@X.Y.Z)." >&2
   exit 1
 fi
+
+extract_mise_pnpm_version() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    printf '%s' ""
+    return 0
+  fi
+
+  local line=""
+  line="$(grep -E '^[[:space:]]*pnpm[[:space:]]*=' "$file" | head -n 1 || true)"
+  if [ -z "$line" ]; then
+    printf '%s' ""
+    return 0
+  fi
+
+  local value="${line#*=}"
+  value="${value%%#*}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" == \"*\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  elif [[ "$value" == \'*\' ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+  fi
+  value="${value#v}"
+  value="${value#V}"
+  printf '%s' "$value"
+}
 
 extract_workflow_env_pnpm_version() {
   local file="$1"
@@ -246,5 +277,21 @@ for workflow in "${workflow_files[@]}"; do
     check_workflow_corepack_pnpm_pins "$workflow"
   fi
 done
+
+mise_pnpm_version="$(extract_mise_pnpm_version "$mise_file")"
+if [ -n "$mise_pnpm_version" ]; then
+  if ! [[ "$mise_pnpm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "mise.toml pnpm tool version must be patch-pinned (X.Y.Z); found pnpm=${mise_pnpm_version}" >&2
+    exit 1
+  fi
+  if [ "$mise_pnpm_version" != "$expected_pnpm_version" ]; then
+    echo "pnpm version pin mismatch between ${package_json} and ${mise_file}:" >&2
+    echo "  ${package_json}: pnpm@${expected_pnpm_version}" >&2
+    echo "  ${mise_file}: pnpm=${mise_pnpm_version}" >&2
+    echo "" >&2
+    echo "Fix: update ${mise_file} pnpm pin to ${expected_pnpm_version} (or update ${package_json} packageManager)." >&2
+    exit 1
+  fi
+fi
 
 echo "pnpm version pins match package.json (pnpm@${expected_pnpm_version})."
