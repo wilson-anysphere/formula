@@ -345,16 +345,16 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     validate_cell_edits(edits)?;
 
     // When BrtWsDim is missing from the input stream, we may need to synthesize it so the
-    // worksheet used-range metadata stays consistent after inserting non-blank cells.
+    // worksheet used-range metadata stays consistent after inserting cells.
     //
     // Mirror the streaming patcher's conservative bounding-box logic: only include edits that
-    // materialize a non-blank cell after patching.
+    // materialize a cell record after patching.
+    //
+    // Note: This includes formatting-only edits that create a `BrtCellBlank` record (i.e. a blank
+    // cell with an explicit style index).
     let mut requested_bounds: Option<Bounds> = None;
     for edit in edits {
         if insertion_is_noop(edit) {
-            continue;
-        }
-        if matches!(edit.new_value, CellValue::Blank) {
             continue;
         }
         bounds_include(&mut requested_bounds, edit.row, edit.col);
@@ -581,8 +581,12 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         .ok_or(Error::UnexpectedEof)?,
                 };
 
-                // Track used-range expansion for edits that turn an empty cell into a value.
-                if id == biff12::BLANK && !matches!(edit.new_value, CellValue::Blank) {
+                // Track used-range expansion for edits that turn an empty cell into a value, or
+                // apply formatting to a blank cell.
+                if id == biff12::BLANK
+                    && !value_edit_is_noop_blank(style, edit)
+                    && (!matches!(edit.new_value, CellValue::Blank) || style_out != 0)
+                {
                     bounds_include(&mut dim_additions, row, col);
                 }
 
@@ -1166,9 +1170,7 @@ fn flush_missing_rows_before<W: io::Write>(
             write_new_cell_record(writer, edit.col, edit)?;
             wrote_any = true;
             applied[idx] = true;
-            if !matches!(edit.new_value, CellValue::Blank) {
-                bounds_include(dim_additions, edit.row, edit.col);
-            }
+            bounds_include(dim_additions, edit.row, edit.col);
             *cursor += 1;
         }
 
@@ -1213,9 +1215,7 @@ fn flush_missing_cells_before<W: io::Write>(
         write_new_cell_record(writer, edit.col, edit)?;
         wrote_any = true;
         applied[idx] = true;
-        if !matches!(edit.new_value, CellValue::Blank) {
-            bounds_include(dim_additions, edit.row, edit.col);
-        }
+        bounds_include(dim_additions, edit.row, edit.col);
         *cursor += 1;
         advance_insert_cursor(ordered, applied, cursor);
     }
@@ -1257,9 +1257,7 @@ fn flush_remaining_cells_in_row<W: io::Write>(
         write_new_cell_record(writer, edit.col, edit)?;
         wrote_any = true;
         applied[idx] = true;
-        if !matches!(edit.new_value, CellValue::Blank) {
-            bounds_include(dim_additions, edit.row, edit.col);
-        }
+        bounds_include(dim_additions, edit.row, edit.col);
         *cursor += 1;
         advance_insert_cursor(ordered, applied, cursor);
     }
@@ -1350,9 +1348,7 @@ fn flush_remaining_rows<W: io::Write>(
             write_new_cell_record(writer, edit.col, edit)?;
             wrote_any = true;
             applied[idx] = true;
-            if !matches!(edit.new_value, CellValue::Blank) {
-                bounds_include(dim_additions, edit.row, edit.col);
-            }
+            bounds_include(dim_additions, edit.row, edit.col);
             *cursor += 1;
         }
 

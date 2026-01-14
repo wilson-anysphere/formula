@@ -22,8 +22,8 @@ struct RawRecordHeader {
 /// - missing rows/cells inside `BrtSheetData` are inserted in row-major order
 /// - edits that clear a missing cell to blank (`new_value = Blank` + no formula payload) are
 ///   treated as no-ops and do not materialize new records
-/// - the worksheet `BrtWsDim` / `DIMENSION` record is expanded (never shrunk) to include any
-///   edited non-blank cells
+/// - the worksheet `BrtWsDim` / `DIMENSION` record is expanded (never shrunk) to include edits
+///   that materialize cell records, including formatting-only updates to blank cells
 ///
 /// Returns `Ok(true)` when the output differs from the input stream, and `Ok(false)` when the
 /// output is byte-identical.
@@ -68,14 +68,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
     let mut insert_cursor = 0usize;
 
     // For streaming we cannot "backpatch" the output stream, so precompute the bounding box of
-    // all non-blank edits. This is a conservative expansion that keeps the used range consistent
-    // when we insert new rows/cells.
+    // all edits that can materialize new cell records (including formatted blanks). This is a
+    // conservative expansion that keeps the used range consistent when we insert new rows/cells.
     let mut requested_bounds: Option<super::Bounds> = None;
     for edit in edits {
         if super::insertion_is_noop(edit) {
-            continue;
-        }
-        if matches!(edit.new_value, CellValue::Blank) {
             continue;
         }
         super::bounds_include(&mut requested_bounds, edit.row, edit.col);
@@ -369,7 +366,10 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                 let style_out = edit.new_style.unwrap_or(style);
                 super::advance_insert_cursor(&ordered_edits, &applied, &mut insert_cursor);
 
-                if id == biff12::BLANK && !matches!(edit.new_value, CellValue::Blank) {
+                if id == biff12::BLANK
+                    && !super::value_edit_is_noop_blank(style, edit)
+                    && (!matches!(edit.new_value, CellValue::Blank) || style_out != 0)
+                {
                     super::bounds_include(&mut dim_additions, row, col);
                 }
 
