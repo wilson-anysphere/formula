@@ -1,6 +1,6 @@
 use formula_engine::value::Value;
 use formula_engine::{EditOp, Engine};
-use formula_model::{Protection, Style};
+use formula_model::{CellRef, Protection, Range, Style};
 
 fn unlocked_style_id(engine: &mut Engine) -> u32 {
     engine.intern_style(Style {
@@ -97,6 +97,45 @@ fn sheet_default_style_persists_across_structural_edits() {
             count: 1,
         })
         .expect("delete rows");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+
+    // Range-map edits (insert/delete cells) should also preserve the sheet default style layer.
+    let a1 = Range::new(CellRef::new(0, 0), CellRef::new(0, 0));
+
+    engine
+        .apply_operation(EditOp::InsertCellsShiftRight {
+            sheet: "Sheet1".to_string(),
+            range: a1,
+        })
+        .expect("insert cells shift right");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCellsShiftLeft {
+            sheet: "Sheet1".to_string(),
+            range: a1,
+        })
+        .expect("delete cells shift left");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::InsertCellsShiftDown {
+            sheet: "Sheet1".to_string(),
+            range: a1,
+        })
+        .expect("insert cells shift down");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCellsShiftUp {
+            sheet: "Sheet1".to_string(),
+            range: a1,
+        })
+        .expect("delete cells shift up");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
 }
