@@ -10,15 +10,41 @@ set -euo pipefail
 #
 # Usage:
 #   bash scripts/ci/check-gha-action-sha-pins.sh [workflow.yml ...]
+#   bash scripts/ci/check-gha-action-sha-pins.sh .github/workflows
 #
 # If no workflow paths are provided, defaults to `.github/workflows/release.yml`.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-workflows=("$@")
+inputs=("$@")
+if [ "${#inputs[@]}" -eq 0 ]; then
+  inputs=(".github/workflows/release.yml")
+fi
+
+workflows=()
+for path in "${inputs[@]}"; do
+  if [ -d "$path" ]; then
+    # Expand a directory into the workflow files it contains.
+    while IFS= read -r file; do
+      [ -z "$file" ] && continue
+      workflows+=("$file")
+    done < <(find "$path" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+    continue
+  fi
+
+  if [ -f "$path" ]; then
+    workflows+=("$path")
+    continue
+  fi
+
+  echo "error: workflow file/directory not found: ${path}" >&2
+  exit 2
+done
+
 if [ "${#workflows[@]}" -eq 0 ]; then
-  workflows=(".github/workflows/release.yml")
+  echo "error: no workflow files found from inputs: ${inputs[*]}" >&2
+  exit 2
 fi
 
 fail=0
@@ -33,10 +59,6 @@ trim() {
 }
 
 for workflow in "${workflows[@]}"; do
-  if [ ! -f "$workflow" ]; then
-    echo "error: workflow file not found: ${workflow}" >&2
-    exit 2
-  fi
 
 while IFS= read -r match; do
   [ -z "$match" ] && continue

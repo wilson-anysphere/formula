@@ -24,7 +24,7 @@ jobs:
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: workflow actions are pinned to commit SHAs"
-        run: bash scripts/ci/check-gha-action-sha-pins.sh .github/workflows/*.yml
+        run: bash scripts/ci/check-gha-action-sha-pins.sh .github/workflows
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
       - name: "Guard: release workflow runner images are pinned (no *-latest)"
