@@ -17,7 +17,7 @@ duplicated follow-up work across the task queue.
 - DONE — Task 383: Copy rewrite for external refs (`90719fa5f`)
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
-- DONE — INDIRECT supports external *single-sheet* refs (bytecode + AST); rejects external 3D spans
+- DONE — INDIRECT: bytecode rejects external workbook refs; AST supports single-sheet external refs; rejects external 3D spans
 - DONE — Task 381: Dynamic external deps (dependency tracing/indexing for dynamic ref producers) (`efb7d5af9`)
 
 ## Remaining (open)

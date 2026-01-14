@@ -594,25 +594,27 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 &mut sheet_dimensions,
             );
 
-            match ctx.eval_arg(&compiled) {
-                ArgValue::Reference(r) => {
-                    // Allow single-sheet external workbook references like `"[Book.xlsx]Sheet1"`,
-                    // but reject external 3D spans like `"[Book.xlsx]Sheet1:Sheet3"`.
-                    //
-                    // This matches the bytecode runtime's `INDIRECT` behavior.
-                    match &r.sheet_id {
-                        crate::functions::SheetId::External(key)
-                            if !crate::eval::is_valid_external_sheet_key(key) =>
-                        {
-                            Value::Error(ErrorKind::Ref)
-                        }
-                        _ => Value::Reference(r),
-                    }
-                }
-                ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),
-                ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
-                _ => Value::Error(ErrorKind::Ref),
-            }
+	            match ctx.eval_arg(&compiled) {
+	                ArgValue::Reference(r) => {
+	                    // AST INDIRECT supports single-sheet external workbook references like
+	                    // `"[Book.xlsx]Sheet1"`, but rejects external 3D spans like
+	                    // `"[Book.xlsx]Sheet1:Sheet3"`.
+	                    //
+	                    // Note: the bytecode backend currently rejects external workbook references
+	                    // for INDIRECT (Excel semantics).
+	                    match &r.sheet_id {
+	                        crate::functions::SheetId::External(key)
+	                            if !crate::eval::is_valid_external_sheet_key(key) =>
+	                        {
+	                            Value::Error(ErrorKind::Ref)
+	                        }
+	                        _ => Value::Reference(r),
+	                    }
+	                }
+	                ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),
+	                ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+	                _ => Value::Error(ErrorKind::Ref),
+	            }
         }
         crate::eval::Expr::NameRef(_) => Value::Error(ErrorKind::Ref),
         crate::eval::Expr::Error(e) => Value::Error(e),

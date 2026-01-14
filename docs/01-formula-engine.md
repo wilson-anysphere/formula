@@ -381,10 +381,14 @@ restrictions (notably: no `]`), so this split is unambiguous.
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when external sheet order is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
-* **INDIRECT + external workbook refs:** `INDIRECT` supports external *single-sheet* workbook
-  references like `INDIRECT("[Book.xlsx]Sheet1!A1")` via the configured external provider.
-  External 3D spans (e.g. `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")`) are rejected and return
-  `#REF!`.
+* **INDIRECT + external workbook refs:**
+  * With the bytecode backend enabled (`Engine::set_bytecode_enabled(true)`, the default),
+    `INDIRECT` rejects external workbook references and returns `#REF!` (the external provider is
+    **not** consulted), matching Excel.
+  * With bytecode disabled (AST backend), `INDIRECT` can resolve *single-sheet* external workbook
+    refs/ranges like `INDIRECT("[Book.xlsx]Sheet1!A1")` via `ExternalValueProvider`.
+  * External-workbook 3D spans (e.g. `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")`) are currently
+    rejected (`#REF!`) in both modes.
 
 #### Minimal provider sketch (including `sheet_order`)
 
