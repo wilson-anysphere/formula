@@ -1005,7 +1005,7 @@ fn decrypt_standard_with_scheme(
         hash_alg,
         key0.as_slice(),
     ) {
-        Ok(()) => true,
+        Ok(_) => true,
         Err(OfficeCryptoError::InvalidPassword) => false,
         Err(other) => return Err(other),
     };
