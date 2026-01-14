@@ -7361,7 +7361,7 @@ registerDesktopCommands({
   commandRegistry,
   app,
   layoutController: ribbonLayoutController,
-  isEditing: () => isSpreadsheetEditing() || app.isReadOnly(),
+  isEditing: isSpreadsheetEditing,
   focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
   getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
