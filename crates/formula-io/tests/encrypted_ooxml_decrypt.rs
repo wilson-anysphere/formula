@@ -283,6 +283,30 @@ fn decrypts_agile_macro_enabled_xlsm_fixture_with_correct_password() {
 }
 
 #[test]
+fn decrypts_standard_macro_enabled_xlsm_fixture_with_correct_password() {
+    let plaintext_basic_path = fixture_path("plaintext-basic.xlsm");
+    let standard_basic_path = fixture_path("standard-basic.xlsm");
+
+    assert_eq!(
+        detect_workbook_format(&plaintext_basic_path).expect("detect plaintext-basic.xlsm"),
+        WorkbookFormat::Xlsm
+    );
+    let plaintext_basic_bytes =
+        std::fs::read(&plaintext_basic_path).expect("read plaintext-basic.xlsm");
+    assert_has_vba_project(&plaintext_basic_bytes);
+
+    let standard_basic = open_model_with_password(&standard_basic_path, "password");
+    assert!(
+        !standard_basic.sheets.is_empty(),
+        "expected decrypted macro workbook to have at least one sheet"
+    );
+    let standard_basic_bytes =
+        open_decrypted_package_bytes_with_password(&standard_basic_path, "password");
+    assert_has_vba_project(&standard_basic_bytes);
+    assert_detects_xlsm(&standard_basic_bytes);
+}
+
+#[test]
 fn errors_on_missing_password_for_empty_password_fixture() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
