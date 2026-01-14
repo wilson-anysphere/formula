@@ -234,6 +234,7 @@ describe("Ribbon UI state overrides", () => {
       "developer.code.useRelativeReferences",
       "developer.code.macroSecurity",
       "developer.code.macroSecurity.trustCenter",
+      "ai.inlineEdit",
       "home.cells.insert",
       "home.cells.insert.insertCells",
       "home.cells.insert.insertSheetRows",

@@ -35,6 +35,10 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "developer.code.macroSecurity": true,
   "developer.code.macroSecurity.trustCenter": true,
 
+  // --- AI ---------------------------------------------------------------------
+  // Inline AI edit applies changes to the sheet and is guarded against active cell/formula edits.
+  "ai.inlineEdit": true,
+
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
   "format.toggleSuperscript": true,
