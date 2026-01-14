@@ -21,7 +21,7 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__header {
-  padding: 10px 12px;
+  padding: calc(var(--space-4) + var(--space-1)) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
 
@@ -32,10 +32,10 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__content {
-  padding: 10px 12px;
+  padding: calc(var(--space-4) + var(--space-1)) var(--space-5);
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
   overflow: auto;
 }
 
@@ -48,12 +48,12 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: var(--space-4);
   background: var(--bg-secondary);
 }
 
 .format-cells-dialog__section-title {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-3);
   font-size: 12px;
   font-weight: 700;
   color: var(--text-secondary);
@@ -65,8 +65,8 @@ dialog.format-cells-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .format-cells-dialog__row:last-child {
@@ -87,7 +87,7 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__select,
 .format-cells-dialog__input {
   width: 100%;
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -96,7 +96,7 @@ dialog.format-cells-dialog::backdrop {
 
 .format-cells-dialog__toggles {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .format-cells-dialog__toggle {
@@ -104,10 +104,10 @@ dialog.format-cells-dialog::backdrop {
   background: var(--bg-primary);
   color: var(--text-primary);
   border-radius: var(--radius-sm);
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   font-weight: 700;
   cursor: pointer;
-  min-width: 28px;
+  min-width: calc(var(--space-6) + var(--space-5));
 }
 
 .format-cells-dialog__toggle[aria-pressed="true"] {
@@ -118,7 +118,7 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__checkbox {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   font-size: 12px;
   color: var(--text-primary);
 }
@@ -126,7 +126,7 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__swatches {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .format-cells-dialog__swatch {
@@ -171,17 +171,17 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__actions {
-  padding: 10px 12px;
+  padding: calc(var(--space-4) + var(--space-1)) var(--space-5);
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .format-cells-dialog__actions button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
