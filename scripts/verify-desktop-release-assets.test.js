@@ -529,6 +529,51 @@ test("validateReleaseExpectations fails on ambiguous multi-arch assets that omit
   );
 });
 
+test("validateReleaseExpectations fails when an asset matches multiple arch tokens (e.g. x64+arm64)", () => {
+  const expectedTargets = [
+    {
+      id: "windows-x64",
+      os: "windows",
+      arch: "x64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-x86_64"],
+    },
+    {
+      id: "windows-arm64",
+      os: "windows",
+      arch: "arm64",
+      installerExts: [".msi", ".exe"],
+      updaterPlatformKeys: ["windows-aarch64"],
+    },
+  ];
+
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi.zip", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi.zip", signature: "sig" },
+    },
+  };
+
+  // Single installer name includes both tokens; this should not be accepted as satisfying both
+  // arch expectations.
+  const assetNames = ["Formula_0.1.0_x64_arm64.msi"];
+
+  assert.throws(
+    () =>
+      validateReleaseExpectations({
+        manifest,
+        expectedVersion: "0.1.0",
+        assetNames,
+        expectedTargets,
+      }),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("multiple architecture tokens") &&
+      err.message.includes("windows"),
+  );
+});
+
 test("validateReleaseExpectations allows missing arch token for macos-universal installers", () => {
   const expectedTargets = [
     {

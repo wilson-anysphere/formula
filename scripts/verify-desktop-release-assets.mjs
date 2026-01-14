@@ -261,9 +261,11 @@ const EXPECT_FLAG_MAP = new Map([
 ]);
 
 const ARCH_TOKENS = {
-  x64: ["x64", "x86_64", "amd64"],
+  // Tauri output naming varies a bit between bundlers/toolchains. Keep this generous so the
+  // verifier doesn't false-fail on trivial formatting differences.
+  x64: ["x64", "x86_64", "x86-64", "amd64", "win64"],
   arm64: ["arm64", "aarch64"],
-  universal: ["universal"],
+  universal: ["universal", "universal2"],
 };
 
 /** @typedef {"windows" | "macos" | "linux"} DesktopOs */
@@ -1272,6 +1274,30 @@ function validateReleaseExpectations({ manifest, expectedVersion, assetNames, ex
     }
     for (const name of ambiguous) {
       errors.push(`  ${name}`);
+    }
+  }
+
+  // 4) Detect assets that match multiple arch tokens (e.g. "x64-arm64"), which can mask a missing
+  // per-arch installer by satisfying multiple expectations at once.
+  for (const [os, archs] of expectedArchsByOs.entries()) {
+    const uniqueArchs = Array.from(new Set(archs));
+    if (uniqueArchs.length < 2) continue;
+
+    const artifactNames = listOsArtifacts(assetNames, os).filter((name) => containsVersion(name, version));
+    /** @type {string[]} */
+    const multiMatch = [];
+    for (const name of artifactNames) {
+      const matched = uniqueArchs.filter((arch) => containsArchToken(name, arch));
+      if (matched.length > 1) {
+        multiMatch.push(`${name} (matches: ${matched.join(", ")})`);
+      }
+    }
+    if (multiMatch.length > 0) {
+      errors.push(`[${os}] Assets match multiple architecture tokens (ambiguous naming).`);
+      errors.push(
+        `  Each asset should include exactly one arch/universal discriminator to avoid confusion/overwrite.`,
+      );
+      for (const item of multiMatch) errors.push(`  ${item}`);
     }
   }
 
