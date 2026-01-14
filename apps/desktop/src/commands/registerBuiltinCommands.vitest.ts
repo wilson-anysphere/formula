@@ -104,6 +104,40 @@ describe("registerBuiltinCommands: panel toggles", () => {
     await Promise.resolve();
     expect(onExtensionsLoaded).toHaveBeenCalledTimes(1);
   });
+
+  it("does not invoke ensureExtensionsLoaded when toggling Marketplace panel (keep extension host lazy)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const ensureExtensionsLoaded = vi.fn(async () => {});
+    const onExtensionsLoaded = vi.fn();
+
+    registerBuiltinCommands({
+      commandRegistry,
+      app: {} as any,
+      layoutController,
+      ensureExtensionsLoaded,
+      onExtensionsLoaded,
+    });
+
+    await commandRegistry.executeCommand("view.togglePanel.marketplace");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.MARKETPLACE)).toEqual({ kind: "docked", side: "right" });
+    expect(ensureExtensionsLoaded).toHaveBeenCalledTimes(0);
+
+    // `view.togglePanel.marketplace` should not schedule onExtensionsLoaded either.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onExtensionsLoaded).toHaveBeenCalledTimes(0);
+  });
 });
 
 describe("registerBuiltinCommands: Home tab core commands", () => {
