@@ -9,6 +9,7 @@ use arrow_schema::{DataType, Field, Schema};
 use formula_columnar::arrow::{columnar_to_record_batch, record_batch_to_columnar};
 use formula_columnar::{ColumnType, Value};
 use half::f16;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 fn assert_tables_equal(a: &formula_columnar::ColumnarTable, b: &formula_columnar::ColumnarTable) {
@@ -265,5 +266,52 @@ fn record_batch_to_columnar_accepts_decimal128_as_number() -> Result<(), Box<dyn
     assert_eq!(table.get_cell(0, 0), Value::Number(123.45));
     assert_eq!(table.get_cell(1, 0), Value::Null);
     assert_eq!(table.get_cell(2, 0), Value::Number(-1.0));
+    Ok(())
+}
+
+#[test]
+fn record_batch_to_columnar_accepts_currency_decimal128_with_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::Decimal128Array;
+
+    let arr = Decimal128Array::from(vec![Some(12_345_i128), None, Some(-5_i128)])
+        .with_precision_and_scale(10, 2)?;
+
+    let mut meta = HashMap::new();
+    meta.insert("formula:column_type".to_owned(), "currency".to_owned());
+    meta.insert("formula:scale".to_owned(), "2".to_owned());
+
+    let field = Field::new("money", DataType::Decimal128(10, 2), true).with_metadata(meta);
+    let schema = Arc::new(Schema::new(vec![field]));
+    let batch = RecordBatch::try_new(schema, vec![Arc::new(arr) as ArrayRef])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::Currency { scale: 2 });
+    assert_eq!(table.get_cell(0, 0), Value::Currency(12_345));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::Currency(-5));
+    Ok(())
+}
+
+#[test]
+fn record_batch_to_columnar_accepts_percentage_decimal128_with_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::Decimal128Array;
+
+    let arr = Decimal128Array::from(vec![Some(1_234_i128), Some(0_i128)])
+        .with_precision_and_scale(10, 3)?;
+
+    let mut meta = HashMap::new();
+    meta.insert("formula:column_type".to_owned(), "percentage".to_owned());
+    meta.insert("formula:scale".to_owned(), "3".to_owned());
+
+    let field = Field::new("pct", DataType::Decimal128(10, 3), true).with_metadata(meta);
+    let schema = Arc::new(Schema::new(vec![field]));
+    let batch = RecordBatch::try_new(schema, vec![Arc::new(arr) as ArrayRef])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::Percentage { scale: 3 });
+    assert_eq!(table.get_cell(0, 0), Value::Percentage(1_234));
+    assert_eq!(table.get_cell(1, 0), Value::Percentage(0));
     Ok(())
 }

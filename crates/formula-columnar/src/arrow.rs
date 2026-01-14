@@ -62,6 +62,12 @@ pub enum ArrowInteropError {
     UnsupportedDataType(DataType),
     UnsupportedDictionaryValueType(DataType),
     InvalidDictionaryKey { key: String, dictionary_len: usize },
+    InvalidDecimalScaleConversion {
+        value: i128,
+        from_scale: i32,
+        to_scale: i32,
+        reason: &'static str,
+    },
     Context {
         context: String,
         source: Box<ArrowInteropError>,
@@ -80,6 +86,15 @@ impl std::fmt::Display for ArrowInteropError {
             Self::InvalidDictionaryKey { key, dictionary_len } => write!(
                 f,
                 "invalid dictionary key {key} (dictionary has {dictionary_len} values)"
+            ),
+            Self::InvalidDecimalScaleConversion {
+                value,
+                from_scale,
+                to_scale,
+                reason,
+            } => write!(
+                f,
+                "cannot convert decimal {value} from scale {from_scale} to scale {to_scale}: {reason}"
             ),
             Self::Context { context, source } => write!(f, "{context}: {source}"),
             Self::InvalidMetadata { key, value } => {
@@ -103,6 +118,57 @@ impl From<arrow_schema::ArrowError> for ArrowInteropError {
     fn from(value: arrow_schema::ArrowError) -> Self {
         Self::Arrow(value)
     }
+}
+
+fn scale_decimal_i128_to_i64(
+    value: i128,
+    from_scale: i32,
+    to_scale: i32,
+) -> Result<i64, ArrowInteropError> {
+    let scale_diff = to_scale - from_scale;
+    let mut out = value;
+
+    if scale_diff > 0 {
+        let pow10 = 10_i128.checked_pow(scale_diff as u32).ok_or_else(|| {
+            ArrowInteropError::InvalidDecimalScaleConversion {
+                value,
+                from_scale,
+                to_scale,
+                reason: "scale conversion overflows i128",
+            }
+        })?;
+        out = out.checked_mul(pow10).ok_or_else(|| ArrowInteropError::InvalidDecimalScaleConversion {
+            value,
+            from_scale,
+            to_scale,
+            reason: "scaled value overflows i128",
+        })?;
+    } else if scale_diff < 0 {
+        let pow10 = 10_i128
+            .checked_pow((-scale_diff) as u32)
+            .ok_or_else(|| ArrowInteropError::InvalidDecimalScaleConversion {
+                value,
+                from_scale,
+                to_scale,
+                reason: "scale conversion overflows i128",
+            })?;
+        if out % pow10 != 0 {
+            return Err(ArrowInteropError::InvalidDecimalScaleConversion {
+                value,
+                from_scale,
+                to_scale,
+                reason: "value has fractional digits beyond target scale",
+            });
+        }
+        out /= pow10;
+    }
+
+    i64::try_from(out).map_err(|_| ArrowInteropError::InvalidDecimalScaleConversion {
+        value,
+        from_scale,
+        to_scale,
+        reason: "scaled value does not fit in i64",
+    })
 }
 
 fn column_type_tag(column_type: ColumnType) -> &'static str {
@@ -498,19 +564,49 @@ pub(crate) fn value_from_array(
                 .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
             Ok(Value::DateTime(arr.value(row)))
         }
-        ColumnType::Currency { .. } => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<arrow_array::Int64Array>()
-                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
-            Ok(Value::Currency(arr.value(row)))
+        ColumnType::Currency { scale } => match array.data_type() {
+            DataType::Int64 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Int64Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Currency(arr.value(row)))
+            }
+            DataType::Decimal128(_, dec_scale) => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Decimal128Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                let scaled = scale_decimal_i128_to_i64(
+                    arr.value(row),
+                    *dec_scale as i32,
+                    scale as i32,
+                )?;
+                Ok(Value::Currency(scaled))
+            }
+            other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
         }
-        ColumnType::Percentage { .. } => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<arrow_array::Int64Array>()
-                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
-            Ok(Value::Percentage(arr.value(row)))
+        ColumnType::Percentage { scale } => match array.data_type() {
+            DataType::Int64 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Int64Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Percentage(arr.value(row)))
+            }
+            DataType::Decimal128(_, dec_scale) => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Decimal128Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                let scaled = scale_decimal_i128_to_i64(
+                    arr.value(row),
+                    *dec_scale as i32,
+                    scale as i32,
+                )?;
+                Ok(Value::Percentage(scaled))
+            }
+            other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
         }
     }
 }
