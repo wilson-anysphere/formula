@@ -21,17 +21,17 @@ use crate::locale::{
 };
 use crate::value::{Array, ErrorKind, Value};
 use formula_model::{
-    CellId, CellRef, ColProperties, Range, RowProperties, Style, StyleTable, Table, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
+    sheet_name_eq_case_insensitive, CellId, CellRef, ColProperties, Range, RowProperties, Style,
+    StyleTable, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
 use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 
@@ -390,7 +390,10 @@ impl Workbook {
                 "sheet order contains missing sheet id {}",
                 id
             );
-            assert!(seen.insert(id), "sheet order contains duplicate sheet id {id}");
+            assert!(
+                seen.insert(id),
+                "sheet order contains duplicate sheet id {id}"
+            );
         }
         assert_eq!(
             seen, existing,
@@ -584,7 +587,10 @@ impl RecalcValueChangeCollector {
             if *before == after {
                 continue;
             }
-            let sheet = workbook.sheet_name(key.sheet).unwrap_or_default().to_string();
+            let sheet = workbook
+                .sheet_name(key.sheet)
+                .unwrap_or_default()
+                .to_string();
             out.push(RecalcValueChange {
                 sheet,
                 addr: key.addr,
@@ -1018,6 +1024,30 @@ impl Engine {
                     cell.formula = Some(rewritten);
                 }
             }
+
+            // Rewrite table calculated column + totals formulas.
+            for table in &mut sheet.tables {
+                for column in &mut table.columns {
+                    if let Some(formula) = column.formula.as_mut() {
+                        let rewritten =
+                            rewrite_deleted_sheet_references_in_formula_internal_refs_only(
+                                formula,
+                                &deleted_sheet_name,
+                                &sheet_order_names,
+                            );
+                        *formula = rewritten;
+                    }
+                    if let Some(formula) = column.totals_formula.as_mut() {
+                        let rewritten =
+                            rewrite_deleted_sheet_references_in_formula_internal_refs_only(
+                                formula,
+                                &deleted_sheet_name,
+                                &sheet_order_names,
+                            );
+                        *formula = rewritten;
+                    }
+                }
+            }
         }
 
         // Rewrite workbook-scoped names.
@@ -1046,7 +1076,9 @@ impl Engine {
             for def in sheet.names.values_mut() {
                 let formula = match &mut def.definition {
                     NameDefinition::Constant(_) => continue,
-                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => formula,
+                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                        formula
+                    }
                 };
                 let origin = crate::CellAddr::new(0, 0);
                 let (rewritten, changed) = rewrite_formula_for_sheet_delete(
@@ -1070,6 +1102,120 @@ impl Engine {
             self.recalculate();
         }
         Ok(())
+    }
+
+    /// Returns an immutable view of the tables defined on `sheet`.
+    ///
+    /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
+    pub fn sheet_tables(&self, sheet: &str) -> Option<&[Table]> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        Some(self.workbook.sheets.get(sheet_id)?.tables.as_slice())
+    }
+
+    /// Rename a worksheet and rewrite formulas that reference it (Excel-like).
+    ///
+    /// Returns `false` if `old_name` does not exist or `new_name` conflicts with another sheet.
+    pub fn rename_sheet(&mut self, old_name: &str, new_name: &str) -> bool {
+        let Some(sheet_id) = self.workbook.sheet_id(old_name) else {
+            return false;
+        };
+        if let Some(existing) = self.workbook.sheet_id(new_name) {
+            if existing != sheet_id {
+                return false;
+            }
+        }
+
+        let Some(display_old_name) = self.workbook.sheet_name(sheet_id).map(|s| s.to_string())
+        else {
+            return false;
+        };
+
+        if display_old_name == new_name {
+            return true;
+        }
+
+        let sheet_ids: Vec<SheetId> = self.workbook.sheet_ids_in_order().to_vec();
+        for sheet_id in sheet_ids {
+            let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+                continue;
+            };
+
+            for cell in sheet.cells.values_mut() {
+                if let Some(formula) = cell.formula.as_mut() {
+                    *formula = formula_model::rewrite_sheet_names_in_formula(
+                        formula,
+                        &display_old_name,
+                        new_name,
+                    );
+                }
+            }
+
+            for table in &mut sheet.tables {
+                for column in &mut table.columns {
+                    if let Some(formula) = column.formula.as_mut() {
+                        *formula = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &display_old_name,
+                            new_name,
+                        );
+                    }
+                    if let Some(formula) = column.totals_formula.as_mut() {
+                        *formula = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &display_old_name,
+                            new_name,
+                        );
+                    }
+                }
+            }
+
+            for def in sheet.names.values_mut() {
+                match &mut def.definition {
+                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                        *formula = formula_model::rewrite_sheet_names_in_formula(
+                            formula,
+                            &display_old_name,
+                            new_name,
+                        );
+                    }
+                    NameDefinition::Constant(_) => {}
+                }
+            }
+        }
+
+        for def in self.workbook.names.values_mut() {
+            match &mut def.definition {
+                NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                    *formula = formula_model::rewrite_sheet_names_in_formula(
+                        formula,
+                        &display_old_name,
+                        new_name,
+                    );
+                }
+                NameDefinition::Constant(_) => {}
+            }
+        }
+
+        if let Some(slot) = self.workbook.sheet_names.get_mut(sheet_id) {
+            *slot = Some(new_name.to_string());
+        }
+
+        self.workbook.sheet_name_to_id = self
+            .workbook
+            .sheet_names
+            .iter()
+            .enumerate()
+            .filter_map(|(id, name)| name.as_ref().map(|name| (Workbook::sheet_key(name), id)))
+            .collect();
+
+        // Sheet names can be observed by worksheet information functions (e.g. CELL("address")).
+        // Conservatively mark all compiled formula cells dirty so callers see updated results.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        true
     }
 
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
@@ -1288,10 +1434,10 @@ impl Engine {
         let mut out = Vec::new();
         for (_, sheet_id, addr, reason) in entries.into_iter().take(limit) {
             let sheet = self.workbook.sheet_name(sheet_id).unwrap_or_default().to_string();
-            out.push(BytecodeCompileReportEntry {
-                sheet,
-                addr,
-                reason,
+        out.push(BytecodeCompileReportEntry {
+            sheet,
+            addr,
+            reason,
             });
         }
         out
@@ -4028,9 +4174,8 @@ impl Engine {
 
         let workbook = &self.workbook;
         let mut resolve_sheet_id = |name: &str| workbook.sheet_id(name);
-        let mut expand_sheet_span = |start_id: SheetId, end_id: SheetId| {
-            workbook.sheet_span_ids(start_id, end_id)
-        };
+        let mut expand_sheet_span =
+            |start_id: SheetId, end_id: SheetId| workbook.sheet_span_ids(start_id, end_id);
         let rewritten_names = rewrite_defined_name_constants_for_bytecode(
             expr_after_structured,
             key.sheet,
@@ -5042,8 +5187,9 @@ impl Engine {
                 // used to resolve the defined name (which may differ from the formula's sheet when
                 // the name reference is explicitly sheet-qualified).
                 if both_unprefixed {
-                    let sheet_ref =
-                        crate::SheetRef::Sheet(self.workbook.sheet_name(current_sheet)?.to_string());
+                    let sheet_ref = crate::SheetRef::Sheet(
+                        self.workbook.sheet_name(current_sheet)?.to_string(),
+                    );
                     match &mut left {
                         crate::Expr::CellRef(r) => r.sheet = Some(sheet_ref.clone()),
                         crate::Expr::ColRef(r) => r.sheet = Some(sheet_ref.clone()),
@@ -7783,7 +7929,10 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         if let Some(provider) = &self.external_value_provider {
-            if let Some(sheet_name) = self.sheet_names_by_id.get(sheet_id).and_then(|s| s.as_deref())
+            if let Some(sheet_name) = self
+                .sheet_names_by_id
+                .get(sheet_id)
+                .and_then(|s| s.as_deref())
             {
                 if let Some(v) = provider.get(sheet_name, addr) {
                     return v;
@@ -9197,7 +9346,10 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                 row: start_row,
                 col: start_col,
             },
-            end: CellAddr { row: end_row, col: end_col },
+            end: CellAddr {
+                row: end_row,
+                col: end_col,
+            },
         };
 
         let mut guard = match trace.lock() {
@@ -9576,11 +9728,9 @@ fn bytecode_expr_within_grid_limits(
                                     }
 
                                     let spans_all_cols = resolved.col_start == 0
-                                        && resolved.col_end
-                                            == EXCEL_MAX_COLS_I32.saturating_sub(1);
+                                        && resolved.col_end == EXCEL_MAX_COLS_I32.saturating_sub(1);
                                     let spans_all_rows = resolved.row_start == 0
-                                        && resolved.row_end
-                                            == EXCEL_MAX_ROWS_I32.saturating_sub(1);
+                                        && resolved.row_end == EXCEL_MAX_ROWS_I32.saturating_sub(1);
 
                                     // ROW/COLUMN treat full-row/full-column references as 1-D
                                     // arrays (see `functions::builtins_reference::{row_fn,column_fn}`
@@ -10393,7 +10543,8 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
                 // base is reference-valued.
-                let base_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
+                let base_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 // rows/cols/height/width are scalar arguments, but Excel applies implicit
                 // intersection when they are provided as references. Allow reference values but
                 // reject array literals in these scalar positions.
@@ -12173,6 +12324,572 @@ fn rewrite_defined_name_range_map(
     let parsed = lower_ast(&ast, None);
     let compiled = engine.compile_name_expr(&parsed);
     Ok(Some((new_def, compiled)))
+}
+
+fn looks_like_a1_cell_reference(name: &str) -> bool {
+    // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
+    // Excel requires quoting to disambiguate.
+    let mut chars = name.chars().peekable();
+    let Some(first) = chars.peek().copied() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+
+    let mut letters = String::new();
+    while let Some(c) = chars.peek().copied() {
+        if c.is_ascii_alphabetic() {
+            if letters.len() >= 3 {
+                return false;
+            }
+            letters.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    let mut digits = String::new();
+    while let Some(c) = chars.peek().copied() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if letters.is_empty() || digits.is_empty() || chars.peek().is_some() {
+        return false;
+    }
+
+    // Reject impossible columns (beyond XFD). This keeps the check cheap and avoids quoting
+    // names like "SHEET1" where the "letters" part is > 3 and already returned false above.
+    let col = letters.chars().fold(0u32, |acc, c| {
+        acc * 26 + (c.to_ascii_uppercase() as u32 - 'A' as u32 + 1)
+    });
+    col <= 16_384
+}
+
+fn looks_like_r1c1_cell_reference(name: &str) -> bool {
+    // In R1C1 notation, `R`/`C` are valid relative references. Excel may also treat
+    // `R123C456` as a cell reference even when the workbook is in A1 mode.
+    if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("c") {
+        return true;
+    }
+
+    let bytes = name.as_bytes();
+    if bytes.first().copied().map(|b| b.to_ascii_uppercase()) != Some(b'R') {
+        return false;
+    }
+
+    let mut i = 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    if i >= bytes.len() || bytes[i].to_ascii_uppercase() != b'C' {
+        return false;
+    }
+
+    i += 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    i == bytes.len()
+}
+
+fn is_reserved_unquoted_sheet_name(name: &str) -> bool {
+    // Excel boolean literals are tokenized as keywords; quoting avoids ambiguity in formulas.
+    name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false")
+}
+
+fn is_valid_unquoted_sheet_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    // Excel allows many Unicode sheet names, but it also permits quoting for all of them.
+    // We keep the unquoted form conservative and ASCII-only.
+    if first.is_ascii_digit() {
+        return false;
+    }
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    if !chars.all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric()) {
+        return false;
+    }
+
+    if is_reserved_unquoted_sheet_name(name) {
+        return false;
+    }
+
+    !(looks_like_a1_cell_reference(name) || looks_like_r1c1_cell_reference(name))
+}
+
+fn needs_quoting_for_sheet_reference(
+    workbook_prefix: Option<&str>,
+    start: &str,
+    end: Option<&str>,
+) -> bool {
+    // For safety (and because we cannot know if the external workbook is open/closed), always
+    // quote external workbook references.
+    if workbook_prefix.is_some() {
+        return true;
+    }
+
+    if !is_valid_unquoted_sheet_name(start) {
+        return true;
+    }
+
+    end.is_some_and(|end| !is_valid_unquoted_sheet_name(end))
+}
+
+fn escape_single_quotes(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+fn format_sheet_reference(workbook_prefix: Option<&str>, start: &str, end: Option<&str>) -> String {
+    let mut content = String::new();
+    if let Some(prefix) = workbook_prefix {
+        content.push_str(prefix);
+    }
+    content.push_str(start);
+    if let Some(end) = end {
+        content.push(':');
+        content.push_str(end);
+    }
+
+    if needs_quoting_for_sheet_reference(workbook_prefix, start, end) {
+        format!("'{}'", escape_single_quotes(&content))
+    } else {
+        content
+    }
+}
+
+fn split_workbook_prefix(sheet_spec: &str) -> (Option<&str>, &str) {
+    // External references can include a path component that itself contains `[` / `]` (e.g.
+    // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`). The *workbook* delimiter is the last `[...]` pair in the
+    // spec, so search from the end.
+    let Some(open) = sheet_spec.rfind('[') else {
+        return (None, sheet_spec);
+    };
+    let Some(close_rel) = sheet_spec[open..].find(']') else {
+        return (None, sheet_spec);
+    };
+    let close = open + close_rel;
+    let prefix_end = close + 1;
+    if prefix_end >= sheet_spec.len() {
+        return (None, sheet_spec);
+    }
+    let (prefix, remainder) = sheet_spec.split_at(prefix_end);
+    (Some(prefix), remainder)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeleteSheetSpecRewrite {
+    Unchanged,
+    Adjusted(String),
+    Invalidate,
+}
+
+fn sheet_index_in_order(sheet_order: &[String], name: &str) -> Option<usize> {
+    sheet_order
+        .iter()
+        .position(|sheet_name| sheet_name_eq_case_insensitive(sheet_name, name))
+}
+
+fn rewrite_sheet_spec_for_delete(
+    spec: &str,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> DeleteSheetSpecRewrite {
+    let (workbook_prefix, remainder) = split_workbook_prefix(spec);
+    // Ignore external workbook references.
+    if workbook_prefix.is_some() {
+        return DeleteSheetSpecRewrite::Unchanged;
+    }
+
+    let mut parts = remainder.splitn(2, ':');
+    let start = parts.next().unwrap_or_default();
+    let end = parts.next();
+
+    let Some(end) = end else {
+        return if sheet_name_eq_case_insensitive(start, deleted_sheet) {
+            DeleteSheetSpecRewrite::Invalidate
+        } else {
+            DeleteSheetSpecRewrite::Unchanged
+        };
+    };
+
+    let start_matches = sheet_name_eq_case_insensitive(start, deleted_sheet);
+    let end_matches = sheet_name_eq_case_insensitive(end, deleted_sheet);
+
+    if !start_matches && !end_matches {
+        return DeleteSheetSpecRewrite::Unchanged;
+    }
+
+    let Some(start_idx) = sheet_index_in_order(sheet_order, start) else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+    let Some(end_idx) = sheet_index_in_order(sheet_order, end) else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+
+    // The span references only the deleted sheet.
+    if start_idx == end_idx {
+        return DeleteSheetSpecRewrite::Invalidate;
+    }
+
+    let dir = if end_idx > start_idx { 1isize } else { -1isize };
+    let mut new_start_idx = start_idx as isize;
+    let mut new_end_idx = end_idx as isize;
+
+    // When deleting a 3D boundary, Excel shifts it one sheet toward the other boundary.
+    if start_matches {
+        new_start_idx += dir;
+    }
+    if end_matches {
+        new_end_idx -= dir;
+    }
+
+    let Some(new_start) = new_start_idx
+        .try_into()
+        .ok()
+        .and_then(|idx: usize| sheet_order.get(idx))
+    else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+    let Some(new_end) = new_end_idx
+        .try_into()
+        .ok()
+        .and_then(|idx: usize| sheet_order.get(idx))
+    else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+
+    let end = (!sheet_name_eq_case_insensitive(new_start, new_end)).then_some(new_end.as_str());
+
+    DeleteSheetSpecRewrite::Adjusted(format_sheet_reference(None, new_start.as_str(), end))
+}
+
+fn parse_quoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str, String)> {
+    let bytes = formula.as_bytes();
+    if bytes.get(start) != Some(&b'\'') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    let mut unescaped = String::new();
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' => {
+                if bytes.get(i + 1) == Some(&b'\'') {
+                    unescaped.push('\'');
+                    i += 2;
+                } else {
+                    i += 1;
+                    break;
+                }
+            }
+            _ => {
+                let ch = formula[i..].chars().next()?;
+                unescaped.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+    }
+
+    if i >= bytes.len() || bytes[i] != b'!' {
+        return None;
+    }
+
+    let next = i + 1;
+    Some((next, &formula[start..next], unescaped))
+}
+
+fn parse_unquoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str, &str)> {
+    let bytes = formula.as_bytes();
+    let mut i = start;
+
+    let first = formula[i..].chars().next()?;
+    if first != '[' && first != '_' && !first.is_alphabetic() {
+        return None;
+    }
+
+    // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
+    if first == '[' {
+        // Scan until the closing `]` (workbook name can contain many characters).
+        i += 1;
+        while i < bytes.len() {
+            if bytes[i] == b']' {
+                i += 1;
+                break;
+            }
+            let ch = formula[i..].chars().next()?;
+            i += ch.len_utf8();
+        }
+
+        if i >= bytes.len() {
+            return None;
+        }
+
+        let next_ch = formula[i..].chars().next()?;
+        if next_ch != '_' && !next_ch.is_alphabetic() {
+            // Not a workbook+sheet reference; likely a structured reference.
+            return None;
+        }
+    } else {
+        i += first.len_utf8();
+    }
+
+    while i < bytes.len() {
+        if bytes[i] == b'!' {
+            let next = i + 1;
+            return Some((next, &formula[start..next], &formula[start..i]));
+        }
+        let ch = formula[i..].chars().next()?;
+        if ch == '_' || ch == '.' || ch == ':' || ch.is_alphanumeric() {
+            i += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+
+    None
+}
+
+fn parse_error_literal(formula: &str, start: usize) -> Option<(usize, &str)> {
+    let bytes = formula.as_bytes();
+    if bytes.get(start) != Some(&b'#') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        let ch = formula[i..].chars().next()?;
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '/' | '_' | '.' => {
+                i += ch.len_utf8();
+            }
+            '!' | '?' => {
+                i += ch.len_utf8();
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    if i == start + 1 {
+        return None;
+    }
+
+    Some((i, &formula[start..i]))
+}
+
+fn sheet_ref_tail_end(formula: &str, start: usize) -> usize {
+    let bytes = formula.as_bytes();
+    let mut i = start;
+    let mut bracket_depth: u32 = 0;
+    let mut paren_depth: u32 = 0;
+    let mut in_string = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_string {
+            if b == b'"' {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    i += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'"' => {
+                in_string = true;
+                i += 1;
+            }
+            b'[' => {
+                bracket_depth = bracket_depth.saturating_add(1);
+                i += 1;
+            }
+            b']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                i += 1;
+            }
+            b'(' => {
+                paren_depth = paren_depth.saturating_add(1);
+                i += 1;
+            }
+            b')' => {
+                if paren_depth == 0 {
+                    break;
+                }
+                paren_depth = paren_depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => {
+                if bracket_depth == 0
+                    && paren_depth == 0
+                    && matches!(
+                        b,
+                        b' ' | b'\t'
+                            | b'\n'
+                            | b'\r'
+                            | b','
+                            | b';'
+                            | b'+'
+                            | b'-'
+                            | b'*'
+                            | b'/'
+                            | b'^'
+                            | b'&'
+                            | b'='
+                            | b'<'
+                            | b'>'
+                            | b'{'
+                            | b'}'
+                            | b'%'
+                    )
+                {
+                    break;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    i
+}
+
+/// Rewrite sheet references inside `formula` when `deleted_sheet` is removed.
+///
+/// This mirrors [`formula_model::rewrite_deleted_sheet_references_in_formula`], but intentionally
+/// does **not** rewrite references that include an explicit workbook prefix (e.g.
+/// `='[Book.xlsx]Sheet1'!A1`), since those refer to an external workbook and should not change when
+/// deleting a sheet inside the current workbook.
+fn rewrite_deleted_sheet_references_in_formula_internal_refs_only(
+    formula: &str,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> String {
+    let mut out = String::with_capacity(formula.len());
+    let mut i = 0;
+    let mut in_string = false;
+    let bytes = formula.as_bytes();
+
+    while i < bytes.len() {
+        if in_string {
+            let ch = formula[i..]
+                .chars()
+                .next()
+                .expect("i always at char boundary");
+            out.push(ch);
+            if ch == '"' {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    out.push('"');
+                    i += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            i += ch.len_utf8();
+            continue;
+        }
+
+        if bytes[i] == b'"' {
+            in_string = true;
+            out.push('"');
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'#' {
+            if let Some((next, raw)) = parse_error_literal(formula, i) {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
+        }
+
+        if bytes[i] == b'\'' {
+            if let Some((next, raw, sheet_spec)) = parse_quoted_sheet_spec(formula, i) {
+                // Ignore external workbook references.
+                if split_workbook_prefix(&sheet_spec).0.is_some() {
+                    out.push_str(raw);
+                    i = next;
+                    continue;
+                }
+
+                match rewrite_sheet_spec_for_delete(&sheet_spec, deleted_sheet, sheet_order) {
+                    DeleteSheetSpecRewrite::Unchanged => {
+                        out.push_str(raw);
+                        i = next;
+                        continue;
+                    }
+                    DeleteSheetSpecRewrite::Adjusted(rewritten) => {
+                        out.push_str(&rewritten);
+                        out.push('!');
+                        i = next;
+                        continue;
+                    }
+                    DeleteSheetSpecRewrite::Invalidate => {
+                        out.push_str("#REF!");
+                        i = sheet_ref_tail_end(formula, next);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        if let Some((next, raw, sheet_spec)) = parse_unquoted_sheet_spec(formula, i) {
+            // Ignore external workbook references.
+            if split_workbook_prefix(sheet_spec).0.is_some() {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
+
+            match rewrite_sheet_spec_for_delete(sheet_spec, deleted_sheet, sheet_order) {
+                DeleteSheetSpecRewrite::Unchanged => {
+                    out.push_str(raw);
+                    i = next;
+                    continue;
+                }
+                DeleteSheetSpecRewrite::Adjusted(rewritten) => {
+                    out.push_str(&rewritten);
+                    out.push('!');
+                    i = next;
+                    continue;
+                }
+                DeleteSheetSpecRewrite::Invalidate => {
+                    out.push_str("#REF!");
+                    i = sheet_ref_tail_end(formula, next);
+                    continue;
+                }
+            }
+        }
+
+        let ch = formula[i..]
+            .chars()
+            .next()
+            .expect("i always at char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -15108,12 +15825,7 @@ mod tests {
             .expect("B1 stored");
 
         cell.dynamic_deps = true;
-        let ast = cell
-            .compiled
-            .as_ref()
-            .expect("compiled")
-            .ast()
-            .clone();
+        let ast = cell.compiled.as_ref().expect("compiled").ast().clone();
 
         let mut program =
             bytecode::Program::new(Arc::from("bytecode_dependency_trace_engine_test"));
@@ -15121,9 +15833,11 @@ mod tests {
             bytecode::Ref::new(0, 0, true, true), // A1
             bytecode::Ref::new(0, 0, true, true), // A1
         ));
-        program
-            .instrs
-            .push(bytecode::Instruction::new(bytecode::OpCode::LoadRange, 0, 0));
+        program.instrs.push(bytecode::Instruction::new(
+            bytecode::OpCode::LoadRange,
+            0,
+            0,
+        ));
 
         cell.compiled = Some(CompiledFormula::Bytecode(BytecodeFormula {
             ast,
