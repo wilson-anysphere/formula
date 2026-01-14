@@ -21216,7 +21216,7 @@ export class SpreadsheetApp {
       const pasteBaseCell = { ...this.selection.active };
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
-      const start = { ...this.selection.active };
+      const start = { ...pasteBaseCell };
       const ctx = this.clipboardCopyContext;
       const mode = options.mode ?? "all";
       const transpose = options.transpose === true;
@@ -21523,7 +21523,7 @@ export class SpreadsheetApp {
         return source.map((row: any[]) => row.map((cell: any) => ({ value: cell?.value ?? null })));
       })();
 
-      this.document.setRangeValues(this.sheetId, start, values, { label: t("clipboard.paste") });
+      this.document.setRangeValues(pasteSheetId, start, values, { label: t("clipboard.paste") });
 
       const pastedRowCount = values.length;
       const pastedColCount = Math.max(0, ...values.map((row: any) => (Array.isArray(row) ? row.length : 0)));
@@ -21535,11 +21535,16 @@ export class SpreadsheetApp {
         startCol: start.col,
         endCol: start.col + pastedColCount - 1
       };
-      this.selection = buildSelection({ ranges: [range], active: start, anchor: start, activeRangeIndex: 0 }, this.limits);
+      const stillOnSheet = this.sheetId === pasteSheetId;
+      if (stillOnSheet) {
+        this.selection = buildSelection({ ranges: [range], active: start, anchor: start, activeRangeIndex: 0 }, this.limits);
+      }
 
       this.syncEngineNow();
-      this.refresh();
-      this.focus();
+      if (stillOnSheet) {
+        this.refresh();
+        this.focus();
+      }
     } catch (err) {
       const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
       if (isDlpViolation) {
