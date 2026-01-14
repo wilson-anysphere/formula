@@ -867,6 +867,9 @@ mod tests {
             plot_area_style: None,
             external_data_rel_id: rel_id.map(str::to_string),
             external_data_auto_update: auto_update,
+            chart_space_ext_lst_xml: None,
+            chart_ext_lst_xml: None,
+            plot_area_ext_lst_xml: None,
             diagnostics: Vec::new(),
         }
     }
