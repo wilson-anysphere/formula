@@ -248,9 +248,18 @@ validate_container() {
 
   require_cmd docker
 
-  # Docker bind mounts require an absolute path.
-  local rpm_dir
-  rpm_dir="$(cd "$(dirname "${rpm_path}")" && pwd -P)"
+  rpm_path="$(abs_path "${rpm_path}")"
+  local rpm_basename
+  rpm_basename="$(basename "${rpm_path}")"
+
+  # Mount a temp directory that contains only the RPM under test so we don't
+  # accidentally install multiple unrelated RPMs if the output directory has
+  # leftovers from previous builds.
+  local mount_dir
+  mount_dir="$(mktemp -d)"
+  if ! ln -s "${rpm_path}" "${mount_dir}/${rpm_basename}" 2>/dev/null; then
+    cp "${rpm_path}" "${mount_dir}/${rpm_basename}"
+  fi
 
   note "Container validation (Fedora): ${rpm_path}"
   note "Using image: ${FEDORA_IMAGE}"
@@ -327,8 +336,14 @@ validate_container() {
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
 
-  docker run --rm -v "${rpm_dir}:/rpms:ro" "${FEDORA_IMAGE}" bash -lc "${container_cmd}" \
-    || die "Fedora container installability check failed for: ${rpm_path}"
+  set +e
+  docker run --rm -v "${mount_dir}:/rpms:ro" "${FEDORA_IMAGE}" bash -lc "${container_cmd}"
+  local status=$?
+  set -e
+  rm -rf "${mount_dir}"
+  if [[ "${status}" -ne 0 ]]; then
+    die "Fedora container installability check failed for: ${rpm_path}"
+  fi
 }
 
 main() {
