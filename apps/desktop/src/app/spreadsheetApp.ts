@@ -1785,6 +1785,11 @@ export class SpreadsheetApp {
         startClientX: number;
         startClientY: number;
         startAnchor: ChartRecord["anchor"];
+        /**
+         * Set when a chart drag/resize gesture is blocked due to collab read-only
+         * permissions. Used to avoid spamming toasts on every pointermove.
+         */
+        readOnlyBlocked?: boolean;
       }
     | null = null;
   private chartDragAbort: AbortController | null = null;
@@ -3440,6 +3445,17 @@ export class SpreadsheetApp {
               if (!obj) return;
               const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
               if (typeof chartId !== "string" || chartId.trim() === "") return;
+              if (this.isReadOnly()) {
+                const chart = this.getChartRecordById(chartId);
+                const currentAnchor = chart ? chartAnchorToDrawingAnchor(chart.anchor) : null;
+                if (currentAnchor && !anchorsEqual(currentAnchor, obj.anchor)) {
+                  const cell = this.selection.active;
+                  showCollabEditRejectedToast([
+                    { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+                  ]);
+                }
+                return;
+              }
               this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
             },
             beginBatch: () => {
@@ -3450,11 +3466,16 @@ export class SpreadsheetApp {
               this.chartDrawingGestureActive = false;
               lastCanvasChartAnchor = null;
               this.canvasChartDrawingObjectsOverride = null;
+              // Ensure we repaint after clearing the in-flight gesture override. This is particularly
+              // important when a gesture is blocked (e.g. collab read-only) and no ChartStore change
+              // occurs to trigger a redraw.
+              this.scheduleDrawingsRender("chart:gesture-end");
             },
             cancelBatch: () => {
               this.chartDrawingGestureActive = false;
               lastCanvasChartAnchor = null;
               this.canvasChartDrawingObjectsOverride = null;
+              this.scheduleDrawingsRender("chart:gesture-cancel");
             },
             onPointerDownHit: () => {
               if (this.editor.isOpen()) {
@@ -9281,6 +9302,17 @@ export class SpreadsheetApp {
           if (!obj) return;
           const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
           if (typeof chartId !== "string" || chartId.trim() === "") return;
+          if (this.isReadOnly()) {
+            const chart = this.getChartRecordById(chartId);
+            const currentAnchor = chart ? chartAnchorToDrawingAnchor(chart.anchor) : null;
+            if (currentAnchor && !anchorsEqual(currentAnchor, obj.anchor)) {
+              const cell = this.selection.active;
+              showCollabEditRejectedToast([
+                { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+              ]);
+            }
+            return;
+          }
           this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
         },
         beginBatch: () => {
@@ -16301,6 +16333,23 @@ export class SpreadsheetApp {
     const dx = e.clientX - state.startClientX;
     const dy = e.clientY - state.startClientY;
 
+    // Collab read-only roles (viewer/commenter) can still select charts, but should not be
+    // able to move/resize them. Provide feedback and avoid mutating local anchor state.
+    if (this.isReadOnly()) {
+      const movedEnough = Math.abs(dx) > 1 || Math.abs(dy) > 1;
+      if (movedEnough && !state.readOnlyBlocked) {
+        state.readOnlyBlocked = true;
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        // Defensive: if the session became read-only mid-gesture after we already applied
+        // anchor updates, snap back to the start anchor.
+        this.chartStore.updateChartAnchor(state.chartId, state.startAnchor as any);
+      }
+      return;
+    }
+
     // Avoid `getFrozen()` allocations; compute frozen counts directly.
     const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
@@ -17896,6 +17945,14 @@ export class SpreadsheetApp {
     if (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown") {
       e.preventDefault();
       e.stopPropagation();
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        this.focus();
+        return true;
+      }
       const step = e.shiftKey ? 10 : 1;
       const { dxPx, dyPx } = (() => {
         switch (key) {

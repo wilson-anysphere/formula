@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { chartIdToDrawingId } from "../../charts/chartDrawingAdapter";
+import { pxToEmu } from "../../drawings/overlay";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -72,7 +73,29 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-describe("SpreadsheetApp chart keyboard nudging", () => {
+function createPointerLikeMouseEvent(
+  type: string,
+  options: {
+    clientX: number;
+    clientY: number;
+    button: number;
+    pointerId?: number;
+    pointerType?: string;
+  },
+): MouseEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: options.clientX,
+    clientY: options.clientY,
+    button: options.button,
+  });
+  Object.defineProperty(event, "pointerId", { configurable: true, value: options.pointerId ?? 1 });
+  Object.defineProperty(event, "pointerType", { configurable: true, value: options.pointerType ?? "mouse" });
+  return event;
+}
+
+describe("SpreadsheetApp canvas chart pointer drag (read-only)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -112,7 +135,7 @@ describe("SpreadsheetApp chart keyboard nudging", () => {
     };
   });
 
-  it("moves the selected chart on Arrow key press (without moving the active cell)", () => {
+  it("moves the chart on pointer drag when editable", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -124,32 +147,44 @@ describe("SpreadsheetApp chart keyboard nudging", () => {
     const { chart_id: chartId } = app.addChart({
       chart_type: "bar",
       data_range: "A2:B5",
-      title: "Nudge Chart",
-      position: "C1",
+      title: "Drag Chart",
+      position: "A1",
+    });
+
+    // Use a deterministic absolute anchor for stable pointer coordinates.
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(30),
+      yEmu: pxToEmu(20),
+      cxEmu: pxToEmu(80),
+      cyEmu: pxToEmu(60),
     });
 
     const drawingId = chartIdToDrawingId(chartId);
-    app.selectDrawingById(drawingId);
-    expect(app.getSelectedChartId()).toBe(chartId);
+    const rect = app.getDrawingRectPx(drawingId);
+    expect(rect).not.toBeNull();
 
-    const activeBefore = app.getActiveCell();
-    const anchorBefore = app.listCharts().find((c) => c.id === chartId)?.anchor ?? null;
-    expect(anchorBefore).not.toBeNull();
-    const anchorBeforeSnapshot = JSON.parse(JSON.stringify(anchorBefore));
+    const anchorBefore = JSON.parse(JSON.stringify(app.listCharts().find((c) => c.id === chartId)?.anchor ?? null));
 
-    root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const startX = rect!.x + rect!.width / 2;
+    const startY = rect!.y + rect!.height / 2;
 
-    const anchorAfter = app.listCharts().find((c) => c.id === chartId)?.anchor ?? null;
-    expect(anchorAfter).not.toBeNull();
-    expect(anchorAfter).not.toEqual(anchorBeforeSnapshot);
-    expect(app.getSelectedChartId()).toBe(chartId);
-    expect(app.getActiveCell()).toEqual(activeBefore);
+    root.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: startX, clientY: startY, button: 0, pointerId: 1 }));
+    root.dispatchEvent(
+      createPointerLikeMouseEvent("pointermove", { clientX: startX + 50, clientY: startY, button: 0, pointerId: 1 }),
+    );
+    root.dispatchEvent(
+      createPointerLikeMouseEvent("pointerup", { clientX: startX + 50, clientY: startY, button: 0, pointerId: 1 }),
+    );
+
+    const anchorAfter = JSON.parse(JSON.stringify(app.listCharts().find((c) => c.id === chartId)?.anchor ?? null));
+    expect(anchorAfter).not.toEqual(anchorBefore);
 
     app.destroy();
     root.remove();
   });
 
-  it("does not move the selected chart on Arrow key press when collab is read-only", () => {
+  it("does not move the chart on pointer drag when collab is read-only", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -157,34 +192,45 @@ describe("SpreadsheetApp chart keyboard nudging", () => {
       activeValue: document.createElement("div"),
     };
     const app = new SpreadsheetApp(root, status);
-
-    // Minimal stub: SpreadsheetApp.isReadOnly() consults `collabSession.isReadOnly()`.
     (app as any).collabSession = { isReadOnly: () => true };
 
     const { chart_id: chartId } = app.addChart({
       chart_type: "bar",
       data_range: "A2:B5",
-      title: "Read-only Nudge Chart",
-      position: "C1",
+      title: "Read-only Drag Chart",
+      position: "A1",
+    });
+
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(30),
+      yEmu: pxToEmu(20),
+      cxEmu: pxToEmu(80),
+      cyEmu: pxToEmu(60),
     });
 
     const drawingId = chartIdToDrawingId(chartId);
-    app.selectDrawingById(drawingId);
-    expect(app.getSelectedChartId()).toBe(chartId);
+    const rect = app.getDrawingRectPx(drawingId);
+    expect(rect).not.toBeNull();
 
-    const activeBefore = app.getActiveCell();
-    const anchorBefore = app.listCharts().find((c) => c.id === chartId)?.anchor ?? null;
-    expect(anchorBefore).not.toBeNull();
-    const anchorBeforeSnapshot = JSON.parse(JSON.stringify(anchorBefore));
+    const anchorBefore = JSON.parse(JSON.stringify(app.listCharts().find((c) => c.id === chartId)?.anchor ?? null));
 
-    root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const startX = rect!.x + rect!.width / 2;
+    const startY = rect!.y + rect!.height / 2;
 
-    const anchorAfter = app.listCharts().find((c) => c.id === chartId)?.anchor ?? null;
-    expect(anchorAfter).toEqual(anchorBeforeSnapshot);
-    expect(app.getSelectedChartId()).toBe(chartId);
-    expect(app.getActiveCell()).toEqual(activeBefore);
+    root.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: startX, clientY: startY, button: 0, pointerId: 1 }));
+    root.dispatchEvent(
+      createPointerLikeMouseEvent("pointermove", { clientX: startX + 50, clientY: startY, button: 0, pointerId: 1 }),
+    );
+    root.dispatchEvent(
+      createPointerLikeMouseEvent("pointerup", { clientX: startX + 50, clientY: startY, button: 0, pointerId: 1 }),
+    );
+
+    const anchorAfter = JSON.parse(JSON.stringify(app.listCharts().find((c) => c.id === chartId)?.anchor ?? null));
+    expect(anchorAfter).toEqual(anchorBefore);
 
     app.destroy();
     root.remove();
   });
 });
+
