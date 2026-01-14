@@ -2097,10 +2097,10 @@ export class SpreadsheetApp {
           ({
             shouldEncryptCell: (cell) => encryptionPolicy?.shouldEncryptCell(cell) ?? false,
             keyForCell: (cell) => {
-              // Prefer reading the key id from an existing encrypted payload when available so
-              // clients can still decrypt/mutate encrypted cells even if the shared encryption
-              // policy metadata is missing/unsupported (or out of sync with ciphertext).
-              let keyId: string | null = null;
+            // Prefer reading the key id from an existing encrypted payload when available so
+            // clients can still decrypt/mutate encrypted cells even if the shared encryption
+            // policy metadata is missing/unsupported (or out of sync with ciphertext).
+              let payloadKeyId: string | null = null;
               try {
                 const session = this.collabSession as any;
                 const cells = session?.cells;
@@ -2120,7 +2120,7 @@ export class SpreadsheetApp {
                       typeof (cellData as any)?.get === "function" ? (cellData as any).get("enc") : (cellData as any)?.enc;
                     if (encRaw === undefined) continue;
                     if (!isEncryptedCellPayload(encRaw)) continue;
-                    keyId = encRaw.keyId;
+                    payloadKeyId = encRaw.keyId;
                     break;
                   }
                 }
@@ -2128,11 +2128,14 @@ export class SpreadsheetApp {
                 // ignore (best-effort key-id discovery)
               }
 
-              if (!keyId) {
-                keyId = encryptionPolicy?.keyIdForCell(cell) ?? null;
+              if (payloadKeyId) {
+                const key = encryptionKeyStore.getCachedKey(collab.docId, payloadKeyId);
+                if (key) return key;
               }
-              if (!keyId) return null;
-              return encryptionKeyStore.getCachedKey(collab.docId, keyId);
+
+              const policyKeyId = encryptionPolicy?.keyIdForCell(cell) ?? null;
+              if (!policyKeyId) return null;
+              return encryptionKeyStore.getCachedKey(collab.docId, policyKeyId);
             },
           } as any),
         // Enable formula/value conflict monitoring in collab mode.

@@ -401,4 +401,73 @@ describe("SpreadsheetApp read-only collab UX", () => {
     app.destroy();
     root.remove();
   });
+
+  it("falls back to the policy keyId when an encrypted cell payload key is unavailable", async () => {
+    const root = createRoot();
+    const readOnlyIndicator = document.createElement("div");
+    readOnlyIndicator.hidden = true;
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+      readOnlyIndicator,
+    };
+
+    let capturedOptions: any = null;
+    mocks.createCollabSession.mockImplementation((opts: any) => {
+      capturedOptions = opts;
+      const session = createMockCollabSession();
+      session.doc.transact(() => {
+        session.metadata.set("encryptedRanges", [
+          {
+            id: "er-1",
+            sheetId: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 0,
+            endCol: 0,
+            keyId: "policy-key",
+          },
+        ]);
+
+        const cell = new Y.Map();
+        cell.set("enc", {
+          v: 1,
+          alg: "AES-256-GCM",
+          keyId: "payload-key",
+          ivBase64: "a",
+          tagBase64: "b",
+          ciphertextBase64: "c",
+        });
+        session.cells.set("Sheet1:0:0", cell);
+      });
+      return session;
+    });
+
+    const app = new SpreadsheetApp(root, status, {
+      collab: {
+        wsUrl: "ws://example.invalid",
+        docId: "doc-1",
+        persistenceEnabled: false,
+        user: { id: "u1", name: "User 1", color: "#ff0000" },
+      },
+    });
+
+    expect(capturedOptions).not.toBeNull();
+    expect(typeof capturedOptions?.encryption?.keyForCell).toBe("function");
+
+    // Only cache the policy key. When the ciphertext key is unavailable, SpreadsheetApp should
+    // still return the policy key so clients can overwrite/rotate encrypted cells.
+    const store = app.getCollabEncryptionKeyStore();
+    expect(store).not.toBeNull();
+    await store!.set("doc-1", "policy-key", Buffer.alloc(32, 2).toString("base64"));
+
+    const resolved = capturedOptions.encryption.keyForCell({ sheetId: "Sheet1", row: 0, col: 0 });
+    expect(resolved).toMatchObject({ keyId: "policy-key" });
+    expect(resolved?.keyBytes).toBeInstanceOf(Uint8Array);
+    expect(resolved?.keyBytes?.byteLength).toBe(32);
+
+    app.destroy();
+    root.remove();
+  });
 });
