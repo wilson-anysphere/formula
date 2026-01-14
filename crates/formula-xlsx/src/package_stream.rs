@@ -9,19 +9,16 @@ use crate::streaming::PartOverride;
 use crate::zip_util::read_zip_file_bytes_with_limit;
 use crate::{MacroPresence, RecalcPolicy, WorkbookKind, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 
-trait ReadSeek: Read + Seek {}
-impl<T: Read + Seek> ReadSeek for T {}
-
-struct PartNamesIter<'a> {
-    pkg: &'a StreamingXlsxPackage,
+struct PartNamesIter<'a, R: Read + Seek> {
+    pkg: &'a StreamingXlsxPackage<R>,
     source_iter: std::collections::btree_set::Iter<'a, String>,
     added_iter: std::collections::btree_set::Iter<'a, String>,
     next_source: Option<&'a String>,
     next_added: Option<&'a String>,
 }
 
-impl<'a> PartNamesIter<'a> {
-    fn new(pkg: &'a StreamingXlsxPackage) -> Self {
+impl<'a, R: Read + Seek> PartNamesIter<'a, R> {
+    fn new(pkg: &'a StreamingXlsxPackage<R>) -> Self {
         let mut it = Self {
             pkg,
             source_iter: pkg.source_part_names.iter(),
@@ -45,7 +42,7 @@ impl<'a> PartNamesIter<'a> {
     }
 }
 
-impl<'a> Iterator for PartNamesIter<'a> {
+impl<'a, R: Read + Seek> Iterator for PartNamesIter<'a, R> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -88,8 +85,8 @@ impl<'a> Iterator for PartNamesIter<'a> {
 /// This type keeps the source ZIP reader plus an in-memory overlay of [`PartOverride`] mutations.
 /// When saving via [`Self::write_to`], unchanged entries are preserved byte-for-byte via
 /// `ZipWriter::raw_copy_file`.
-pub struct StreamingXlsxPackage {
-    reader: RefCell<Box<dyn ReadSeek>>,
+pub struct StreamingXlsxPackage<R: Read + Seek> {
+    reader: RefCell<R>,
     /// Canonical (normalized) part names present in the source archive.
     ///
     /// Canonicalization:
@@ -120,7 +117,7 @@ pub struct StreamingXlsxPackage {
     added_part_names: BTreeSet<String>,
 }
 
-impl std::fmt::Debug for StreamingXlsxPackage {
+impl<R: Read + Seek> std::fmt::Debug for StreamingXlsxPackage<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamingXlsxPackage")
             .field("source_part_names", &self.source_part_names)
@@ -130,7 +127,7 @@ impl std::fmt::Debug for StreamingXlsxPackage {
     }
 }
 
-impl StreamingXlsxPackage {
+impl<R: Read + Seek> StreamingXlsxPackage<R> {
     fn resolve_source_part_name<'a>(&'a self, canonical: &str) -> Option<&'a str> {
         if let Some(name) = self.source_part_names.get(canonical) {
             return Some(name.as_str());
@@ -142,54 +139,46 @@ impl StreamingXlsxPackage {
     }
 
     /// Open an XLSX/XLSM package from an arbitrary `Read + Seek` source.
-    pub fn from_reader<R: Read + Seek + 'static>(reader: R) -> Result<Self, XlsxError> {
-        let mut boxed: Box<dyn ReadSeek> = Box::new(reader);
-
+    pub fn from_reader(mut reader: R) -> Result<Self, XlsxError> {
         // Scan the central directory once to build a canonical name index without inflating part
         // payloads.
-        boxed.seek(SeekFrom::Start(0))?;
-        let mut archive = ZipArchive::new(&mut boxed)?;
+        reader.seek(SeekFrom::Start(0))?;
 
         let mut source_part_names: BTreeSet<String> = BTreeSet::new();
         let mut source_part_name_to_zip_key: HashMap<String, String> = HashMap::new();
         let mut source_part_name_to_index: HashMap<String, usize> = HashMap::new();
 
-        for i in 0..archive.len() {
-            let file = archive.by_index(i)?;
-            if file.is_dir() {
-                continue;
+        {
+            let mut archive = ZipArchive::new(&mut reader)?;
+            for i in 0..archive.len() {
+                let file = archive.by_index(i)?;
+                if file.is_dir() {
+                    continue;
+                }
+                let raw_name = file.name().to_string();
+                let zip_key = raw_name.strip_prefix('/').unwrap_or(raw_name.as_str());
+                let canonical = canonical_part_name(&raw_name);
+
+                source_part_names.insert(canonical.clone());
+
+                // In degenerate cases where a ZIP contains duplicate names that normalize to the same
+                // canonical value (e.g. `xl/workbook.xml` and `xl\\workbook.xml`), keep the first
+                // index/key we saw. XLSX producers should not emit such archives.
+                source_part_name_to_zip_key
+                    .entry(canonical.clone())
+                    .or_insert_with(|| zip_key.to_string());
+                source_part_name_to_index.entry(canonical).or_insert(i);
             }
-            let raw_name = file.name().to_string();
-            let zip_key = raw_name.strip_prefix('/').unwrap_or(raw_name.as_str());
-            let canonical = canonical_part_name(&raw_name);
-
-            source_part_names.insert(canonical.clone());
-
-            // In degenerate cases where a ZIP contains duplicate names that normalize to the same
-            // canonical value (e.g. `xl/workbook.xml` and `xl\\workbook.xml`), keep the first
-            // index/key we saw. XLSX producers should not emit such archives.
-            source_part_name_to_zip_key
-                .entry(canonical.clone())
-                .or_insert_with(|| zip_key.to_string());
-            source_part_name_to_index.entry(canonical).or_insert(i);
         }
 
         Ok(Self {
-            reader: RefCell::new(boxed),
+            reader: RefCell::new(reader),
             source_part_names,
             source_part_name_to_zip_key,
             source_part_name_to_index,
             part_overrides: HashMap::new(),
             added_part_names: BTreeSet::new(),
         })
-    }
-
-    /// Open an XLSX/XLSM package from a filesystem path (non-wasm).
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn from_path(path: impl AsRef<std::path::Path>) -> Result<Self, XlsxError> {
-        use std::fs::File;
-        let file = File::open(path)?;
-        Self::from_reader(file)
     }
 
     /// Replace (or add) a part in the output package.
@@ -393,6 +382,15 @@ impl StreamingXlsxPackage {
             self.part_overrides.get(override_key),
             Some(PartOverride::Remove)
         )
+    }
+}
+
+/// Path-based constructor for non-wasm builds.
+#[cfg(not(target_arch = "wasm32"))]
+impl StreamingXlsxPackage<std::fs::File> {
+    pub fn from_path(path: impl AsRef<std::path::Path>) -> Result<Self, XlsxError> {
+        let file = std::fs::File::open(path)?;
+        Self::from_reader(file)
     }
 }
 
