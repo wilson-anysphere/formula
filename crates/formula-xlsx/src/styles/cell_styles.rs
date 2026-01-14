@@ -228,22 +228,73 @@ impl StylesPart {
             .collect()
     }
 
-    /// Replace the `styles.xml` `<dxfs>` table used by conditional formatting rules.
+    /// Update the `<dxfs>` section (differential formats) for conditional formatting rules.
     ///
-    /// XLSX stores a single global `<dxfs>` table in `xl/styles.xml`. Individual worksheet
-    /// conditional formatting rules reference these via `<cfRule dxfId="...">`.
+    /// Excel stores conditional-formatting style overrides in `styles.xml` under `<dxfs>`,
+    /// and worksheet `<cfRule dxfId="...">` attributes reference indices into this list.
     ///
-    /// Note: this writer only serializes the subset of differential formatting currently modeled
-    /// in [`formula_model::CfStyleOverride`] (font bold/italic/color + fill fgColor). Any
-    /// additional content previously present in `<dxfs>` will be dropped if this method is used.
-    pub fn set_conditional_formatting_dxfs(&mut self, dxfs: &[CfStyleOverride]) {
+    /// This helper updates the DOM held by this [`StylesPart`] while trying to preserve any
+    /// existing `<dxf>` entries that are semantically equivalent to the desired ones. When a
+    /// `<dxf>` differs, it is replaced with a minimal representation generated from
+    /// [`CfStyleOverride`]. New entries are appended.
+    pub fn set_conditional_formatting_dxfs(
+        &mut self,
+        desired: &[CfStyleOverride],
+    ) {
         let dxfs_el = ensure_styles_child(&mut self.root, "dxfs");
-        dxfs_el.children.clear();
-        dxfs_el.children.extend(
-            dxfs.iter()
-                .map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))),
-        );
-        dxfs_el.set_attr("count", dxfs.len().to_string());
+
+        // Positions of existing `<dxf>` element nodes within `dxfs_el.children`.
+        let mut existing_indices: Vec<usize> = dxfs_el
+            .children
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, child)| match child {
+                XmlNode::Element(el) if el.name.local == "dxf" => Some(idx),
+                _ => None,
+            })
+            .collect();
+
+        // Replace or append to reach the desired length.
+        for (desired_idx, desired_dxf) in desired.iter().enumerate() {
+            if let Some(&child_idx) = existing_indices.get(desired_idx) {
+                let should_replace = match dxfs_el.children.get(child_idx) {
+                    Some(XmlNode::Element(existing_el)) => {
+                        parse_conditional_formatting_dxf(existing_el) != *desired_dxf
+                    }
+                    _ => true,
+                };
+                if should_replace {
+                    dxfs_el.children[child_idx] =
+                        XmlNode::Element(build_conditional_formatting_dxf(desired_dxf));
+                }
+            } else {
+                // Append new `<dxf>` element.
+                dxfs_el
+                    .children
+                    .push(XmlNode::Element(build_conditional_formatting_dxf(desired_dxf)));
+            }
+        }
+
+        // If the desired list is shorter than the existing one, drop the extra `<dxf>` entries
+        // (in reverse order to keep indices stable while removing).
+        if existing_indices.len() > desired.len() {
+            // Refresh indices because we may have appended above.
+            existing_indices = dxfs_el
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, child)| match child {
+                    XmlNode::Element(el) if el.name.local == "dxf" => Some(idx),
+                    _ => None,
+                })
+                .collect();
+
+            for &idx in existing_indices.iter().skip(desired.len()).rev() {
+                dxfs_el.children.remove(idx);
+            }
+        }
+
+        dxfs_el.set_attr("count", desired.len().to_string());
     }
 
     /// Append additional differential formats (`<dxf>`) to the existing `styles.xml` `<dxfs>` table.

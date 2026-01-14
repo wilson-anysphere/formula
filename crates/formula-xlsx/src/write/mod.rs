@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
@@ -718,6 +717,7 @@ fn build_parts(
     });
     let style_ids = style_ids.filter(|style_id| *style_id != 0);
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
+
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
     let has_existing_styles_part = parts.contains_key(&styles_part_name);
@@ -822,15 +822,19 @@ fn build_parts(
             orig_view,
             orig_cols,
             orig_autofilter,
+            orig_conditional_formatting,
             orig_sheet_protection,
             orig_has_data_validations,
-            orig_has_conditional_formatting,
         ) = if let Some(orig) = orig {
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
             let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
 
+            let orig_conditional_formatting =
+                crate::parse_worksheet_conditional_formatting_streaming(orig_xml)
+                    .ok()
+                    .map(|parsed| parsed.rules);
             let orig_sheet_format = parse_sheet_format_settings(orig_xml)?;
             let orig_cols = parse_col_properties(orig_xml, &styles_editor)?;
             let orig_view = parse_sheet_view(orig_xml)?;
@@ -877,14 +881,6 @@ fn build_parts(
                     )),
                 },
             )?;
-
-            // Conditional formatting blocks are only meaningful when they contain `<cfRule>`
-            // children. Some producers (or corrupted files) may contain an empty
-            // `<conditionalFormatting/>` element. Treat those as "no conditional formatting" so
-            // callers can still insert conditional formatting rules via the streaming patcher.
-            let orig_has_conditional_formatting =
-                orig_xml.contains("<cfRule") || orig_xml.contains(":cfRule");
-
             (
                 orig_tab_color,
                 orig_merges,
@@ -895,9 +891,9 @@ fn build_parts(
                 orig_view,
                 orig_cols,
                 orig_autofilter,
+                orig_conditional_formatting,
                 orig_sheet_protection,
                 orig_has_data_validations,
-                orig_has_conditional_formatting,
             )
         } else {
             (
@@ -910,8 +906,8 @@ fn build_parts(
                 None,
                 BTreeMap::new(),
                 None,
+                Some(Vec::new()),
                 None,
-                false,
                 false,
             )
         };
@@ -954,14 +950,6 @@ fn build_parts(
         };
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
-
-        // New sheets rendered from scratch already include conditional formatting blocks (with
-        // workbook-global `dxfId` remapping), so avoid re-inserting them via the streaming patcher
-        // which currently operates on the model's per-sheet `dxf_id` values.
-        let conditional_formatting_changed = !is_new_sheet
-            && !sheet.conditional_formatting_rules.is_empty()
-            && !orig_has_conditional_formatting;
-
         let sheet_protection_changed = if sheet.sheet_protection.enabled {
             match orig_sheet_protection.as_ref() {
                 Some(orig) => orig != &sheet.sheet_protection,
@@ -994,6 +982,19 @@ fn build_parts(
             .local_to_global_by_sheet
             .get(&sheet.id)
             .map(|v| v.as_slice());
+        let mapped_conditional_formatting_rules =
+            remap_conditional_formatting_rule_dxfs(&sheet.conditional_formatting_rules, local_to_global_dxf);
+
+        let conditional_formatting_changed = if is_new_sheet {
+            !sheet.conditional_formatting_rules.is_empty()
+        } else if let Some(orig_rules) = orig_conditional_formatting.as_ref() {
+            !conditional_formatting_rules_eq_ignoring_deps(orig_rules, &mapped_conditional_formatting_rules)
+        } else {
+            // If we couldn't parse the original conditional formatting, only rewrite when the
+            // model explicitly contains rules to write. This preserves unknown/unmodeled rules
+            // on no-op saves.
+            !sheet.conditional_formatting_rules.is_empty()
+        };
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
             sheet_meta,
@@ -1142,37 +1143,6 @@ fn build_parts(
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
-        // Insert conditional formatting rules into preserved worksheet XML when the model contains
-        // conditional formatting rules but the source XML didn't have any `<cfRule>` nodes (for
-        // example, the sheet had no conditional formatting at all, or it contained an empty
-        // `<conditionalFormatting/>` placeholder).
-        if conditional_formatting_changed {
-            let rules: Cow<'_, [CfRule]> = if sheet
-                .conditional_formatting_rules
-                .iter()
-                .any(|rule| rule.dxf_id.is_some())
-            {
-                // `CfRule.dxf_id` indexes into the per-worksheet `conditional_formatting_dxfs`
-                // vector. In SpreadsheetML, `cfRule/@dxfId` indexes into the *workbook-global*
-                // `<dxfs>` table in `xl/styles.xml`, so remap local indices to the aggregated
-                // workbook table.
-                let mut owned = sheet.conditional_formatting_rules.clone();
-                for rule in &mut owned {
-                    rule.dxf_id = rule.dxf_id.and_then(|local| {
-                        local_to_global_dxf.and_then(|map| map.get(local as usize).copied())
-                    });
-                }
-                Cow::Owned(owned)
-            } else {
-                Cow::Borrowed(&sheet.conditional_formatting_rules)
-            };
-
-            sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml_with_seed(
-                &sheet_xml,
-                rules.as_ref(),
-                sheet_meta.sheet_id as u128,
-            )?;
-        }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
         }
@@ -1204,6 +1174,14 @@ fn build_parts(
                     parts.remove(&rels_part);
                 }
             }
+        }
+        if is_new_sheet || conditional_formatting_changed {
+            sheet_xml =
+                crate::conditional_formatting::update_worksheet_conditional_formatting_xml_with_seed(
+                    &sheet_xml,
+                    &mapped_conditional_formatting_rules,
+                    sheet_meta.sheet_id as u128,
+                )?;
         }
 
         if drawings_need_emit {
@@ -1886,6 +1864,45 @@ fn normalize_parsed_data_validations(
     out
 }
 
+fn conditional_formatting_rules_eq_ignoring_deps(a: &[CfRule], b: &[CfRule]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    // `CfRule::dependencies` is a runtime-only cache invalidation surface. Ignore it when
+    // deciding whether to rewrite worksheet conditional formatting XML.
+    let mut a_norm = a.to_vec();
+    for rule in &mut a_norm {
+        rule.dependencies.clear();
+    }
+    let mut b_norm = b.to_vec();
+    for rule in &mut b_norm {
+        rule.dependencies.clear();
+    }
+
+    a_norm == b_norm
+}
+
+fn remap_conditional_formatting_rule_dxfs(
+    rules: &[CfRule],
+    local_to_global_dxf: Option<&[u32]>,
+) -> Vec<CfRule> {
+    // Best-effort: if no mapping is available, treat the rule indices as already-global.
+    let Some(mapping) = local_to_global_dxf else {
+        return rules.to_vec();
+    };
+
+    rules
+        .iter()
+        .cloned()
+        .map(|mut rule| {
+            rule.dxf_id = rule
+                .dxf_id
+                .and_then(|local| mapping.get(local as usize).copied());
+            rule
+        })
+        .collect()
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SheetFormatSettings {
     default_col_width: Option<f32>,
