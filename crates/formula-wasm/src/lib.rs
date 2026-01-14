@@ -4068,7 +4068,9 @@ impl WasmWorkbook {
                 style_id: r.style_id,
             })
             .collect();
-        self.inner.set_col_format_runs_internal(&sheet, col, runs)
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner
+            .with_manual_calc_mode(|this| this.set_col_format_runs_internal(&sheet, col, runs))
     }
 
     #[wasm_bindgen(js_name = "getCalcSettings")]
@@ -4690,8 +4692,9 @@ impl WasmWorkbook {
                 let has_phonetic = cell.phonetic.is_some();
                 if !has_formula && !has_value && !has_phonetic {
                     // Style-only cells are not represented in the sparse JS input map (`toJson`),
-                    // but we still applied their style id above so worksheet info functions like
-                    // `CELL("format")`/`CELL("protect")` can observe their formatting metadata.
+                    // but still need to be present in the calc engine so worksheet info functions
+                    // like `CELL("format")` / `CELL("protect")` can observe their formatting
+                    // metadata. The style id has already been applied above.
                     continue;
                 }
 
@@ -4827,7 +4830,10 @@ impl WasmWorkbook {
     /// Returns `false` when `old_name` does not exist or `new_name` conflicts with another sheet.
     #[wasm_bindgen(js_name = "renameSheet")]
     pub fn rename_sheet(&mut self, old_name: String, new_name: String) -> bool {
-        self.inner.rename_sheet_internal(&old_name, &new_name)
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner
+            .with_manual_calc_mode(|this| Ok(this.rename_sheet_internal(&old_name, &new_name)))
+            .unwrap_or(false)
     }
 
     #[wasm_bindgen(js_name = "setSheetDisplayName")]
@@ -4836,8 +4842,10 @@ impl WasmWorkbook {
         sheet_key: String,
         display_name: String,
     ) -> Result<(), JsValue> {
-        self.inner
-            .set_sheet_display_name_internal(&sheet_key, &display_name)
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            this.set_sheet_display_name_internal(&sheet_key, &display_name)
+        })
     }
     /// Set (or clear) a per-column width override for a sheet.
     ///
