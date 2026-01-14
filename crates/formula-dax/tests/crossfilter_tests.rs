@@ -1,7 +1,10 @@
 mod common;
 
 use common::{build_model, build_model_bidirectional};
-use formula_dax::{DaxEngine, FilterContext, RowContext};
+use formula_dax::{
+    Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, Relationship, RowContext,
+    Table,
+};
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -229,6 +232,75 @@ fn crossfilter_is_order_independent_with_other_calculate_filters() {
                 &model,
                 "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH), Orders[Amount] = 20)",
                 &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn crossfilter_both_works_with_userelationship_on_inactive_relationship() {
+    let mut model = DataModel::new();
+    let mut dates = Table::new("Date", vec!["DateKey"]);
+    dates.push_row(vec![1.into()]).unwrap();
+    dates.push_row(vec![2.into()]).unwrap();
+    model.add_table(dates).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["OrderDateKey", "ShipDateKey"]);
+    sales.push_row(vec![1.into(), 2.into()]).unwrap();
+    sales.push_row(vec![2.into(), 1.into()]).unwrap();
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_OrderDate".into(),
+            from_table: "Sales".into(),
+            from_column: "OrderDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Sales_ShipDate".into(),
+            from_table: "Sales".into(),
+            from_column: "ShipDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    // Even with USERELATIONSHIP activating the ship-date relationship, Date should not be filtered
+    // by a Sales-side filter unless CROSSFILTER enables bidirectional propagation.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Date), Sales[ShipDateKey] = 2, USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Date), Sales[ShipDateKey] = 2, USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]), CROSSFILTER(Sales[ShipDateKey], Date[DateKey], BOTH))",
+                &FilterContext::empty(),
                 &RowContext::default(),
             )
             .unwrap(),
