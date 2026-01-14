@@ -8255,6 +8255,15 @@ fn rewrite_defined_name_constants_for_bytecode(
 ///   `None` is treated as an unresolved external link and evaluates to `#REF!`. Providers should
 ///   return `Some(Value::Blank)` to represent a blank cell in an external workbook.
 ///
+/// # Threading / performance
+///
+/// The engine may call [`ExternalValueProvider::get`] (and [`ExternalValueProvider::sheet_order`])
+/// many times when evaluating range functions (e.g. `SUM([Book.xlsx]Sheet1!A:A)`).
+///
+/// When multi-threaded recalculation is enabled, provider methods may also be called concurrently
+/// from multiple threads. Implementations should be thread-safe and keep lookups fast (e.g. by
+/// caching results internally or minimizing lock contention).
+///
 /// Note: Excel treats sheet names case-insensitively. The engine preserves the formula's casing in
 /// the sheet key for single-sheet external references, so providers that want Excel-compatible
 /// behavior should generally match sheet keys case-insensitively.
@@ -8277,7 +8286,8 @@ pub trait ExternalValueProvider: Send + Sync {
     /// (e.g. `"[Book.xlsx]{sheet_name}"`), so the casing/spelling in this list should correspond
     /// to the provider's `get` keying strategy.
     ///
-    /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"`).
+    /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
+    /// `"C:\\path\\Book.xlsx"`).
     ///
     /// Returning `None` indicates that the sheet order is not available, in which case external
     /// 3D spans evaluate to `#REF!`.

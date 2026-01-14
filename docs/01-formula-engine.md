@@ -74,7 +74,7 @@ The formula engine is the computational heart of the spreadsheet. It must parse,
 | CELL_REF | `A1`, `$A$1`, `A$1`, `$A1` | Absolute/relative markers |
 | RANGE_REF | `A1:B10`, `A:A`, `1:1` | Full column/row references |
 | SHEET_REF | `Sheet1!A1`, `Sheet1:Sheet3!A1`, `'Sheet Name'!A1`, `'Sheet 1:Sheet 3'!A1` | Includes 3D sheet spans; quoted for special chars |
-| EXTERNAL_REF | `[Book.xlsx]Sheet!A1` | External workbook references |
+| EXTERNAL_REF | `[Book.xlsx]Sheet!A1`, `[Book.xlsx]Sheet1:Sheet3!A1`, `'C:\path\[Book.xlsx]Sheet1'!A1` | External workbook references (including 3D spans and path-qualified forms) |
 | STRUCTURED_REF | `[@Column]`, `Table1[Column]` | Table references |
 | NAMED_RANGE | `MyRange`, `_xlnm.Print_Area` | Named references |
 | FUNCTION | `SUM`, `VLOOKUP`, `_xlfn.XLOOKUP` | Including prefixed new functions |
@@ -162,6 +162,13 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
 * For **external sheet keys** (e.g. `"[Book.xlsx]Sheet1"`), returning `None` is treated as an unresolved external link and
   evaluates to `#REF!`. Providers should return `Some(Value::Blank)` to represent a blank cell in an external workbook.
 
+Implementation notes:
+
+* `get(...)` and `sheet_order(...)` may be called frequently (especially when evaluating ranges).
+* When the engine is configured for multi-threaded recalculation, these methods may be called
+  concurrently from multiple threads; implementations should be thread-safe and keep lookups fast
+  (e.g. internal caching, lock-free reads, etc.).
+
 #### External 3D sheet spans (workbook sheet order)
 
 Excel 3D spans inside an external workbook (e.g. `Sheet1:Sheet3`) are represented by the engine as a
@@ -232,6 +239,10 @@ canonicalization would appear as:
 * **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
   reevaluated on every `Engine::recalculate()` pass). There is not yet a fine-grained “external link
   invalidation” mechanism—hosts should call `recalculate()` when external values may have changed.
+* **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
+  union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
+  to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
+  endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
 * **INDIRECT + external 3D spans:** `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")` currently evaluates to
   `#REF!` (span expansion is only supported for direct references).
 
