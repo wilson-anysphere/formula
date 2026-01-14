@@ -206,14 +206,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps implemented ribbon-only commands enabled even though they are not registered", () => {
+  it("keeps ribbon-only commands enabled via the exemption list (not CommandRegistry)", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
     // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
     // so they must be exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
-    expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.series"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.sortFilter.customSort"]).toBeUndefined();
     expect(baselineDisabledById["data.sortFilter.sort.customSort"]).toBeUndefined();
@@ -229,16 +227,33 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBeUndefined();
   });
 
-  it("keeps AutoSum dropdown variants enabled even though they are not registered", () => {
-    const commandRegistry = new CommandRegistry();
+  it("registers Fill Up/Left ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // AutoSum dropdown variants are wired via `apps/desktop/src/main.ts` (not CommandRegistry), so they must
-    // be exempt from the registry-backed disabling allowlist to stay clickable in the ribbon.
-    expect(baselineDisabledById["home.editing.autoSum.average"]).toBeUndefined();
-    expect(baselineDisabledById["home.editing.autoSum.countNumbers"]).toBeUndefined();
-    expect(baselineDisabledById["home.editing.autoSum.max"]).toBeUndefined();
-    expect(baselineDisabledById["home.editing.autoSum.min"]).toBeUndefined();
+    const ids = ["home.editing.fill.up", "home.editing.fill.left"] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
+  it("registers AutoSum dropdown variants as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "home.editing.autoSum.average",
+      "home.editing.autoSum.countNumbers",
+      "home.editing.autoSum.max",
+      "home.editing.autoSum.min",
+    ] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
   });
 
   it("keeps exempt menu items enabled even when the CommandRegistry does not register them", () => {
@@ -263,7 +278,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
-                { id: "home.editing.autoSum.average", label: "Average", ariaLabel: "Average" },
+                { id: "home.editing.fill.series", label: "Series", ariaLabel: "Series" },
                 // Non-exempt id to prove the baseline is still working.
                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
               ],
@@ -298,9 +313,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const average = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.autoSum.average"]');
-    expect(average).toBeInstanceOf(HTMLButtonElement);
-    expect(average?.disabled).toBe(false);
+    const series = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.fill.series"]');
+    expect(series).toBeInstanceOf(HTMLButtonElement);
+    expect(series?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);

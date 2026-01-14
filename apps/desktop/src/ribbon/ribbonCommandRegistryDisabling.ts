@@ -67,12 +67,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "home.cells.delete.deleteSheet",
 
   // Home → Editing.
-  "home.editing.autoSum.average",
-  "home.editing.autoSum.countNumbers",
-  "home.editing.autoSum.max",
-  "home.editing.autoSum.min",
-  "home.editing.fill.up",
-  "home.editing.fill.left",
   "home.editing.fill.series",
   "home.editing.sortFilter.customSort",
   "home.editing.sortFilter.filter",

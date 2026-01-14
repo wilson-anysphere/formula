@@ -1813,6 +1813,31 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  // Ribbon schema still uses `home.editing.fill.*` ids for Up/Left. Register them as aliases so the
+  // ribbon can rely on CommandRegistry (and so these actions are available to other UI surfaces).
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.fill.up",
+    t("command.edit.fillUp"),
+    () => app.fillUp(),
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.fillUp"),
+      keywords: ["fill", "fill up", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.fill.left",
+    t("command.edit.fillLeft"),
+    () => app.fillLeft(),
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.fillLeft"),
+      keywords: ["fill", "fill left", "excel"],
+    },
+  );
   commandRegistry.registerBuiltinCommand(
     "edit.selectCurrentRegion",
     t("command.edit.selectCurrentRegion"),
@@ -1863,6 +1888,36 @@ export function registerBuiltinCommands(params: {
       keywords: ["autosum", "sum", "excel"],
     },
   );
+
+  // Ribbon-specific AutoSum dropdown variants (Home → Editing → AutoSum menu items).
+  //
+  // These are implemented by SpreadsheetApp (and were historically routed via `main.ts`), but are
+  // now registered so the ribbon can rely on the CommandRegistry baseline enable/disable behavior.
+  commandRegistry.registerBuiltinCommand("home.editing.autoSum.average", "AutoSum: Average", () => app.autoSumAverage(), {
+    category: t("commandCategory.editing"),
+    icon: null,
+    keywords: ["autosum", "sum", "average", "excel"],
+  });
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.autoSum.countNumbers",
+    "AutoSum: Count Numbers",
+    () => app.autoSumCountNumbers(),
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      keywords: ["autosum", "sum", "count", "count numbers", "excel"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand("home.editing.autoSum.max", "AutoSum: Max", () => app.autoSumMax(), {
+    category: t("commandCategory.editing"),
+    icon: null,
+    keywords: ["autosum", "sum", "max", "maximum", "excel"],
+  });
+  commandRegistry.registerBuiltinCommand("home.editing.autoSum.min", "AutoSum: Min", () => app.autoSumMin(), {
+    category: t("commandCategory.editing"),
+    icon: null,
+    keywords: ["autosum", "sum", "min", "minimum", "excel"],
+  });
 
   if (themeController) {
     const categoryView = t("commandCategory.view");
