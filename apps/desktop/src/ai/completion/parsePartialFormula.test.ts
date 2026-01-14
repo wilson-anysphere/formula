@@ -130,6 +130,24 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.functionName).toBe("SUM");
   });
 
+  it("does not treat separators inside structured refs with escaped brackets as function args (semicolon locales)", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    // Column name is literally `A]B;USD`, encoded as `A]]B;USD` inside the structured ref item.
+    // The semicolon inside the structured ref must not be treated as a function argument separator.
+    const input = "=SUMME(Table1[[#Headers],[A]]B;USD]]; A";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    expect(result.functionName).toBe("SUM");
+    expect(result.argIndex).toBe(1);
+    expect(result.currentArg?.text).toBe("A");
+  });
+
   it("does not treat decimal commas as argument separators for A1-like function names (LOG10)", async () => {
     setLocale("de-DE");
 
