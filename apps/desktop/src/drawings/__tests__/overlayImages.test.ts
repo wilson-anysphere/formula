@@ -195,6 +195,26 @@ describe("DrawingOverlay images", () => {
     expect(drawCalls[1]!.args[0]).toBe(bitmap);
   });
 
+  it("renders a placeholder for images missing bytes and does not attempt decode", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images = createImageStore({});
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const getMock = vi.fn();
+    (overlay as any).bitmapCache = { get: getMock };
+
+    const obj = createImageObject({ id: 1, imageId: "missing", zOrder: 0, x: 5, y: 7 });
+    await overlay.render([obj], viewport);
+
+    expect(getMock).toHaveBeenCalledTimes(0);
+    expect(calls.some((call) => call.method === "drawImage")).toBe(false);
+    expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
+    const label = calls.find((call) => call.method === "fillText");
+    expect(label?.args[0]).toBe("missing image");
+  });
+
   it("aborts stale renders after awaiting image decode", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
