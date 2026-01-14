@@ -999,6 +999,12 @@ docker run --rm -it \
   '
 ```
 
+To run the same install smoke test CI uses (includes Docker platform pinning and extra diagnostics), run:
+
+```bash
+bash scripts/ci/linux-package-install-smoke.sh deb
+```
+
 CI guardrails (tagged releases):
 
 - `bash scripts/ci/verify-linux-package-deps.sh` inspects the produced `.deb` with `dpkg -I` / `dpkg-deb -f` and fails the
@@ -1097,6 +1103,12 @@ docker run --rm -it \
     dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpm/*.rpm
     ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
   '
+```
+
+To run the same install smoke test CI uses (Fedora by default; includes Docker platform pinning), run:
+
+```bash
+bash scripts/ci/linux-package-install-smoke.sh rpm
 ```
 
 Optional: openSUSE smoke install (helps validate our RPM rich-deps cover openSUSE package naming):
