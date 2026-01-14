@@ -1133,7 +1133,8 @@ impl Engine {
         }
 
         if !self.workbook.sheet_exists(id) {
-            return Err(SheetLifecycleError::SheetNotFound);
+            // Invalid/deleted ids are treated as a no-op so hosts can safely apply stale operations.
+            return Ok(());
         }
 
         formula_model::validate_sheet_name(new_name)?;
@@ -1306,13 +1307,15 @@ impl Engine {
     }
 
     /// Reorder a worksheet within the workbook's tab order using its stable [`SheetId`].
+    ///
+    /// If `id` is invalid or already deleted, this is a no-op and returns `Ok(())`.
     pub fn reorder_sheet_by_id(
         &mut self,
         id: SheetId,
         new_index: usize,
     ) -> Result<(), SheetLifecycleError> {
         if !self.workbook.sheet_exists(id) {
-            return Err(SheetLifecycleError::SheetNotFound);
+            return Ok(());
         }
         if new_index >= self.workbook.sheet_order.len() {
             return Err(SheetLifecycleError::IndexOutOfRange);
@@ -1767,6 +1770,11 @@ impl Engine {
         self.info.origin_by_sheet.remove(&deleted_sheet_id);
         // Keep the pre-delete sheet tab order so 3D span boundary shift logic can resolve adjacent
         // sheets (Excel shifts a deleted 3D boundary one sheet inward).
+        //
+        // Note: Excel formulas are defined in terms of the user-visible sheet display names, but
+        // the engine also supports referencing sheets by their stable key. We capture *both* so we
+        // can invalidate references regardless of which name form appears in the stored formula
+        // text.
         let sheet_order_keys: Vec<String> = self
             .workbook
             .sheet_ids_in_order()
@@ -1779,7 +1787,6 @@ impl Engine {
             .iter()
             .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
             .collect();
-
         // Formulas can reference sheets by either their user-visible display name (Excel semantics)
         // or by their stable sheet key (backward compatibility / host-provided identifiers). When
         // deleting a sheet, we must rewrite both forms so references cannot resurrect if a sheet
@@ -1823,7 +1830,6 @@ impl Engine {
                 }
             }
         };
-
         let rewrite_deleted_sheet_table_formula = |formula: &str| -> Option<String> {
             let key_rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
                 formula,
@@ -1979,7 +1985,7 @@ impl Engine {
     /// Delete a worksheet by its stable [`SheetId`].
     pub fn delete_sheet_by_id(&mut self, id: SheetId) -> Result<(), SheetLifecycleError> {
         if !self.workbook.sheet_exists(id) {
-            return Err(SheetLifecycleError::SheetNotFound);
+            return Ok(());
         }
 
         let name = self

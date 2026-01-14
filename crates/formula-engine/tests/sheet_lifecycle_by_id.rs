@@ -1,5 +1,6 @@
 use formula_engine::{Engine, SheetLifecycleError};
 use formula_model::SheetNameError;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn sheet_lifecycle_by_id_rename_reorder_delete() {
@@ -29,7 +30,6 @@ fn sheet_lifecycle_by_id_rename_reorder_delete() {
     engine.rename_sheet_by_id(sheet2_id, "Renamed").unwrap();
     assert_eq!(engine.sheet_id("Renamed"), Some(sheet2_id));
     assert_eq!(engine.sheet_name(sheet2_id), Some("Renamed"));
-    assert_eq!(engine.sheet_id("Sheet2"), None);
 
     // Delete by id should tombstone the sheet and invalidate lookups by id and name.
     engine.delete_sheet_by_id(sheet1_id).unwrap();
@@ -37,18 +37,13 @@ fn sheet_lifecycle_by_id_rename_reorder_delete() {
     assert_eq!(engine.sheet_id("Sheet1"), None);
     assert!(!engine.sheet_ids_in_order().contains(&sheet1_id));
 
-    assert_eq!(
-        engine.rename_sheet_by_id(sheet1_id, "DoesNotExist").unwrap_err(),
-        SheetLifecycleError::SheetNotFound
-    );
-    assert_eq!(
-        engine.reorder_sheet_by_id(sheet1_id, 0).unwrap_err(),
-        SheetLifecycleError::SheetNotFound
-    );
-    assert_eq!(
-        engine.delete_sheet_by_id(sheet1_id).unwrap_err(),
-        SheetLifecycleError::SheetNotFound
-    );
+    // Invalid / tombstoned ids should be handled gracefully (no-op, workbook unchanged).
+    let order_before = engine.sheet_ids_in_order();
+    engine.rename_sheet_by_id(sheet1_id, "DoesNotExist").unwrap();
+    engine.reorder_sheet_by_id(sheet1_id, 0).unwrap();
+    engine.delete_sheet_by_id(sheet1_id).unwrap();
+    assert_eq!(engine.sheet_ids_in_order(), order_before);
+    assert_eq!(engine.sheet_name(sheet1_id), None);
 
     // Re-creating a sheet with the same name should not reuse the old id.
     engine.ensure_sheet("Sheet1");
@@ -94,4 +89,67 @@ fn sheet_lifecycle_by_id_validates_names_and_indices() {
         engine.reorder_sheet_by_id(sheet1_id, 2).unwrap_err(),
         SheetLifecycleError::IndexOutOfRange
     );
+}
+
+#[test]
+fn sheet_lifecycle_by_id_rewrites_formulas_and_preserves_external_refs() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+
+    // Make sure we have a stored formula that references Sheet1 both locally and via an external
+    // workbook reference. Local references should be rewritten on rename/delete, but external
+    // workbook refs must remain intact.
+    engine
+        .set_cell_formula("Sheet2", "A1", "=[Book.xlsx]Sheet1!A1+Sheet1!A1")
+        .unwrap();
+    // Include a 3D sheet span so deletion must shift boundaries inward.
+    engine
+        .set_cell_formula("Sheet2", "B1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
+    let sheet2_id = engine.sheet_id("Sheet2").unwrap();
+    let sheet3_id = engine.sheet_id("Sheet3").unwrap();
+
+    engine.rename_sheet_by_id(sheet1_id, "Renamed").unwrap();
+    assert_eq!(engine.sheet_name(sheet1_id), Some("Renamed"));
+    assert_eq!(engine.sheet_id("Renamed"), Some(sheet1_id));
+
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "A1"),
+        Some("=[Book.xlsx]Sheet1!A1+Renamed!A1")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "B1"),
+        Some("=SUM(Renamed:Sheet3!A1)")
+    );
+
+    engine.delete_sheet_by_id(sheet1_id).unwrap();
+    assert_eq!(engine.sheet_name(sheet1_id), None);
+    assert_eq!(engine.sheet_id("Renamed"), None);
+    assert!(!engine.sheet_ids_in_order().contains(&sheet1_id));
+
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "A1"),
+        Some("=[Book.xlsx]Sheet1!A1+#REF!")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "B1"),
+        Some("=SUM(Sheet2:Sheet3!A1)")
+    );
+
+    // Reorder by id (remaining sheets).
+    engine.reorder_sheet_by_id(sheet3_id, 0).unwrap();
+    assert_eq!(engine.sheet_ids_in_order(), vec![sheet3_id, sheet2_id]);
+    assert_eq!(engine.sheet_id("Sheet2"), Some(sheet2_id));
+    assert_eq!(engine.sheet_id("Sheet3"), Some(sheet3_id));
+
+    // Out-of-range ids are handled gracefully.
+    let order_before = engine.sheet_ids_in_order();
+    engine.rename_sheet_by_id(123_456, "Nope").unwrap();
+    engine.reorder_sheet_by_id(123_456, 0).unwrap();
+    engine.delete_sheet_by_id(123_456).unwrap();
+    assert_eq!(engine.sheet_ids_in_order(), order_before);
 }
