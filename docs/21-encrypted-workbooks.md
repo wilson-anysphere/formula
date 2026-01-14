@@ -145,14 +145,15 @@ Implementation notes:
   ```bash
   bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
   ```
-- `crates/formula-offcrypto` parses `EncryptionInfo` for both:
-  - Standard (CryptoAPI; `versionMinor == 2`) header + verifier structures, and
-  - Agile (4.4) XML (password key-encryptor subset),
-  and implements Standard password→key derivation + verifier checks.
+- `crates/formula-office-crypto` is the primary end-to-end MS-OFFCRYPTO implementation in this repo:
+  - parses `EncryptionInfo` for Agile (4.4) and Standard/CryptoAPI (`versionMinor == 2`), and
+  - decrypts `EncryptedPackage` to the plaintext OOXML ZIP bytes (and also includes an Agile writer).
+- `crates/formula-offcrypto` provides MS-OFFCRYPTO parsing helpers and standalone decrypt primitives
+  (useful for inspection tooling, and for some Standard/CryptoAPI helper APIs).
 - Standard/CryptoAPI AES `EncryptedPackage` decryption (ECMA-376 baseline) uses **AES-ECB** (no IV),
-  with plaintext truncated to the 8-byte plaintext size prefix. In this repo, see `crates/formula-offcrypto`
-  (`decrypt_standard_ooxml_from_bytes` / `decrypt_encrypted_package_ecb`) and
-  `docs/offcrypto-standard-encryptedpackage.md`.
+  with plaintext truncated to the 8-byte plaintext size prefix. In this repo, see
+  `crates/formula-offcrypto` (`decrypt_standard_ooxml_from_bytes` / `decrypt_encrypted_package_ecb`)
+  and `docs/offcrypto-standard-encryptedpackage.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -532,8 +533,6 @@ Current behavior in `formula-io`:
   - `Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (no password support),
     and
   - `Error::PasswordRequired` / `Error::InvalidPassword` via `open_workbook_with_password(..)` /
-    `open_workbook_model_with_password(..)` (attempts the decrypting `.xls` importer; XOR, RC4
-    “standard”, RC4 CryptoAPI).
     `open_workbook_model_with_password(..)` (attempts the decrypting `.xls` importer; XOR, RC4
     “standard”, RC4 CryptoAPI).
 
