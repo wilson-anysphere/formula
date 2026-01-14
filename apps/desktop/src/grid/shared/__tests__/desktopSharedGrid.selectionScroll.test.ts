@@ -192,6 +192,62 @@ describe("DesktopSharedGrid selection scrollIntoView option", () => {
     container.remove();
   });
 
+  it("emits onScroll when axis size changes without scrolling", () => {
+    const rowCount = 50;
+    const colCount = 50;
+    const provider = new MockCellProvider({ rowCount, colCount });
+
+    const onScroll = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas"),
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div"),
+    };
+
+    scrollbars.vTrack.appendChild(scrollbars.vThumb);
+    scrollbars.hTrack.appendChild(scrollbars.hThumb);
+    container.appendChild(scrollbars.vTrack);
+    container.appendChild(scrollbars.hTrack);
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount,
+      colCount,
+      canvases,
+      scrollbars,
+      callbacks: { onScroll },
+    });
+
+    grid.resize(300, 200, 1);
+    onScroll.mockClear();
+
+    const before = grid.getScroll();
+    const beforeViewport = grid.renderer.getViewportState();
+    const beforeMaxScrollY = beforeViewport.maxScrollY;
+
+    grid.renderer.setRowHeight(0, grid.renderer.getRowHeight(0) + 10);
+
+    expect(grid.getScroll()).toEqual(before);
+    const afterMaxScrollY = grid.renderer.getViewportState().maxScrollY;
+    expect(afterMaxScrollY).not.toBe(beforeMaxScrollY);
+    expect(onScroll).toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
+
   it("does not re-sync scrollbars when scrollToCell is a no-op", () => {
     const rowCount = 100;
     const colCount = 100;
