@@ -317,12 +317,86 @@ check_workflow_pnpm_pins() {
   fi
 }
 
+extract_workflow_corepack_prepare_pnpm_matches() {
+  local file="$1"
+  # Only scan shell commands executed via `run:` steps (inline or block scalar), so YAML-ish
+  # strings inside other block scalars (e.g. env vars, release notes, github-script inputs)
+  # cannot satisfy or fail this guardrail.
+  awk '
+    function indent(s) {
+      match(s, /^[ ]*/);
+      return RLENGTH;
+    }
+
+    BEGIN {
+      in_block = 0;
+      block_indent = 0;
+      block_is_run = 0;
+      block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+    }
+
+    {
+      raw = $0;
+      sub(/\r$/, "", raw);
+      ind = indent(raw);
+
+      if (in_block) {
+        # Blank/whitespace-only lines are always part of the scalar.
+        if (raw ~ /^[[:space:]]*$/) next;
+        if (ind > block_indent) {
+          if (block_is_run) {
+            trimmed = raw;
+            sub(/^[[:space:]]*/, "", trimmed);
+            # Ignore comment-only lines within run scripts.
+            if (trimmed ~ /^#/) next;
+            if (trimmed ~ /corepack[[:space:]]+prepare[[:space:]]+pnpm@/) {
+              printf "%d:%s\n", NR, raw;
+            }
+          }
+          next;
+        }
+        in_block = 0;
+        block_is_run = 0;
+      }
+
+      trimmed = raw;
+      sub(/^[[:space:]]*/, "", trimmed);
+      if (trimmed ~ /^#/) next;
+
+      line = raw;
+      sub(/#.*/, "", line);
+      is_block = (line ~ block_re);
+
+      if (is_block) {
+        block_is_run = (line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*[>|]/);
+        in_block = 1;
+        block_indent = ind;
+        next;
+      }
+
+      # Inline run steps: `run: corepack prepare ...`.
+      if (line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) {
+        cmd = line;
+        sub(/^[[:space:]]*-?[[:space:]]*run:[[:space:]]*/, "", cmd);
+        if (cmd ~ /corepack[[:space:]]+prepare[[:space:]]+pnpm@/) {
+          printf "%d:%s\n", NR, raw;
+        }
+      }
+    }
+  ' "$file"
+}
+
 check_workflow_corepack_pnpm_pins() {
   local file="$1"
+  local matches="${2-}"
   local env_pnpm_version=""
   env_pnpm_version="$(extract_workflow_env_pnpm_version "$file")"
 
   local found_any=0
+
+  if [ -z "$matches" ]; then
+    matches="$(extract_workflow_corepack_prepare_pnpm_matches "$file")"
+  fi
 
   while IFS= read -r match; do
     [ -z "$match" ] && continue
@@ -377,7 +451,7 @@ check_workflow_corepack_pnpm_pins() {
     echo "  Found an unrecognized pnpm ref in: ${content}" >&2
     echo "  Fix: use corepack prepare pnpm@${expected_pnpm_version} --activate (or pnpm@\\\${{ env.PNPM_VERSION }} with PNPM_VERSION pinned)." >&2
     exit 1
-  done < <(grep -n -E 'corepack[[:space:]]+prepare[[:space:]]+pnpm@' "$file" || true)
+  done <<<"$matches"
 
   if [ "$found_any" -eq 0 ]; then
     echo "No corepack prepare pnpm@... steps found in ${file} (expected at least one match when checking corepack pins)." >&2
@@ -412,9 +486,10 @@ fi
 
 corepack_matched=0
 for workflow in "${workflow_files[@]}"; do
-  if grep -q -E 'corepack[[:space:]]+prepare[[:space:]]+pnpm@' "$workflow"; then
+  corepack_matches="$(extract_workflow_corepack_prepare_pnpm_matches "$workflow")"
+  if [ -n "$corepack_matches" ]; then
     corepack_matched=1
-    check_workflow_corepack_pnpm_pins "$workflow"
+    check_workflow_corepack_pnpm_pins "$workflow" "$corepack_matches"
   fi
 done
 

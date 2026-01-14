@@ -182,6 +182,47 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("ignores corepack prepare pnpm@ strings inside non-run YAML block scalars", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+`,
+    ".github/workflows/security.yml": `
+name: Security
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: corepack prepare pnpm@9.0.0 --activate
+`,
+    ".github/workflows/docs.yml": `
+name: Docs
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_NOTES: |
+        corepack prepare pnpm@0.0.0 --activate
+    steps:
+      - run: echo ok
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("ignores pnpm/action-setup strings inside inline run steps", { skip: !canRun }, () => {
   const proc = run({
     "package.json": `{
