@@ -306,7 +306,7 @@ describe("parseDrawingMLShapeText", () => {
           <a:lstStyle/>
           <a:p>
             <a:r>
-              <a:rPr b="yes" i="no"/>
+              <a:rPr b="yes" i="no" u="no"/>
               <a:t>Styled</a:t>
             </a:r>
           </a:p>
@@ -321,6 +321,7 @@ describe("parseDrawingMLShapeText", () => {
       text: "Styled",
       bold: true,
       italic: false,
+      underline: false,
     });
   });
 

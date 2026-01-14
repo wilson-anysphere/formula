@@ -154,7 +154,9 @@ function parseBoolAttr(value: string | null): boolean | undefined {
 function parseUnderlineAttr(value: string | null): boolean | undefined {
   if (value == null) return undefined;
   const normalized = value.trim().toLowerCase();
-  if (normalized === "none" || normalized === "0" || normalized === "false" || normalized === "off") return false;
+  if (normalized === "none" || normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
   return true;
 }
 
