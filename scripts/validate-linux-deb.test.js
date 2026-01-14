@@ -556,7 +556,7 @@ test("validate-linux-deb fails when Parquet shared-mime-info definition is missi
   // When python3 is present, the strict verifier reports no packaged shared-mime-info definition
   // matching the expected MIME + glob; otherwise the bash fallback emits a "missing expected content"
   // error. Match either so the test remains hermetic across environments.
-  assert.match(proc.stderr, /(missing expected content|no packaged shared-mime-info definition)/i);
+  assert.match(proc.stderr, /(missing expected content|missing required content|no packaged shared-mime-info definition)/i);
 });
 
 test("validate-linux-deb fails when extracted .desktop is missing MimeType=", { skip: !hasBash }, () => {

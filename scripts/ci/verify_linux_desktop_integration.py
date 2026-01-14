@@ -126,9 +126,7 @@ def load_expected_doc_package_name(tauri_config_path: Path) -> str:
 
 def load_expected_identifier(tauri_config_path: Path) -> str:
     """
-    Tauri app identifier (reverse-DNS). We use this as the source of truth for the
-    Linux shared-mime-info definition filename we ship for Parquet:
-
+    Tauri app identifier (reverse-DNS). We use it as the shared-mime-info XML filename:
       /usr/share/mime/packages/<identifier>.xml
     """
     try:
@@ -180,31 +178,43 @@ def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
     expected_mime = "application/vnd.apache.parquet"
     expected_glob = "*.parquet"
     identifier = identifier.strip()
-    if not identifier:
-        raise SystemExit(
-            "[linux] ERROR: Parquet file association configured but tauri.conf.json identifier is missing.\n"
-            "Hint: `identifier` is required to determine the expected shared-mime-info XML filename "
-            "(/usr/share/mime/packages/<identifier>.xml)."
-        )
 
-    expected_xml = mime_packages_dir / f"{identifier}.xml"
-    if not expected_xml.is_file():
+    # Prefer validating the identifier-derived filename when available. If identifier is
+    # missing (e.g. running against an ad-hoc config), fall back to scanning any packaged
+    # shared-mime-info XML files.
+    candidates: list[Path]
+    if identifier:
+        expected_xml = mime_packages_dir / f"{identifier}.xml"
+        if not expected_xml.is_file():
+            packaged = sorted(mime_packages_dir.glob("*.xml"))
+            formatted = "\n".join(f"- {p}" for p in packaged) if packaged else "(no *.xml files found)"
+            raise SystemExit(
+                "[linux] ERROR: Parquet file association configured but expected shared-mime-info definition file is missing.\n"
+                f"Expected: {expected_xml}\n"
+                f"Found:\n{formatted}\n"
+                "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
+                "(where <identifier> comes from tauri.conf.json identifier)."
+            )
+        candidates = [expected_xml]
+    else:
         candidates = sorted(mime_packages_dir.glob("*.xml"))
-        formatted = "\n".join(f"- {p}" for p in candidates) if candidates else "(none)"
-        raise SystemExit(
-            "[linux] ERROR: Parquet file association configured but no shared-mime-info XML files were packaged.\n"
-            f"Expected: {expected_xml}\n"
-            f"Found under {mime_packages_dir}:\n{formatted}\n"
-            "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
-            "(where <identifier> comes from tauri.conf.json identifier)."
-        )
-
-    candidates = [expected_xml]
+        if not candidates:
+            raise SystemExit(
+                "[linux] ERROR: Parquet file association configured but no shared-mime-info XML files were packaged.\n"
+                f"Expected at least one *.xml under: {mime_packages_dir}\n"
+                "Hint: add a MIME definition file and map it into the Linux bundles via tauri.conf.json."
+            )
     for xml_path in candidates:
         try:
             tree = ET.parse(xml_path)
-        except ET.ParseError:
-            # Ignore unrelated/invalid XML files; we'll fail if none match.
+        except ET.ParseError as e:
+            if identifier:
+                raise SystemExit(
+                    "[linux] ERROR: failed to parse expected Parquet shared-mime-info definition XML.\n"
+                    f"File: {xml_path}\n"
+                    f"Error: {e}"
+                )
+            # Ignore unrelated/invalid XML files in the fallback scan; we'll fail if none match.
             continue
         root = tree.getroot()
         for mime_type in root.findall(".//{http://www.freedesktop.org/standards/shared-mime-info}mime-type"):
@@ -217,10 +227,16 @@ def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
                     )
                     return
 
+    if identifier:
+        raise SystemExit(
+            "[linux] ERROR: Parquet file association configured but the expected shared-mime-info definition file is missing required content.\n"
+            f"Expected: {mime_packages_dir}/{identifier}.xml\n"
+            f"Expected to define:\n  - {expected_mime} with glob {expected_glob}\n"
+            "Hint: ensure the packaged shared-mime-info XML includes a <glob pattern=\"*.parquet\" /> entry."
+        )
     raise SystemExit(
         "[linux] ERROR: Parquet file association configured but no packaged shared-mime-info definition was found.\n"
-        f"Expected: {expected_xml}\n"
-        f"Expected {expected_xml.name} to define:\n"
+        f"Expected a *.xml under {mime_packages_dir} defining:\n"
         f"  - {expected_mime} with glob {expected_glob}\n"
         "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
         "(where <identifier> comes from tauri.conf.json identifier)."

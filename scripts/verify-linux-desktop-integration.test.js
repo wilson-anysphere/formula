@@ -14,7 +14,11 @@ const hasPython3 = (() => {
   return !probe.error && probe.status === 0;
 })();
 
-function writeConfig(dir, { mainBinaryName = "formula-desktop" } = {}) {
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function writeConfig(dir, { mainBinaryName = "formula-desktop", identifier = "app.formula.desktop" } = {}) {
   const configPath = path.join(dir, "tauri.conf.json");
   const fileAssociations = [
     {
@@ -23,7 +27,7 @@ function writeConfig(dir, { mainBinaryName = "formula-desktop" } = {}) {
     },
   ];
   const conf = {
-    identifier: "app.formula.desktop",
+    identifier,
     mainBinaryName,
     bundle: {
       fileAssociations,
@@ -37,6 +41,7 @@ function writeConfigWithAssociations(
   dir,
   {
     mainBinaryName = "formula-desktop",
+    identifier = "app.formula.desktop",
     fileAssociations = [
       {
         ext: ["xlsx"],
@@ -47,7 +52,7 @@ function writeConfigWithAssociations(
 ) {
   const configPath = path.join(dir, "tauri.conf.json");
   const conf = {
-    identifier: "app.formula.desktop",
+    identifier,
     mainBinaryName,
     bundle: { fileAssociations },
   };
@@ -325,6 +330,40 @@ test(
 
     const proc = runValidator({ packageRoot: pkgRoot, configPath });
     assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but the identifier-based MIME XML file is missing",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const identifier = "com.example.formula.desktop";
+    const configPath = writeConfigWithAssociations(tmp, {
+      identifier,
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+    // Write a Parquet MIME definition, but under a different identifier filename than the config expects.
+    writeParquetMimeDefinition(pkgRoot, { identifier: "app.formula.desktop" });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /expected shared-mime-info definition file is missing/i);
+    assert.match(proc.stderr, new RegExp(`${escapeRegExp(identifier)}\\.xml`, "i"));
   },
 );
 
