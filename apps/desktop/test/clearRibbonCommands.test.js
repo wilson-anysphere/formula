@@ -46,6 +46,34 @@ test("Ribbon schema wires Home → Editing → Clear menu items to canonical com
       `Expected homeTab.ts to not include legacy id ${id}`,
     );
   }
+
+  // Ensure the canonical ids actually live under the Home → Editing → Clear dropdown (not elsewhere in the schema).
+  const editingClearStart = schema.search(/\bid:\s*["']home\.editing\.clear["']/);
+  assert.ok(editingClearStart >= 0, "Expected homeTab.ts to define the home.editing.clear dropdown");
+  const editingClearEnd = (() => {
+    const idx = schema.slice(editingClearStart).search(/\bid:\s*["']home\.editing\.sortFilter["']/);
+    return idx >= 0 ? editingClearStart + idx : Math.min(schema.length, editingClearStart + 2_000);
+  })();
+  const editingClearBlock = schema.slice(editingClearStart, editingClearEnd);
+  for (const id of requiredIds) {
+    assert.match(
+      editingClearBlock,
+      new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`),
+      `Expected Home → Editing → Clear dropdown to include ${id}`,
+    );
+  }
+
+  // Ensure the Home → Font → Clear dropdown also routes Clear Contents through the canonical edit command.
+  const fontClearStart = schema.search(/\bid:\s*["']home\.font\.clearFormatting["']/);
+  assert.ok(fontClearStart >= 0, "Expected homeTab.ts to define the home.font.clearFormatting dropdown");
+  const fontClearEnd = (() => {
+    const idx = schema.slice(fontClearStart).search(/\bid:\s*["']home\.alignment["']/);
+    return idx >= 0 ? fontClearStart + idx : Math.min(schema.length, fontClearStart + 2_000);
+  })();
+  const fontClearBlock = schema.slice(fontClearStart, fontClearEnd);
+  assert.match(fontClearBlock, /\bid:\s*["']format\.clearFormats["']/);
+  assert.match(fontClearBlock, /\bid:\s*["']edit\.clearContents["']/);
+  assert.match(fontClearBlock, /\bid:\s*["']format\.clearAll["']/);
 });
 
 test("Clear commands are registered under canonical ids (no legacy routing helpers)", () => {
@@ -103,4 +131,3 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   assert.doesNotMatch(main, /\bhomeEditingClearCommandRouting\b/);
   assert.doesNotMatch(main, /\bresolveHomeEditingClearCommandTarget\b/);
 });
-
