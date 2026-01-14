@@ -178,6 +178,93 @@ describe("WasmWorkbookBackend", () => {
     expect(await backend.getSheetUsedRange("Sheet1")).toBeNull();
   });
 
+  it("loads workbooks from raw xlsx bytes using getWorkbookInfo() when available (seeding used ranges without toJson)", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    const meta = {
+      path: null,
+      origin_path: null,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          usedRange: { start_row: 0, start_col: 0, end_row: 2, end_col: 2 },
+        },
+        {
+          id: "Sheet2",
+          name: "Sheet2",
+          usedRange: null,
+        },
+        {
+          id: "Empty",
+          name: "Empty",
+        },
+      ],
+    } as const;
+
+    const engine: EngineClient = {
+      init: vi.fn(async () => {}),
+      newWorkbook: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
+      getWorkbookInfo: vi.fn(async () => meta as any),
+      toJson: vi.fn(async () => {
+        throw new Error("toJson should not be called when getWorkbookInfo is available");
+      }),
+      getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
+      getRange: vi.fn(async () => []),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      setRange: vi.fn(async () => {}),
+      setWorkbookFileMetadata: vi.fn(async () => {}),
+      setCellStyleId: vi.fn(async () => {}),
+      setColWidth: vi.fn(async () => {}),
+      setColHidden: vi.fn(async () => {}),
+      internStyle: vi.fn(async () => 0),
+      setLocale: vi.fn(async () => true),
+      recalculate: vi.fn(async () => []),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
+      applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
+      rewriteFormulasForCopyDelta: vi.fn(async () => []),
+      lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
+      terminate: vi.fn(),
+    };
+
+    const backend = new WasmWorkbookBackend(engine);
+    const info = await backend.openWorkbookFromBytes(bytes);
+
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledTimes(1);
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledWith(bytes);
+
+    expect(engine.recalculate).toHaveBeenCalledTimes(1);
+    expect(engine.recalculate).toHaveBeenCalledWith();
+
+    expect(engine.getWorkbookInfo).toHaveBeenCalledTimes(1);
+    expect(engine.toJson).toHaveBeenCalledTimes(0);
+
+    expect(info).toEqual({
+      path: null,
+      origin_path: null,
+      sheets: [
+        { id: "Sheet1", name: "Sheet1" },
+        { id: "Sheet2", name: "Sheet2" },
+        { id: "Empty", name: "Empty" },
+      ],
+    });
+
+    expect(await backend.getSheetUsedRange("Sheet1")).toEqual({
+      start_row: 0,
+      start_col: 0,
+      end_row: 2,
+      end_col: 2,
+    });
+    expect(await backend.getSheetUsedRange("Sheet2")).toBeNull();
+    expect(await backend.getSheetUsedRange("Empty")).toBeNull();
+  });
+
   it("loads workbooks from raw xlsx bytes, triggers a full recalc, and seeds used ranges", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const workbookJson = JSON.stringify({
@@ -203,6 +290,9 @@ describe("WasmWorkbookBackend", () => {
       newWorkbook: vi.fn(async () => {}),
       loadWorkbookFromJson: vi.fn(async () => {}),
       loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
+      getWorkbookInfo: vi.fn(async () => {
+        throw new Error("getWorkbookInfo: not supported");
+      }),
       toJson: vi.fn(async () => workbookJson),
       getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
       getRange: vi.fn(async () => []),

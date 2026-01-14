@@ -16,6 +16,7 @@ import type {
   PivotCalculationResult,
   PivotConfig,
   PivotSchema,
+  WorkbookInfoDto,
   RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";
@@ -43,6 +44,12 @@ export interface EngineClient {
    */
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;
+  /**
+   * Return lightweight workbook metadata (sheet list + best-effort used ranges).
+   *
+   * Additive API: older workers / WASM builds may not support this call.
+   */
+  getWorkbookInfo?(options?: RpcOptions): Promise<WorkbookInfoDto>;
   getCell(address: string, sheet?: string, options?: RpcOptions): Promise<CellData>;
   /**
    * Read a cell's rich `{type,value}` input/value.
@@ -325,6 +332,7 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     loadWorkbookFromXlsxBytes: async (bytes, rpcOptions) =>
       await withEngine((connected) => connected.loadWorkbookFromXlsxBytes(bytes, rpcOptions)),
     toJson: async () => await withEngine((connected) => connected.toJson()),
+    getWorkbookInfo: async (rpcOptions) => await withEngine((connected) => connected.getWorkbookInfo(rpcOptions)),
     getCell: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),
     getCellRich: async (address, sheet, rpcOptions) =>

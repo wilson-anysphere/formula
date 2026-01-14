@@ -6,11 +6,14 @@ import type {
   InitMessage,
   RpcCancel,
   RpcRequest,
+  SheetUsedRangeDto,
+  WorkbookInfoDto,
   WorkerInboundMessage,
   WorkerOutboundMessage,
 } from "./protocol.ts";
 
 type WasmWorkbookInstance = {
+  getWorkbookInfo?: () => unknown;
   getCell(address: string, sheet?: string): unknown;
   getCellRich?: (address: string, sheet?: string) => unknown;
   goalSeek?: (request: unknown) => unknown;
@@ -38,6 +41,56 @@ type WasmWorkbookInstance = {
   internStyle?: (style: unknown) => number;
   toJson(): string;
 };
+
+type UsedRangeState = SheetUsedRangeDto;
+
+type EngineWorkbookJson = {
+  sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
+};
+
+function colNameToIndex(colName: string): number {
+  if (colName.trim() === "") {
+    throw new Error("Expected a non-empty column name");
+  }
+
+  let n = 0;
+  for (const ch of colName.toUpperCase()) {
+    const code = ch.charCodeAt(0);
+    if (code < 65 || code > 90) {
+      throw new Error(`Invalid column name: ${colName}`);
+    }
+    n = n * 26 + (code - 64);
+  }
+  return n - 1;
+}
+
+function fromA1(address: string): { row0: number; col0: number } {
+  const trimmed = address.trim();
+  const match = /^\$?([A-Za-z]+)\$?([1-9][0-9]*)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(`Invalid A1 address: ${address}`);
+  }
+
+  const [, colName, rowStr] = match;
+  const row1 = Number(rowStr);
+  if (!Number.isInteger(row1) || row1 < 1) {
+    throw new Error(`Invalid row in A1 address: ${address}`);
+  }
+
+  return { row0: row1 - 1, col0: colNameToIndex(colName) };
+}
+
+function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row: number, col: number): void {
+  const existing = map.get(sheetId);
+  if (!existing) {
+    map.set(sheetId, { start_row: row, end_row: row, start_col: col, end_col: col });
+    return;
+  }
+  existing.start_row = Math.min(existing.start_row, row);
+  existing.end_row = Math.max(existing.end_row, row);
+  existing.start_col = Math.min(existing.start_col, col);
+  existing.end_col = Math.max(existing.end_col, col);
+}
 
 type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
@@ -391,6 +444,67 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
           }
 
           switch (req.method) {
+            case "getWorkbookInfo":
+              if (typeof (wb as any).getWorkbookInfo === "function") {
+                result = cloneToPlainData((wb as any).getWorkbookInfo());
+                break;
+              }
+
+              // Backward compatibility: older WASM builds don't export `getWorkbookInfo()`. Fall back
+              // to parsing `toJson()` inside the worker so large workbook JSON strings don't cross
+              // the postMessage boundary.
+              {
+                const json = wb.toJson();
+                let parsed: EngineWorkbookJson | null = null;
+                try {
+                  parsed = JSON.parse(json) as EngineWorkbookJson;
+                } catch {
+                  parsed = null;
+                }
+
+                const sheetsRecord =
+                  parsed?.sheets && typeof parsed.sheets === "object" ? (parsed.sheets as EngineWorkbookJson["sheets"]) : null;
+                const sheetIds = sheetsRecord ? Object.keys(sheetsRecord) : [];
+
+                const usedRanges = new Map<string, UsedRangeState>();
+                for (const sheetId of sheetIds) {
+                  const cells = sheetsRecord?.[sheetId]?.cells;
+                  if (!cells || typeof cells !== "object") continue;
+                  for (const address of Object.keys(cells)) {
+                    try {
+                      const { row0, col0 } = fromA1(address);
+                      updateUsedRange(usedRanges, sheetId, row0, col0);
+                    } catch {
+                      // Ignore invalid A1 keys; used range tracking is best-effort.
+                    }
+                  }
+                }
+
+                const sheets: WorkbookInfoDto["sheets"] =
+                  sheetIds.length > 0
+                    ? sheetIds.map((id) => {
+                        const sheetMeta = sheetsRecord?.[id];
+                        const sheet: any = { id, name: id };
+                        if (sheetMeta && typeof sheetMeta === "object") {
+                          if (typeof sheetMeta.rowCount === "number") {
+                            sheet.rowCount = sheetMeta.rowCount;
+                          }
+                          if (typeof sheetMeta.colCount === "number") {
+                            sheet.colCount = sheetMeta.colCount;
+                          }
+                        }
+
+                        const used = usedRanges.get(id);
+                        if (used) {
+                          sheet.usedRange = used;
+                        }
+                        return sheet;
+                      })
+                    : [{ id: "Sheet1", name: "Sheet1" }];
+
+                result = { path: null, origin_path: null, sheets } satisfies WorkbookInfoDto;
+              }
+              break;
             case "toJson":
               result = wb.toJson();
               break;

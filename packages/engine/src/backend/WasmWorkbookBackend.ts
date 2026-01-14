@@ -46,6 +46,18 @@ type EngineWorkbookJson = {
   sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
 };
 
+type EngineWorkbookInfo = {
+  path: string | null;
+  origin_path: string | null;
+  sheets: Array<{
+    id: string;
+    name: string;
+    rowCount?: number;
+    colCount?: number;
+    usedRange?: UsedRangeState | null;
+  }>;
+};
+
 export class WasmWorkbookBackend implements WorkbookBackend {
   private readonly usedRanges = new Map<string, UsedRangeState>();
   private workbookInfo: WorkbookInfo | null = null;
@@ -73,6 +85,52 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     await this.engine.loadWorkbookFromXlsxBytes(bytes);
     await this.engine.recalculate();
 
+    this.usedRanges.clear();
+
+    // Prefer the lightweight metadata API when available to avoid materializing and scanning a huge
+    // workbook JSON string in JS.
+    if (typeof this.engine.getWorkbookInfo === "function") {
+      try {
+        const meta = (await this.engine.getWorkbookInfo()) as EngineWorkbookInfo;
+        if (meta && typeof meta === "object" && Array.isArray((meta as any).sheets)) {
+          for (const sheet of meta.sheets) {
+            if (!sheet || typeof sheet !== "object") continue;
+            const sheetId = String((sheet as any).id ?? "");
+            if (!sheetId) continue;
+
+            const used = (sheet as any).usedRange as UsedRangeState | null | undefined;
+            if (
+              used &&
+              typeof used === "object" &&
+              typeof used.start_row === "number" &&
+              typeof used.end_row === "number" &&
+              typeof used.start_col === "number" &&
+              typeof used.end_col === "number"
+            ) {
+              this.usedRanges.set(sheetId, { ...used });
+            }
+          }
+
+          const sheets: SheetInfo[] =
+            meta.sheets.length > 0
+              ? meta.sheets.map((sheet) => ({ id: String(sheet.id), name: String(sheet.name) }))
+              : [DEFAULT_SHEET];
+
+          const info: WorkbookInfo = {
+            path: meta.path ?? null,
+            origin_path: meta.origin_path ?? null,
+            sheets,
+          };
+          this.workbookInfo = info;
+          return info;
+        }
+      } catch {
+        // Ignore and fall back to the legacy JSON-based metadata path.
+      }
+    }
+
+    // Legacy fallback: parse the full workbook JSON export and scan cell keys to derive sheet ids
+    // + best-effort used ranges.
     const json = await this.engine.toJson();
     let parsed: EngineWorkbookJson | null = null;
     try {
@@ -80,8 +138,6 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     } catch {
       parsed = null;
     }
-
-    this.usedRanges.clear();
 
     const sheetIds = parsed?.sheets && typeof parsed.sheets === "object" ? Object.keys(parsed.sheets) : [];
     for (const sheetId of sheetIds) {
@@ -98,8 +154,7 @@ export class WasmWorkbookBackend implements WorkbookBackend {
       }
     }
 
-    const sheets: SheetInfo[] =
-      sheetIds.length > 0 ? sheetIds.map((id) => ({ id, name: id })) : [DEFAULT_SHEET];
+    const sheets: SheetInfo[] = sheetIds.length > 0 ? sheetIds.map((id) => ({ id, name: id })) : [DEFAULT_SHEET];
 
     const info: WorkbookInfo = {
       path: null,

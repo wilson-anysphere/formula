@@ -16,6 +16,7 @@ import type {
   PivotCalculationResult,
   PivotConfig,
   PivotSchema,
+  WorkbookInfoDto,
   WorkbookStyleDto,
   RewriteFormulaForCopyDeltaRequest,
   RpcCancel,
@@ -225,6 +226,11 @@ export class EngineWorker {
   async toJson(options?: RpcOptions): Promise<string> {
     await this.flush();
     return (await this.invoke("toJson", {}, options)) as string;
+  }
+
+  async getWorkbookInfo(options?: RpcOptions): Promise<WorkbookInfoDto> {
+    await this.flush();
+    return (await this.invoke("getWorkbookInfo", {}, options)) as WorkbookInfoDto;
   }
 
   async getCell(

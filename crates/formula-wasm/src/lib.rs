@@ -3041,6 +3041,109 @@ impl WasmWorkbook {
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))
     }
 
+    /// Return a lightweight workbook metadata payload (sheet list + dimensions + best-effort used ranges)
+    /// without materializing the full workbook JSON string returned by `toJson()`.
+    ///
+    /// This is intended for web clients that need to open `.xlsx` bytes and quickly determine the
+    /// available sheets / their used ranges without scanning every cell key in JS.
+    #[wasm_bindgen(js_name = "getWorkbookInfo")]
+    pub fn get_workbook_info(&self) -> Result<JsValue, JsValue> {
+        let obj = Object::new();
+        object_set(&obj, "path", &JsValue::NULL)?;
+        object_set(&obj, "origin_path", &JsValue::NULL)?;
+
+        let sheets_out = Array::new();
+
+        for (sheet_name, cells) in &self.inner.sheets {
+            let sheet_obj = Object::new();
+            object_set(&sheet_obj, "id", &JsValue::from_str(sheet_name))?;
+            object_set(&sheet_obj, "name", &JsValue::from_str(sheet_name))?;
+
+            // Include sheet dimensions when they differ from Excel defaults (to match `toJson()`).
+            let (rows, cols) = self
+                .inner
+                .engine
+                .sheet_dimensions(sheet_name)
+                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
+            if rows != EXCEL_MAX_ROWS {
+                object_set(&sheet_obj, "rowCount", &JsValue::from_f64(rows as f64))?;
+            }
+            if cols != EXCEL_MAX_COLS {
+                object_set(&sheet_obj, "colCount", &JsValue::from_f64(cols as f64))?;
+            }
+
+            // Best-effort used range derived from the sparse input maps (scalar + rich).
+            let mut used_start_row: Option<u32> = None;
+            let mut used_end_row: u32 = 0;
+            let mut used_start_col: u32 = 0;
+            let mut used_end_col: u32 = 0;
+
+            for (address, input) in cells {
+                // Explicit nulls should not affect used range tracking (sparse semantics).
+                if input.is_null() {
+                    continue;
+                }
+                let Ok(cell_ref) = CellRef::from_a1(address) else {
+                    continue;
+                };
+
+                match used_start_row {
+                    None => {
+                        used_start_row = Some(cell_ref.row);
+                        used_end_row = cell_ref.row;
+                        used_start_col = cell_ref.col;
+                        used_end_col = cell_ref.col;
+                    }
+                    Some(start_row) => {
+                        used_start_row = Some(start_row.min(cell_ref.row));
+                        used_end_row = used_end_row.max(cell_ref.row);
+                        used_start_col = used_start_col.min(cell_ref.col);
+                        used_end_col = used_end_col.max(cell_ref.col);
+                    }
+                }
+            }
+
+            if let Some(rich_cells) = self.inner.sheets_rich.get(sheet_name) {
+                for (address, input) in rich_cells {
+                    if input.is_empty() {
+                        continue;
+                    }
+                    let Ok(cell_ref) = CellRef::from_a1(address) else {
+                        continue;
+                    };
+                    match used_start_row {
+                        None => {
+                            used_start_row = Some(cell_ref.row);
+                            used_end_row = cell_ref.row;
+                            used_start_col = cell_ref.col;
+                            used_end_col = cell_ref.col;
+                        }
+                        Some(start_row) => {
+                            used_start_row = Some(start_row.min(cell_ref.row));
+                            used_end_row = used_end_row.max(cell_ref.row);
+                            used_start_col = used_start_col.min(cell_ref.col);
+                            used_end_col = used_end_col.max(cell_ref.col);
+                        }
+                    }
+                }
+            }
+
+            if let Some(start_row) = used_start_row {
+                let used_obj = Object::new();
+                object_set(&used_obj, "start_row", &JsValue::from_f64(start_row as f64))?;
+                object_set(&used_obj, "end_row", &JsValue::from_f64(used_end_row as f64))?;
+                object_set(&used_obj, "start_col", &JsValue::from_f64(used_start_col as f64))?;
+                object_set(&used_obj, "end_col", &JsValue::from_f64(used_end_col as f64))?;
+                object_set(&sheet_obj, "usedRange", &used_obj.into())?;
+            }
+
+            sheets_out.push(&sheet_obj);
+        }
+
+        object_set(&obj, "sheets", &sheets_out.into())?;
+        Ok(obj.into())
+    }
+
     #[wasm_bindgen(js_name = "getCell")]
     pub fn get_cell(&self, address: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);

@@ -115,6 +115,61 @@ export interface CellChange {
   value: CellScalar;
 }
 
+/**
+ * Best-effort used range metadata for a worksheet.
+ *
+ * Semantics:
+ * - Coordinates are 0-based (engine coordinates).
+ * - Range is inclusive (`start_*` and `end_*` are both included).
+ */
+export interface SheetUsedRangeDto {
+  start_row: number;
+  end_row: number;
+  start_col: number;
+  end_col: number;
+}
+
+/**
+ * Lightweight workbook metadata DTO returned by the worker's `getWorkbookInfo` RPC.
+ *
+ * This is compatible with `@formula/workbook-backend`'s `WorkbookInfo` shape, with additive
+ * optional metadata (dimensions + best-effort used range).
+ */
+export interface WorkbookSheetInfoDto {
+  id: string;
+  name: string;
+  visibility?: "visible" | "hidden" | "veryHidden";
+  tabColor?: {
+    rgb?: string;
+    theme?: number;
+    indexed?: number;
+    tint?: number;
+    auto?: boolean;
+  };
+  /**
+   * Logical row count for the worksheet grid.
+   *
+   * Only present when the sheet differs from Excel defaults.
+   */
+  rowCount?: number;
+  /**
+   * Logical column count for the worksheet grid.
+   *
+   * Only present when the sheet differs from Excel defaults.
+   */
+  colCount?: number;
+  /**
+   * Best-effort used range computed from stored sparse inputs (may be omitted or null when empty).
+   */
+  usedRange?: SheetUsedRangeDto | null;
+}
+
+export interface WorkbookInfoDto {
+  path: string | null;
+  origin_path: string | null;
+  sheets: WorkbookSheetInfoDto[];
+}
+
 // Pivots
 
 export type PivotValue =
@@ -456,6 +511,7 @@ export type RpcMethod =
   | "loadFromJson"
   | "loadFromXlsxBytes"
   // Workbook reads/writes
+  | "getWorkbookInfo"
   | "toJson"
   | "getCell"
   | "getCellRich"
