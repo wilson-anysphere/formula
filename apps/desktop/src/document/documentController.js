@@ -6575,7 +6575,23 @@ export class DocumentController {
       nextImages.set(id, entry);
     };
 
-    const rawImagesField = parsed?.images ?? parsed?.metadata?.images ?? null;
+    let rawImagesField = parsed?.images ?? parsed?.metadata?.images ?? null;
+    // Some interop layers may wrap arrays as singleton arrays-of-arrays or `{0: [...]}` objects.
+    // Only unwrap when the wrapped payload is an array, so normal single-image arrays
+    // (`[{...}]`) are preserved.
+    if (Array.isArray(rawImagesField) && rawImagesField.length === 1 && Array.isArray(rawImagesField[0])) {
+      rawImagesField = rawImagesField[0];
+    }
+    if (
+      rawImagesField &&
+      typeof rawImagesField === "object" &&
+      !Array.isArray(rawImagesField) &&
+      Object.keys(rawImagesField).length === 1 &&
+      Object.prototype.hasOwnProperty.call(rawImagesField, "0") &&
+      Array.isArray(rawImagesField[0])
+    ) {
+      rawImagesField = rawImagesField[0];
+    }
     if (Array.isArray(rawImagesField)) {
       for (const image of rawImagesField) {
         const rawId = unwrapSingletonId(image?.id);
