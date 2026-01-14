@@ -1,4 +1,4 @@
-use formula_engine::Engine;
+use formula_engine::{Engine, SheetLifecycleError};
 use formula_model::{CellRef, Range, Table, TableColumn};
 use pretty_assertions::assert_eq;
 
@@ -168,4 +168,34 @@ fn delete_sheet_succeeds_when_multiple_sheets_exist() {
     assert!(engine.delete_sheet("Sheet1").is_ok());
     assert_eq!(engine.sheet_id("Sheet1"), None);
     assert_eq!(engine.sheet_ids_in_order(), vec![sheet2]);
+}
+
+#[test]
+fn delete_sheet_by_id_refuses_to_delete_last_sheet() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Only");
+    let id = engine.sheet_id("Only").unwrap();
+
+    assert!(matches!(
+        engine.delete_sheet_by_id(id),
+        Err(SheetLifecycleError::CannotDeleteLastSheet)
+    ));
+    assert!(engine.sheet_id("Only").is_some());
+    assert_eq!(engine.sheet_ids_in_order().len(), 1);
+}
+
+#[test]
+fn delete_sheet_by_id_succeeds_when_multiple_sheets_exist() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+
+    let sheet2 = engine.sheet_id("Sheet2").unwrap();
+    assert!(engine.delete_sheet_by_id(sheet2).is_ok());
+    assert_eq!(engine.sheet_id("Sheet2"), None);
+    assert_eq!(
+        engine.sheet_names_in_order(),
+        vec!["Sheet1".to_string(), "Sheet3".to_string()]
+    );
 }

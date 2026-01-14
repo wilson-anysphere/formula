@@ -1649,13 +1649,13 @@ impl Engine {
         if !self.workbook.sheet_exists(id) {
             return Err(SheetLifecycleError::SheetNotFound);
         }
-        if self.workbook.sheet_order.len() <= 1 {
-            return Err(SheetLifecycleError::CannotDeleteLastSheet);
-        }
 
         let name = self.workbook.sheet_name(id).expect("sheet exists").to_string();
         self.delete_sheet(&name)
-            .map_err(|e| SheetLifecycleError::Internal(e.to_string()))
+            .map_err(|e| match e {
+                EngineError::CannotDeleteLastSheet => SheetLifecycleError::CannotDeleteLastSheet,
+                other => SheetLifecycleError::Internal(other.to_string()),
+            })
     }
     /// Store a pivot table definition in the engine and return its allocated id.
     ///
