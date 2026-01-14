@@ -167,7 +167,9 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     expect(entry.bytes).toEqual(bytes);
 
     // Drawing image bytes are stored out-of-band (in-memory + IndexedDB) rather than in
-    // DocumentController snapshots.
+    // DocumentController snapshots / image map.
+    const stored = (app.getDocument() as any)?.getImage?.(obj.kind.imageId);
+    expect(stored).toBeFalsy();
     const snapshotBytes = app.getDocument().encodeState();
     const snapshot = JSON.parse(new TextDecoder().decode(snapshotBytes));
     expect(snapshot.images).toBeUndefined();
