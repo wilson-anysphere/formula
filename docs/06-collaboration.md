@@ -1266,6 +1266,21 @@ const versions = await versioning.listVersions();
 await versioning.restoreVersion(versions[0].id);
 ```
 
+### Workbook diffs (Version History “Compare”)
+
+The desktop Version History “Compare” UI computes a workbook-level diff between a selected version snapshot and the current live Yjs document state via `diffYjsWorkbookVersionAgainstCurrent`:
+
+- Source: [`packages/versioning/src/yjs/versionHistory.js`](../packages/versioning/src/yjs/versionHistory.js)
+- Diff implementation: [`packages/versioning/src/yjs/diffWorkbookSnapshots.js`](../packages/versioning/src/yjs/diffWorkbookSnapshots.js)
+
+The returned `WorkbookDiff` includes sheet-level metadata changes in `diff.sheets.metaChanged[]` (in addition to adds/removes/renames/reorders). This list is intentionally limited to a **small subset** of per-sheet state so version history summaries stay fast and compact:
+
+- `visibility` (`visible | hidden | veryHidden`)
+- `tabColor`: canonicalized to **8-digit uppercase ARGB** hex (e.g. `FF00FF00`) or `null` when cleared
+- frozen panes: `view.frozenRows`, `view.frozenCols`
+
+Note: large sheet view maps (e.g. row/column size tables) are intentionally excluded from workbook diffs; only frozen pane counts are tracked.
+
 ### VersionStore choices (in-doc vs API vs SQLite)
 
 `createCollabVersioning` accepts a `store` option (see defaulting logic in
