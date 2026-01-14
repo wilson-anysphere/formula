@@ -1015,4 +1015,63 @@ mod tests {
         assert_eq!(legend.position, LegendPosition::Right);
         assert!(legend.overlay);
     }
+
+    #[test]
+    fn collect_chart_ex_kind_hints_normalizes_and_deduplicates() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chart>
+    <cx:plotArea>
+      <cx:chartData>
+        <cx:series layoutId="cx:treemapChart" chartType="WaterfallChart"/>
+        <cx:series layoutId="treemap" chartType="waterfall"/>
+        <cx:series layoutId="treemapChart" chartType="waterfallChart"/>
+      </cx:chartData>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>"#;
+
+        let doc = Document::parse(xml).expect("parse xml");
+        let hints = collect_chart_ex_kind_hints(&doc);
+        assert_eq!(
+            hints,
+            vec!["layoutId=treemap".to_string(), "chartType=waterfall".to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_chart_ex_kind_hints_caps_output() {
+        let mut xml = String::from(
+            r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chart><cx:plotArea><cx:chartData>"#,
+        );
+        for i in 0..20 {
+            xml.push_str(&format!(
+                r#"<cx:series layoutId="kind{i}" chartType="type{i}"/>"#
+            ));
+        }
+        xml.push_str("</cx:chartData></cx:plotArea></cx:chart></cx:chartSpace>");
+
+        let doc = Document::parse(&xml).expect("parse xml");
+        let hints = collect_chart_ex_kind_hints(&doc);
+        assert_eq!(hints.len(), 12);
+        assert_eq!(
+            hints,
+            vec![
+                "layoutId=kind0",
+                "chartType=type0",
+                "layoutId=kind1",
+                "chartType=type1",
+                "layoutId=kind2",
+                "chartType=type2",
+                "layoutId=kind3",
+                "chartType=type3",
+                "layoutId=kind4",
+                "chartType=type4",
+                "layoutId=kind5",
+                "chartType=type5",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
+    }
 }

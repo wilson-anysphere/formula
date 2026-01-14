@@ -2213,6 +2213,45 @@ mod tests {
     }
 
     #[test]
+    fn unmatched_fact_rows_retain_sparse() {
+        let mut rows = UnmatchedFactRows::Sparse(vec![0, 1, 2, 3, 4]);
+        rows.retain(|&row| row % 2 == 0);
+
+        let mut out = Vec::new();
+        rows.extend_into(&mut out);
+        assert_eq!(out, vec![0, 2, 4]);
+    }
+
+    #[test]
+    fn unmatched_fact_rows_retain_dense_updates_count_and_bits() {
+        // Ensure retain works on the dense representation and updates the `count` field.
+        let mut builder = UnmatchedFactRowsBuilder::new(128);
+        builder.push(0);
+        builder.push(1);
+        builder.push(2); // triggers switch to dense for 128 rows (threshold > 2)
+        builder.push(65);
+
+        let mut rows = builder.finish();
+        rows.retain(|&row| row % 2 == 0);
+
+        match &rows {
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                assert_eq!(*len, 128);
+                assert_eq!(*count, 2);
+                assert_eq!(bits.len(), 2);
+                assert_eq!(bits[0], 0b101); // rows 0 and 2
+                assert_eq!(bits[1], 0); // row 65 removed
+            }
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        let mut out = Vec::new();
+        rows.extend_into(&mut out);
+        out.sort_unstable();
+        assert_eq!(out, vec![0, 2]);
+    }
+
+    #[test]
     fn relationship_large_columnar_does_not_explode_memory() {
         if std::env::var_os("FORMULA_DAX_REL_BENCH").is_none() {
             return;
