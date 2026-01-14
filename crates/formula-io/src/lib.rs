@@ -1033,6 +1033,17 @@ pub fn open_workbook_model_with_options(
     // surface an "unsupported encryption" error so callers don't assume a password will work.
     #[cfg(feature = "encrypted-workbooks")]
     {
+        let is_xlsb = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb"));
+        if opts.password.is_some() && !is_xlsb {
+            if let Some(workbook) =
+                try_open_standard_aes_encrypted_ooxml_model_workbook(path, opts.password.as_deref())?
+            {
+                return Ok(workbook);
+            }
+        }
         if let Some(bytes) =
             try_decrypt_ooxml_encrypted_package_from_path(path, opts.password.as_deref())?
         {
@@ -1342,8 +1353,21 @@ pub fn open_workbook_model_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+    {
+        let is_xlsb = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb"));
+        if password.is_some() && !is_xlsb {
+            if let Some(workbook) = try_open_standard_aes_encrypted_ooxml_model_workbook(path, password)?
+            {
+                return Ok(workbook);
+            }
+        }
+
+        if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
