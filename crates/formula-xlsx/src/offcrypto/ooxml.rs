@@ -60,8 +60,19 @@ fn map_standard_error(
     use formula_offcrypto::OffcryptoError as OE;
     match err {
         OE::InvalidPassword => OffCryptoError::WrongPassword,
+        OE::IntegrityCheckFailed => OffCryptoError::IntegrityMismatch,
+        OE::SpinCountTooLarge { spin_count, max } => {
+            OffCryptoError::SpinCountTooLarge { spin_count, max }
+        }
         OE::UnsupportedVersion { major, minor } => {
             OffCryptoError::UnsupportedEncryptionVersion { major, minor }
+        }
+        OE::UnsupportedAlgorithm(reason) => {
+            if reason.starts_with("algIdHash=") {
+                OffCryptoError::UnsupportedHashAlgorithm { hash: reason }
+            } else {
+                OffCryptoError::UnsupportedCipherAlgorithm { cipher: reason }
+            }
         }
         OE::InvalidCiphertextLength { len } => OffCryptoError::CiphertextNotBlockAligned {
             field: "EncryptedPackage",
