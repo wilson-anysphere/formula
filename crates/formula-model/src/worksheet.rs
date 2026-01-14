@@ -909,7 +909,7 @@ impl Worksheet {
 
     /// Set (or clear) the default style id for all cells in a row.
     ///
-    /// Passing `None` removes the style override. If the row has no overrides
+    /// Passing `None` (or `Some(0)`) removes the style override. If the row has no overrides
     /// remaining, its entry is removed from the map.
     pub fn set_row_style_id(&mut self, row_0based: u32, style_id: Option<u32>) {
         self.row_count = self.row_count.max(row_0based.saturating_add(1));
@@ -1004,7 +1004,7 @@ impl Worksheet {
 
     /// Set (or clear) the default style id for all cells in a column.
     ///
-    /// Passing `None` removes the style override. If the column has no overrides
+    /// Passing `None` (or `Some(0)`) removes the style override. If the column has no overrides
     /// remaining, its entry is removed from the map.
     pub fn set_col_style_id(&mut self, col_0based: u32, style_id: Option<u32>) {
         assert!(
