@@ -754,9 +754,22 @@ async function main() {
           } else if (key === "linux" && lower.includes("rpm") && !artifacts.rpm) {
             skipReason =
               "No local .rpm bundles found under target/**/release/bundle/rpm/*.rpm (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
-          } else if (key === "macos" && lower.includes("macos") && !artifacts.dmg) {
+          } else if (key === "linux" && lower.includes("deb") && !artifacts.deb) {
+            skipReason =
+              "No local .deb bundles found under target/**/release/bundle/deb/*.deb (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (key === "macos" && (lower.includes("dmg") || lower.includes("macos")) && !artifacts.dmg) {
             skipReason =
               "No local .dmg bundles found under target/**/release/bundle/dmg/*.dmg (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (key === "windows" && (lower.includes("msi") || lower.includes("windows")) && !artifacts.msi) {
+            skipReason =
+              "No local .msi bundles found under target/**/release/bundle/msi/*.msi (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (
+            key === "windows" &&
+            (lower.includes("nsis") || lower.includes("exe") || lower.includes("windows")) &&
+            !artifacts.exe
+          ) {
+            skipReason =
+              "No local .exe installers found under target/**/release/bundle/nsis/*.exe (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "windows" && lower.includes("windows") && !artifacts.exe && !artifacts.msi) {
             skipReason =
               "No local Windows installer bundles found under target/**/release/bundle/(msi|nsis) (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
@@ -764,8 +777,13 @@ async function main() {
 
           // validate-linux-rpm.sh can optionally run an installability check inside a Fedora container.
           // If Docker isn't available locally, still run the static checks.
-          if (base === "validate-linux-rpm.sh" && skipReason === undefined && !commandExists("docker")) {
-            extraArgs.push("--no-container");
+          if (base === "validate-linux-rpm.sh" && skipReason === undefined) {
+            if (!commandExists("rpm")) {
+              skipReason =
+                "Skipping validate-linux-rpm.sh because required command `rpm` is not available on PATH. Install rpm (and optionally docker) to validate local RPM bundles.";
+            } else if (!commandExists("docker")) {
+              extraArgs.push("--no-container");
+            }
           }
 
           steps.push(makeValidatorStep(validator, key, { extraArgs, skipReason }));

@@ -86,3 +86,28 @@ test("release-smoke-test: supports --tag= and --repo= forms", () => {
   );
   assert.match(child.stdout, /Release smoke test PASSED/i);
 });
+
+test("release-smoke-test: --local-bundles skips validators when bundle dirs exist but no artifacts", () => {
+  const tag = currentDesktopTag();
+  const bundleDir = path.join(repoRoot, "target", "release", "bundle");
+
+  fs.mkdirSync(bundleDir, { recursive: true });
+
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [smokeTestPath, "--tag", tag, "--repo", "owner/repo", "--local-bundles", "--", "--help"],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+
+    assert.equal(
+      child.status,
+      0,
+      `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.match(child.stdout, /Release smoke test PASSED/i);
+    assert.match(child.stdout, /\[SKIP\]/);
+  } finally {
+    fs.rmSync(path.join(repoRoot, "target"), { recursive: true, force: true });
+  }
+});
