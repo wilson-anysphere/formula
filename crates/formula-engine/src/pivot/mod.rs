@@ -36,8 +36,19 @@ pub use definition::{
     PivotTableId,
 };
 pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
-    // Match pivot record sources using the canonical name defined by the pivot model.
-    field.canonical_name()
+    match field {
+        // Cache-backed pivots use the header caption directly.
+        PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
+        // Data Model measures are frequently stored in cache headers without DAX brackets, so
+        // prefer the raw measure name and fall back to the `[Measure]` display form elsewhere.
+        PivotFieldRef::DataModelMeasure(name) => Cow::Borrowed(name),
+        // Data Model column refs may be stored in cache headers with or without DAX quoting for
+        // table names (e.g. `Dim Product[Category]` vs `'Dim Product'[Category]`). Prefer the
+        // unquoted `{table}[{column}]` form and fall back to the quoted DAX form elsewhere.
+        PivotFieldRef::DataModelColumn { table, column } => {
+            Cow::Owned(format!("{table}[{column}]"))
+        }
+    }
 }
 
 fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
