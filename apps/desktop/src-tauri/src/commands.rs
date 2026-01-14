@@ -1377,54 +1377,69 @@ pub struct RangeCellEdit {
     pub formula: Option<LimitedCellFormula>,
 }
 
-/// IPC-deserialized matrix of cell edits with size limits applied during deserialization.
+/// IPC-deserialized matrix with size limits applied during deserialization.
 ///
-/// This prevents a compromised webview from sending arbitrarily large `values` payloads to the
-/// `set_range` command and forcing the backend to allocate excessive memory before we can apply
-/// range-size checks.
+/// This prevents a compromised webview from sending arbitrarily large 2D payloads and forcing the
+/// backend to allocate excessive memory before we can apply additional validation.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LimitedRangeCellEdits(pub Vec<Vec<RangeCellEdit>>);
+pub struct LimitedMatrix<T, const MAX_DIM: usize, const MAX_CELLS: usize>(pub Vec<Vec<T>>);
 
-impl<'de> Deserialize<'de> for LimitedRangeCellEdits {
+impl<'de, T, const MAX_DIM: usize, const MAX_CELLS: usize> Deserialize<'de>
+    for LimitedMatrix<T, MAX_DIM, MAX_CELLS>
+where
+    T: Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct MatrixVisitor;
+        struct MatrixVisitor<T, const MAX_DIM: usize, const MAX_CELLS: usize>(PhantomData<T>);
 
-        impl<'de> de::Visitor<'de> for MatrixVisitor {
-            type Value = LimitedRangeCellEdits;
+        impl<'de, T, const MAX_DIM: usize, const MAX_CELLS: usize> de::Visitor<'de>
+            for MatrixVisitor<T, MAX_DIM, MAX_CELLS>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = LimitedMatrix<T, MAX_DIM, MAX_CELLS>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a 2D array of cell edits")
+                formatter.write_str("a 2D array")
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: de::SeqAccess<'de>,
             {
-                use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
-
-                struct RowSeed<'a> {
+                struct RowSeed<'a, T, const MAX_DIM: usize, const MAX_CELLS: usize> {
                     total_cells: &'a mut usize,
+                    marker: PhantomData<T>,
                 }
 
-                impl<'de> de::DeserializeSeed<'de> for RowSeed<'_> {
-                    type Value = Vec<RangeCellEdit>;
+                impl<'de, T, const MAX_DIM: usize, const MAX_CELLS: usize> de::DeserializeSeed<'de>
+                    for RowSeed<'_, T, MAX_DIM, MAX_CELLS>
+                where
+                    T: Deserialize<'de>,
+                {
+                    type Value = Vec<T>;
 
                     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
                     where
                         D: serde::Deserializer<'de>,
                     {
-                        struct RowVisitor<'a> {
+                        struct RowVisitor<'a, T, const MAX_DIM: usize, const MAX_CELLS: usize> {
                             total_cells: &'a mut usize,
+                            marker: PhantomData<T>,
                         }
 
-                        impl<'de> de::Visitor<'de> for RowVisitor<'_> {
-                            type Value = Vec<RangeCellEdit>;
+                        impl<'de, T, const MAX_DIM: usize, const MAX_CELLS: usize> de::Visitor<'de>
+                            for RowVisitor<'_, T, MAX_DIM, MAX_CELLS>
+                        where
+                            T: Deserialize<'de>,
+                        {
+                            type Value = Vec<T>;
 
                             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                                formatter.write_str("an array of cell edits")
+                                formatter.write_str("an array")
                             }
 
                             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -1432,17 +1447,17 @@ impl<'de> Deserialize<'de> for LimitedRangeCellEdits {
                                 A: de::SeqAccess<'de>,
                             {
                                 let mut row = Vec::new();
-                                while let Some(cell) = seq.next_element::<RangeCellEdit>()? {
-                                    if row.len() >= MAX_RANGE_DIM {
+                                while let Some(cell) = seq.next_element::<T>()? {
+                                    if row.len() >= MAX_DIM {
                                         return Err(de::Error::custom(format!(
-                                            "range values row is too large (max {MAX_RANGE_DIM} columns)"
+                                            "range values row is too large (max {MAX_DIM} columns)"
                                         )));
                                     }
 
                                     *self.total_cells = self.total_cells.saturating_add(1);
-                                    if *self.total_cells > MAX_RANGE_CELLS_PER_CALL {
+                                    if *self.total_cells > MAX_CELLS {
                                         return Err(de::Error::custom(format!(
-                                            "range values payload is too large (max {MAX_RANGE_CELLS_PER_CALL} cells)"
+                                            "range values payload is too large (max {MAX_CELLS} cells)"
                                         )));
                                     }
 
@@ -1452,31 +1467,46 @@ impl<'de> Deserialize<'de> for LimitedRangeCellEdits {
                             }
                         }
 
-                        deserializer.deserialize_seq(RowVisitor {
+                        deserializer.deserialize_seq(RowVisitor::<T, MAX_DIM, MAX_CELLS> {
                             total_cells: self.total_cells,
+                            marker: PhantomData,
                         })
                     }
                 }
 
                 let mut rows = Vec::new();
                 let mut total_cells = 0usize;
-                while let Some(row) = seq.next_element_seed(RowSeed {
-                    total_cells: &mut total_cells,
-                })? {
-                    if rows.len() >= MAX_RANGE_DIM {
+                while let Some(row) =
+                    seq.next_element_seed(RowSeed::<T, MAX_DIM, MAX_CELLS> {
+                        total_cells: &mut total_cells,
+                        marker: PhantomData,
+                    })?
+                {
+                    if rows.len() >= MAX_DIM {
                         return Err(de::Error::custom(format!(
-                            "range values payload is too large (max {MAX_RANGE_DIM} rows)"
+                            "range values payload is too large (max {MAX_DIM} rows)"
                         )));
                     }
                     rows.push(row);
                 }
-                Ok(LimitedRangeCellEdits(rows))
+                Ok(LimitedMatrix(rows))
             }
         }
 
-        deserializer.deserialize_seq(MatrixVisitor)
+        deserializer.deserialize_seq(MatrixVisitor::<T, MAX_DIM, MAX_CELLS>(PhantomData))
     }
 }
+
+/// IPC-deserialized matrix of cell edits with size limits applied during deserialization.
+///
+/// This prevents a compromised webview from sending arbitrarily large `values` payloads to the
+/// `set_range` command and forcing the backend to allocate excessive memory before we can apply
+/// range-size checks.
+pub type LimitedRangeCellEdits = LimitedMatrix<
+    RangeCellEdit,
+    { crate::resource_limits::MAX_RANGE_DIM },
+    { crate::resource_limits::MAX_RANGE_CELLS_PER_CALL },
+>;
 
 /// IPC-deserialized vector of `f64` with a maximum length.
 ///
@@ -8896,6 +8926,28 @@ mod tests {
         assert!(
             err.to_string().contains("cell formula") && err.to_string().contains(&max.to_string()),
             "expected error message to mention limit: {err}"
+        );
+    }
+
+    #[test]
+    fn cell_edit_ipc_rejects_oversized_range_payload_cell_count() {
+        type SmallLimitedRangeCellEdits = LimitedMatrix<RangeCellEdit, 100, 10>;
+
+        let max = 10usize;
+        let mut json = String::from("[[");
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("{}");
+        }
+        json.push_str("]]");
+
+        let err = serde_json::from_str::<SmallLimitedRangeCellEdits>(&json)
+            .expect_err("expected cell count limit to be rejected");
+        assert!(
+            err.to_string().contains("cells") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
         );
     }
 
