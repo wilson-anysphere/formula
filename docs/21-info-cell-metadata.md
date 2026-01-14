@@ -361,6 +361,7 @@ This section documents the “wiring points” for hosts.
 
 - INFO environment metadata (`INFO("system")`, `INFO("directory")`, `INFO("osversion")`, `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`):
   - `EngineClient.setEngineInfo({ system, directory, osversion, release, version, memavail, totmem })`
+    - The worker/WASM implementation treats this as a **patch**: fields not present in the object are left unchanged.
     - `null` / empty string clears string values
     - `memavail` / `totmem` must be finite numbers
 - Per-sheet origin cell (`INFO("origin")`, preferred):
