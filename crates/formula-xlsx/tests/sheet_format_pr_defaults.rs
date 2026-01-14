@@ -314,3 +314,30 @@ fn semantic_export_formats_row_height_f32_without_rounding_noise() {
     assert_eq!(row.attribute("ht"), Some("15.3"));
     assert_eq!(row.attribute("customHeight"), Some("1"));
 }
+
+#[test]
+fn semantic_export_emits_sheet_format_pr_outline_levels() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).unwrap();
+
+    // Outline indices are 1-based.
+    sheet.outline.group_rows(1, 3);
+    // Nest one row group to force a higher max outline level.
+    sheet.outline.group_rows(2, 2);
+    sheet.outline.group_cols(1, 2);
+
+    let mut cursor = Cursor::new(Vec::new());
+    write_workbook_to_writer(&workbook, &mut cursor).expect("write workbook");
+    let bytes = cursor.into_inner();
+
+    let sheet_xml = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    let doc = roxmltree::Document::parse(&sheet_xml).expect("parse sheet xml");
+    let sheet_format = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetFormatPr")
+        .expect("expected sheetFormatPr element");
+
+    assert_eq!(sheet_format.attribute("outlineLevelRow"), Some("2"));
+    assert_eq!(sheet_format.attribute("outlineLevelCol"), Some("1"));
+}
