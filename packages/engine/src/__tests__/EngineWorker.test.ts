@@ -200,6 +200,29 @@ class MockWorker implements WorkerLike {
   }
 }
 
+class HangingWorker implements WorkerLike {
+  public serverPort: MockMessagePort | null = null;
+  public terminated = false;
+  public postMessageCalls = 0;
+
+  postMessage(message: unknown): void {
+    this.postMessageCalls += 1;
+    const init = message as InitMessage;
+    if (!init || typeof init !== "object" || (init as any).type !== "init") {
+      return;
+    }
+
+    this.serverPort = init.port as unknown as MockMessagePort;
+    // Intentionally never post the initial `{ type: "ready" }` handshake.
+  }
+
+  terminate(): void {
+    this.terminated = true;
+    this.serverPort?.close();
+    this.serverPort = null;
+  }
+}
+
 describe("EngineWorker RPC", () => {
   it("supports ping RPC requests", async () => {
     const worker = new MockWorker();
@@ -1013,5 +1036,47 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ style: { font: { bold: true } } });
+  });
+
+  it("rejects connect immediately when the AbortSignal is already aborted (no init post)", async () => {
+    const worker = new HangingWorker();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      EngineWorker.connect({
+        worker,
+        wasmModuleUrl: "mock://wasm",
+        channelFactory: createMockChannel,
+        signal: controller.signal
+      })
+    ).rejects.toThrow(/aborted/i);
+
+    // Guard against leaking a message port by posting init even after abort.
+    expect(worker.postMessageCalls).toBe(0);
+    expect(worker.serverPort).toBeNull();
+    expect(worker.terminated).toBe(true);
+  });
+
+  it("rejects connect and terminates the worker when aborted before the ready handshake", async () => {
+    const worker = new HangingWorker();
+    const controller = new AbortController();
+
+    const promise = EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel,
+      signal: controller.signal
+    });
+
+    // Ensure the init message was posted (we only abort after connect begins).
+    expect(worker.postMessageCalls).toBe(1);
+    expect(worker.serverPort).not.toBeNull();
+
+    controller.abort();
+
+    await expect(promise).rejects.toThrow(/aborted/i);
+    expect(worker.terminated).toBe(true);
+    expect(worker.serverPort).toBeNull();
   });
 });

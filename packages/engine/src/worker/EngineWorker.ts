@@ -172,6 +172,31 @@ export class EngineWorker {
     const port = channel.port1;
     const worker = options.worker;
 
+    const cleanup = () => {
+      try {
+        port.close?.();
+      } catch {
+        // ignore
+      }
+      try {
+        // If the port hasn't been transferred yet (e.g. aborted before posting init), ensure we
+        // close it to avoid leaking a MessagePort handle.
+        (channel.port2 as any)?.close?.();
+      } catch {
+        // ignore
+      }
+      try {
+        worker.terminate();
+      } catch {
+        // ignore
+      }
+    };
+
+    if (options.signal?.aborted) {
+      cleanup();
+      throw new Error("EngineWorker.connect aborted");
+    }
+
     const ready = new Promise<void>((resolve, reject) => {
       // Use `let` so the `onReady` handler can safely reference it even in the (unlikely)
       // event that a mock Worker posts "ready" synchronously.
@@ -191,16 +216,7 @@ export class EngineWorker {
 
       onAbort = () => {
         port.removeEventListener("message", onReady);
-        try {
-          port.close?.();
-        } catch {
-          // ignore
-        }
-        try {
-          worker.terminate();
-        } catch {
-          // ignore
-        }
+        cleanup();
         reject(new Error("EngineWorker.connect aborted"));
       };
 
@@ -220,6 +236,11 @@ export class EngineWorker {
       wasmBinaryUrl: options.wasmBinaryUrl
     };
     port.start?.();
+    // If the signal was aborted after we installed the abort listener but before the init message
+    // is posted, bail out without transferring the port.
+    if (options.signal?.aborted) {
+      await ready;
+    }
     worker.postMessage(initMessage, [channel.port2]);
 
     await ready;
