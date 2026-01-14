@@ -62,6 +62,7 @@ The backend abstraction exists so the engine can:
 - `filter_eq`, `filter_in`
 - `distinct_values_filtered`
 - `group_by_aggregations`
+- `hash_join` (when both sides are backed by `formula-columnar`)
 
 #### In-memory backend (`InMemoryTableBackend`)
 
@@ -92,7 +93,9 @@ The columnar backend maps `formula_columnar::Value` into `formula_dax::Value`:
 - `Number` → `Value::Number`
 - `Boolean` → `Value::Boolean`
 - `String` → `Value::Text`
-- `DateTime` / `Currency` / `Percentage` → `Value::Number` (stored as `f64`)
+- `DateTime` → `Value::Number` (stored as `f64`)
+- `Currency(scale)` / `Percentage(scale)` → `Value::Number` (stored as `f64`)  
+  The raw integer value is divided by `10^scale` so currency/percentage scaling is preserved.
 
 ### `Value`
 
