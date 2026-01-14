@@ -9238,16 +9238,19 @@ export class SpreadsheetApp {
   private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
+    const zoom = this.getZoom();
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+
     let left = 0;
     let top = 0;
     let width = 0;
     let height = 0;
 
     if (anchor.kind === "absolute") {
-      left = emuToPx(anchor.xEmu);
-      top = emuToPx(anchor.yEmu);
-      width = emuToPx(anchor.cxEmu);
-      height = emuToPx(anchor.cyEmu);
+      left = emuToPx(anchor.xEmu) * z;
+      top = emuToPx(anchor.yEmu) * z;
+      width = emuToPx(anchor.cxEmu) * z;
+      height = emuToPx(anchor.cyEmu) * z;
     } else if (anchor.kind === "oneCell") {
       if (this.sharedGrid) {
         const headerRows = this.sharedHeaderRows();
@@ -9262,18 +9265,18 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) -
           headerWidth +
-          emuToPx(anchor.fromColOffEmu ?? 0);
+          emuToPx(anchor.fromColOffEmu ?? 0) * z;
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) -
           headerHeight +
-          emuToPx(anchor.fromRowOffEmu ?? 0);
-        width = emuToPx(anchor.cxEmu ?? 0);
-        height = emuToPx(anchor.cyEmu ?? 0);
+          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
+        width = emuToPx(anchor.cxEmu ?? 0) * z;
+        height = emuToPx(anchor.cyEmu ?? 0) * z;
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
-        width = emuToPx(anchor.cxEmu);
-        height = emuToPx(anchor.cyEmu);
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu) * z;
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu) * z;
+        width = emuToPx(anchor.cxEmu) * z;
+        height = emuToPx(anchor.cyEmu) * z;
       }
     } else if (anchor.kind === "twoCell") {
       if (this.sharedGrid) {
@@ -9292,27 +9295,27 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(fromCol) -
           headerWidth +
-          emuToPx(anchor.fromColOffEmu ?? 0);
+          emuToPx(anchor.fromColOffEmu ?? 0) * z;
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(fromRow) -
           headerHeight +
-          emuToPx(anchor.fromRowOffEmu ?? 0);
+          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
         const right =
           this.sharedGrid.renderer.scroll.cols.positionOf(toCol) -
           headerWidth +
-          emuToPx(anchor.toColOffEmu ?? 0);
+          emuToPx(anchor.toColOffEmu ?? 0) * z;
         const bottom =
           this.sharedGrid.renderer.scroll.rows.positionOf(toRow) -
           headerHeight +
-          emuToPx(anchor.toRowOffEmu ?? 0);
+          emuToPx(anchor.toRowOffEmu ?? 0) * z;
 
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
-        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu);
-        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu);
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu) * z;
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu) * z;
+        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu) * z;
+        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu) * z;
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       }
@@ -9466,6 +9469,9 @@ export class SpreadsheetApp {
     colOffEmu: number;
     rowOffEmu: number;
   } {
+    const zoom = this.getZoom();
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+
     const x = Math.max(0, point.x);
     const y = Math.max(0, point.y);
 
@@ -9492,8 +9498,8 @@ export class SpreadsheetApp {
       return {
         col,
         row,
-        colOffEmu: Math.round(pxToEmu(x - originX)),
-        rowOffEmu: Math.round(pxToEmu(y - originY)),
+        colOffEmu: Math.round(pxToEmu((x - originX) / z)),
+        rowOffEmu: Math.round(pxToEmu((y - originY) / z)),
       };
     }
 
@@ -9514,8 +9520,8 @@ export class SpreadsheetApp {
     return {
       col,
       row,
-      colOffEmu: Math.round(pxToEmu(x - originX)),
-      rowOffEmu: Math.round(pxToEmu(y - originY)),
+      colOffEmu: Math.round(pxToEmu((x - originX) / z)),
+      rowOffEmu: Math.round(pxToEmu((y - originY) / z)),
     };
   }
 
@@ -9523,6 +9529,9 @@ export class SpreadsheetApp {
     anchorKind: ChartRecord["anchor"]["kind"],
     rect: { x: number; y: number; width: number; height: number },
   ): ChartRecord["anchor"] {
+    const zoom = this.getZoom();
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+
     const x = Math.max(0, rect.x);
     const y = Math.max(0, rect.y);
     const width = Math.max(1, rect.width);
@@ -9531,10 +9540,10 @@ export class SpreadsheetApp {
     if (anchorKind === "absolute") {
       return {
         kind: "absolute",
-        xEmu: Math.round(pxToEmu(x)),
-        yEmu: Math.round(pxToEmu(y)),
-        cxEmu: Math.round(pxToEmu(width)),
-        cyEmu: Math.round(pxToEmu(height)),
+        xEmu: Math.round(pxToEmu(x / z)),
+        yEmu: Math.round(pxToEmu(y / z)),
+        cxEmu: Math.round(pxToEmu(width / z)),
+        cyEmu: Math.round(pxToEmu(height / z)),
       };
     }
 
@@ -9546,8 +9555,8 @@ export class SpreadsheetApp {
         fromRow: from.row,
         fromColOffEmu: from.colOffEmu,
         fromRowOffEmu: from.rowOffEmu,
-        cxEmu: Math.round(pxToEmu(width)),
-        cyEmu: Math.round(pxToEmu(height)),
+        cxEmu: Math.round(pxToEmu(width / z)),
+        cyEmu: Math.round(pxToEmu(height / z)),
       };
     }
 
