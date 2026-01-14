@@ -294,7 +294,7 @@ fn info_exposes_host_provided_metadata() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A2"),
-        Value::Text("/tmp".to_string())
+        Value::Text("/tmp/".to_string())
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A3"),
@@ -374,9 +374,96 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
     let mut sheet = TestSheet::new();
 
     // Excel returns "" until the workbook has been saved.
+    assert_eq!(sheet.eval("=CELL(\"filename\")"), Value::Text(String::new()));
+
+    // Excel returns #N/A until the workbook has been saved.
+    assert_eq!(sheet.eval("=INFO(\"directory\")"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
+fn cell_filename_and_info_directory_use_workbook_file_metadata() {
+    use formula_engine::Engine;
+
+    // Windows-like path semantics: preserve host-supplied separators and include a trailing `\`.
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(Some(r"C:\Dir\"), Some("Book.xlsx"));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
     assert_eq!(
-        sheet.eval("=CELL(\"filename\")"),
-        Value::Text(String::new())
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(r"C:\Dir\[Book.xlsx]Sheet1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text(r"C:\Dir\".to_string())
+    );
+
+    // POSIX-like path semantics: preserve host-supplied separators and include a trailing `/`.
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(Some("/dir/"), Some("Book.xlsx"));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("/dir/[Book.xlsx]Sheet1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("/dir/".to_string())
+    );
+}
+
+#[test]
+fn cell_filename_supports_filename_only_metadata() {
+    use formula_engine::Engine;
+
+    // When only the filename is known (e.g. in a web environment), include the bracketed file name
+    // but omit the directory prefix.
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(None, Some("Book.xlsx"));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("[Book.xlsx]Sheet1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
+fn cell_filename_uses_reference_sheet_name_without_quoting() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Other Sheet", "A1", 1.0).unwrap();
+    engine.set_workbook_file_metadata(Some("/dir/"), Some("Book.xlsx"));
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\",'Other Sheet'!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("/dir/[Book.xlsx]Other Sheet".to_string())
     );
 }
 

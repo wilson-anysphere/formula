@@ -34,6 +34,37 @@ fn parse_info_type(key: &str) -> Option<InfoType> {
     }
 }
 
+fn workbook_dir_for_excel(dir: &str) -> String {
+    if dir.is_empty() {
+        return String::new();
+    }
+    if dir.ends_with('/') || dir.ends_with('\\') {
+        return dir.to_string();
+    }
+
+    // Excel returns directory strings with a trailing path separator. We don't want to probe the
+    // OS, so infer the separator from the host-supplied directory string.
+    let last_slash = dir.rfind('/');
+    let last_backslash = dir.rfind('\\');
+    let sep = match (last_slash, last_backslash) {
+        (Some(i), Some(j)) => {
+            if i > j {
+                '/'
+            } else {
+                '\\'
+            }
+        }
+        (Some(_), None) => '/',
+        (None, Some(_)) => '\\',
+        (None, None) => '/',
+    };
+
+    let mut out = String::with_capacity(dir.len() + 1);
+    out.push_str(dir);
+    out.push(sep);
+    out
+}
+
 /// Excel INFO(type_text) worksheet information function.
 pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
     let Some(info_type) = parse_info_type(type_text) else {
@@ -52,10 +83,21 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
         },
         InfoType::System => Value::Text(ctx.info_system().unwrap_or("pcdos").to_string()),
         InfoType::NumFile => Value::Number(ctx.sheet_count() as f64),
-        InfoType::Directory => ctx
-            .info_directory()
-            .map(|s| Value::Text(s.to_string()))
-            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::Directory => {
+            // Prefer the host-provided `INFO("directory")` override if available.
+            if let Some(dir) = ctx.info_directory().filter(|d| !d.is_empty()) {
+                Value::Text(workbook_dir_for_excel(dir))
+            } else {
+                // Otherwise fall back to workbook file metadata. Excel returns `#N/A` until the
+                // workbook has been saved, which we model as having a `workbook_filename`.
+                match (ctx.workbook_filename(), ctx.workbook_directory()) {
+                    (Some(_), Some(dir)) if !dir.is_empty() => {
+                        Value::Text(workbook_dir_for_excel(dir))
+                    }
+                    _ => Value::Error(ErrorKind::NA),
+                }
+            }
+        }
         InfoType::Origin => ctx
             .info_origin()
             .map(|s| Value::Text(s.to_string()))
@@ -357,7 +399,10 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             };
 
             match ctx.workbook_directory().filter(|s| !s.is_empty()) {
-                Some(dir) => Value::Text(format!("{dir}[{filename}]{sheet_name}")),
+                Some(dir) => Value::Text(format!(
+                    "{}[{filename}]{sheet_name}",
+                    workbook_dir_for_excel(dir)
+                )),
                 None => Value::Text(format!("[{filename}]{sheet_name}")),
             }
         }
