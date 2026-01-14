@@ -45,9 +45,13 @@ const RECORD_SORT: u16 = 0x0090;
 /// Excel typically uses `record_id == rt`.
 const RECORD_AUTOFILTER12: u16 = 0x087E;
 /// Sort12 (Future Record Type; BIFF8 only)
-const RECORD_SORT12: u16 = 0x0880;
+const RECORD_SORT12: u16 = 0x0890;
+// Alternate Sort12 rt value observed in some non-Excel producers.
+const RECORD_SORT12_ALT: u16 = 0x0880;
 /// SortData12 (Future Record Type; BIFF8 only)
-const RECORD_SORTDATA12: u16 = 0x0881;
+const RECORD_SORTDATA12: u16 = 0x0895;
+// Alternate SortData12 rt value observed in some non-Excel producers.
+const RECORD_SORTDATA12_ALT: u16 = 0x0881;
 const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -1195,20 +1199,9 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                             }
                         }
                     }
-                    RECORD_SORT12 => {
-                        if !props.warnings.iter().any(|w| w == "unsupported Sort12") {
-                            push_warning_bounded(&mut props.warnings, "unsupported Sort12");
-                        }
-                    }
-                    RECORD_SORTDATA12 => {
-                        if !props
-                            .warnings
-                            .iter()
-                            .any(|w| w == "unsupported SortData12")
-                        {
-                            push_warning_bounded(&mut props.warnings, "unsupported SortData12");
-                        }
-                    }
+                    // Sort12/SortData12 future records are imported separately during AutoFilter
+                    // post-processing (see `biff::sort`).
+                    RECORD_SORT12 | RECORD_SORT12_ALT | RECORD_SORTDATA12 | RECORD_SORTDATA12_ALT => {}
                     _ => {}
                 }
             }

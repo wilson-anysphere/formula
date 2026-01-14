@@ -11,11 +11,18 @@ const RECORD_SORT: u16 = 0x0090;
 // See [MS-XLS] 2.4.278 (Sort12) and 2.4.277 (SortData12).
 //
 // Note: Some producers may emit Sort12/SortData12 instead of the classic SORT record.
-// We currently only import classic SORT; future records are skipped with warnings.
-const RECORD_SORT12: u16 = 0x0890;
-// The record id for SortData12 is not currently used for parsing, but we still surface a
-// best-effort warning when present so diagnostics show why sort state is missing.
-const RECORD_SORTDATA12: u16 = 0x0895;
+// These records are Future Record Type (FRT) records and begin with an `FrtHeader`. Excel writers
+// typically use `record_id == FrtHeader.rt`, but we key off `rt` to be robust.
+const RT_SORT12: u16 = 0x0890;
+const RT_SORTDATA12: u16 = 0x0895;
+// Some producers appear to use alternative `rt` values for Sort12/SortData12. Accept these as
+// aliases in best-effort decoding.
+const RT_SORT12_ALT: u16 = 0x0880;
+const RT_SORTDATA12_ALT: u16 = 0x0881;
+
+// BIFF record id range used by Excel for future records (FRT).
+const RECORD_FRT_MIN: u16 = 0x0850;
+const RECORD_FRT_MAX: u16 = 0x08FF;
 
 // BIFF8 `.xls` worksheets are limited to 256 columns, but some producers use `0x3FFF` as a
 // sentinel "max column". Masking to 8 bits maps that to `0x00FF` (IV), matching Excel's limits.
@@ -76,11 +83,33 @@ pub(crate) fn parse_biff_sheet_sort_state(
                     out.sort_state = Some(sort_state);
                 }
             }
-            RECORD_SORT12 | RECORD_SORTDATA12 => {
-                out.warnings.push(format!(
-                    "skipping unsupported sort future record 0x{:04X} at offset {}",
-                    record.record_id, record.offset
-                ));
+            id if (RECORD_FRT_MIN..=RECORD_FRT_MAX).contains(&id) => {
+                let (rt, payload) = parse_frt_header(record.data).unwrap_or((id, record.data));
+                match rt {
+                    RT_SORT12 | RT_SORT12_ALT => {
+                        if let Some(sort_state) = parse_sort12_like_payload_best_effort(
+                            payload,
+                            record.offset,
+                            auto_filter_range,
+                        ) {
+                            out.sort_state = Some(sort_state);
+                        } else if payload_has_relevant_ref(payload, auto_filter_range) {
+                            push_warning_once(&mut out.warnings, "unsupported Sort12");
+                        }
+                    }
+                    RT_SORTDATA12 | RT_SORTDATA12_ALT => {
+                        if let Some(sort_state) = parse_sort12_like_payload_best_effort(
+                            payload,
+                            record.offset,
+                            auto_filter_range,
+                        ) {
+                            out.sort_state = Some(sort_state);
+                        } else if payload_has_relevant_ref(payload, auto_filter_range) {
+                            push_warning_once(&mut out.warnings, "unsupported SortData12");
+                        }
+                    }
+                    _ => {}
+                }
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -153,6 +182,71 @@ fn parse_sort_record_best_effort(
         ));
     }
 
+    None
+}
+
+/// Parse an `FrtHeader` structure and return `(rt, payload_after_header)`.
+///
+/// `FrtHeader` is an 8-byte structure: `rt` (u16), `grbitFrt` (u16), and a reserved u32.
+fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
+    if data.len() < 8 {
+        return None;
+    }
+    let rt = u16::from_le_bytes([data[0], data[1]]);
+    Some((rt, &data[8..]))
+}
+
+fn push_warning_once(warnings: &mut Vec<String>, msg: &'static str) {
+    if warnings.iter().any(|w| w == msg) {
+        return;
+    }
+    warnings.push(msg.to_string());
+}
+
+/// Returns true if the payload appears to contain a Ref8 range that matches or is contained by the
+/// AutoFilter range.
+fn payload_has_relevant_ref(payload: &[u8], auto_filter_range: Range) -> bool {
+    // Try a few common starting offsets for embedded Ref8 ranges within future-record payloads.
+    for start in [0usize, 2, 4, 6, 8, 10, 12, 14, 16] {
+        let Some(slice) = payload.get(start..) else {
+            continue;
+        };
+        let Some(range) = parse_ref8(slice) else {
+            continue;
+        };
+        if range_matches_or_contained_by(auto_filter_range, range) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Best-effort decode of a Sort12/SortData12 payload (after the `FrtHeader`).
+///
+/// The exact on-disk structures for these future records are complex. As a conservative fallback,
+/// attempt to interpret the payload as a classic BIFF8 `SORT` record starting at a handful of
+/// common offsets. This recovers basic column-order sort state for some Excel-generated `.xls`
+/// files.
+fn parse_sort12_like_payload_best_effort(
+    payload: &[u8],
+    record_offset: usize,
+    auto_filter_range: Range,
+) -> Option<SortState> {
+    for start in [0usize, 2, 4, 6, 8, 10, 12, 14, 16] {
+        let Some(slice) = payload.get(start..) else {
+            continue;
+        };
+        // Require a valid Ref8 at the start to avoid inventing bogus sort state.
+        if parse_ref8(slice).is_none() {
+            continue;
+        }
+        let mut tmp_warnings = Vec::new();
+        if let Some(state) =
+            parse_sort_record_best_effort(slice, record_offset, auto_filter_range, &mut tmp_warnings)
+        {
+            return Some(state);
+        }
+    }
     None
 }
 
