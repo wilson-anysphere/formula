@@ -810,7 +810,7 @@ fn build_parts(
 
             let orig_views = parse_sheet_view_settings(orig_xml)?;
             let orig_sheet_format = parse_sheet_format_settings(orig_xml)?;
-            let orig_cols = parse_col_properties(orig_xml)?;
+            let orig_cols = parse_col_properties(orig_xml, &styles_editor)?;
             let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
             let orig_has_data_validations = worksheet_has_data_validations(orig_xml)?;
 
@@ -2752,6 +2752,7 @@ fn update_sheet_protection_xml(
 
 fn parse_col_properties(
     xml: &str,
+    styles_editor: &XlsxStylesEditor,
 ) -> Result<BTreeMap<u32, formula_model::ColProperties>, WriteError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -2773,6 +2774,8 @@ fn parse_col_properties(
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
+                let mut style: Option<u32> = None;
+                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
 
                 for attr in e.attributes() {
@@ -2783,6 +2786,8 @@ fn parse_col_properties(
                         b"max" => max = val.parse().ok(),
                         b"width" => width = val.parse().ok(),
                         b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"style" => style = val.parse().ok(),
+                        b"customFormat" => custom_format = Some(parse_xml_bool(&val)),
                         b"hidden" => hidden = parse_xml_bool(&val),
                         _ => {}
                     }
@@ -2800,12 +2805,21 @@ fn parse_col_properties(
                     width
                 };
 
+                let clear_style = custom_format == Some(false);
+                let style_id = if clear_style {
+                    None
+                } else {
+                    style
+                        .map(|xf_index| styles_editor.style_id_for_xf(xf_index))
+                        .filter(|style_id| *style_id != 0)
+                };
+
                 for idx_1_based in min..=max {
                     let col = idx_1_based - 1;
                     if col >= formula_model::EXCEL_MAX_COLS {
                         continue;
                     }
-                    if width.is_none() && !hidden {
+                    if width.is_none() && !hidden && style_id.is_none() {
                         continue;
                     }
                     let entry = map.entry(col).or_default();
@@ -2815,7 +2829,12 @@ fn parse_col_properties(
                     if hidden {
                         entry.hidden = true;
                     }
-                    if entry.width.is_none() && !entry.hidden {
+                    if clear_style {
+                        entry.style_id = None;
+                    } else if let Some(style_id) = style_id {
+                        entry.style_id = Some(style_id);
+                    }
+                    if entry.width.is_none() && !entry.hidden && entry.style_id.is_none() {
                         map.remove(&col);
                     }
                 }
@@ -2849,10 +2868,11 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
+                let mut style: Option<u32> = None;
+                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
                 let mut outline_level: u8 = 0;
                 let mut collapsed = false;
-                let mut style_xf: Option<u32> = None;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -2862,13 +2882,8 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                         b"max" => max = val.parse().ok(),
                         b"width" => width = val.parse().ok(),
                         b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
-                        b"style" => {
-                            if let Ok(xf) = val.parse::<u32>() {
-                                if xf != 0 {
-                                    style_xf = Some(xf);
-                                }
-                            }
-                        }
+                        b"style" => style = val.parse().ok(),
+                        b"customFormat" => custom_format = Some(parse_xml_bool(&val)),
                         b"hidden" => hidden = parse_xml_bool(&val),
                         b"outlineLevel" => outline_level = val.parse().unwrap_or(0),
                         b"collapsed" => collapsed = parse_xml_bool(&val),
@@ -2888,7 +2903,14 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     width
                 };
 
-                if width.is_none() && style_xf.is_none() && !hidden && outline_level == 0 && !collapsed {
+                let style_xf = if custom_format == Some(false) {
+                    None
+                } else {
+                    style.filter(|xf| *xf != 0)
+                };
+
+                if width.is_none() && !hidden && outline_level == 0 && !collapsed && style_xf.is_none()
+                {
                     continue;
                 }
 
@@ -2899,19 +2921,21 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     let entry = map.entry(col_1_based).or_insert_with(|| ColXmlProps {
                         width: None,
                         hidden: false,
-                        style_xf: None,
                         outline_level: 0,
                         collapsed: false,
+                        style_xf: None,
                     });
                     if let Some(width) = width {
                         entry.width = Some(width);
                     }
-                    if style_xf.is_some() {
-                        entry.style_xf = style_xf;
-                    }
                     entry.hidden |= hidden;
                     entry.outline_level = entry.outline_level.max(outline_level);
                     entry.collapsed |= collapsed;
+                    if custom_format == Some(false) {
+                        entry.style_xf = None;
+                    } else if let Some(style_xf) = style_xf {
+                        entry.style_xf = Some(style_xf);
+                    }
                 }
             }
             _ => {}
@@ -5705,9 +5729,9 @@ fn patch_worksheet_dimension(
 struct ColXmlProps {
     width: Option<f32>,
     hidden: bool,
-    style_xf: Option<u32>,
     outline_level: u8,
     collapsed: bool,
+    style_xf: Option<u32>,
 }
 
 fn cols_xml_props_from_sheet(
@@ -5755,9 +5779,9 @@ fn cols_xml_props_from_sheet(
             .or_insert_with(|| ColXmlProps {
                 width: None,
                 hidden: entry.hidden.is_hidden(),
-                style_xf: None,
                 outline_level: entry.level,
                 collapsed: entry.collapsed,
+                style_xf: None,
             });
     }
 
@@ -5813,12 +5837,13 @@ fn render_col_range(
     let min = start_col_1;
     let max = end_col_1;
     s.push_str(&format!(r#"<{col_tag} min="{min}" max="{max}""#));
-    if let Some(style_xf) = props.style_xf {
-        s.push_str(&format!(r#" style="{style_xf}" customFormat="1""#));
-    }
     if let Some(width) = props.width {
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
+    }
+    if let Some(style_xf) = props.style_xf {
+        s.push_str(&format!(r#" style="{style_xf}""#));
+        s.push_str(r#" customFormat="1""#);
     }
     if props.hidden {
         s.push_str(r#" hidden="1""#);
