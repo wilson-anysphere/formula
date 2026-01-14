@@ -88,34 +88,56 @@ function findTauriActionScriptIssues(workflowText) {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("#")) continue;
 
-    const usesMatch = line.match(/^(\s*)-\s+uses:\s*tauri-apps\/tauri-action@/);
-    if (!usesMatch) continue;
+    const dashUses = line.match(/^(?<indent>\s*)-\s+uses:\s*tauri-apps\/tauri-action@/);
+    const plainUses = line.match(/^(?<indent>\s*)uses:\s*tauri-apps\/tauri-action@/);
+    if (!dashUses && !plainUses) continue;
 
-    const baseIndent = usesMatch[1] ?? "";
-    const baseIndentLen = baseIndent.length;
+    const indentLen = (dashUses?.groups?.indent ?? plainUses?.groups?.indent ?? "").length;
+    const stepIndentLen = dashUses ? indentLen : Math.max(0, indentLen - 2);
 
-    let tauriScriptValue = null;
-    let tauriScriptLine = null;
+    // Find the start of the step (the `- ...` line) so we can scan the entire
+    // mapping for `tauriScript`, regardless of key ordering.
+    let stepStartIndex = i;
+    if (!dashUses) {
+      for (let k = i; k >= 0; k -= 1) {
+        const m = lines[k].match(/^(\s*)-\s+/);
+        if (!m) continue;
+        if ((m[1] ?? "").length === stepIndentLen) {
+          stepStartIndex = k;
+          break;
+        }
+      }
+    }
 
-    for (let j = i + 1; j < lines.length; j += 1) {
+    // Find the end of the step: the next `- ...` at the same or lower indent.
+    let stepEndIndex = lines.length;
+    for (let j = stepStartIndex + 1; j < lines.length; j += 1) {
       const nextLine = lines[j];
       const nextTrimmed = nextLine.trimStart();
       if (nextTrimmed.startsWith("#")) continue;
-
       const stepStart = nextLine.match(/^(\s*)-\s+/);
-      if (stepStart && (stepStart[1] ?? "").length <= baseIndentLen) break;
-
-      const tsMatch = nextLine.match(/^\s*tauriScript:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/);
-      if (tsMatch) {
-        tauriScriptValue = tsMatch[1].trim();
-        tauriScriptLine = j + 1;
+      if (stepStart && (stepStart[1] ?? "").length <= stepIndentLen) {
+        stepEndIndex = j;
         break;
       }
     }
 
+    let tauriScriptValue = null;
+    let tauriScriptLine = null;
+    for (let j = stepStartIndex; j < stepEndIndex; j += 1) {
+      const l = lines[j];
+      const lTrim = l.trimStart();
+      if (lTrim.startsWith("#")) continue;
+      const tsMatch = l.match(/^\s*tauriScript:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/);
+      if (!tsMatch) continue;
+      tauriScriptValue = tsMatch[1].trim();
+      tauriScriptLine = j + 1;
+      break;
+    }
+
     if (!tauriScriptValue) {
       issues.push({
-        line: i + 1,
+        line: stepStartIndex + 1,
         message: "tauri-action step must set tauriScript: cargo tauri",
       });
       continue;
@@ -123,7 +145,7 @@ function findTauriActionScriptIssues(workflowText) {
 
     if (tauriScriptValue !== "cargo tauri") {
       issues.push({
-        line: tauriScriptLine ?? i + 1,
+        line: tauriScriptLine ?? stepStartIndex + 1,
         message: `tauriScript must be \"cargo tauri\" (found ${JSON.stringify(tauriScriptValue)})`,
       });
     }
