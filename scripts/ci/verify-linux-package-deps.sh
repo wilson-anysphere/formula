@@ -45,7 +45,7 @@ require_cmd rpm
 require_cmd rpm2cpio
 require_cmd cpio
 
-TAURI_CONF_PATH="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+TAURI_CONF_PATH="${FORMULA_TAURI_CONF_PATH:-${repo_root}/apps/desktop/src-tauri/tauri.conf.json}"
 EXPECTED_DESKTOP_VERSION=""
 EXPECTED_PACKAGE_NAME=""
 EXPECTED_IDENTIFIER=""
@@ -136,8 +136,15 @@ if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
   fail "Unable to determine expected desktop version from ${TAURI_CONF_PATH}"
 fi
 : "${EXPECTED_PACKAGE_NAME:=formula-desktop}"
-: "${EXPECTED_IDENTIFIER:=app.formula.desktop}"
 : "${PARQUET_ASSOCIATION:=0}"
+
+# Parquet file associations rely on a packaged shared-mime-info definition at:
+#   /usr/share/mime/packages/<identifier>.xml
+# When Parquet is configured in tauri.conf.json, `identifier` is required so we can
+# validate the expected filename inside the built .deb/.rpm bundles.
+if [[ "${PARQUET_ASSOCIATION}" -eq 1 && -z "${EXPECTED_IDENTIFIER}" ]]; then
+  fail "Parquet file association configured in ${TAURI_CONF_PATH}, but tauri \"identifier\" is missing/empty (required for /usr/share/mime/packages/<identifier>.xml)."
+fi
 
 echo "verify-linux-package-deps: expected desktop version: ${EXPECTED_DESKTOP_VERSION}"
 echo "verify-linux-package-deps: expected package/binary name: ${EXPECTED_PACKAGE_NAME}"

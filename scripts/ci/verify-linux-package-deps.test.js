@@ -243,6 +243,48 @@ test("verify-linux-package-deps passes when bundles include Parquet shared-mime-
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test(
+  "verify-linux-package-deps fails when Parquet association is configured but tauri identifier is missing",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-verify-linux-package-deps-"));
+    const binDir = path.join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFakeToolchain(binDir);
+
+    const tauriConfPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      tauriConfPath,
+      JSON.stringify(
+        {
+          version: expectedVersion,
+          mainBinaryName: expectedMainBinary,
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["parquet"],
+                mimeType: "application/vnd.apache.parquet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const proc = runVerifier({
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        FORMULA_TAURI_CONF_PATH: tauriConfPath,
+      },
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier.*missing/i);
+  },
+);
+
 test("verify-linux-package-deps fails when RPM Parquet shared-mime-info XML is missing expected content", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "formula-verify-linux-package-deps-"));
   const binDir = path.join(tmp, "bin");
