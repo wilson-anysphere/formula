@@ -131,10 +131,12 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut error_title: Option<String> = None;
                 let mut error: Option<String> = None;
 
-                for attr in e.attributes() {
-                    let attr = attr?;
+                for attr in e.attributes().with_checks(false).flatten() {
                     let key = crate::openxml::local_name(attr.key.as_ref());
-                    let val = attr.unescape_value()?.into_owned();
+                    let Ok(val) = attr.unescape_value() else {
+                        continue;
+                    };
+                    let val = val.into_owned();
                     match key {
                         b"type" => kind = parse_kind(val.trim()),
                         b"operator" => operator = parse_operator(val.trim()),
@@ -224,10 +226,12 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut error_title: Option<String> = None;
                 let mut error: Option<String> = None;
 
-                for attr in e.attributes() {
-                    let attr = attr?;
+                for attr in e.attributes().with_checks(false).flatten() {
                     let key = crate::openxml::local_name(attr.key.as_ref());
-                    let val = attr.unescape_value()?.into_owned();
+                    let Ok(val) = attr.unescape_value() else {
+                        continue;
+                    };
+                    let val = val.into_owned();
                     match key {
                         b"type" => kind = parse_kind(val.trim()),
                         b"operator" => operator = parse_operator(val.trim()),

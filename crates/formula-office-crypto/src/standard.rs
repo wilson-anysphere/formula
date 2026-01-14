@@ -437,7 +437,7 @@ pub(crate) fn verify_password_standard(
 /// Some producers encrypt verifier fields with AES-CBC; callers that need that compatibility should
 /// use `verify_password_standard_with_key_and_mode` or their own scheme-specific verification.
 #[allow(dead_code)]
-fn verify_password_standard_with_key(
+fn verify_password_standard_with_key_ecb_only(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
     hash_alg: HashAlgorithm,
