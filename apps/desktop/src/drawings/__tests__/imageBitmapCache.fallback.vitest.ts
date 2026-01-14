@@ -120,4 +120,61 @@ describe("ImageBitmapCache decode fallback", () => {
       else URLCtor.revokeObjectURL = originalRevokeObjectURL;
     }
   });
+
+  it("rethrows InvalidStateError when createImageBitmap(canvas) fails, and still revokes the object URL", async () => {
+    const entry: ImageEntry = { id: "img_fallback_canvas_error", bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
+
+    const invalidState = new Error("decode failed");
+    (invalidState as any).name = "InvalidStateError";
+    const createImageBitmapMock = vi.fn((src: any) => {
+      if (src instanceof Blob) {
+        return Promise.reject(invalidState);
+      }
+      return Promise.reject(new Error("bitmap allocation failed"));
+    });
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        width = 16;
+        height = 8;
+        naturalWidth = 16;
+        naturalHeight = 8;
+        set src(_value: string) {
+          this.onload?.();
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      const originalGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() }) as any);
+      try {
+        const cache = new ImageBitmapCache({ maxEntries: 16, negativeCacheMs: 0 });
+        await expect(cache.get(entry)).rejects.toMatchObject({ name: "InvalidStateError" });
+      } finally {
+        HTMLCanvasElement.prototype.getContext = originalGetContext;
+      }
+
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+      expect(createImageBitmapMock.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+      expect(createImageBitmapMock.mock.calls[1]?.[0]).toBeInstanceOf(HTMLCanvasElement);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
 });
