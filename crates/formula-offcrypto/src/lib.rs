@@ -2062,14 +2062,17 @@ pub fn decrypt_encrypted_package_ecb(
         )));
     }
 
-    let original_size = u64::from_le_bytes(
+    let total_size = u64::from_le_bytes(
         encrypted_package[..8]
             .try_into()
             .expect("slice length checked above"),
     );
-    let original_size: usize = original_size.try_into().map_err(|_| {
-        OffcryptoError::InvalidStructure("original size does not fit into usize".to_string())
+    let original_size = usize::try_from(total_size).map_err(|_| {
+        OffcryptoError::EncryptedPackageSizeOverflow { total_size }
     })?;
+    // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
+    isize::try_from(original_size)
+        .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     let ciphertext = &encrypted_package[8..];
     if ciphertext.len() % 16 != 0 {

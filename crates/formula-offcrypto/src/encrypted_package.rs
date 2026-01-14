@@ -334,4 +334,35 @@ mod tests {
             "expected no large allocations, observed max allocation request: {max_alloc} bytes"
         );
     }
+
+    #[test]
+    fn decrypt_encrypted_package_ecb_rejects_oversized_total_size_without_large_allocation() {
+        // Ensure the Standard AES-ECB helper rejects header sizes that cannot fit into a `Vec<u8>`
+        // even if the ciphertext is empty (avoid depending on ciphertext mismatch errors).
+        let total_size: u64 = if usize::BITS < 64 {
+            (usize::MAX as u64) + 1
+        } else {
+            u64::MAX
+        };
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&total_size.to_le_bytes());
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let key = [0u8; 16];
+        let err = crate::decrypt_encrypted_package_ecb(&key, bytes.as_slice())
+            .expect_err("expected size overflow");
+
+        assert!(
+            matches!(err, OffcryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
+            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+        );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
 }
