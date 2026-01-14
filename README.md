@@ -45,7 +45,7 @@ and formula-bar signature hints consume a **generated** catalog committed into t
 Each entry includes (at minimum): `name`, `min_args`, `max_args`, `volatility`, `return_type`, and a
 best-effort `arg_types` array derived from the Rust `FunctionSpec` metadata.
 
-To regenerate after adding/removing Rust functions (requires a Rust toolchain):
+To regenerate after adding/removing Rust functions (requires a Rust toolchain; pinned via `rust-toolchain.toml`):
 
 ```bash
 pnpm generate:function-catalog
