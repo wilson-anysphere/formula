@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { distinctColumnValues, TableViewRow } from "./tableView";
 
 export interface AutoFilterDropdownProps {
@@ -28,6 +28,15 @@ export function AutoFilterDropdown({
   );
 
   const valueLabel = (value: string): string => (value === "" ? "(Blanks)" : value);
+  const allSelected = values.length > 0 && selected.size === values.length;
+  const noneSelected = selected.size === 0;
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (!el) return;
+    el.indeterminate = !allSelected && !noneSelected;
+  }, [allSelected, noneSelected]);
 
   const toggle = (v: string) => {
     setSelected((prev) => {
@@ -38,9 +47,25 @@ export function AutoFilterDropdown({
     });
   };
 
+  const toggleAll = () => {
+    setSelected(() => (allSelected ? new Set() : new Set(values)));
+  };
+
   return (
     <div className="formula-table-filter-dropdown">
       <div className="formula-table-filter-dropdown__list">
+        {values.length > 0 && (
+          <label key="__select_all__" className="formula-sort-filter__row formula-table-filter-dropdown__item">
+            <input
+              ref={selectAllRef}
+              className="formula-sort-filter__checkbox"
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+            />
+            <span>Select All</span>
+          </label>
+        )}
         {values.map((v) => (
           <label key={v} className="formula-sort-filter__row formula-table-filter-dropdown__item">
             <input
