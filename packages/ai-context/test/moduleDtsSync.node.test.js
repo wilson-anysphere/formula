@@ -34,7 +34,7 @@ function extractJsNamedExports(code) {
     // or:
     //   export { foo, // comment\n bar }
     // don't confuse the parser.
-    list = list.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    list = stripComments(list);
     for (const part of list.split(",")) {
       const trimmed = part.trim();
       if (!trimmed) continue;
