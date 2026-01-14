@@ -37,6 +37,8 @@ describe("@formula/collab-workbook sheet metadata", () => {
       },
     ];
     const mergedRanges = [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }];
+    const colWidths = { "0": 120 };
+    const rowHeights = { "1": 40 };
 
     // Insert a "real" Sheet1 first (hidden + tabColor + renamed), then a placeholder
     // Sheet1 later. The schema normalizer keeps the last entry by index, but should
@@ -59,6 +61,8 @@ describe("@formula/collab-workbook sheet metadata", () => {
       real.set("view", {
         frozenRows: 2,
         frozenCols: 1,
+        colWidths,
+        rowHeights,
         mergedRanges,
         drawings,
       });
@@ -68,7 +72,8 @@ describe("@formula/collab-workbook sheet metadata", () => {
       placeholder.set("id", "Sheet1");
       placeholder.set("name", "Sheet1");
       placeholder.set("visibility", "visible");
-      placeholder.set("view", { frozenRows: 0, frozenCols: 0 });
+      // Include empty axis size objects to ensure schema dedupe prefers non-empty values.
+      placeholder.set("view", { frozenRows: 0, frozenCols: 0, colWidths: {}, rowHeights: {} });
       sheets.push([placeholder]);
     });
 
@@ -86,6 +91,8 @@ describe("@formula/collab-workbook sheet metadata", () => {
     expect(sheet1.get("view")).toEqual({
       frozenRows: 2,
       frozenCols: 1,
+      colWidths,
+      rowHeights,
       mergedRanges,
       drawings,
     });

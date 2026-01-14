@@ -211,6 +211,16 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 }
               }
 
+              if (key === "colWidths" || key === "rowHeights") {
+                const winnerJson = yjsValueToJson(winnerVal);
+                const entryJson = yjsValueToJson(entryVal);
+                const winnerCount = isRecord(winnerJson) ? Object.keys(winnerJson).length : 0;
+                const entryCount = isRecord(entryJson) ? Object.keys(entryJson).length : 0;
+                if (winnerCount === 0 && entryCount > 0) {
+                  winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                }
+              }
+
               // For legacy list keys, prefer non-empty over empty/undefined.
               if (key === "drawings" || key === "mergedRanges" || key === "mergedCells" || key === "merged_cells") {
                 const winnerArr = Array.isArray(yjsValueToJson(winnerVal)) ? yjsValueToJson(winnerVal) : [];
@@ -261,6 +271,17 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                     continue;
                   }
 
+                  if (k === "colWidths" || k === "rowHeights") {
+                    const wJson = yjsValueToJson(wv);
+                    const eJson = yjsValueToJson(ev);
+                    const wCount = isRecord(wJson) ? Object.keys(wJson).length : 0;
+                    const eCount = isRecord(eJson) ? Object.keys(eJson).length : 0;
+                    if (wCount === 0 && eCount > 0) {
+                      winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    }
+                    continue;
+                  }
+
                   if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
                     const wArr = Array.isArray(yjsValueToJson(wv)) ? yjsValueToJson(wv) : [];
                     const eArr = Array.isArray(yjsValueToJson(ev)) ? yjsValueToJson(ev) : [];
@@ -277,12 +298,12 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                 if (isRecord(wJson) && isRecord(eJson)) {
                   /** @type {Record<string, any>} */
                   const merged = { ...wJson };
-                  for (const [k, ev] of Object.entries(eJson)) {
-                    const wv = merged[k];
-                    if (wv === undefined) {
-                      merged[k] = structuredClone(ev);
-                      continue;
-                    }
+                for (const [k, ev] of Object.entries(eJson)) {
+                  const wv = merged[k];
+                  if (wv === undefined) {
+                    merged[k] = structuredClone(ev);
+                    continue;
+                  }
 
                     if (k === "frozenRows" || k === "frozenCols") {
                       const wNum = normalizeFrozenCount(wv);
@@ -291,17 +312,26 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
                       continue;
                     }
 
-                    if (k === "backgroundImageId" || k === "background_image_id") {
-                      const wStr = coerceString(wv)?.trim() ?? "";
-                      const eStr = coerceString(ev)?.trim() ?? "";
-                      if (!wStr && eStr) merged[k] = eStr;
-                      continue;
-                    }
+                  if (k === "backgroundImageId" || k === "background_image_id") {
+                    const wStr = coerceString(wv)?.trim() ?? "";
+                    const eStr = coerceString(ev)?.trim() ?? "";
+                    if (!wStr && eStr) merged[k] = eStr;
+                    continue;
+                  }
 
-                    if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
-                      const wArr = Array.isArray(wv) ? wv : [];
-                      const eArr = Array.isArray(ev) ? ev : [];
-                      if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
+                  if (k === "colWidths" || k === "rowHeights") {
+                    const wObj = isRecord(wv) ? wv : {};
+                    const eObj = isRecord(ev) ? ev : {};
+                    if (Object.keys(wObj).length === 0 && Object.keys(eObj).length > 0) {
+                      merged[k] = structuredClone(ev);
+                    }
+                    continue;
+                  }
+
+                  if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+                    const wArr = Array.isArray(wv) ? wv : [];
+                    const eArr = Array.isArray(ev) ? ev : [];
+                    if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
                       continue;
                     }
                   }
