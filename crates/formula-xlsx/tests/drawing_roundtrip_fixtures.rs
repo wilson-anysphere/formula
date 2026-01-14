@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
+use formula_model::{CellRef, CellValue};
 use formula_xlsx::openxml::{parse_relationships, resolve_target};
 use formula_xlsx::{load_from_bytes, XlsxPackage};
 
@@ -16,6 +17,20 @@ fn drawing_roundtrip_fixtures_preserve_drawing_opc_parts() -> Result<(), Box<dyn
         ("fixtures/charts/xlsx/bar.xlsx", CHART_FIXTURE),
     ] {
         assert_fixture_roundtrip_preserves_drawings(name, bytes)?;
+    }
+
+    Ok(())
+}
+
+#[test]
+fn drawing_roundtrip_fixtures_preserve_drawing_opc_parts_on_unrelated_cell_edit(
+) -> Result<(), Box<dyn Error>> {
+    for (name, bytes) in [
+        ("fixtures/xlsx/basic/image.xlsx", IMAGE_FIXTURE),
+        ("fixtures/xlsx/basic/smartart.xlsx", SMARTART_FIXTURE),
+        ("fixtures/charts/xlsx/bar.xlsx", CHART_FIXTURE),
+    ] {
+        assert_fixture_cell_edit_preserves_drawings(name, bytes)?;
     }
 
     Ok(())
@@ -70,6 +85,83 @@ fn assert_fixture_roundtrip_preserves_drawings(
     if !issues.is_empty() {
         eprintln!(
             "Drawing OPC parts changed during no-op round-trip for fixture {fixture_name}"
+        );
+        for (part, entries) in issues {
+            eprintln!("- {part}");
+            for entry in entries {
+                eprintln!("  issue: {entry}");
+            }
+        }
+        panic!("fixture {fixture_name} did not preserve drawing parts");
+    }
+
+    Ok(())
+}
+
+fn assert_fixture_cell_edit_preserves_drawings(
+    fixture_name: &str,
+    original_bytes: &[u8],
+) -> Result<(), Box<dyn Error>> {
+    let mut doc = load_from_bytes(original_bytes)?;
+    let sheet_id = doc
+        .workbook
+        .sheets
+        .first()
+        .map(|sheet| sheet.id)
+        .expect("fixture should contain at least one sheet");
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_value(
+            CellRef::from_a1("A1").expect("valid A1"),
+            CellValue::Number(123.0),
+        );
+
+    let roundtripped_bytes = doc.save_to_vec()?;
+
+    let expected = XlsxPackage::from_bytes(original_bytes)?;
+    let actual = XlsxPackage::from_bytes(&roundtripped_bytes)?;
+
+    let expected_drawing_xml_parts = collect_parts(&expected, is_drawing_xml_part);
+    let actual_drawing_xml_parts = collect_parts(&actual, is_drawing_xml_part);
+
+    let expected_drawing_rels_parts = collect_parts(&expected, is_drawing_rels_part);
+    let actual_drawing_rels_parts = collect_parts(&actual, is_drawing_rels_part);
+
+    let expected_media_parts =
+        collect_media_parts_referenced_by_drawings(&expected, &expected_drawing_rels_parts)?;
+
+    let mut issues: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    report_part_set_differences(
+        &expected_drawing_xml_parts,
+        &actual_drawing_xml_parts,
+        "drawing_xml",
+        &mut issues,
+    );
+    report_part_set_differences(
+        &expected_drawing_rels_parts,
+        &actual_drawing_rels_parts,
+        "drawing_rels",
+        &mut issues,
+    );
+
+    // Compare bytes for all drawing parts and their drawing-level rels.
+    for part in expected_drawing_xml_parts
+        .iter()
+        .chain(expected_drawing_rels_parts.iter())
+    {
+        compare_part_bytes(&expected, &actual, part, &mut issues);
+    }
+
+    // Compare bytes for drawing-referenced media parts.
+    for part in expected_media_parts.iter() {
+        compare_part_bytes(&expected, &actual, part, &mut issues);
+    }
+
+    if !issues.is_empty() {
+        eprintln!(
+            "Drawing OPC parts changed during cell-edit round-trip for fixture {fixture_name}"
         );
         for (part, entries) in issues {
             eprintln!("- {part}");
@@ -212,4 +304,3 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> Option<usize> {
     }
     (a.len() != b.len()).then_some(shared)
 }
-
