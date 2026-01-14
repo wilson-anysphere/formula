@@ -36,23 +36,6 @@ export function registerFormatFontDropdownCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
-    "format.clearContents",
-    "Clear Contents",
-    () =>
-      applyFormattingToSelection(
-        "Clear contents",
-        (doc, sheetId, ranges) => {
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear contents" });
-          }
-        },
-        // Clearing cell contents is a workbook mutation and must remain blocked for read-only collab roles.
-        { allowReadOnlyBandSelection: false },
-      ),
-    { category },
-  );
-
-  commandRegistry.registerBuiltinCommand(
     "format.clearAll",
     "Clear All",
     () =>

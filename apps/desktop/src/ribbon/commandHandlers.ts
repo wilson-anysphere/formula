@@ -194,18 +194,6 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
         return applied;
       });
       return true;
-    case "format.clearContents":
-      ctx.applyFormattingToSelection(
-        "Clear contents",
-        (doc, sheetId, ranges) => {
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear contents" });
-          }
-        },
-        // Clearing cell contents is a workbook mutation and must remain blocked for read-only collab roles.
-        { allowReadOnlyBandSelection: false },
-      );
-      return true;
     case "format.clearAll":
       ctx.applyFormattingToSelection(
         "Clear all",

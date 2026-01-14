@@ -1448,7 +1448,7 @@ function applyFormattingToSelection(
   // mutations must remain local-only; collaboration binders are responsible for preventing
   // them from being persisted into shared Yjs state.
   //
-  // Some commands routed through this helper (e.g. "Clear Contents") mutate cell values and must
+  // Some commands routed through this helper (e.g. "Clear All") mutate cell values and must
   // remain blocked in read-only even for band selections. Callers can opt out via
   // `allowReadOnlyBandSelection: false`.
   const allowReadOnlyBandSelection = options.allowReadOnlyBandSelection !== false;
@@ -2400,7 +2400,6 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             // Organize Sheets is a structural edit surface and must remain disabled in read-only.
             "home.cells.format.organizeSheets": true,
             // Workbook mutations should remain disabled in read-only mode even if formatting defaults are enabled.
-            "format.clearContents": true,
             "format.clearAll": true,
           }
         : null),
