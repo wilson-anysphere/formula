@@ -71,6 +71,10 @@ apps/web/public/engine/**
 apps/desktop/public/engine/**
 !apps/desktop/public/engine/wasm_smoke.worker.js
 
+# Desktop Pyodide assets (downloaded by `apps/desktop/scripts/ensure-pyodide-assets.mjs` when
+# bundling is explicitly enabled via `FORMULA_BUNDLE_PYODIDE_ASSETS=1`).
+apps/desktop/public/pyodide/
+
 # Lockfiles
 package-lock.json
 

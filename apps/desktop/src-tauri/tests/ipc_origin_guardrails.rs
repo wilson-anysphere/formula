@@ -141,6 +141,7 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "write_clipboard",
         // External integration / network.
         "open_external_url",
+        "pyodide_index_url",
         "network_fetch",
         "marketplace_search",
         "marketplace_get_extension",

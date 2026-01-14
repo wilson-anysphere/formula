@@ -3,7 +3,7 @@ import { DocumentControllerBridge } from "@formula/python-runtime/document-contr
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { getTauriInvokeOrNull } from "../../tauri/invoke.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards.js";
-const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
+import { ensurePyodideIndexURL, getCachedPyodideIndexURL } from "../../pyodide/pyodideIndexURL.js";
 const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024;
@@ -100,6 +100,8 @@ export function mountPythonPanel({
   let blockedOutputReason = null;
 
   let initPromise = null;
+  let pyodideIndexURL = null;
+  let pyodideIndexURLPromise = null;
   /** @type {PyodideRuntime | null} */
   let pyodideRuntime = null;
   /** @type {any | null} */
@@ -254,9 +256,69 @@ export function mountPythonPanel({
   updateRuntimeStatus();
   syncRunButtonDisabledState();
 
+  const formatBytes = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes == null) return "";
+    const units = ["B", "KiB", "MiB", "GiB"];
+    let value = bytes;
+    let unit = units[0];
+    for (let idx = 0; idx < units.length - 1; idx += 1) {
+      if (value < 1024) break;
+      value /= 1024;
+      unit = units[idx + 1];
+    }
+    return `${value.toFixed(value >= 10 || unit === "B" ? 0 : 1)} ${unit}`;
+  };
+
+  const renderPyodideProgress = (progress) => {
+    if (!progress || typeof progress !== "object") return null;
+    const kind = progress.kind;
+    if (kind === "downloadStart" && progress.message) return String(progress.message);
+    if (kind === "ready" && progress.message) return String(progress.message);
+    if (kind === "downloadProgress") {
+      const name = progress.fileName ? String(progress.fileName) : "asset";
+      const total = formatBytes(progress.bytesTotal);
+      const done = formatBytes(progress.bytesDownloaded);
+      const frac = total ? ` (${done} / ${total})` : done ? ` (${done})` : "";
+      return `Downloading ${name}${frac}…`;
+    }
+    return null;
+  };
+
+  async function resolvePyodideIndexURL({ downloadIfMissing }) {
+    if (typeof pyodideIndexURL === "string" && pyodideIndexURL.length > 0) return pyodideIndexURL;
+    if (pyodideIndexURLPromise) return await pyodideIndexURLPromise;
+
+    pyodideIndexURLPromise = (async () => {
+      const resolved = downloadIfMissing
+        ? await ensurePyodideIndexURL({
+            onProgress: (progress) => {
+              const msg = renderPyodideProgress(progress);
+              if (msg) setOutput(`${msg}\n`);
+            },
+          })
+        : await getCachedPyodideIndexURL();
+      if (typeof resolved === "string" && resolved.length > 0) {
+        pyodideIndexURL = resolved;
+      }
+      return resolved;
+    })().finally(() => {
+      pyodideIndexURLPromise = null;
+    });
+
+    return await pyodideIndexURLPromise;
+  }
+
   runtimeSelect.addEventListener("change", () => {
     updateRuntimeStatus();
     setOutput("");
+    if (runtimeSelect.value === "pyodide") {
+      void resolvePyodideIndexURL({ downloadIfMissing: true }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        if (runtimeSelect.value === "pyodide") {
+          setOutput(`Failed to download Pyodide assets.\n\n${message}`);
+        }
+      });
+    }
   });
 
   if (typeof window !== "undefined") {
@@ -327,7 +389,6 @@ export function mountPythonPanel({
       });
       pyodideRuntime = new PyodideRuntime({
         api: pyodideBridge,
-        indexURL: PYODIDE_INDEX_URL,
         rpcTimeoutMs: 5_000,
       });
       updateRuntimeStatus();
@@ -338,12 +399,13 @@ export function mountPythonPanel({
     // `PyodideRuntime.initialize()` is idempotent and will return quickly when
     // already initialized. We only memoize the in-flight promise so callers can
     // retry after the runtime resets itself (timeouts/memory errors).
-    initPromise = pyodideRuntime
-      .initialize()
-      .finally(() => {
-        initPromise = null;
-        updateRuntimeStatus();
-      });
+    initPromise = (async () => {
+      const indexURL = await resolvePyodideIndexURL({ downloadIfMissing: true });
+      await pyodideRuntime.initialize({ indexURL });
+    })().finally(() => {
+      initPromise = null;
+      updateRuntimeStatus();
+    });
 
     return await initPromise;
   }

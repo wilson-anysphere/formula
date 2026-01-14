@@ -3,6 +3,7 @@ import { PyodideRuntime } from "@formula/python-runtime/pyodide";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 
 import { DocumentControllerWorkbookAdapter } from "../scripting/documentControllerWorkbookAdapter.js";
+import { ensurePyodideIndexURL, getCachedPyodideIndexURL } from "../pyodide/pyodideIndexURL.js";
 
 import type { DocumentController } from "../document/documentController.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
@@ -33,9 +34,9 @@ export interface WebMacroBackendOptions {
   /**
    * Base URL to load Pyodide assets from (must end with a trailing slash).
    *
-   * For the Vite demo we proxy `/pyodide/**` to jsdelivr so we can run under
-   * `crossOriginIsolated` without loading cross-origin scripts directly.
-   */
+    * Desktop builds prefer downloading Pyodide assets on-demand into an app-data
+    * cache and serving them via the `pyodide://` protocol.
+    */
   pyodideIndexURL?: string;
 }
 
@@ -305,7 +306,16 @@ export class WebMacroBackend implements MacroBackend {
     const output: string[] = [];
 
     try {
-      const runtime = await this.ensurePyodideInitialized(api);
+      const indexURL = await ensurePyodideIndexURL({
+        explicitIndexURL: this.options.pyodideIndexURL,
+        onProgress: (progress) => {
+          if (progress.kind === "downloadStart" && progress.message) {
+            output.push(`pyodide: ${progress.message}`);
+          }
+        },
+      });
+
+      const runtime = await this.ensurePyodideInitialized(api, indexURL);
       if (runtime.getBackendMode?.() === "mainThread" && !this.warnedPyodideMainThread) {
         output.push(
           "warning: SharedArrayBuffer unavailable; running Pyodide on the main thread (UI may freeze during execution).",
@@ -332,22 +342,23 @@ export class WebMacroBackend implements MacroBackend {
     // eagerly when we can use the Worker backend.
     if (!canUsePyodideWorkerBackend()) return;
 
+    // Desktop builds download Pyodide on demand; do not prewarm unless the cache is already present
+    // (or an explicit `pyodideIndexURL` override is configured).
+    const indexURL = await getCachedPyodideIndexURL({ explicitIndexURL: this.options.pyodideIndexURL });
+    if (!indexURL) return;
+
     const doc = this.options.getDocumentController();
     const api = new DocumentControllerBridge(doc, { activeSheetId: this.activeSheetId() });
-    await this.ensurePyodideInitialized(api);
+    await this.ensurePyodideInitialized(api, indexURL);
   }
 
-  private async ensurePyodideInitialized(api: unknown): Promise<PyodideRuntime> {
-    const indexURL =
-      this.options.pyodideIndexURL ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((globalThis as any).__pyodideIndexURL as string | undefined) ??
-      "/pyodide/v0.25.1/full/";
+  private async ensurePyodideInitialized(api: unknown, indexURL?: string): Promise<PyodideRuntime> {
+    const normalizedIndexURL = typeof indexURL === "string" && indexURL.length > 0 ? indexURL : undefined;
 
     if (!this.pyodide) {
       this.pyodide = new PyodideRuntime({
         api,
-        indexURL,
+        indexURL: normalizedIndexURL,
         mode: "auto",
         permissions: defaultPythonPermissions(),
         timeoutMs: 5_000,
@@ -366,7 +377,7 @@ export class WebMacroBackend implements MacroBackend {
     if (!this.pyodideInit) {
       this.pyodideInit = this.pyodide.initialize({
         api,
-        indexURL,
+        indexURL: normalizedIndexURL,
         permissions: defaultPythonPermissions(),
       });
     }
@@ -379,7 +390,8 @@ export class WebMacroBackend implements MacroBackend {
       const guidance = needsIsolation
         ? "SharedArrayBuffer is unavailable, so Pyodide is running on the main thread.\n" +
           "If initialization fails, ensure Pyodide assets are reachable (pyodideIndexURL) or enable COOP/COEP headers to use the worker backend."
-        : "If initialization fails, ensure Pyodide assets are reachable (pyodideIndexURL).";
+        : "If initialization fails, ensure Pyodide assets are reachable (pyodideIndexURL).\n" +
+          "Desktop builds download Pyodide on-demand; if the download fails, check your network connection and try again.";
 
       runtimeErr.message = `${runtimeErr.message}\n\n${guidance}`;
 

@@ -66,6 +66,7 @@
           "power_query_refresh_state_set",
           "power_query_state_get",
           "power_query_state_set",
+          "pyodide_index_url",
           "quit_app",
           "read_binary_file",
           "read_binary_file_range",

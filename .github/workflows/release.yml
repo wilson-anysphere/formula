@@ -827,47 +827,6 @@ jobs:
           #
           # Best-effort install: extract-and-run mode means the build can proceed without FUSE.
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
-      - name: Detect Pyodide version (for caching)
-        id: pyodide
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\s+PYODIDE_VERSION\s*=\s*["\x27]([^"\x27]+)["\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Pyodide asset cache
-        id: pyodide-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: apps/desktop/public/pyodide/
-          enableCrossOsArchive: true
-          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
-          restore-keys: |
-            pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
-            pyodide-v${{ steps.pyodide.outputs.version }}-
-
-      - name: Restore tracked Pyodide files (avoid cache overwriting repo files)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The Pyodide cache path includes tracked files (e.g. README.md and .gitignore). Restore
-          # the tracked files to the checked-out revision without touching the untracked vendored
-          # assets downloaded by `ensure-pyodide-assets.mjs`.
-          git restore --source=HEAD -- apps/desktop/public/pyodide/
-
-      - name: Ensure Pyodide assets are present (populate cache on miss)
-        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
-
-      - name: Save Pyodide asset cache
-        if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        # Multiple jobs within the release matrix can race to populate the same cache key
-        # (e.g. Windows x64 + ARM64). Cache save conflicts are expected; don't fail the build.
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: apps/desktop/public/pyodide/
-          enableCrossOsArchive: true
-          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         env:

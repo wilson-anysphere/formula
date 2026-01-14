@@ -1,8 +1,0 @@
-# Pyodide distribution files are downloaded locally via:
-#   apps/desktop/scripts/ensure-pyodide-assets.mjs
-#
-# Keep this directory in the repository without committing the (large) vendored
-# assets.
-*
-!.gitignore
-

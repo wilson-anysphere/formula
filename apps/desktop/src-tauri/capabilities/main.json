@@ -54,6 +54,7 @@
         { "event": "update-download-progress" },
         { "event": "update-downloaded" },
         { "event": "update-download-error" },
+        { "event": "pyodide-download-progress" },
         { "event": "oauth-redirect" }
       ]
     },

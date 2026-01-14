@@ -81,7 +81,7 @@ roxmltree = "0.20"
 socket2 = "0.5"
 sysinfo = { version = "0.30", optional = true }
 tempfile = "3.10"
-tokio = { version = "1.38", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.38", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
 unicode-normalization = "0.1"
 uuid = { version = "1.8", features = ["v4"] }

@@ -1992,7 +1992,7 @@ use crate::{file_io::Workbook, macro_trust::compute_macro_fingerprint};
 #[cfg(any(feature = "desktop", test))]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
-use tauri::State;
+use tauri::{Emitter, State};
 #[cfg(feature = "desktop")]
 use tauri_plugin_shell::ShellExt;
 
@@ -7609,6 +7609,33 @@ pub(crate) fn ensure_ipc_network_url_allowed(
             "Unsupported url scheme for {context}: {other} (only http/https allowed)"
         )),
     }
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn pyodide_index_url(
+    window: tauri::WebviewWindow,
+    download: Option<bool>,
+) -> Result<Option<String>, String> {
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "python runtime download",
+        ipc_origin::Verb::Is,
+    )?;
+
+    let download = download.unwrap_or(false);
+
+    crate::pyodide_assets::pyodide_index_url_from_cache(download, |progress| {
+        let _ = window.emit(crate::pyodide_assets::PYODIDE_DOWNLOAD_PROGRESS_EVENT, progress);
+    })
+    .await
+    .map_err(|err| {
+        format!(
+            "Failed to prepare the Python runtime.\n\n\
+Pyodide is downloaded on-demand and cached for future runs.\n\
+Error: {err}"
+        )
+    })
 }
 
 #[cfg(feature = "desktop")]

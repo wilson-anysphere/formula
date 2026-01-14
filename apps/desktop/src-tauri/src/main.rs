@@ -4,6 +4,7 @@
 )]
 
 mod asset_protocol;
+mod pyodide_protocol;
 mod menu;
 mod shortcuts;
 mod tray;
@@ -1513,6 +1514,8 @@ fn main() {
         // Override Tauri's default `asset:` protocol handler to attach COEP-friendly headers.
         // See `asset_protocol.rs` for details.
         .register_uri_scheme_protocol("asset", asset_protocol::handler)
+        // Serve on-demand cached Pyodide assets from the app data directory.
+        .register_uri_scheme_protocol("pyodide", pyodide_protocol::handler)
         // In production builds, the webview loads `frontendDist` via Tauri's custom
         // asset protocol (`tauri://...`). Unlike the Vite dev/preview servers, those
         // responses don't include COOP/COEP headers by default, which prevents
@@ -1912,6 +1915,7 @@ fn main() {
             commands::run_macro,
             commands::validate_vba_migration,
             commands::run_python_script,
+            commands::pyodide_index_url,
             commands::network_fetch,
             commands::marketplace_search,
             commands::marketplace_get_extension,

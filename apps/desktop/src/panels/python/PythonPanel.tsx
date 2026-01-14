@@ -1,6 +1,8 @@
 import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 
+import { ensurePyodideIndexURL } from "../../pyodide/pyodideIndexURL.js";
+
 type NetworkPermission = "none" | "allowlist" | "full";
 
 export type MountPythonPanelOptions = {
@@ -23,10 +25,6 @@ function parseAllowlist(raw: string) {
 
 export function mountPythonPanel({ documentController, container, getActiveSheetId }: MountPythonPanelOptions) {
   container.replaceChildren();
-
-  const pyodideIndexURL =
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 
   const root = document.createElement("div");
   root.className = "python-panel";
@@ -114,7 +112,7 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   let disposed = false;
   let initialized = false;
 
-  const runtime = new PyodideRuntime({ api: bridge, indexURL: pyodideIndexURL });
+  const runtime = new PyodideRuntime({ api: bridge });
 
   function effectivePermissions() {
     const network = networkSelect.value as NetworkPermission;
@@ -152,8 +150,19 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
       const permissions = effectivePermissions();
 
       if (!initialized) {
+        output.textContent += "Preparing Python runtime…\n";
+        const indexURL = await ensurePyodideIndexURL({
+          onProgress: (progress) => {
+            if (progress.kind === "downloadStart" && progress.message) {
+              output.textContent += `${progress.message}\n`;
+            }
+            if (progress.kind === "ready" && progress.message) {
+              output.textContent += `${progress.message}\n`;
+            }
+          },
+        });
         output.textContent += "Loading Python runtime…\n";
-        await runtime.initialize({ api: bridge, permissions });
+        await runtime.initialize({ api: bridge, permissions, indexURL });
         initialized = true;
         output.textContent += "Ready.\n\n";
       }

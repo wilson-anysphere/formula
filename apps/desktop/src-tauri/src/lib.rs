@@ -32,6 +32,8 @@ pub mod persistence;
 mod power_query_validation;
 pub mod python;
 #[cfg(any(feature = "desktop", test))]
+pub mod pyodide_assets;
+#[cfg(any(feature = "desktop", test))]
 pub mod network_fetch;
 pub mod resource_limits;
 pub(crate) mod sheet_name;
