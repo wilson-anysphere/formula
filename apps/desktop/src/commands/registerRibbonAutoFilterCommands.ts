@@ -9,7 +9,13 @@ export type RibbonAutoFilterCommandHandlers = {
    * Excel-style toggle.
    */
   toggle: (pressed?: boolean) => void | Promise<void>;
+  /**
+   * Clear AutoFilter criteria (show all rows) while keeping AutoFilter enabled.
+   */
   clear: () => void | Promise<void>;
+  /**
+   * Recompute and reapply the current AutoFilter criteria.
+   */
   reapply: () => void | Promise<void>;
 };
 
@@ -61,8 +67,10 @@ export function registerRibbonAutoFilterCommands(params: {
   registerIfMissing(commandRegistry, "data.sortFilter.clear", "Clear", () => withHandlers((handlers) => handlers.clear()), {
     category,
     icon: null,
-    description: "Clear the current AutoFilter criteria",
+    description: "Clear AutoFilter criteria (show all rows)",
     keywords: ["clear", "filter", "auto filter", "autofilter"],
+    // Hide from the command palette when AutoFilter is not enabled for the active sheet.
+    when: "spreadsheet.hasAutoFilter == true",
   });
 
   registerIfMissing(commandRegistry, "data.sortFilter.reapply", "Reapply", () => withHandlers((handlers) => handlers.reapply()), {
@@ -70,12 +78,14 @@ export function registerRibbonAutoFilterCommands(params: {
     icon: null,
     description: "Reapply the current AutoFilter",
     keywords: ["reapply", "filter", "auto filter", "autofilter"],
+    // Hide from the command palette when AutoFilter is not enabled for the active sheet.
+    when: "spreadsheet.hasAutoFilter == true",
   });
 
-  registerIfMissing(commandRegistry, "data.sortFilter.advanced.clearFilter", "Clear Filter", () => withHandlers((handlers) => handlers.clear()), {
+  registerIfMissing(commandRegistry, "data.sortFilter.advanced.clearFilter", "Clear Filter", () => commandRegistry.executeCommand("data.sortFilter.clear"), {
     category,
     icon: null,
-    description: "Clear the current AutoFilter criteria",
-    keywords: ["clear filter", "filter", "auto filter", "autofilter"],
+    // Ribbon-only alias for the canonical Clear command.
+    when: "false",
   });
-}
+} 

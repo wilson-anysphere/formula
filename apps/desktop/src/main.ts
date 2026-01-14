@@ -5222,6 +5222,10 @@ if (
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
       commentsPanelVisible: app.isCommentsPanelVisible(),
       cellHasComment: app.activeCellHasComment(),
+      // Ribbon AutoFilter MVP is view-local (in-memory store + outline.hidden.filter). Expose
+      // a context key so command-palette entries like "Clear" / "Reapply" can be hidden when
+      // AutoFilter is not enabled for the active sheet.
+      "spreadsheet.hasAutoFilter": ribbonAutoFilterStore.hasAny(sheetId),
       "spreadsheet.isReadOnly": app.isReadOnly?.() === true,
       // Some roles (e.g. `commenter`) are read-only for cell edits but can still create comments.
       // Expose a dedicated key so shortcuts (Shift+F2) can be gated without relying on
@@ -9479,6 +9483,7 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
     nextColumns.push({ colId, values: selected });
   }
   ribbonAutoFilterStore.set(sheetId, { rangeA1, headerRows, filterColumns: nextColumns });
+  updateContextKeys();
 
   // Reapply all stored filters so row hidden state stays consistent even if multiple filter ranges overlap.
   reapplyRibbonAutoFiltersForActiveSheet();
@@ -9503,6 +9508,7 @@ function clearRibbonAutoFilterCriteriaForActiveSheet(): void {
   for (const filter of filters) {
     ribbonAutoFilterStore.set(sheetId, { rangeA1: filter.rangeA1, headerRows: filter.headerRows, filterColumns: [] });
   }
+  updateContextKeys();
 
   // Apply the updated (empty) criteria by clearing any existing filter-hidden rows.
   reapplyRibbonAutoFiltersForActiveSheet();
@@ -9517,6 +9523,7 @@ function clearRibbonAutoFiltersForActiveSheet(): void {
 
   const sheetId = app.getCurrentSheetId();
   ribbonAutoFilterStore.clearSheet(sheetId);
+  updateContextKeys();
 
   const limits = app.getGridLimits();
   app.clearFilteredHiddenRowsInRange(0, limits.maxRows - 1);
