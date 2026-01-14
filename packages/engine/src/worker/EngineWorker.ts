@@ -1133,10 +1133,15 @@ export class EngineWorker {
     return (await this.invoke("renameSheet", { oldName, newName }, options)) as boolean;
   }
 
-  async setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
+  setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
     // Origin is UI/view metadata (scroll position + frozen panes) and is independent of pending
     // cell edits. Avoid forcing a `setCells` flush on high-frequency scroll updates.
-    await this.invoke("setSheetOrigin", { sheet, origin }, options);
+    const promise = this.invoke("setSheetOrigin", { sheet, origin }, options).then(() => undefined) as Promise<void>;
+    // Sheet-origin updates are typically fire-and-forget (high-frequency scroll path). Attach a
+    // no-op rejection handler so a failure doesn't surface as an unhandled rejection if callers
+    // don't await.
+    void promise.catch(() => {});
+    return promise;
   }
 
   async setSheetDisplayName(sheetId: string, name: string, options?: RpcOptions): Promise<void> {

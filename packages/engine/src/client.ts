@@ -630,8 +630,13 @@ export function createEngineClient(options?: {
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
     renameSheet: async (oldName, newName, rpcOptions) =>
       await withEngine((connected) => connected.renameSheet(oldName, newName, rpcOptions)),
-    setSheetOrigin: async (sheet, origin, rpcOptions) =>
-      await withEngine((connected) => connected.setSheetOrigin(sheet, origin, rpcOptions)),
+    setSheetOrigin: (sheet, origin, rpcOptions) => {
+      const promise = withEngine((connected) => connected.setSheetOrigin(sheet, origin, rpcOptions));
+      // Sheet origin updates are often called fire-and-forget (scroll path). Attach a no-op rejection
+      // handler so teardown/connect races don't surface as unhandled rejections.
+      void promise.catch(() => {});
+      return promise;
+    },
     setSheetDisplayName: async (sheetId, name, rpcOptions) =>
       await withEngine((connected) => connected.setSheetDisplayName(sheetId, name, rpcOptions)),
     setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>

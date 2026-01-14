@@ -328,6 +328,52 @@ class ErrorSetCellsWorker implements WorkerLike {
   }
 }
 
+class ErrorSheetOriginWorker implements WorkerLike {
+  public serverPort: MockMessagePort | null = null;
+  public received: WorkerInboundMessage[] = [];
+  public terminated = false;
+
+  postMessage(message: unknown): void {
+    const init = message as InitMessage;
+    if (!init || typeof init !== "object" || (init as any).type !== "init") {
+      return;
+    }
+
+    this.serverPort = init.port as unknown as MockMessagePort;
+    this.serverPort.addEventListener("message", (event) => {
+      const msg = event.data as WorkerInboundMessage;
+      this.received.push(msg);
+
+      if (msg.type !== "request") {
+        return;
+      }
+
+      const req = msg as RpcRequest;
+      if (req.method === "setSheetOrigin") {
+        const response: WorkerOutboundMessage = {
+          type: "response",
+          id: req.id,
+          ok: false,
+          error: "setSheetOrigin failed"
+        };
+        this.serverPort?.postMessage(response);
+        return;
+      }
+
+      const response: WorkerOutboundMessage = { type: "response", id: req.id, ok: true, result: null };
+      this.serverPort?.postMessage(response);
+    });
+
+    this.serverPort.postMessage({ type: "ready" } as WorkerOutboundMessage);
+  }
+
+  terminate(): void {
+    this.terminated = true;
+    this.serverPort?.close();
+    this.serverPort = null;
+  }
+}
+
 describe("EngineWorker RPC", () => {
   it("supports ping RPC requests", async () => {
     const worker = new MockWorker();
@@ -379,6 +425,20 @@ describe("EngineWorker RPC", () => {
 
     // Allow the microtask flush + response to run. Without internal handling, this would surface
     // as an unhandled rejection and fail the test run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    engine.terminate();
+  });
+
+  it("does not emit unhandled rejections when fire-and-forgetting a failing setSheetOrigin", async () => {
+    const worker = new ErrorSheetOriginWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    void engine.setSheetOrigin("Sheet1", "A1");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     engine.terminate();
