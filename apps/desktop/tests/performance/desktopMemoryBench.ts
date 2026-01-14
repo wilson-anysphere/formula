@@ -20,7 +20,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { parse, resolve } from 'node:path';
+import { parse, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { type BenchmarkResult } from './benchmark.ts';
@@ -404,7 +404,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb} profile=${profileRoot}`,
+    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb} profile=${relative(repoRoot, profileRoot) || profileRoot}`,
   );
 
   const values: number[] = [];

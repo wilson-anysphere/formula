@@ -595,8 +595,8 @@ async function main(): Promise<void> {
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
       `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
       `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
-      `- perf-home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
-      `- profile: ${profileRoot}\n` +
+      `- perf-home: ${relative(repoRoot, perfHome) || perfHome} (override with FORMULA_PERF_HOME)\n` +
+      `- profile: ${relative(repoRoot, profileRoot) || profileRoot}\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
