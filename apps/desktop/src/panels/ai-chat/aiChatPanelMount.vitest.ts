@@ -82,8 +82,10 @@ describe("AI chat panel", () => {
     async () => {
       const doc = new DocumentController();
       const getDocumentController = vi.fn(() => doc);
+      const app = { getCellComputedValueForSheet: vi.fn(() => 123) };
+      const getSpreadsheetApp = vi.fn(() => app);
 
-      const renderer = createPanelBodyRenderer({ getDocumentController });
+      const renderer = createPanelBodyRenderer({ getDocumentController, getSpreadsheetApp });
 
       const body = document.createElement("div");
       document.body.appendChild(body);
@@ -96,6 +98,8 @@ describe("AI chat panel", () => {
       expect(mocks.getDesktopLLMClient).toHaveBeenCalled();
       expect(mocks.getDesktopAIAuditStore).toHaveBeenCalled();
       expect(mocks.purgeLegacyDesktopLLMSettings).toHaveBeenCalled();
+      // When the toggle is off, we should not eagerly call into SpreadsheetApp for computed values.
+      expect(getSpreadsheetApp).not.toHaveBeenCalled();
 
       expect(body.querySelector('[data-testid="ai-tab-chat"]')).toBeInstanceOf(HTMLButtonElement);
       expect(body.querySelector('[data-testid="ai-tab-agent"]')).toBeInstanceOf(HTMLButtonElement);
@@ -110,6 +114,7 @@ describe("AI chat panel", () => {
       expect(lastCall?.llmClient).toBe(mocks.sentinelClient);
       expect(lastCall?.model).toBe("test-model");
       expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(false);
+      expect(lastCall?.getCellComputedValueForSheet).toBeUndefined();
       const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
       act(() => {
         renderer.cleanup([]);
@@ -158,8 +163,10 @@ describe("AI chat panel", () => {
     async () => {
       const doc = new DocumentController();
       const getDocumentController = vi.fn(() => doc);
+      const app = { getCellComputedValueForSheet: vi.fn(() => 123) };
+      const getSpreadsheetApp = vi.fn(() => app);
 
-      const renderer = createPanelBodyRenderer({ getDocumentController });
+      const renderer = createPanelBodyRenderer({ getDocumentController, getSpreadsheetApp });
 
       const body = document.createElement("div");
       document.body.appendChild(body);
@@ -180,10 +187,15 @@ describe("AI chat panel", () => {
       });
 
       expect(window.localStorage.getItem("formula.ai.includeFormulaValues")).toBe("true");
+      // When enabled, the chat panel should consult SpreadsheetApp for computed values.
+      expect(getSpreadsheetApp).toHaveBeenCalled();
       expect(mocks.createAiChatOrchestrator.mock.calls.length).toBeGreaterThan(priorCalls);
 
       const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
       expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(true);
+      expect(lastCall?.getCellComputedValueForSheet).toBeInstanceOf(Function);
+      expect(lastCall?.getCellComputedValueForSheet("Sheet1", { row: 0, col: 0 })).toBe(123);
+      expect(app.getCellComputedValueForSheet).toHaveBeenCalledWith("Sheet1", { row: 0, col: 0 });
 
       const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
       act(() => {
