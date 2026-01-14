@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use formula_format::{FormatOptions, Value as FmtValue};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -229,7 +230,13 @@ impl PivotKeyPart {
             }
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
-            PivotKeyPart::Bool(b) => b.to_string(),
+            PivotKeyPart::Bool(b) => {
+                if *b {
+                    "TRUE".to_string()
+                } else {
+                    "FALSE".to_string()
+                }
+            }
         }
     }
 }
@@ -316,16 +323,18 @@ impl PivotValue {
         match self {
             PivotValue::Blank => String::new(),
             PivotValue::Number(n) => {
-                // Keep it simple; Excel has more nuanced formatting.
-                if n.fract() == 0.0 {
-                    format!("{}", *n as i64)
-                } else {
-                    format!("{n}")
-                }
+                formula_format::format_value(FmtValue::Number(*n), None, &FormatOptions::default())
+                    .text
             }
             PivotValue::Date(d) => d.to_string(),
             PivotValue::Text(s) => s.clone(),
-            PivotValue::Bool(b) => b.to_string(),
+            PivotValue::Bool(b) => {
+                if *b {
+                    "TRUE".to_string()
+                } else {
+                    "FALSE".to_string()
+                }
+            }
         }
     }
 

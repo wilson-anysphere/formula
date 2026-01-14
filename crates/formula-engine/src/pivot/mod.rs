@@ -2244,6 +2244,25 @@ mod tests {
     }
 
     #[test]
+    fn pivot_value_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints() {
+        let s = PivotValue::Number(1e20).display_string();
+        assert_ne!(s, i64::MAX.to_string());
+        assert!(s.contains('E'), "{s}");
+        assert!(s.starts_with('1'), "{s}");
+    }
+
+    #[test]
+    fn pivot_value_display_string_normalizes_negative_zero() {
+        assert_eq!(PivotValue::Number(-0.0).display_string(), "0");
+    }
+
+    #[test]
+    fn pivot_value_display_string_formats_booleans_like_excel() {
+        assert_eq!(PivotValue::Bool(true).display_string(), "TRUE");
+        assert_eq!(PivotValue::Bool(false).display_string(), "FALSE");
+    }
+
+    #[test]
     fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region")],
@@ -2641,8 +2660,8 @@ mod tests {
             result.data,
             vec![
                 vec!["Flag".into(), "Sum of Sales".into()],
-                vec!["true".into(), 2.into()],
-                vec!["false".into(), 1.into()],
+                vec!["TRUE".into(), 2.into()],
+                vec!["FALSE".into(), 1.into()],
                 vec!["(blank)".into(), 3.into()],
             ]
         );
