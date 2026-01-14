@@ -1,6 +1,16 @@
 import { parseA1Range, type RangeAddress } from "./a1.js";
 import { tokenizeFormula } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
+// Translation tables from the Rust engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+//
+// This lightweight evaluator is used in UI contexts (formula-bar previews, AI provenance
+// fallbacks). When the UI locale uses localized function names (e.g. de-DE `SUMME`),
+// we canonicalize them so built-in function handlers (SUM, IF, ...) still work.
+import DE_DE_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
+
 export type SpreadsheetValue = number | string | boolean | null;
 export const PROVENANCE_REF_SEPARATOR = "\u001f";
 export type ProvenanceCellValue = { __cellRef: string; value: SpreadsheetValue };
@@ -42,6 +52,13 @@ export interface AiFunctionEvaluator {
 export interface EvaluateFormulaOptions {
   ai?: AiFunctionEvaluator;
   cellAddress?: string;
+  /**
+   * Optional locale identifier used for canonicalizing localized function names (e.g. de-DE `SUMME` -> `SUM`).
+   *
+   * Callers should generally pass the current UI/workbook locale when evaluating user-visible previews.
+   * When omitted, the evaluator assumes canonical English function names.
+   */
+  localeId?: string;
   /**
    * Optional name resolver used by lightweight evaluation (e.g. formula-bar preview).
    *
@@ -88,6 +105,51 @@ export const SPREADSHEET_ERROR_CODE_REGEX =
 
 export function isSpreadsheetErrorCode(value: unknown): value is string {
   return typeof value === "string" && SPREADSHEET_ERROR_CODE_REGEX.test(value);
+}
+
+function casefoldIdent(ident: string): string {
+  // Mirror Rust's locale behavior (`casefold_ident` / `casefold`): Unicode-aware uppercasing.
+  return String(ident ?? "").toUpperCase();
+}
+
+type FunctionTranslationMap = Map<string, string>;
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
+  const localizedToCanonical: FunctionTranslationMap = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    const canonUpper = casefoldIdent(canonical.trim());
+    const locUpper = casefoldIdent(localized.trim());
+    // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
+    if (canonUpper && locUpper && canonUpper !== locUpper) {
+      localizedToCanonical.set(locUpper, canonUpper);
+    }
+  }
+  return localizedToCanonical;
+}
+
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = {
+  "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
+  "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
+  "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+};
+
+function canonicalizeFunctionNameForLocale(name: string, localeId?: string): string {
+  const raw = String(name ?? "");
+  if (!raw) return raw;
+
+  const map = localeId ? FUNCTION_TRANSLATIONS_BY_LOCALE[localeId] : undefined;
+
+  // Mirror `formula_engine::locale::registry::FormulaLocale::canonical_function_name`.
+  const PREFIX = "_xlfn.";
+  const hasPrefix = raw.length >= PREFIX.length && raw.slice(0, PREFIX.length).toLowerCase() === PREFIX;
+  const base = hasPrefix ? raw.slice(PREFIX.length) : raw;
+  const upper = casefoldIdent(base);
+  const mapped = map?.get(upper) ?? upper;
+  return hasPrefix ? `${PREFIX}${mapped}` : mapped;
 }
 
 function isErrorCode(value: unknown): value is string {
@@ -171,7 +233,7 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
         case "reference":
           return { type: "reference", value: token.text };
         case "function":
-          return { type: "function", value: token.text.toUpperCase() };
+          return { type: "function", value: canonicalizeFunctionNameForLocale(token.text, options.localeId) };
         case "identifier": {
           const upper = token.text.toUpperCase();
           if (upper === "TRUE") return { type: "boolean", value: true };

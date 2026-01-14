@@ -430,6 +430,14 @@ function createPreviewEvaluator(params: {
     const text = suggestion?.text ?? "";
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
+    const localeId = (() => {
+      try {
+        return getLocale();
+      } catch {
+        return undefined;
+      }
+    })();
+
     const namedRanges = await getNamedRanges();
     const tables = await getTables();
     const resolveNameToReference = (name: string): string | null => {
@@ -527,6 +535,7 @@ function createPreviewEvaluator(params: {
         value = evaluateFormula(state.formula, getCellValue, {
           cellAddress: `${targetSheet}!${normalized}`,
           resolveNameToReference,
+          localeId,
         });
       } else {
         const raw = state?.value ?? null;
@@ -542,6 +551,7 @@ function createPreviewEvaluator(params: {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         resolveStructuredRefToReference,
+        localeId,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax.
       if (typeof value === "string" && (value === "#NAME?" || value === "#VALUE!")) return "(preview unavailable)";

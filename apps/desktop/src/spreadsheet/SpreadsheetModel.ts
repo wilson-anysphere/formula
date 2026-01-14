@@ -73,6 +73,7 @@ export class SpreadsheetModel {
     const value = evaluateFormula(input, (ref) => this.getCellValue(ref), {
       ai: this.#aiCellFunctions,
       cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
+      localeId: getLocale(),
     });
     this.#cells.set(address, { input, value });
     this.#cellsVersion += 1;
@@ -197,6 +198,7 @@ export class SpreadsheetModel {
       const value = evaluateFormula(cell.input, (ref) => this.getCellValue(ref), {
         ai: this.#aiCellFunctions,
         cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
+        localeId: getLocale(),
       });
       if (value === cell.value) continue;
       this.#cells.set(address, { input: cell.input, value });

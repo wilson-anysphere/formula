@@ -73,7 +73,7 @@ import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/
 import { AuditingOverlayRenderer } from "../grid/auditing-overlays/AuditingOverlayRenderer";
 import { computeAuditingOverlays, type AuditingMode, type AuditingOverlays } from "../grid/auditing-overlays/overlays";
 import { resolveCssVar } from "../theme/cssVars.js";
-import { t, tWithVars } from "../i18n/index.js";
+import { t, tWithVars, getLocale } from "../i18n/index.js";
 import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
@@ -18985,6 +18985,7 @@ export class SpreadsheetApp {
         value = evaluateFormula(state.formula, getCellValue, {
           cellAddress: `${targetSheet}!${normalizedAddr}`,
           resolveNameToReference,
+          localeId: getLocale(),
           maxRangeCells: MAX_CELL_READS,
         });
       } else {
@@ -19007,6 +19008,7 @@ export class SpreadsheetApp {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         resolveStructuredRefToReference,
+        localeId: getLocale(),
         maxRangeCells: MAX_CELL_READS,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax / functions.
@@ -19364,7 +19366,13 @@ export class SpreadsheetApp {
       coord.col = 0;
       parseA1CellRefIntoCoord(targetAddress, coord);
       return this.computeCellValue(targetSheet, coord, memo, stack, options);
-    }, { ai: this.aiCellFunctions, cellAddress, resolveNameToReference, resolveStructuredRefToReference });
+    }, {
+      ai: this.aiCellFunctions,
+      cellAddress,
+      resolveNameToReference,
+      resolveStructuredRefToReference,
+      localeId: getLocale(),
+    });
 
     sheetStack.delete(key);
     sheetMemo.set(key, value);

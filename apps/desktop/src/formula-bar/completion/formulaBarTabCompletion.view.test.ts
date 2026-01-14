@@ -270,6 +270,45 @@ describe("FormulaBarView tab completion (integration)", () => {
     }
   });
 
+  it("previews localized range suggestions in de-DE (SUMME)", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    try {
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SUMME(A";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await completion.flushTabCompletion();
+
+      expect(view.model.aiSuggestion()).toBe("=SUMME(A1:A10)");
+      expect(view.model.aiGhostText()).toBe("1:A10)");
+      expect(view.model.aiSuggestionPreview()).toBe(55);
+    } finally {
+      completion.destroy();
+      host.remove();
+      setLocale(prevLocale);
+    }
+  });
+
   it("suggests localized starter functions for bare '=' in de-DE", async () => {
     const prevLocale = getLocale();
     setLocale("de-DE");

@@ -35,4 +35,16 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=SUM(1;2)", () => null)).toBe(3);
     expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null)).toBe(true);
   });
+
+  it("canonicalizes localized function names when a localeId is provided", () => {
+    expect(evaluateFormula("=SUMME(1;2)", () => null, { localeId: "de-DE" })).toBe(3);
+    expect(evaluateFormula("=MITTELWERT(1;2;3)", () => null, { localeId: "de-DE" })).toBe(2);
+    expect(evaluateFormula("=WENN(1>0; TRUE; FALSE)", () => null, { localeId: "de-DE" })).toBe(true);
+
+    expect(evaluateFormula("=SOMME(1;2)", () => null, { localeId: "fr-FR" })).toBe(3);
+    expect(evaluateFormula("=MOYENNE(1;2;3)", () => null, { localeId: "fr-FR" })).toBe(2);
+
+    expect(evaluateFormula("=SUMA(1;2)", () => null, { localeId: "es-ES" })).toBe(3);
+    expect(evaluateFormula("=PROMEDIO(1;2;3)", () => null, { localeId: "es-ES" })).toBe(2);
+  });
 });
