@@ -84,8 +84,23 @@ def _find_signtool() -> str | None:
 
     # Fallback: recursive scan only when the expected layout isn't present.
     if not candidates:
-        for root in existing_roots:
-            candidates.extend([p for p in root.glob("**/signtool.exe") if p.is_file()])
+        # Keep the fallback bounded: Windows Kits directories can be large, and a fully recursive
+        # glob over `bin/` can be slow in CI. The expected layout is shallow (bin/<version>/<arch>).
+        max_depth = 4
+        for kit_root in existing_roots:
+            for dirpath, dirnames, filenames in os.walk(kit_root):
+                cur = Path(dirpath)
+                try:
+                    depth = len(cur.relative_to(kit_root).parts)
+                except ValueError:
+                    depth = max_depth
+                if depth >= max_depth:
+                    dirnames[:] = []
+                for filename in filenames:
+                    if filename.lower() == "signtool.exe":
+                        p = cur / filename
+                        if p.is_file():
+                            candidates.append(p)
 
     if not candidates:
         return None
@@ -112,13 +127,15 @@ def _find_signtool() -> str | None:
 
 
 def _find_installers(bundle_dir: Path) -> tuple[list[Path], list[Path]]:
-    msis = sorted([p for p in (bundle_dir / "msi").glob("**/*.msi") if p.is_file()])
+    # Tauri installer outputs are emitted directly under bundle/<kind>/ (no deep nesting).
+    # Avoid recursive `**/*.msi` globbing even though bundle dirs are usually small.
+    msis = sorted([p for p in (bundle_dir / "msi").glob("*.msi") if p.is_file()])
 
     exes: list[Path] = []
     for sub in ("nsis", "nsis-web"):
         d = bundle_dir / sub
         if d.is_dir():
-            exes.extend([p for p in d.glob("**/*.exe") if p.is_file()])
+            exes.extend([p for p in d.glob("*.exe") if p.is_file()])
 
     # Exclude embedded WebView2 helper installers; we only care about the Formula installer(s).
     filtered_exes: list[Path] = []
