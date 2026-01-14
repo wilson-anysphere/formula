@@ -12,6 +12,17 @@ test("parseSpreadsheetCellKey: marks strict canonical keys as isCanonical=true",
   });
 });
 
+test("parseSpreadsheetCellKey: supports an out param for reuse", () => {
+  const out = { sheetId: "", row: 0, col: 0, isCanonical: false };
+  const r1 = parseSpreadsheetCellKey("Sheet1:0:0", undefined, out);
+  assert.equal(r1, out);
+  assert.deepEqual(out, { sheetId: "Sheet1", row: 0, col: 0, isCanonical: true });
+
+  const r2 = parseSpreadsheetCellKey("Sheet1:0,1", undefined, out);
+  assert.equal(r2, out);
+  assert.deepEqual(out, { sheetId: "Sheet1", row: 0, col: 1, isCanonical: false });
+});
+
 test("parseSpreadsheetCellKey: marks non-canonical numeric encodings as isCanonical=false", () => {
   assert.deepEqual(parseSpreadsheetCellKey("Sheet1:00:0"), { sheetId: "Sheet1", row: 0, col: 0, isCanonical: false });
   assert.deepEqual(parseSpreadsheetCellKey("Sheet1:1e0:2"), { sheetId: "Sheet1", row: 1, col: 2, isCanonical: false });
@@ -42,4 +53,3 @@ test("parseSpreadsheetCellKey: rejects unsupported key shapes", () => {
   assert.equal(parseSpreadsheetCellKey("Sheet1:0:0:extra"), null);
   assert.equal(parseSpreadsheetCellKey("Sheet1:-1:0"), null);
 });
-
