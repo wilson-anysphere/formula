@@ -162,7 +162,89 @@ export function replaceForeignRootType<T>(params: { doc: Y.Doc; name: string; ex
   if (typeof t._integrate === "function") {
     t._integrate(doc as any, null);
   }
+
+  // Y.Text special case: Yjs' rich-text helpers use constructor equality checks
+  // (`n.content.constructor === ContentString`) to detect content types.
+  //
+  // When the existing root was created by a *different* Yjs module instance,
+  // each `Item.content` object is also from that module instance. If we only
+  // replace the root type, the new local Y.Text will see "foreign" Content*
+  // instances and treat them as unknown, causing `toString()` / `toDelta()` to
+  // return empty results.
+  //
+  // Fix: patch the prototype of known Content* objects based on their `getRef()`
+  // so `content.constructor` matches the local Content* constructors.
+  if (t instanceof Y.Text) {
+    const protosByRef = getYTextContentPrototypesByRef();
+    for (let n = t._start ?? null; n !== null; n = n.right) {
+      const content = n?.content;
+      if (!content || typeof content !== "object" || typeof content.getRef !== "function") continue;
+      const ref = content.getRef();
+      if (typeof ref !== "number") continue;
+      const proto = protosByRef.get(ref);
+      if (!proto) continue;
+      if (Object.getPrototypeOf(content) === proto) continue;
+      try {
+        Object.setPrototypeOf(content, proto);
+      } catch {
+        // Ignore: non-extensible content objects (unexpected).
+      }
+    }
+  }
   return t as T;
+}
+
+let yTextContentPrototypesByRef: Map<number, object> | null = null;
+
+function getYTextContentPrototypesByRef(): Map<number, object> {
+  if (yTextContentPrototypesByRef) return yTextContentPrototypesByRef;
+
+  /**
+   * Extract `Item.content` prototypes from a probe Y.Text by walking its internal item list.
+   * We key by Yjs' internal content "ref" ids (`content.getRef()`).
+   *
+   * @param {Y.Text} text
+   * @param {Map<number, object>} out
+   */
+  const collectProtos = (text: Y.Text, out: Map<number, object>) => {
+    for (let n = (text as any)?._start ?? null; n !== null; n = n.right) {
+      const content = n?.content;
+      if (!content || typeof content !== "object" || typeof content.getRef !== "function") continue;
+      const ref = content.getRef();
+      if (typeof ref !== "number" || out.has(ref)) continue;
+      out.set(ref, Object.getPrototypeOf(content));
+    }
+  };
+
+  const doc = new Y.Doc();
+  const protos = new Map<number, object>();
+
+  // Populate the common Y.Text content types:
+  // - 4: ContentString (plain text)
+  // - 5: ContentEmbed (inserted embed objects)
+  // - 6: ContentFormat (formatting attributes)
+  // - 7: ContentType (embedded Yjs types)
+  const tString = doc.getText("__content_proto_string");
+  tString.insert(0, "x");
+  collectProtos(tString, protos);
+
+  const tEmbed = doc.getText("__content_proto_embed");
+  tEmbed.insertEmbed(0, { foo: "bar" });
+  collectProtos(tEmbed, protos);
+
+  const tType = doc.getText("__content_proto_type");
+  tType.insertEmbed(0, new Y.Map());
+  collectProtos(tType, protos);
+
+  const tFormat = doc.getText("__content_proto_format");
+  tFormat.insert(0, "x");
+  tFormat.format(0, 1, { bold: true });
+  collectProtos(tFormat, protos);
+
+  doc.destroy();
+
+  yTextContentPrototypesByRef = protos;
+  return protos;
 }
 
 export function getMapRoot<T = unknown>(doc: Y.Doc, name: string): Y.Map<T> {

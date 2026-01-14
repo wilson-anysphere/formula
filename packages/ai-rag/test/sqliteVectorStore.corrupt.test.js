@@ -114,6 +114,7 @@ test(
   "SqliteVectorStore resetOnCorrupt tolerates storage.remove() failures (falls back to save())",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     // Not a SQLite database.
     /** @type {Uint8Array | null} */
     let stored = new TextEncoder().encode("not a sqlite database");

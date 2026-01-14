@@ -550,6 +550,7 @@ test(
   "SqliteVectorStore repairs v2 DBs missing metadata_hash column",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-migrate-metadata-hash-"));
@@ -711,6 +712,7 @@ test(
   "SqliteVectorStore upgrades schema_version=2 DB missing metadata_hash column (and updates hash index definition)",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-v2-upgrade-"));
@@ -857,7 +859,7 @@ test(
       assert.ok(idxStmt.step());
       const idxSql = String(idxStmt.get()[0] ?? "");
       idxStmt.free();
-      assert.match(idxSql.toLowerCase(), /length\\(vector\\)/);
+      assert.match(idxSql.toLowerCase(), /length\(vector\)/);
 
       await store.close();
 
@@ -902,6 +904,7 @@ test(
   "SqliteVectorStore ensures covering index for workbook hash scans exists",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
       const sqlStmt = store._db.prepare(
@@ -910,7 +913,7 @@ test(
       assert.ok(sqlStmt.step());
       const sql = String(sqlStmt.get()[0] ?? "");
       sqlStmt.free();
-      assert.match(sql.toLowerCase(), /length\\(vector\\)/);
+      assert.match(sql.toLowerCase(), /length\(vector\)/);
 
       const stmt = store._db.prepare("PRAGMA index_list(vectors);");
       /** @type {string[]} */
@@ -931,6 +934,7 @@ test(
   "SqliteVectorStore.listContentHashes does not parse metadata_json",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
       const blob = new Uint8Array(new Float32Array([1, 0, 0]).buffer);
@@ -1109,6 +1113,7 @@ test(
   "SqliteVectorStore.listContentHashes throws when stored vector blob has wrong length",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
       const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
