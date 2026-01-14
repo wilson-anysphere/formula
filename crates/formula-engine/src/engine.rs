@@ -16446,6 +16446,52 @@ fn walk_external_dependencies(
         }
     }
 
+    fn static_coerce_text(
+        expr: &CompiledExpr,
+        current_cell: CellKey,
+        workbook: &Workbook,
+        lexical_scopes: &[HashSet<String>],
+    ) -> Option<String> {
+        match expr {
+            Expr::Text(s) => Some(s.clone()),
+            Expr::Binary {
+                op: crate::eval::BinaryOp::Concat,
+                left,
+                right,
+            } => {
+                let mut out = static_coerce_text(left, current_cell, workbook, lexical_scopes)?;
+                out.push_str(&static_coerce_text(
+                    right,
+                    current_cell,
+                    workbook,
+                    lexical_scopes,
+                )?);
+                Some(out)
+            }
+            Expr::NameRef(nref) => {
+                let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+                    return None;
+                };
+                let name_key = normalize_defined_name(&nref.name);
+                if name_key.is_empty() {
+                    return None;
+                }
+                // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+                // Explicit sheet-qualified names should still resolve as defined names.
+                if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+                {
+                    return None;
+                }
+                let def = resolve_defined_name(workbook, sheet, &name_key)?;
+                match &def.definition {
+                    NameDefinition::Constant(Value::Text(s)) => Some(s.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
@@ -16618,7 +16664,9 @@ fn walk_external_dependencies(
                         // ref_text and A1 flag are constant we can extract external dependencies up
                         // front so external invalidation works even before the formula has been
                         // evaluated.
-                        if let Some(Expr::Text(text)) = args.first() {
+                        if let Some(text) = args.first().and_then(|arg| {
+                            static_coerce_text(arg, current_cell, workbook, lexical_scopes)
+                        }) {
                             // Only attempt static extraction when the optional A1 flag is either
                             // omitted or can be statically coerced to a scalar boolean; otherwise the
                             // reference style is runtime dependent.
@@ -19271,6 +19319,74 @@ mod tests {
             sheet: sheet_id,
             addr,
         };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_ref_text_is_constant_name() {
+        let mut engine = Engine::new();
+        engine
+            .define_name(
+                "ExtRef",
+                NameScope::Workbook,
+                NameDefinition::Constant(Value::Text("[Book.xlsx]Sheet1!B2".to_string())),
+            )
+            .unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "A1", "=INDIRECT(ExtRef)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_ref_text_is_constant_concat() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Constant text concatenation produces a constant external ref string.
+                r#"=INDIRECT("[Book.xlsx]"&"Sheet1!B2")"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
 
         assert_eq!(
             engine
