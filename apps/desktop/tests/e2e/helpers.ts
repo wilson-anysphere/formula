@@ -247,6 +247,85 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
 }
 
 export async function waitForDesktopReady(page: Page): Promise<void> {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const requestFailures: string[] = [];
+
+  const onConsole = (msg: any): void => {
+    try {
+      if (msg?.type?.() !== "error") return;
+      consoleErrors.push(msg.text());
+    } catch {
+      // ignore listener failures
+    }
+  };
+
+  const onPageError = (err: unknown): void => {
+    const message =
+      err instanceof Error
+        ? `${err.name}: ${err.message}\n${err.stack ?? ""}`.trim()
+        : String(err);
+    pageErrors.push(message);
+  };
+
+  const onRequestFailed = (req: any): void => {
+    try {
+      const method = typeof req?.method === "function" ? req.method() : "REQUEST";
+      const url = typeof req?.url === "function" ? req.url() : String(req?.url ?? "");
+      const failure = typeof req?.failure === "function" ? req.failure() : null;
+      const suffix = failure?.errorText ? ` (${failure.errorText})` : "";
+      requestFailures.push(`${method} ${url}${suffix}`.trim());
+    } catch {
+      // ignore listener failures
+    }
+  };
+
+  page.on("console", onConsole);
+  page.on("pageerror", onPageError);
+  page.on("requestfailed", onRequestFailed);
+
+  const formatStartupDiagnostics = async (): Promise<string> => {
+    const uniqueConsole = [...new Set(consoleErrors)];
+    const uniquePage = [...new Set(pageErrors)];
+    const uniqueRequests = [...new Set(requestFailures)];
+
+    let appProbe: { present: boolean; truthy: boolean; type: string; nullish: boolean; ctor: string | null } | null = null;
+    try {
+      appProbe = await page.evaluate(() => {
+        const present = "__formulaApp" in window;
+        const value = window.__formulaApp;
+        return {
+          present,
+          truthy: Boolean(value),
+          type: typeof value,
+          nullish: value == null,
+          ctor: value && typeof value === "object" ? (value as any).constructor?.name ?? null : null,
+        };
+      });
+    } catch {
+      // ignore
+    }
+
+    let viteOverlayText = "";
+    try {
+      viteOverlayText = await page.evaluate(() => {
+        const overlay = document.querySelector("vite-error-overlay") as any;
+        if (!overlay) return "";
+        return (overlay.textContent ?? "").trim();
+      });
+    } catch {
+      // ignore
+    }
+
+    const parts: string[] = [];
+    if (uniqueConsole.length > 0) parts.push(`Console errors:\n${uniqueConsole.join("\n")}`);
+    if (uniquePage.length > 0) parts.push(`Page errors:\n${uniquePage.join("\n")}`);
+    if (uniqueRequests.length > 0) parts.push(`Request failures:\n${uniqueRequests.join("\n")}`);
+    if (appProbe) parts.push(`window.__formulaApp probe:\n${JSON.stringify(appProbe, null, 2)}`);
+    if (viteOverlayText) parts.push(`Vite error overlay:\n${viteOverlayText}`);
+    return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
+  };
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
@@ -256,6 +335,9 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
           await app.whenIdle();
         }
       });
+      page.off("console", onConsole);
+      page.off("pageerror", onPageError);
+      page.off("requestfailed", onRequestFailed);
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -269,9 +351,17 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         await page.waitForLoadState("domcontentloaded");
         continue;
       }
-      throw err;
+      const diag = await formatStartupDiagnostics();
+      page.off("console", onConsole);
+      page.off("pageerror", onPageError);
+      page.off("requestfailed", onRequestFailed);
+      throw new Error(`${message}${diag}`);
     }
   }
+
+  page.off("console", onConsole);
+  page.off("pageerror", onPageError);
+  page.off("requestfailed", onRequestFailed);
 }
 
 /**

@@ -28,7 +28,10 @@
 
 .vba-migrate-panel__error-text {
   color: var(--error);
-  font-size: 12px;
+}
+
+.vba-migrate-panel__warning-text {
+  color: var(--warning);
 }
 
 .vba-migrate-panel__body {
@@ -143,7 +146,6 @@
   display: flex;
   gap: var(--space-3);
   align-items: center;
-  font-size: 12px;
 }
 
 .vba-migrate-panel__entrypoint-control {
@@ -152,7 +154,6 @@
 
 .vba-migrate-panel__subheader {
   font-size: 11px;
-  color: var(--text-secondary);
 }
 
 .vba-migrate-panel__row {

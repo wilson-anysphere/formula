@@ -559,7 +559,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
       </div>
 
       {projectError ? (
-        <div className="vba-migrate-panel__error-text" data-testid="vba-project-error">
+        <div className="vba-migrate-panel__error-text vba-migrate-panel__text-sm" data-testid="vba-project-error">
           {projectError}
         </div>
       ) : null}
@@ -648,11 +648,11 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
           <div className="vba-migrate-panel__card-header vba-migrate-panel__card-header--row">
             <div className="vba-migrate-panel__grow">
               <div className="vba-migrate-panel__heading">Conversion</div>
-              <div className="vba-migrate-panel__subheader">
+              <div className="vba-migrate-panel__subheader vba-migrate-panel__secondary-text">
                 AI backend: <span className="vba-migrate-panel__mono">Cursor</span>
               </div>
             </div>
-            <label className="vba-migrate-panel__entrypoint-label">
+            <label className="vba-migrate-panel__entrypoint-label vba-migrate-panel__text-sm">
               Macro:
               {availableMacros.length > 0 ? (
                 <select
@@ -719,7 +719,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
           {conversionError ? (
             <div
-              className="vba-migrate-panel__section vba-migrate-panel__section--divider vba-migrate-panel__error-text"
+              className="vba-migrate-panel__section vba-migrate-panel__section--divider vba-migrate-panel__error-text vba-migrate-panel__text-sm"
               data-testid="vba-conversion-error"
             >
               {conversionError}
@@ -750,7 +750,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                 <div className="vba-migrate-panel__secondary-text vba-migrate-panel__text-sm">Validating…</div>
               ) : null}
               {validationError ? (
-                <div className="vba-migrate-panel__error-text" data-testid="vba-validation-error">
+                <div className="vba-migrate-panel__error-text vba-migrate-panel__text-sm" data-testid="vba-validation-error">
                   {validationError}
                 </div>
               ) : null}
@@ -758,7 +758,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                 <div data-testid="vba-validation-report">
                   <div className="vba-migrate-panel__text-sm">
                     Result:{" "}
-                    <span className="vba-migrate-panel__mono">
+                    <span
+                      className={`vba-migrate-panel__mono${validationReport.ok ? "" : " vba-migrate-panel__warning-text"}`}
+                    >
                       {validationReport.ok ? "ok" : "failed"}
                       {Array.isArray(validationReport.mismatches)
                         ? ` (${validationReport.mismatches.length} mismatches)`
@@ -766,7 +768,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                     </span>
                   </div>
                   {validationReport.error ? (
-                    <div className="vba-migrate-panel__error-text">{String(validationReport.error)}</div>
+                    <div className="vba-migrate-panel__error-text vba-migrate-panel__text-sm">
+                      {String(validationReport.error)}
+                    </div>
                   ) : null}
                   {Array.isArray(validationReport.mismatches) && validationReport.mismatches.length > 0 ? (
                     <ul className="vba-migrate-panel__list vba-migrate-panel__text-sm">
