@@ -123,6 +123,18 @@ pub struct FilterContext {
     active_relationship_overrides: HashSet<usize>,
     cross_filter_overrides: HashMap<usize, RelationshipOverride>,
     suppress_implicit_measure_context_transition: bool,
+    /// Set of (table, column) references that are considered "in scope" for the current
+    /// evaluation.
+    ///
+    /// This is **pivot-driven metadata** used to implement a minimal version of `ISINSCOPE`.
+    /// Unlike full DAX engines, `formula-dax` does not currently infer scope from arbitrary DAX
+    /// queries; instead, the pivot engine explicitly populates this set with its axis columns.
+    ///
+    /// Non-goals / limitations (MVP):
+    /// - We do not attempt to infer scope from arbitrary DAX query shapes.
+    /// - Related filter-introspection functions like `ISFILTERED` / `HASONEFILTER` are not yet
+    ///   implemented.
+    pub(crate) in_scope_columns: HashSet<(String, String)>,
 }
 
 impl FilterContext {
@@ -882,6 +894,22 @@ impl DaxEngine {
                 };
                 let values = self.distinct_column_values(model, arg, filter)?;
                 Ok(Value::Boolean(values.len() == 1))
+            }
+            "ISINSCOPE" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("ISINSCOPE expects 1 argument".into()));
+                };
+                let Expr::ColumnRef { table, column } = arg else {
+                    return Err(DaxError::Type(
+                        "ISINSCOPE expects a column reference".into(),
+                    ));
+                };
+                Ok(Value::Boolean(
+                    filter
+                        .in_scope_columns
+                        .iter()
+                        .any(|(t, c)| t == table && c == column),
+                ))
             }
             "SELECTEDVALUE" => {
                 if args.is_empty() || args.len() > 2 {

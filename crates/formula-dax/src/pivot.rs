@@ -1363,6 +1363,10 @@ fn pivot_columnar_groups_with_measure_eval(
 
     let mut rows_out = Vec::with_capacity(groups.len());
     let mut group_filter = filter.clone();
+    group_filter.in_scope_columns = group_by
+        .iter()
+        .map(|c| (c.table.clone(), c.column.clone()))
+        .collect();
     for mut key in groups {
         for (col, value) in group_by.iter().zip(key.iter()) {
             group_filter.set_column_equals(&col.table, &col.column, value.clone());
@@ -2013,6 +2017,10 @@ fn pivot_row_scan(
 
     let mut rows_out = Vec::with_capacity(groups.len());
     let mut group_filter = filter.clone();
+    group_filter.in_scope_columns = group_by
+        .iter()
+        .map(|c| (c.table.clone(), c.column.clone()))
+        .collect();
     for key in groups {
         for (col, value) in group_by.iter().zip(key.iter()) {
             group_filter.set_column_equals(&col.table, &col.column, value.clone());
@@ -2226,6 +2234,10 @@ fn pivot_row_scan_many_to_many(
 
     let mut rows_out = Vec::with_capacity(groups.len());
     let mut group_filter = filter.clone();
+    group_filter.in_scope_columns = group_by
+        .iter()
+        .map(|c| (c.table.clone(), c.column.clone()))
+        .collect();
     for key in groups {
         for (col, value) in group_by.iter().zip(key.iter()) {
             group_filter.set_column_equals(&col.table, &col.column, value.clone());
