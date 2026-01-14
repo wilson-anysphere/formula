@@ -131,6 +131,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     (sheetId: string) => {
       if (isSpreadsheetEditing) return;
       try {
+        const meta = store.getById(sheetId);
+        // Keep the spreadsheet in a consistent state: hidden/veryHidden sheets should not become
+        // the active sheet. If the user chooses to activate one, unhide it first.
+        if (meta && meta.visibility !== "visible") {
+          store.unhide(sheetId);
+        }
         host.activateSheet(sheetId);
         setActiveSheetId(sheetId);
       } catch (err) {
@@ -271,6 +277,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
 
           const actionDisabled = busy || isSpreadsheetEditing || (isRenaming && renameSheetId !== sheet.id);
           const confirmingDelete = deleteConfirmSheetId === sheet.id;
+          const activateLabel = sheet.visibility === "visible" ? "Activate" : "Unhide & Activate";
 
           return (
             <div
@@ -330,7 +337,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   disabled={actionDisabled}
                   data-testid={`organize-sheet-activate-${sheet.id}`}
                 >
-                  Activate
+                  {activateLabel}
                 </button>
 
                 {renameSheetId === sheet.id ? (

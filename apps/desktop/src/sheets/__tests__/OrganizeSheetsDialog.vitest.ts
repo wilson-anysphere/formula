@@ -274,4 +274,42 @@ describe("OrganizeSheetsDialog", () => {
     expect(store.listAll().map((s) => s.id)).toEqual(["s2"]);
     expect(activeSheetId).toBe("s2");
   });
+
+  it("activating a hidden sheet unhides it first", async () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Hidden", visibility: "hidden" },
+    ]);
+
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const activateBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-activate-s2"]');
+    expect(activateBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      activateBtn!.click();
+      await Promise.resolve();
+    });
+
+    expect(store.getById("s2")?.visibility).toBe("visible");
+    expect(activeSheetId).toBe("s2");
+  });
 });
