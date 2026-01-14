@@ -234,8 +234,8 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
     // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
     //
-    // Note: keep this conservative—quoting is always safe and keeps `Display` stable across
-    // table names that contain punctuation or whitespace.
+    // Keep this conservative—quoting is always safe and keeps `Display` stable across table names
+    // that contain punctuation or whitespace.
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
