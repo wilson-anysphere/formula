@@ -1,6 +1,8 @@
 #[path = "functions/harness.rs"]
 mod harness;
 
+use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+use formula_engine::Engine;
 use formula_engine::Value;
 
 use harness::TestSheet;
@@ -127,4 +129,34 @@ fn kana_conversions_still_apply_under_cp932() {
     sheet.set_text_codepage(932);
     assert_eq!(sheet.eval(r#"=DBCS("ｶﾞ")"#), Value::Text("ガ".to_string()));
     assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ｶﾞ".to_string()));
+}
+
+#[test]
+fn set_text_codepage_triggers_recalc_in_automatic_mode() {
+    let mut engine = Engine::new();
+    let mut settings = CalcSettings::default();
+    settings.calculation_mode = CalculationMode::Automatic;
+    engine.set_calc_settings(settings);
+
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=DBCS("ABC 123")"#)
+        .unwrap();
+    // Ensure the starting value is materialized before toggling the codepage.
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("ABC 123".to_string())
+    );
+
+    // Automatic mode should recalculate immediately when the workbook text codepage changes.
+    engine.set_text_codepage(932);
+    assert_eq!(engine.text_codepage(), 932);
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("ＡＢＣ　１２３".to_string())
+    );
+    assert!(
+        !engine.has_dirty_cells(),
+        "engine should be clean after automatic recalc"
+    );
 }
