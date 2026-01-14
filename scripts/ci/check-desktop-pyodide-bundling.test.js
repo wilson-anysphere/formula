@@ -117,6 +117,28 @@ test("maybe-ensure script gates bundling behind FORMULA_BUNDLE_PYODIDE_ASSETS", 
   );
 });
 
+test("vite build strips dist/pyodide unless FORMULA_BUNDLE_PYODIDE_ASSETS is set", () => {
+  const src = stripComments(readText("apps/desktop/vite.config.ts"));
+
+  // Defense-in-depth: even if a dev/CI cache accidentally populates `apps/desktop/public/pyodide/...`,
+  // ensure the production Vite build removes it from `dist/` unless bundling is explicitly enabled.
+  assert.match(
+    src,
+    /stripPyodideFromDist/,
+    "Expected apps/desktop/vite.config.ts to include the stripPyodideFromDist build hook",
+  );
+  assert.match(
+    src,
+    /FORMULA_BUNDLE_PYODIDE_ASSETS/,
+    "Expected apps/desktop/vite.config.ts to gate Pyodide bundling behind FORMULA_BUNDLE_PYODIDE_ASSETS",
+  );
+  assert.match(
+    src,
+    /rmSync\([^)]*["']pyodide["']/,
+    "Expected apps/desktop/vite.config.ts to remove the pyodide directory from dist via rmSync(...)",
+  );
+});
+
 test("desktop Pyodide version + required assets stay in sync (ensure script / Rust / python-runtime)", () => {
   const ensureSrc = readText("apps/desktop/scripts/ensure-pyodide-assets.mjs");
   const rustSrc = readText("apps/desktop/src-tauri/src/pyodide_assets.rs");
