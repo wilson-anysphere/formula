@@ -52,10 +52,6 @@ fn encrypted_ooxml_bytes_with_encrypted_package(encrypted_package: &[u8]) -> Vec
     )
 }
 
-fn encrypted_ooxml_bytes() -> Vec<u8> {
-    encrypted_ooxml_bytes_with_encrypted_package(&[])
-}
-
 #[test]
 fn detects_encrypted_ooxml_xlsx_container() {
     let tmp = tempfile::tempdir().expect("tempdir");
