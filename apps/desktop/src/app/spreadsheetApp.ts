@@ -4238,6 +4238,14 @@ export class SpreadsheetApp {
     }
     this.stopDrawingGestureAutoScroll();
     this.drawingGesturePointerPos = null;
+    // Clear outline toggle controls so disposed app instances don't retain DOM button trees
+    // (each button attaches event listeners + can capture sheet state) if the instance stays
+    // referenced (tests/hot reload/multi-document workflows).
+    try {
+      this.outlineLayer?.replaceChildren();
+    } catch {
+      // ignore (tests may construct partial app instances)
+    }
     this.outlineButtons.clear();
     this.chartModels.clear();
     this.dirtyChartIds.clear();
@@ -4281,6 +4289,32 @@ export class SpreadsheetApp {
     this.outlinesBySheet.clear();
     this.chartRecordLookupCache = null;
 
+    // The comments tooltip/panel and auditing legend are rendered as DOM overlays. Even after
+    // `root.replaceChildren()`, a referenced SpreadsheetApp instance can keep these detached
+    // subtrees alive. Clear them so large comment/thread payloads don't linger post-dispose.
+    try {
+      (this.commentsPanelThreads as any)?.replaceChildren?.();
+      if (this.commentsPanelCell) this.commentsPanelCell.textContent = "";
+      if (this.newCommentInput) this.newCommentInput.value = "";
+    } catch {
+      // ignore
+    }
+    try {
+      (this.commentTooltip as any)?.replaceChildren?.();
+      this.commentTooltip?.classList?.remove("comment-tooltip--visible");
+      this.commentTooltipVisible = false;
+      this.lastHoveredCommentCellKey = null;
+      this.lastHoveredCommentIndexVersion = -1;
+    } catch {
+      // ignore
+    }
+    try {
+      (this.auditingLegend as any)?.replaceChildren?.();
+      if (this.auditingLegend) this.auditingLegend.hidden = true;
+    } catch {
+      // ignore
+    }
+
     // Clear derived caches so a destroyed SpreadsheetApp instance doesn't retain large
     // per-sheet allocations if it stays referenced (tests/hot reload).
     this.computedValuesByCoord.clear();
@@ -4288,6 +4322,7 @@ export class SpreadsheetApp {
     this.lastComputedValuesSheetCache = null;
     this.imageStore.clear();
     this.remotePresences = [];
+    this.presenceRenderer = null;
     // Axis/viewport caches can hold very large arrays/maps for big sheets.
     //
     // Shared-grid mode intentionally does not build these caches (they are O(maxRows/maxCols)).
@@ -11260,9 +11295,9 @@ export class SpreadsheetApp {
     panel.dataset.testid = "comments-panel";
     panel.className = "comments-panel";
 
-    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
-    panel.addEventListener("dblclick", (e) => e.stopPropagation());
-    panel.addEventListener("keydown", (e) => e.stopPropagation());
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation(), { signal: this.domAbort.signal });
+    panel.addEventListener("dblclick", (e) => e.stopPropagation(), { signal: this.domAbort.signal });
+    panel.addEventListener("keydown", (e) => e.stopPropagation(), { signal: this.domAbort.signal });
 
     const header = document.createElement("div");
     header.className = "comments-panel__header";
@@ -11276,7 +11311,7 @@ export class SpreadsheetApp {
     closeButton.type = "button";
     closeButton.className = "comments-panel__close-button";
     closeButton.setAttribute("aria-label", t("comments.closePanel"));
-    closeButton.addEventListener("click", () => this.toggleCommentsPanel());
+    closeButton.addEventListener("click", () => this.toggleCommentsPanel(), { signal: this.domAbort.signal });
 
     header.appendChild(title);
     header.appendChild(closeButton);
@@ -11315,7 +11350,7 @@ export class SpreadsheetApp {
     this.newCommentSubmitButton.textContent = t("comments.new.submit");
     this.newCommentSubmitButton.type = "button";
     this.newCommentSubmitButton.className = "comments-panel__submit-button";
-    this.newCommentSubmitButton.addEventListener("click", () => this.submitNewComment());
+    this.newCommentSubmitButton.addEventListener("click", () => this.submitNewComment(), { signal: this.domAbort.signal });
 
     footerRow.appendChild(this.newCommentInput);
     footerRow.appendChild(this.newCommentSubmitButton);
@@ -16487,10 +16522,10 @@ export class SpreadsheetApp {
           e.stopPropagation();
           this.getOutlineForSheet(this.sheetId).toggleRowGroup(summaryIndex);
           this.onOutlineUpdated();
-        });
+        }, { signal: this.domAbort.signal });
         button.addEventListener("pointerdown", (e) => {
           e.stopPropagation();
-        });
+        }, { signal: this.domAbort.signal });
         this.outlineButtons.set(key, button);
         this.outlineLayer.appendChild(button);
       }
@@ -16525,10 +16560,10 @@ export class SpreadsheetApp {
           e.stopPropagation();
           this.getOutlineForSheet(this.sheetId).toggleColGroup(summaryIndex);
           this.onOutlineUpdated();
-        });
+        }, { signal: this.domAbort.signal });
         button.addEventListener("pointerdown", (e) => {
           e.stopPropagation();
-        });
+        }, { signal: this.domAbort.signal });
         this.outlineButtons.set(key, button);
         this.outlineLayer.appendChild(button);
       }

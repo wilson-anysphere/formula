@@ -156,6 +156,21 @@ describe("SpreadsheetApp drawings teardown", () => {
     const aiDisposeSpy = vi.spyOn(AiCellFunctionEngine.prototype, "dispose");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true, formulaBar: formulaBarRoot });
 
+    const outlineLayer = root.querySelector<HTMLDivElement>("div.outline-layer");
+    const commentsThreads = root.querySelector<HTMLDivElement>("div.comments-panel__threads");
+    const commentTooltip = root.querySelector<HTMLDivElement>("div.comment-tooltip");
+    const auditingLegend = root.querySelector<HTMLDivElement>("div.auditing-legend");
+    expect(outlineLayer).toBeTruthy();
+    expect(commentsThreads).toBeTruthy();
+    expect(commentTooltip).toBeTruthy();
+    expect(auditingLegend).toBeTruthy();
+    // Seed some children so dispose() can prove it clears detached DOM subtrees even when
+    // the SpreadsheetApp instance stays referenced.
+    outlineLayer!.appendChild(document.createElement("button"));
+    commentsThreads!.appendChild(document.createElement("div"));
+    commentTooltip!.appendChild(document.createElement("div"));
+    auditingLegend!.appendChild(document.createElement("div"));
+
     // Register a few listeners and seed caches so destroy() can be validated as a
     // best-effort memory release path even when the app object stays referenced.
     app.subscribeSelection(() => {});
@@ -235,6 +250,10 @@ describe("SpreadsheetApp drawings teardown", () => {
     expect(((app as any).editStateListeners as Set<unknown>).size).toBe(0);
     expect(((app as any).drawingsListeners as Set<unknown>).size).toBe(0);
     expect(((app as any).drawingSelectionListeners as Set<unknown>).size).toBe(0);
+    expect(outlineLayer!.childElementCount).toBe(0);
+    expect(commentsThreads!.childElementCount).toBe(0);
+    expect(commentTooltip!.childElementCount).toBe(0);
+    expect(auditingLegend!.childElementCount).toBe(0);
     if (input) {
       expect(input.isConnected).toBe(false);
       expect(input.onchange).toBeNull();
