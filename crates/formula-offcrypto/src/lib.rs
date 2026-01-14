@@ -2541,6 +2541,7 @@ pub fn decrypt_ooxml_standard(
 
 fn hash_output_len(algo: HashAlgorithm) -> usize {
     match algo {
+        HashAlgorithm::Md5 => 16,
         HashAlgorithm::Sha1 => 20,
         HashAlgorithm::Sha256 => 32,
         HashAlgorithm::Sha384 => 48,
@@ -3057,6 +3058,12 @@ fn verify_agile_integrity(
     // MS-OFFCRYPTO dataIntegrity HMAC is computed over the full EncryptedPackage stream (including
     // the 8-byte original size header).
     let actual_hmac = match info.key_data_hash_algorithm {
+        HashAlgorithm::Md5 => {
+            let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(hmac_key)
+                .expect("HMAC key length is unrestricted");
+            mac.update(encrypted_package);
+            mac.finalize().into_bytes().to_vec()
+        }
         HashAlgorithm::Sha1 => {
             let mut mac = <Hmac<Sha1> as Mac>::new_from_slice(hmac_key)
                 .expect("HMAC key length is unrestricted");
