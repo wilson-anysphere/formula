@@ -1057,6 +1057,11 @@ impl PivotEngine {
             .filter_map(|(idx, kind)| (*kind == PivotRowKind::Leaf).then_some(idx))
             .collect();
 
+        let grand_total_row = row_kinds
+            .iter()
+            .enumerate()
+            .find_map(|(idx, kind)| (*kind == PivotRowKind::GrandTotal).then_some(idx));
+
         for vf_idx in 0..value_field_count {
             let show_as = cfg.value_fields[vf_idx]
                 .show_as
@@ -1119,8 +1124,78 @@ impl PivotEngine {
                 ShowAsType::RankDescending => {
                     Self::apply_rank(data, &leaf_rows, &cols, /*descending*/ true);
                 }
-                // Not implemented yet.
-                ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {}
+                ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
+                    let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() else {
+                        continue;
+                    };
+                    let Some(base_item) = cfg.value_fields[vf_idx].base_item.as_deref() else {
+                        continue;
+                    };
+                    let difference = show_as == ShowAsType::PercentDifferenceFrom;
+
+                    let row_total_col = cfg
+                        .grand_totals
+                        .columns
+                        .then_some(row_grand_total_start + vf_idx);
+
+                    if let Some(base_row_pos) = cfg
+                        .row_fields
+                        .iter()
+                        .position(|f| f.source_field == base_field)
+                    {
+                        let Some(base_part) = row_keys.iter().find_map(|rk| {
+                            rk.0.get(base_row_pos)
+                                .filter(|p| p.display_string() == base_item)
+                                .cloned()
+                        }) else {
+                            continue;
+                        };
+
+                        Self::apply_percent_of_base_item_row_field(
+                            data,
+                            &leaf_rows,
+                            grand_total_row,
+                            cube,
+                            row_keys,
+                            col_keys,
+                            &cols[..col_keys.len()],
+                            row_total_col,
+                            vf_idx,
+                            agg,
+                            base_row_pos,
+                            &base_part,
+                            difference,
+                        );
+                    } else if let Some(base_col_pos) = cfg
+                        .column_fields
+                        .iter()
+                        .position(|f| f.source_field == base_field)
+                    {
+                        let Some(base_part) = col_keys.iter().find_map(|ck| {
+                            ck.0.get(base_col_pos)
+                                .filter(|p| p.display_string() == base_item)
+                                .cloned()
+                        }) else {
+                            continue;
+                        };
+
+                        Self::apply_percent_of_base_item_column_field(
+                            data,
+                            &leaf_rows,
+                            grand_total_row,
+                            cube,
+                            row_keys,
+                            col_keys,
+                            &cols[..col_keys.len()],
+                            row_total_col,
+                            vf_idx,
+                            agg,
+                            base_col_pos,
+                            &base_part,
+                            difference,
+                        );
+                    }
+                }
                 ShowAsType::Normal => {}
             }
         }
@@ -1279,6 +1354,365 @@ impl PivotEngine {
                         data[r][c] = PivotValue::Blank;
                     }
                 }
+            }
+        }
+    }
+
+    fn apply_percent_of_base_item_cell(
+        data: &mut [Vec<PivotValue>],
+        r: usize,
+        c: usize,
+        denom: Option<f64>,
+        difference: bool,
+    ) {
+        let Some(n) = data
+            .get(r)
+            .and_then(|row| row.get(c))
+            .and_then(|v| v.as_number())
+        else {
+            return;
+        };
+        let Some(d) = denom.filter(|d| *d != 0.0) else {
+            data[r][c] = PivotValue::Blank;
+            return;
+        };
+
+        let out = if difference { (n - d) / d } else { n / d };
+        data[r][c] = PivotValue::Number(out);
+    }
+
+    fn cube_cell_number(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_key: &PivotKey,
+        col_key: &PivotKey,
+        value_field_idx: usize,
+        agg: AggregationType,
+    ) -> Option<f64> {
+        let row_map = cube.get(row_key)?;
+        let cell_accs = row_map.get(col_key)?;
+        cell_accs
+            .get(value_field_idx)
+            .map(|acc| acc.finalize(agg).as_number())
+            .flatten()
+    }
+
+    fn cube_row_total(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_key: &PivotKey,
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+    ) -> Option<f64> {
+        let row_map = cube.get(row_key)?;
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for col_key in col_keys {
+            if let Some(cell_accs) = row_map.get(col_key) {
+                acc.merge(&cell_accs[value_field_idx]);
+                saw = true;
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn cube_row_total_filtered_by_col_part(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_key: &PivotKey,
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_col_pos: usize,
+        base_part: &PivotKeyPart,
+    ) -> Option<f64> {
+        let row_map = cube.get(row_key)?;
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for col_key in col_keys {
+            if col_key.0.get(base_col_pos) != Some(base_part) {
+                continue;
+            }
+            if let Some(cell_accs) = row_map.get(col_key) {
+                acc.merge(&cell_accs[value_field_idx]);
+                saw = true;
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn cube_col_total(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_key: &PivotKey,
+        value_field_idx: usize,
+        agg: AggregationType,
+    ) -> Option<f64> {
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for row_key in row_keys {
+            let Some(row_map) = cube.get(row_key) else {
+                continue;
+            };
+            if let Some(cell_accs) = row_map.get(col_key) {
+                acc.merge(&cell_accs[value_field_idx]);
+                saw = true;
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn cube_col_total_filtered_by_row_part(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_key: &PivotKey,
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_row_pos: usize,
+        base_part: &PivotKeyPart,
+    ) -> Option<f64> {
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for row_key in row_keys {
+            if row_key.0.get(base_row_pos) != Some(base_part) {
+                continue;
+            }
+            let Some(row_map) = cube.get(row_key) else {
+                continue;
+            };
+            if let Some(cell_accs) = row_map.get(col_key) {
+                acc.merge(&cell_accs[value_field_idx]);
+                saw = true;
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn cube_grand_total_filtered_by_row_part(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_row_pos: usize,
+        base_part: &PivotKeyPart,
+    ) -> Option<f64> {
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for row_key in row_keys {
+            if row_key.0.get(base_row_pos) != Some(base_part) {
+                continue;
+            }
+            let Some(row_map) = cube.get(row_key) else {
+                continue;
+            };
+            for col_key in col_keys {
+                if let Some(cell_accs) = row_map.get(col_key) {
+                    acc.merge(&cell_accs[value_field_idx]);
+                    saw = true;
+                }
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn cube_grand_total_filtered_by_col_part(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_col_pos: usize,
+        base_part: &PivotKeyPart,
+    ) -> Option<f64> {
+        let mut acc = Accumulator::new();
+        let mut saw = false;
+        for row_key in row_keys {
+            let Some(row_map) = cube.get(row_key) else {
+                continue;
+            };
+            for col_key in col_keys {
+                if col_key.0.get(base_col_pos) != Some(base_part) {
+                    continue;
+                }
+                if let Some(cell_accs) = row_map.get(col_key) {
+                    acc.merge(&cell_accs[value_field_idx]);
+                    saw = true;
+                }
+            }
+        }
+        saw.then(|| acc.finalize(agg).as_number()).flatten()
+    }
+
+    fn apply_percent_of_base_item_row_field(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        grand_total_row: Option<usize>,
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        regular_cols: &[usize],
+        row_total_col: Option<usize>,
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_row_pos: usize,
+        base_part: &PivotKeyPart,
+        difference: bool,
+    ) {
+        for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
+            let Some(row_key) = row_keys.get(leaf_idx) else {
+                continue;
+            };
+            if base_row_pos >= row_key.0.len() {
+                continue;
+            }
+            let mut base_key_parts = row_key.0.clone();
+            base_key_parts[base_row_pos] = base_part.clone();
+            let base_row_key = PivotKey(base_key_parts);
+
+            for (col_idx, col_key) in col_keys.iter().enumerate() {
+                let denom =
+                    Self::cube_cell_number(cube, &base_row_key, col_key, value_field_idx, agg);
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let denom =
+                    Self::cube_row_total(cube, &base_row_key, col_keys, value_field_idx, agg);
+                Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
+            }
+        }
+
+        if let Some(grand_r) = grand_total_row {
+            for (col_idx, col_key) in col_keys.iter().enumerate() {
+                let denom = Self::cube_col_total_filtered_by_row_part(
+                    cube,
+                    row_keys,
+                    col_key,
+                    value_field_idx,
+                    agg,
+                    base_row_pos,
+                    base_part,
+                );
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    grand_r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let denom = Self::cube_grand_total_filtered_by_row_part(
+                    cube,
+                    row_keys,
+                    col_keys,
+                    value_field_idx,
+                    agg,
+                    base_row_pos,
+                    base_part,
+                );
+                Self::apply_percent_of_base_item_cell(data, grand_r, total_col, denom, difference);
+            }
+        }
+    }
+
+    fn apply_percent_of_base_item_column_field(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        grand_total_row: Option<usize>,
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        regular_cols: &[usize],
+        row_total_col: Option<usize>,
+        value_field_idx: usize,
+        agg: AggregationType,
+        base_col_pos: usize,
+        base_part: &PivotKeyPart,
+        difference: bool,
+    ) {
+        let base_col_keys = col_keys
+            .iter()
+            .map(|col_key| {
+                let mut parts = col_key.0.clone();
+                if base_col_pos < parts.len() {
+                    parts[base_col_pos] = base_part.clone();
+                }
+                PivotKey(parts)
+            })
+            .collect::<Vec<_>>();
+
+        for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
+            let Some(row_key) = row_keys.get(leaf_idx) else {
+                continue;
+            };
+
+            for col_idx in 0..col_keys.len() {
+                let denom = Self::cube_cell_number(
+                    cube,
+                    row_key,
+                    &base_col_keys[col_idx],
+                    value_field_idx,
+                    agg,
+                );
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let denom = Self::cube_row_total_filtered_by_col_part(
+                    cube,
+                    row_key,
+                    col_keys,
+                    value_field_idx,
+                    agg,
+                    base_col_pos,
+                    base_part,
+                );
+                Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
+            }
+        }
+
+        if let Some(grand_r) = grand_total_row {
+            for col_idx in 0..col_keys.len() {
+                let denom = Self::cube_col_total(
+                    cube,
+                    row_keys,
+                    &base_col_keys[col_idx],
+                    value_field_idx,
+                    agg,
+                );
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    grand_r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let denom = Self::cube_grand_total_filtered_by_col_part(
+                    cube,
+                    row_keys,
+                    col_keys,
+                    value_field_idx,
+                    agg,
+                    base_col_pos,
+                    base_part,
+                );
+                Self::apply_percent_of_base_item_cell(data, grand_r, total_col, denom, difference);
             }
         }
     }
@@ -2440,6 +2874,141 @@ mod tests {
                 vec!["East".into(), 0.25.into(), 0.5.into()],
                 vec!["West".into(), 0.75.into(), 0.5.into()],
                 vec!["Grand Total".into(), 1.0.into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_base_item_row_field() {
+        let data = vec![
+            pv_row(&["Year".into(), "Sales".into()]),
+            pv_row(&["2019".into(), 2.into()]),
+            pv_row(&["2020".into(), 6.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOf),
+                base_field: Some("Year".to_string()),
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Year".into(), "Sum of Sales".into()],
+                vec!["2019".into(), 1.0.into()],
+                vec!["2020".into(), 3.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_difference_from_base_item_row_field() {
+        let data = vec![
+            pv_row(&["Year".into(), "Sales".into()]),
+            pv_row(&["2019".into(), 2.into()]),
+            pv_row(&["2020".into(), 6.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentDifferenceFrom),
+                base_field: Some("Year".to_string()),
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Year".into(), "Sum of Sales".into()],
+                vec!["2019".into(), 0.0.into()],
+                vec!["2020".into(), 2.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_base_item_column_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Year")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOf),
+                base_field: Some("Year".to_string()),
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "2019 - Sum of Sales".into(),
+                    "2020 - Sum of Sales".into(),
+                ],
+                vec!["East".into(), 1.0.into(), 3.0.into()],
+                vec!["West".into(), 1.0.into(), 2.0.into()],
             ]
         );
     }
