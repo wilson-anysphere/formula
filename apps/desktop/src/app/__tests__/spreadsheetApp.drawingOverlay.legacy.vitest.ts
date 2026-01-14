@@ -97,6 +97,12 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
 
+    // jsdom (as used by vitest) does not provide PointerEvent in all environments.
+    // SpreadsheetApp only relies on MouseEvent fields (clientX/Y, button) for drawing hit tests.
+    if (typeof (globalThis as any).PointerEvent === "undefined") {
+      Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: MouseEvent });
+    }
+
     Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -144,13 +150,13 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
 
       expect(resizeSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          width: 800 - 48,
-          height: 600 - 24,
+          width: 800,
+          height: 600,
           dpr: 2,
         }),
       );
-      expect(drawingCanvas!.width).toBe((800 - 48) * 2);
-      expect(drawingCanvas!.height).toBe((600 - 24) * 2);
+      expect(drawingCanvas!.width).toBe(800 * 2);
+      expect(drawingCanvas!.height).toBe(600 * 2);
 
       app.destroy();
       root.remove();
@@ -291,14 +297,11 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       const renderViewport = app.getDrawingRenderViewport();
       const interactionViewport = app.getDrawingInteractionViewport();
 
-      expect(renderViewport.headerOffsetX).toBe(0);
-      expect(renderViewport.headerOffsetY).toBe(0);
-      expect(interactionViewport.headerOffsetX).toBeGreaterThan(0);
-      expect(interactionViewport.headerOffsetY).toBeGreaterThan(0);
-
-      // Frozen boundaries should map between viewport spaces by subtracting header offsets.
-      expect(interactionViewport.frozenWidthPx! - interactionViewport.headerOffsetX!).toBe(renderViewport.frozenWidthPx);
-      expect(interactionViewport.frozenHeightPx! - interactionViewport.headerOffsetY!).toBe(renderViewport.frozenHeightPx);
+      // Render and interaction viewports share the same coordinate space (full grid-root).
+      expect(renderViewport.headerOffsetX).toBe(interactionViewport.headerOffsetX);
+      expect(renderViewport.headerOffsetY).toBe(interactionViewport.headerOffsetY);
+      expect(renderViewport.frozenWidthPx).toBe(interactionViewport.frozenWidthPx);
+      expect(renderViewport.frozenHeightPx).toBe(interactionViewport.frozenHeightPx);
 
       // Verify hit testing aligns with where the object is rendered in drawingCanvas space.
       const geom = (app as any).drawingOverlay.geom;
@@ -346,13 +349,13 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       const hit = hitTestDrawings(
         index,
         interactionViewport,
-        renderX + interactionViewport.headerOffsetX! + 1,
-        renderY + interactionViewport.headerOffsetY! + 1,
+        renderX + 1,
+        renderY + 1,
       );
       expect(hit?.object.id).toBe(1);
       expect(hit?.bounds).toEqual({
-        x: renderX + interactionViewport.headerOffsetX!,
-        y: renderY + interactionViewport.headerOffsetY!,
+        x: renderX,
+        y: renderY,
         width: w,
         height: h,
       });
@@ -394,17 +397,15 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
         }),
       );
 
-      // Frozen extents should be expressed in drawing-canvas coordinates (cell-area),
-      // i.e. they exclude the row/col header offsets.
-      const headerX = 48;
-      const headerY = 24;
+      // Frozen extents are expressed in full root coordinates (including the row/col headers),
+      // matching the drawing canvas coordinate space.
       const firstScrollableCol = app.getCellRectA1("C1");
       const firstScrollableRow = app.getCellRectA1("A2");
       expect(firstScrollableCol).not.toBeNull();
       expect(firstScrollableRow).not.toBeNull();
 
-      expect(viewport.frozenWidthPx).toBe(firstScrollableCol!.x - headerX);
-      expect(viewport.frozenHeightPx).toBe(firstScrollableRow!.y - headerY);
+      expect(viewport.frozenWidthPx).toBe(firstScrollableCol!.x);
+      expect(viewport.frozenHeightPx).toBe(firstScrollableRow!.y);
 
       app.destroy();
       root.remove();

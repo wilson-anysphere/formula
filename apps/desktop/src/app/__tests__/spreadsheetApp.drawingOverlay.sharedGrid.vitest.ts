@@ -117,6 +117,12 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
 
+    // jsdom (as used by vitest) does not provide PointerEvent in all environments.
+    // SpreadsheetApp only relies on MouseEvent fields (clientX/Y, button) for drawing hit tests.
+    if (typeof (globalThis as any).PointerEvent === "undefined") {
+      Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: MouseEvent });
+    }
+
     Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -160,15 +166,15 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       expect(resizeSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          width: 800 - 48,
-          height: 600 - 24,
+          width: 800,
+          height: 600,
           dpr: 2,
         }),
       );
 
       // `DrawingOverlay.resize` should size the backing buffer at DPR scale.
-      expect(canvas!.width).toBe((800 - 48) * 2);
-      expect(canvas!.height).toBe((600 - 24) * 2);
+      expect(canvas!.width).toBe(800 * 2);
+      expect(canvas!.height).toBe(600 * 2);
 
       renderSpy.mockClear();
       const sharedGrid = (app as any).sharedGrid;
@@ -278,26 +284,23 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const headerHeight = sharedGrid.renderer.scroll.rows.totalSize(1);
       const offsetX = Math.min(headerWidth, gridViewport.width);
       const offsetY = Math.min(headerHeight, gridViewport.height);
-      const cellAreaWidth = Math.max(0, gridViewport.width - offsetX);
-      const cellAreaHeight = Math.max(0, gridViewport.height - offsetY);
 
-      // `DrawingOverlay.prototype.render` is shared between the sheet drawings overlay and the
-      // chart selection overlay. Find the call corresponding to the drawings canvas viewport,
-      // whose origin is positioned under the headers (so headerOffsetX/Y are 0).
-      const viewport = renderSpy.mock.calls
-        .map((call) => call?.[1] as any)
-        .find((vp) => vp && vp.headerOffsetX === 0 && vp.headerOffsetY === 0 && vp.width === cellAreaWidth && vp.height === cellAreaHeight);
+      const viewport = renderSpy.mock.calls.at(-1)?.[1] as any;
       expect(viewport).toBeTruthy();
 
       expect(viewport).toEqual(
         expect.objectContaining({
+          width: gridViewport.width,
+          height: gridViewport.height,
+          headerOffsetX: offsetX,
+          headerOffsetY: offsetY,
           frozenRows: 1,
           frozenCols: 1,
         }),
       );
 
-      const expectedFrozenWidthPx = Math.min(cellAreaWidth, Math.max(0, gridViewport.frozenWidth - offsetX));
-      const expectedFrozenHeightPx = Math.min(cellAreaHeight, Math.max(0, gridViewport.frozenHeight - offsetY));
+      const expectedFrozenWidthPx = Math.min(gridViewport.width, Math.max(offsetX, gridViewport.frozenWidth));
+      const expectedFrozenHeightPx = Math.min(gridViewport.height, Math.max(offsetY, gridViewport.frozenHeight));
 
       expect(viewport.frozenWidthPx).toBe(expectedFrozenWidthPx);
       expect(viewport.frozenHeightPx).toBe(expectedFrozenHeightPx);
@@ -458,16 +461,11 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const renderViewport = app.getDrawingRenderViewport(sharedViewport);
       const interactionViewport = app.getDrawingInteractionViewport(sharedViewport);
 
-      // Render viewport (drawingCanvas-local).
-      expect(renderViewport.headerOffsetX).toBe(0);
-      expect(renderViewport.headerOffsetY).toBe(0);
-      // Interaction viewport (selectionCanvas/root-local).
-      expect(interactionViewport.headerOffsetX).toBeGreaterThan(0);
-      expect(interactionViewport.headerOffsetY).toBeGreaterThan(0);
-
-      // Frozen boundaries should map between viewport spaces by the header offsets.
-      expect(interactionViewport.frozenWidthPx! - interactionViewport.headerOffsetX!).toBe(renderViewport.frozenWidthPx);
-      expect(interactionViewport.frozenHeightPx! - interactionViewport.headerOffsetY!).toBe(renderViewport.frozenHeightPx);
+      // Render and interaction viewports share the same coordinate space (full grid-root).
+      expect(renderViewport.headerOffsetX).toBe(interactionViewport.headerOffsetX);
+      expect(renderViewport.headerOffsetY).toBe(interactionViewport.headerOffsetY);
+      expect(renderViewport.frozenWidthPx).toBe(interactionViewport.frozenWidthPx);
+      expect(renderViewport.frozenHeightPx).toBe(interactionViewport.frozenHeightPx);
 
       // Verify hit testing aligns with the rectangle rendered in drawingCanvas space.
       const geom = (app as any).drawingOverlay.geom;
@@ -515,20 +513,16 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const hit = hitTestDrawings(
         index,
         interactionViewport,
-        renderX + interactionViewport.headerOffsetX! + 1,
-        renderY + interactionViewport.headerOffsetY! + 1,
+        renderX + 1,
+        renderY + 1,
       );
       expect(hit?.object.id).toBe(1);
       expect(hit?.bounds).toEqual({
-        x: renderX + interactionViewport.headerOffsetX!,
-        y: renderY + interactionViewport.headerOffsetY!,
+        x: renderX,
+        y: renderY,
         width: w,
         height: h,
       });
-
-      // The hit-test bounds should map back to the render-space bounds by subtracting headers.
-      expect(hit!.bounds.x - interactionViewport.headerOffsetX!).toBe(renderX);
-      expect(hit!.bounds.y - interactionViewport.headerOffsetY!).toBe(renderY);
 
       app.destroy();
       root.remove();

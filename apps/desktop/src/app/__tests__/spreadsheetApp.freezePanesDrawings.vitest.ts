@@ -161,12 +161,19 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       const sharedViewport = sharedGrid.renderer.scroll.getViewportState();
       const renderViewport = app.getDrawingRenderViewport(sharedViewport);
 
+      const headerOffsetX = renderViewport.headerOffsetX ?? 0;
+      const headerOffsetY = renderViewport.headerOffsetY ?? 0;
+
       const scrollX = renderViewport.scrollX;
       const scrollY = renderViewport.scrollY;
-      const frozenContentWidth = renderViewport.frozenWidthPx ?? 0;
-      const frozenContentHeight = renderViewport.frozenHeightPx ?? 0;
-      const scrollableWidth = Math.max(0, renderViewport.width - frozenContentWidth);
-      const scrollableHeight = Math.max(0, renderViewport.height - frozenContentHeight);
+      const frozenBoundaryX = renderViewport.frozenWidthPx ?? headerOffsetX;
+      const frozenBoundaryY = renderViewport.frozenHeightPx ?? headerOffsetY;
+      const frozenContentWidth = Math.max(0, frozenBoundaryX - headerOffsetX);
+      const frozenContentHeight = Math.max(0, frozenBoundaryY - headerOffsetY);
+      const cellAreaWidth = Math.max(0, renderViewport.width - headerOffsetX);
+      const cellAreaHeight = Math.max(0, renderViewport.height - headerOffsetY);
+      const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+      const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
 
       // Create one drawing per quadrant.
       const objects: DrawingObject[] = [
@@ -204,12 +211,22 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       expect(drawingsCtx.clip).toHaveBeenCalledTimes(4);
 
       const expectedClipRects = [
-        { x: 0, y: 0, width: frozenContentWidth, height: frozenContentHeight },
-        { x: frozenContentWidth, y: 0, width: scrollableWidth, height: frozenContentHeight },
-        { x: 0, y: frozenContentHeight, width: frozenContentWidth, height: scrollableHeight },
+        { x: headerOffsetX, y: headerOffsetY, width: frozenContentWidth, height: frozenContentHeight },
         {
-          x: frozenContentWidth,
-          y: frozenContentHeight,
+          x: headerOffsetX + frozenContentWidth,
+          y: headerOffsetY,
+          width: scrollableWidth,
+          height: frozenContentHeight,
+        },
+        {
+          x: headerOffsetX,
+          y: headerOffsetY + frozenContentHeight,
+          width: frozenContentWidth,
+          height: scrollableHeight,
+        },
+        {
+          x: headerOffsetX + frozenContentWidth,
+          y: headerOffsetY + frozenContentHeight,
           width: scrollableWidth,
           height: scrollableHeight,
         },
@@ -229,12 +246,12 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
         x: args[0] as number,
         y: args[1] as number,
       }));
-      expect(strokeCalls[0]).toEqual({ x: 0, y: 0 }); // top-left: no scroll
-      expect(strokeCalls[1]).toEqual({ x: frozenContentWidth - scrollX, y: 0 }); // top-right: scrollX only
-      expect(strokeCalls[2]).toEqual({ x: 0, y: frozenContentHeight - scrollY }); // bottom-left: scrollY only
+      expect(strokeCalls[0]).toEqual({ x: headerOffsetX, y: headerOffsetY }); // top-left: no scroll
+      expect(strokeCalls[1]).toEqual({ x: headerOffsetX + frozenContentWidth - scrollX, y: headerOffsetY }); // top-right: scrollX only
+      expect(strokeCalls[2]).toEqual({ x: headerOffsetX, y: headerOffsetY + frozenContentHeight - scrollY }); // bottom-left: scrollY only
       expect(strokeCalls[3]).toEqual({
-        x: frozenContentWidth - scrollX,
-        y: frozenContentHeight - scrollY,
+        x: headerOffsetX + frozenContentWidth - scrollX,
+        y: headerOffsetY + frozenContentHeight - scrollY,
       }); // bottom-right: scrollX+scrollY
 
       app.destroy();

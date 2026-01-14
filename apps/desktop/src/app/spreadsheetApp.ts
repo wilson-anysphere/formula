@@ -915,8 +915,6 @@ export class SpreadsheetApp {
         width: number;
         height: number;
         dpr: number;
-        offsetX: number;
-        offsetY: number;
       }
     | null = null;
   private referenceCanvas: HTMLCanvasElement;
@@ -2256,7 +2254,8 @@ export class SpreadsheetApp {
 
     // Drawings interactions also require capture-based hit testing because in shared-grid mode
     // pointer events are handled by the full-size `selectionCanvas` (which includes headers)
-    // while drawings are rendered onto `drawingCanvas` (positioned under headers).
+    // while drawings are rendered onto `drawingCanvas` (which spans the full grid root and is
+    // clipped to the cell grid body area under headers).
     //
     // Use a capture listener so we can intercept drawing clicks before grid selection handlers run.
     this.root.addEventListener("pointerdown", (e) => this.onDrawingPointerDownCapture(e), {
@@ -9621,7 +9620,7 @@ export class SpreadsheetApp {
     /** Frozen boundary position in selection/root coordinates (includes header offsets). */
     frozenBoundaryXRoot: number;
     frozenBoundaryYRoot: number;
-    /** Frozen boundary position in drawingCanvas coordinates (excludes header offsets). */
+    /** Frozen boundary position in cell-area coordinates (excludes header offsets). */
     frozenBoundaryXCellArea: number;
     frozenBoundaryYCellArea: number;
     frozenRows: number;
@@ -9702,30 +9701,33 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Viewport used for rendering on `drawingCanvas`, whose origin is already positioned
-   * under the row/col headers (so headerOffsetX/Y are always 0).
+   * Viewport used for rendering on `drawingCanvas` (full `.grid-root` coordinates).
+   *
+   * The drawing overlay canvas spans the entire grid root so it can share the
+   * same coordinate space as other overlays (selection, outline, etc). To ensure
+   * drawings never paint over the row/col headers, we pass `headerOffsetX/Y` so
+   * the DrawingOverlay can clip to the cell grid body area.
    */
   getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
 
-    // The drawing canvas is positioned under headers so the overlay render coordinates
-    // match sheet cell-space without needing header offsets.
-    this.drawingCanvas.style.left = `${layout.headerOffsetX}px`;
-    this.drawingCanvas.style.top = `${layout.headerOffsetY}px`;
+    // Reset any legacy positioning so the drawing canvas always covers the full grid root.
+    this.drawingCanvas.style.left = "0px";
+    this.drawingCanvas.style.top = "0px";
 
     const viewport: DrawingViewport = {
       scrollX: this.scrollX,
       scrollY: this.scrollY,
-      width: layout.cellAreaWidth,
-      height: layout.cellAreaHeight,
+      width: layout.rootWidth,
+      height: layout.rootHeight,
       dpr: this.dpr,
       zoom: this.getZoom(),
-      headerOffsetX: 0,
-      headerOffsetY: 0,
+      headerOffsetX: layout.headerOffsetX,
+      headerOffsetY: layout.headerOffsetY,
       frozenRows: layout.frozenRows,
       frozenCols: layout.frozenCols,
-      frozenWidthPx: layout.frozenBoundaryXCellArea,
-      frozenHeightPx: layout.frozenBoundaryYCellArea,
+      frozenWidthPx: layout.frozenBoundaryXRoot,
+      frozenHeightPx: layout.frozenBoundaryYRoot,
     };
 
     const memo = this.drawingViewportMemo;
@@ -9735,12 +9737,7 @@ export class SpreadsheetApp {
         width: viewport.width,
         height: viewport.height,
         dpr: viewport.dpr,
-        offsetX: layout.headerOffsetX,
-        offsetY: layout.headerOffsetY,
       };
-    } else if (memo.offsetX !== layout.headerOffsetX || memo.offsetY !== layout.headerOffsetY) {
-      memo.offsetX = layout.headerOffsetX;
-      memo.offsetY = layout.headerOffsetY;
     }
 
     return viewport;
