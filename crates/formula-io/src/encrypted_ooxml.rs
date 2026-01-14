@@ -1470,9 +1470,17 @@ mod tests {
         }
 
         // --- Decrypt via the normal Standard AES scheme probing logic ---
+        crate::offcrypto::standard::reset_hash_password_fixed_spin_calls();
         let decrypted = decrypt_encrypted_package(&encryption_info, &encrypted_package, password)
             .expect("decrypt");
         assert_eq!(decrypted, plaintext);
+        // Regression/perf guardrail: `CbcPerSegmentKeyIvZero` must not re-run the expensive fixed-spin
+        // password hash once per segment.
+        assert_eq!(
+            crate::offcrypto::standard::hash_password_fixed_spin_call_count(),
+            1,
+            "expected Standard fixed-spin password hash to run only once during decryption"
+        );
     }
 }
 

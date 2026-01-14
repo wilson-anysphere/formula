@@ -29,6 +29,7 @@ use std::cell::Cell;
 #[cfg(test)]
 thread_local! {
     static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+    static HASH_PASSWORD_FIXED_SPIN_CALLS: Cell<usize> = Cell::new(0);
 }
 
 use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError, AES_BLOCK_SIZE};
@@ -564,6 +565,16 @@ pub(crate) fn ct_eq_call_count() -> usize {
     CT_EQ_CALLS.with(|calls| calls.get())
 }
 
+#[cfg(test)]
+pub(crate) fn reset_hash_password_fixed_spin_calls() {
+    HASH_PASSWORD_FIXED_SPIN_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn hash_password_fixed_spin_call_count() -> usize {
+    HASH_PASSWORD_FIXED_SPIN_CALLS.with(|calls| calls.get())
+}
+
 /// Verify a password against the Standard (CryptoAPI) `EncryptionVerifier` structure.
 ///
 /// Returns `Ok(true)` when the password is correct, `Ok(false)` when the password is incorrect, and
@@ -800,6 +811,9 @@ fn hash_password_fixed_spin(
     salt: &[u8],
     alg_id_hash: u32,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    #[cfg(test)]
+    HASH_PASSWORD_FIXED_SPIN_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
     // Performance note: this function sits on the hot-path for Standard/CryptoAPI verification and
     // is specified to run a fixed 50,000-iteration spin loop. Avoid allocating a fresh `Vec<u8>`
     // for each round; the implementation below only allocates once for the final return value.
