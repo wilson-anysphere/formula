@@ -50,6 +50,40 @@ test("mergeCenter sets horizontal center alignment on the merged cell", () => {
   assert.equal(format?.alignment?.horizontal, "center");
 });
 
+test("mergeCells refuses to merge when a non-anchor cell with content is not editable", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", "keep");
+  doc.setCellValue("Sheet1", "B1", "blocked");
+
+  // Prevent editing B1 (but keep existing content).
+  doc.canEditCell = ({ sheetId, row, col }) => sheetId !== "Sheet1" || row !== 0 || col !== 1;
+
+  const didMerge = mergeCells(doc, "Sheet1", { startRow: 0, endRow: 0, startCol: 0, endCol: 2 }, { label: "Merge Cells" });
+  assert.equal(didMerge, false);
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), []);
+  assert.equal(doc.getCell("Sheet1", "B1").value, "blocked");
+});
+
+test("mergeAcross refuses to merge when a non-anchor cell with content is not editable", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", "row1");
+  doc.setCellValue("Sheet1", "A2", "row2");
+  doc.setCellValue("Sheet1", "B2", "blocked");
+
+  // Prevent editing B2 (but keep existing content).
+  doc.canEditCell = ({ sheetId, row, col }) => sheetId !== "Sheet1" || row !== 1 || col !== 1;
+
+  doc.beginBatch({ label: "Merge Across" });
+  const didMerge = mergeAcross(doc, "Sheet1", { startRow: 0, endRow: 1, startCol: 0, endCol: 2 }, { label: "Merge Across" });
+  doc.endBatch();
+
+  assert.equal(didMerge, false);
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), []);
+  assert.equal(doc.getCell("Sheet1", "B2").value, "blocked");
+});
+
 test("merged ranges shift/expand with structural row edits", () => {
   const doc = new DocumentController();
 

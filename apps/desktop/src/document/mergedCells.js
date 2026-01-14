@@ -65,13 +65,37 @@ export function mergeCells(doc, sheetId, range, options = {}) {
   const isSingleCell = r.startRow === r.endRow && r.startCol === r.endCol;
   if (isSingleCell) return false;
 
+  // Permission semantics: merging discards contents of non-anchor cells. Mirror the
+  // DocumentController implementation by refusing to merge if we can't clear an
+  // interior cell that currently has content (to avoid hidden data inside a merge).
+  if (typeof doc.canEditCell === "function") {
+    if (!doc.canEditCell({ sheetId, row: r.startRow, col: r.startCol })) return false;
+    let blockedByPermissions = false;
+    if (typeof doc.forEachCellInSheet === "function") {
+      doc.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+        if (blockedByPermissions) return;
+        if (row < r.startRow || row > r.endRow) return;
+        if (col < r.startCol || col > r.endCol) return;
+        if (row === r.startRow && col === r.startCol) return;
+        if (cell?.value == null && cell?.formula == null) return;
+        if (!doc.canEditCell({ sheetId, row, col })) blockedByPermissions = true;
+      });
+    }
+    if (blockedByPermissions) return false;
+  }
+
+  // Prefer the DocumentController native merge implementation when available. It applies
+  // the merged-range metadata + cell content clearing as a single workbook edit (one undo
+  // step / one change event) and enforces permission constraints consistently.
+  if (typeof doc.mergeCells === "function") {
+    doc.mergeCells(sheetId, r, options);
+    return true;
+  }
+
+  // Legacy fallback: apply view + cell edits separately.
   const existing = typeof doc.getMergedRanges === "function" ? doc.getMergedRanges(sheetId) : [];
   const remaining = existing.filter((m) => !rangesIntersect(m, r));
   const next = sortRanges([...remaining, r]);
-
-  if (typeof doc.setMergedRanges === "function") {
-    doc.setMergedRanges(sheetId, next, options);
-  }
 
   // Clear values/formulas in non-anchor cells (preserve formatting).
   /** @type {Array<{ sheetId: string, row: number, col: number, value: any, formula: string | null }>} */
@@ -88,7 +112,11 @@ export function mergeCells(doc, sheetId, range, options = {}) {
     });
   }
   if (clearInputs.length > 0 && typeof doc.setCellInputs === "function") {
-    doc.setCellInputs(clearInputs, { label: options.label });
+    doc.setCellInputs(clearInputs, { label: options.label, mergeKey: options.mergeKey });
+  }
+
+  if (typeof doc.setMergedRanges === "function") {
+    doc.setMergedRanges(sheetId, next, options);
   }
 
   return true;
@@ -109,6 +137,26 @@ export function mergeAcross(doc, sheetId, range, options = {}) {
   const r = normalizeMergedRange(range);
   if (r.startCol === r.endCol) return false;
 
+  // Permission semantics: every row segment has its own anchor at the left-most cell.
+  if (typeof doc.canEditCell === "function") {
+    for (let row = r.startRow; row <= r.endRow; row += 1) {
+      if (!doc.canEditCell({ sheetId, row, col: r.startCol })) return false;
+    }
+
+    let blockedByPermissions = false;
+    if (typeof doc.forEachCellInSheet === "function") {
+      doc.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+        if (blockedByPermissions) return;
+        if (row < r.startRow || row > r.endRow) return;
+        if (col < r.startCol || col > r.endCol) return;
+        if (col === r.startCol) return;
+        if (cell?.value == null && cell?.formula == null) return;
+        if (!doc.canEditCell({ sheetId, row, col })) blockedByPermissions = true;
+      });
+    }
+    if (blockedByPermissions) return false;
+  }
+
   const existing = typeof doc.getMergedRanges === "function" ? doc.getMergedRanges(sheetId) : [];
   // Any merges that intersect the selection are removed first (Excel-like).
   const remaining = existing.filter((m) => !rangesIntersect(m, r));
@@ -118,12 +166,7 @@ export function mergeAcross(doc, sheetId, range, options = {}) {
   for (let row = r.startRow; row <= r.endRow; row += 1) {
     newMerges.push({ startRow: row, endRow: row, startCol: r.startCol, endCol: r.endCol });
   }
-
   const next = sortRanges([...remaining, ...newMerges]);
-
-  if (typeof doc.setMergedRanges === "function") {
-    doc.setMergedRanges(sheetId, next, options);
-  }
 
   // Clear values/formulas in non-anchor cells (preserve formatting). Each merged row is anchored
   // at its left-most cell.
@@ -139,8 +182,23 @@ export function mergeAcross(doc, sheetId, range, options = {}) {
       clearInputs.push({ sheetId, row, col, value: null, formula: null });
     });
   }
-  if (clearInputs.length > 0 && typeof doc.setCellInputs === "function") {
-    doc.setCellInputs(clearInputs, { label: options.label });
+
+  const shouldBatch = typeof doc.beginBatch === "function" && typeof doc.endBatch === "function" && doc.batchDepth === 0;
+  if (shouldBatch) doc.beginBatch({ label: options.label ?? "Merge Across" });
+  let committed = false;
+  try {
+    if (clearInputs.length > 0 && typeof doc.setCellInputs === "function") {
+      doc.setCellInputs(clearInputs, { label: options.label, mergeKey: options.mergeKey });
+    }
+    if (typeof doc.setMergedRanges === "function") {
+      doc.setMergedRanges(sheetId, next, options);
+    }
+    committed = true;
+  } finally {
+    if (shouldBatch) {
+      if (committed) doc.endBatch();
+      else doc.cancelBatch?.();
+    }
   }
 
   return true;
