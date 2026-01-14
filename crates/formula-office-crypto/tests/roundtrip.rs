@@ -523,6 +523,33 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         key0.clone()
     };
 
+    // MS-OFFCRYPTO Standard RC4 40-bit key padding regression guard:
+    //
+    // CryptoAPI's RC4 implementation expects a 16-byte key buffer even when `keySize` is 40 bits.
+    // For `password="password"`, `salt=00..0f`, `spinCount=50000`, `block=0`, the derived 5-byte
+    // key material is `6ad7dedf2d` and the padded key is `6ad7dedf2d || 0x00*11`.
+    //
+    // Assert a known RC4 ciphertext so this test cannot pass if both the test encryptor and the
+    // production decryptor mistakenly treat the key as a raw 5-byte RC4 key.
+    if hash_alg == Rc4HashAlgorithm::Sha1 && key_bits == 40 {
+        let expected_ciphertext = hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8");
+
+        let mut ciphertext = b"Hello, RC4 CryptoAPI!".to_vec();
+        rc4_apply(&rc4_key0, &mut ciphertext);
+        assert_eq!(
+            ciphertext, expected_ciphertext,
+            "RC4(16-byte padded 40-bit key, plaintext) vector mismatch"
+        );
+
+        // Sanity: the raw 5-byte key MUST produce a different ciphertext.
+        let mut wrong = b"Hello, RC4 CryptoAPI!".to_vec();
+        rc4_apply(&key0, &mut wrong);
+        assert_ne!(
+            wrong, expected_ciphertext,
+            "RC4 ciphertext unexpectedly matches when using raw 5-byte key"
+        );
+    }
+
     // Build EncryptionVerifier.
     let verifier_plain: [u8; 16] = [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
