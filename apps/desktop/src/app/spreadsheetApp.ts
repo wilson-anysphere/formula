@@ -11858,7 +11858,14 @@ export class SpreadsheetApp {
     if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
     if (px < 0 || py < 0) return null;
 
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations on the pointermove hover path.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
     const selectedId = this.selectedChartId;
     const rectScratch = this.chartCursorScratchRect;
     const boundsScratch = this.chartCursorScratchBounds;
@@ -11866,7 +11873,7 @@ export class SpreadsheetApp {
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
       if (chart.sheetId !== sheetId) continue;
-      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch, frozenRows, frozenCols);
       if (!rect) continue;
 
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
@@ -13571,14 +13578,13 @@ export class SpreadsheetApp {
   private chartAnchorToViewportRect(
     anchor: ChartRecord["anchor"],
     out?: { left: number; top: number; width: number; height: number },
+    frozenRows?: number,
+    frozenCols?: number,
   ): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
-    const z = (() => {
-      const raw = this.getZoom();
-      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
-    })();
-    const emuToViewportPx = (emu: number | null | undefined): number => emuToPx(emu ?? 0) * z;
+    const rawZoom = this.getZoom();
+    const z = typeof rawZoom === "number" && Number.isFinite(rawZoom) && rawZoom > 0 ? rawZoom : 1;
 
     let left = 0;
     let top = 0;
@@ -13586,10 +13592,10 @@ export class SpreadsheetApp {
     let height = 0;
 
     if (anchor.kind === "absolute") {
-      left = emuToViewportPx(anchor.xEmu);
-      top = emuToViewportPx(anchor.yEmu);
-      width = emuToViewportPx(anchor.cxEmu);
-      height = emuToViewportPx(anchor.cyEmu);
+      left = emuToPx(anchor.xEmu ?? 0) * z;
+      top = emuToPx(anchor.yEmu ?? 0) * z;
+      width = emuToPx(anchor.cxEmu ?? 0) * z;
+      height = emuToPx(anchor.cyEmu ?? 0) * z;
     } else if (anchor.kind === "oneCell") {
       if (this.sharedGrid) {
         const headerRows = this.sharedHeaderRows();
@@ -13604,18 +13610,18 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) -
           headerWidth +
-          emuToViewportPx(anchor.fromColOffEmu ?? 0);
+          emuToPx(anchor.fromColOffEmu ?? 0) * z;
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) -
           headerHeight +
-          emuToViewportPx(anchor.fromRowOffEmu ?? 0);
-        width = emuToViewportPx(anchor.cxEmu ?? 0);
-        height = emuToViewportPx(anchor.cyEmu ?? 0);
+          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
+        width = emuToPx(anchor.cxEmu ?? 0) * z;
+        height = emuToPx(anchor.cyEmu ?? 0) * z;
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToViewportPx(anchor.fromColOffEmu);
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToViewportPx(anchor.fromRowOffEmu);
-        width = emuToViewportPx(anchor.cxEmu);
-        height = emuToViewportPx(anchor.cyEmu);
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu ?? 0) * z;
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu ?? 0) * z;
+        width = emuToPx(anchor.cxEmu ?? 0) * z;
+        height = emuToPx(anchor.cyEmu ?? 0) * z;
       }
     } else if (anchor.kind === "twoCell") {
       if (this.sharedGrid) {
@@ -13634,27 +13640,27 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(fromCol) -
           headerWidth +
-          emuToViewportPx(anchor.fromColOffEmu ?? 0);
+          emuToPx(anchor.fromColOffEmu ?? 0) * z;
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(fromRow) -
           headerHeight +
-          emuToViewportPx(anchor.fromRowOffEmu ?? 0);
+          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
         const right =
           this.sharedGrid.renderer.scroll.cols.positionOf(toCol) -
           headerWidth +
-          emuToViewportPx(anchor.toColOffEmu ?? 0);
+          emuToPx(anchor.toColOffEmu ?? 0) * z;
         const bottom =
           this.sharedGrid.renderer.scroll.rows.positionOf(toRow) -
           headerHeight +
-          emuToViewportPx(anchor.toRowOffEmu ?? 0);
+          emuToPx(anchor.toRowOffEmu ?? 0) * z;
 
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToViewportPx(anchor.fromColOffEmu);
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToViewportPx(anchor.fromRowOffEmu);
-        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToViewportPx(anchor.toColOffEmu);
-        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToViewportPx(anchor.toRowOffEmu);
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu ?? 0) * z;
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu ?? 0) * z;
+        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu ?? 0) * z;
+        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu ?? 0) * z;
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       }
@@ -13664,9 +13670,23 @@ export class SpreadsheetApp {
 
     if (width <= 0 || height <= 0) return null;
 
-    const { frozenRows, frozenCols } = this.getFrozen();
-    const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < frozenCols ? 0 : this.scrollX);
-    const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < frozenRows ? 0 : this.scrollY);
+    if (frozenRows === undefined || frozenCols === undefined) {
+      // Avoid `getFrozen()` allocations; compute frozen counts directly.
+      const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+      const rawFrozenRows = Number(view?.frozenRows);
+      const rawFrozenCols = Number(view?.frozenCols);
+      const maxRows = this.limits.maxRows;
+      const maxCols = this.limits.maxCols;
+      const computedFrozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+      const computedFrozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
+      if (frozenRows === undefined) frozenRows = computedFrozenRows;
+      if (frozenCols === undefined) frozenCols = computedFrozenCols;
+    }
+
+    const fr = frozenRows ?? 0;
+    const fc = frozenCols ?? 0;
+    const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < fc ? 0 : this.scrollX);
+    const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < fr ? 0 : this.scrollY);
 
     const target = out ?? { left: 0, top: 0, width: 0, height: 0 };
     target.left = left - scrollX;
