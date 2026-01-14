@@ -3726,6 +3726,17 @@ export class SpreadsheetApp {
     this.drawingOverlay?.destroy?.();
     this.chartSelectionOverlay?.destroy?.();
     this.chartRenderer.destroy();
+    // Drop cached chart models so destroyed app instances don't retain chart data if kept referenced.
+    try {
+      this.chartCanvasStoreAdapter.pruneEntries(new Set());
+    } catch {
+      // ignore
+    }
+    try {
+      this.formulaChartModelStore.clear();
+    } catch {
+      // ignore
+    }
     this.activeSheetBackgroundAbort?.abort();
     this.activeSheetBackgroundAbort = null;
     this.workbookImageBitmaps.clear();
