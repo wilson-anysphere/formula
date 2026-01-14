@@ -11,6 +11,10 @@ import {
 import { getCellPermissions, maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
 
 const MASKED_CELL_VALUE = "###";
+// Defensive cap: drawings metadata can be remote-authored (sheet view state) and is preserved by
+// this binder even though it is not explicitly synced. Keep validation strict to avoid unbounded
+// costs when cloning/upgrading legacy sheet entries.
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
 
 function stableStringify(value) {
   if (value === undefined) return "undefined";
@@ -23,6 +27,62 @@ function stableStringify(value) {
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {any} raw
+ * @returns {any}
+ */
+function sanitizeDrawingsForPreservation(raw) {
+  if (!Array.isArray(raw)) return raw;
+  /** @type {any[]} */
+  const out = [];
+  let changed = false;
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      changed = true;
+      continue;
+    }
+    const rawId = entry?.get?.("id") ?? entry.id;
+    if (typeof rawId === "string") {
+      if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) {
+        changed = true;
+        continue;
+      }
+      if (!rawId.trim()) {
+        changed = true;
+        continue;
+      }
+    } else if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) {
+        changed = true;
+        continue;
+      }
+    } else {
+      changed = true;
+      continue;
+    }
+    out.push(entry);
+  }
+  return changed ? out : raw;
+}
+
+/**
+ * Strip invalid/pathological drawing ids from a sheet view payload.
+ *
+ * @param {any} view
+ * @returns {any}
+ */
+function sanitizeSheetViewForPreservation(view) {
+  if (!isRecord(view)) return view;
+  if (!Object.prototype.hasOwnProperty.call(view, "drawings")) return view;
+  const sanitized = sanitizeDrawingsForPreservation(view.drawings);
+  if (sanitized === view.drawings) return view;
+  if (!Array.isArray(sanitized) || sanitized.length === 0) {
+    const { drawings: _ignored, ...rest } = view;
+    return rest;
+  }
+  return { ...view, drawings: sanitized };
 }
 
 /**
@@ -1860,11 +1920,7 @@ export function bindYjsToDocumentController(options) {
               if (Object.prototype.hasOwnProperty.call(found.entry, "view")) {
                 const rawView = found.entry.view;
                 if (rawView !== undefined) {
-                  try {
-                    sheetMap.set("view", structuredClone(rawView));
-                  } catch {
-                    sheetMap.set("view", rawView);
-                  }
+                  sheetMap.set("view", sanitizeSheetViewForPreservation(rawView));
                 }
               }
 
@@ -1882,6 +1938,12 @@ export function bindYjsToDocumentController(options) {
                   continue;
                 }
                 const value = found.entry[key];
+                if (key === "drawings") {
+                  const sanitized = sanitizeDrawingsForPreservation(value);
+                  if (Array.isArray(sanitized) && sanitized.length === 0) continue;
+                  sheetMap.set(key, sanitized);
+                  continue;
+                }
                 try {
                   sheetMap.set(key, structuredClone(value));
                 } catch {
@@ -2062,15 +2124,25 @@ export function bindYjsToDocumentController(options) {
           const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
           sheetMap.set("name", name);
 
-          if (isRecord(found?.entry)) {
-            const keys = Object.keys(found.entry).sort();
-            for (const key of keys) {
-              if (key === "id" || key === "name") continue;
-              const value = found.entry[key];
-              try {
-                sheetMap.set(key, structuredClone(value));
-              } catch {
-                sheetMap.set(key, value);
+           if (isRecord(found?.entry)) {
+             const keys = Object.keys(found.entry).sort();
+             for (const key of keys) {
+               if (key === "id" || key === "name") continue;
+               const value = found.entry[key];
+               if (key === "view") {
+                 sheetMap.set(key, sanitizeSheetViewForPreservation(value));
+                 continue;
+               }
+               if (key === "drawings") {
+                 const sanitized = sanitizeDrawingsForPreservation(value);
+                 if (Array.isArray(sanitized) && sanitized.length === 0) continue;
+                 sheetMap.set(key, sanitized);
+                 continue;
+               }
+               try {
+                 sheetMap.set(key, structuredClone(value));
+               } catch {
+                 sheetMap.set(key, value);
               }
             }
           }
