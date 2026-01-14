@@ -315,6 +315,58 @@ test("buildContext: structured DLP does not leak Date.toISOString overrides via 
   assert.match(out.promptContext, /## dlp/i);
 });
 
+test("buildContext: structured DLP does not leak Symbol(...) cell values (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  const sneaky = Symbol("TopSecret");
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [
+        [sneaky, "Hello"],
+        ["World", "Public"],
+      ],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            // Trigger structured REDACT via a disallowed cell elsewhere in the window.
+            range: { start: { row: 1, col: 1 }, end: { row: 1, col: 1 } }, // B2
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /TopSecret/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /TopSecret/);
+  assert.match(out.promptContext, /## dlp/i);
+});
+
 test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
   const embedder = new CapturingEmbedder();
   const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });

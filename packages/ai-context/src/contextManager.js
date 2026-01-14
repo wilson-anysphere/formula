@@ -3686,6 +3686,7 @@ function redactValuesForDlp(values, redactor, options = {}) {
     const nextRow = [];
     for (const cell of row) {
       throwIfAborted(signal);
+      const cellType = typeof cell;
       const isTextLike = typeof cell === "string" || typeof cell === "number" || typeof cell === "bigint";
       if (isTextLike) {
         const raw = String(cell);
@@ -3705,6 +3706,14 @@ function redactValuesForDlp(values, redactor, options = {}) {
         }
 
         nextRow.push(redacted);
+        continue;
+      }
+
+      // Symbols/functions can stringify to arbitrary user-controlled content and are not meaningful
+      // in spreadsheet context. Treat them as prompt-unsafe under DLP redaction so they cannot leak
+      // non-heuristic secrets through TSV formatting.
+      if (cellType === "symbol" || cellType === "function") {
+        nextRow.push("[REDACTED]");
         continue;
       }
 
@@ -3763,6 +3772,12 @@ function redactStructuredValue(value, redactor, options = {}) {
       return /** @type {T} */ (redacted);
     }
     return value;
+  }
+  // Symbols and functions can stringify to arbitrary user-controlled content (via descriptions,
+  // names, or overridden hooks) and are not meaningful in spreadsheet context. Treat them as
+  // prompt-unsafe under DLP redaction.
+  if (typeof value === "symbol" || typeof value === "function") {
+    return /** @type {T} */ ("[REDACTED]");
   }
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
