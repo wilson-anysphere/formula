@@ -69,11 +69,16 @@ fn standard_rc4_spun_password_hash(password: &str, salt: &[u8], spin_count: u32)
     cur
 }
 
-/// Standard CryptoAPI per-block key derivation helper.
+/// Standard CryptoAPI per-block key derivation helper (SHA-1).
 ///
 /// Algorithm:
-/// `h_block = SHA1(H || LE32(block_index))`, `rc4_key = h_block[0..key_len]` where
+/// `h_block = SHA1(H || LE32(block_index))`, `key_material = h_block[0..key_len]` where
 /// `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes).
+///
+/// Important: for **40-bit RC4** (`key_len == 5` / `keySize == 0`/`40`), CryptoAPI/Office do **not**
+/// feed the raw 5-byte `key_material` into RC4. Instead they pad it to 16 bytes
+/// (`key_material || 0x00 * 11`) before initializing RC4. That quirk is covered by
+/// `standard_cryptoapi_rc4_40_bit_key_vector` below.
 fn standard_rc4_derive_block_key(h: [u8; 20], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(h);
@@ -100,7 +105,7 @@ fn standard_rc4_spun_password_hash_md5(password: &str, salt: &[u8], spin_count: 
     cur
 }
 
-/// Standard CryptoAPI per-block key derivation helper for MD5.
+/// Standard CryptoAPI per-block key derivation helper (MD5).
 fn standard_rc4_derive_block_key_md5(h: [u8; 16], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Md5::new();
     hasher.update(h);
@@ -174,7 +179,8 @@ fn standard_cryptoapi_rc4_derivation_vector() {
     assert_eq!(key2, hex_decode("9ce57d0699be3938951f47fa949361db"));
     assert_eq!(key3, hex_decode("e65b2643eaba3815a37a61159f137840"));
 
-    // 40-bit and 56-bit keys are not special-cased; they are truncated to KeySize/8 bytes.
+    // Key material for 40-bit and 56-bit keys is a raw truncation of `SHA1(H || LE32(block))`.
+    // (CryptoAPI applies an additional padding quirk for 40-bit RC4 when initializing RC4.)
     let key0_40 = standard_rc4_derive_block_key(h, 0, 5);
     let key1_40 = standard_rc4_derive_block_key(h, 1, 5);
     assert_eq!(key0_40, hex_decode("6ad7dedf2d"));
@@ -220,7 +226,8 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key2, hex_decode("ac69022e396c7750872133f37e2c7afc"));
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
 
-    // 40-bit and 56-bit keys are not special-cased; they are truncated to KeySize/8 bytes.
+    // Key material for 40-bit and 56-bit keys is a raw truncation of `MD5(H || LE32(block))`.
+    // (CryptoAPI applies an additional padding quirk for 40-bit RC4 when initializing RC4.)
     let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
     let key1_40 = standard_rc4_derive_block_key_md5(h, 1, 5);
     assert_eq!(key0_40, hex_decode("69badcae24"));
