@@ -16641,6 +16641,42 @@ fn walk_calc_expr(
                     );
                 }
             }
+            Expr::FunctionCall { name, args, .. } if name == "CHOOSE" => {
+                if args.is_empty() {
+                    return;
+                }
+
+                // CHOOSE can return references depending on surrounding context (see bytecode VM /
+                // AST evaluator semantics). In reference context (e.g. ROW(CHOOSE(...))), the
+                // selected choice expression should be treated as producing a reference rather than
+                // dereferencing cell values. Otherwise, self-referential formulas like
+                // `=ROW(CHOOSE(1, A1, B1))` entered into `A1` become spurious calc-graph cycles.
+                //
+                // The index argument itself is value-driven and should participate in dependency
+                // analysis.
+                walk_calc_expr(
+                    &args[0],
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
+                for choice in args.iter().skip(1) {
+                    walk_calc_expr_reference_context(
+                        choice,
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                }
+            }
             Expr::FunctionCall { name, args, .. } if name == "INDEX" => {
                 if args.is_empty() {
                     return;
@@ -18671,6 +18707,18 @@ mod tests {
 
         assert_eq!(engine.circular_reference_count(), 0);
         assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
+    }
+
+    #[test]
+    fn row_choose_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ROW(CHOOSE(1, A1, B1))")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
     }
 
     #[test]
