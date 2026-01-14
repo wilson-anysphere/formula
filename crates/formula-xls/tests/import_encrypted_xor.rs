@@ -108,6 +108,12 @@ fn xor_wrong_password_errors() {
 }
 
 #[test]
+fn xor_missing_password_reports_encrypted_workbook() {
+    let err = formula_xls::import_xls_path(fixture_path()).expect_err("expected encrypted workbook");
+    assert!(matches!(err, formula_xls::ImportError::EncryptedWorkbook));
+}
+
+#[test]
 fn xor_unsupported_encryption_type_errors() {
     // Patch the fixture FILEPASS header to claim an unsupported wEncryptionType.
     let bytes = std::fs::read(fixture_path()).expect("read fixture");
