@@ -298,18 +298,21 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       } catch (err) {
         // If we generated and stored a brand-new key id, clean it up on failure to avoid leaving orphaned keys.
         // (If we could not verify whether the key already existed, do not delete.)
+        let deletedStoredKey = false;
         if (didStoreNewKey && canSafelyDeleteStoredKeyOnFailure) {
           try {
             const deleteKey = (keyStore as any)?.delete;
             if (typeof deleteKey === "function") {
               await deleteKey.call(keyStore, docId, storedKeyId);
+              deletedStoredKey = true;
             }
           } catch {
             // Best-effort; ignore delete failures.
           }
         }
         const message = err instanceof Error ? err.message : String(err);
-        showToast(`Failed to encrypt range: ${message}`, "error");
+        const orphanedNote = didStoreNewKey && !deletedStoredKey ? " (note: key may have been stored locally)" : "";
+        showToast(`Failed to encrypt range: ${message}${orphanedNote}`, "error");
         return;
       }
 
