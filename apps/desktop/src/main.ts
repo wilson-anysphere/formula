@@ -1681,39 +1681,6 @@ function activeCellIndentLevel(): number {
   const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : 0;
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
-function parseDecimalPlaces(format: string): number {
-  const dot = format.indexOf(".");
-  if (dot === -1) return 0;
-  let count = 0;
-  for (let i = dot + 1; i < format.length; i++) {
-    const ch = format[i];
-    if (ch === "0" || ch === "#") count += 1;
-    else break;
-  }
-  return count;
-}
-
-function stepDecimalPlacesInNumberFormat(format: string | null, direction: "increase" | "decrease"): string | null {
-  const raw = (format ?? "").trim();
-  const section = (raw.split(";")[0] ?? "").trim();
-  const lower = section.toLowerCase();
-  // Avoid trying to manipulate date/time format codes.
-  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
-
-  const currencyMatch = /[$€£¥]/.exec(section);
-  const prefix = currencyMatch?.[0] ?? "";
-  const suffix = section.includes("%") ? "%" : "";
-  const useThousands = section.includes(",");
-  const decimals = parseDecimalPlaces(section);
-
-  const nextDecimals =
-    direction === "increase" ? Math.min(10, decimals + 1) : Math.max(0, decimals - 1);
-  if (nextDecimals === decimals) return null;
-
-  const integer = useThousands ? "#,##0" : "0";
-  const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
-  return `${prefix}${integer}${fraction}${suffix}`;
-}
 if (collabStatus) installCollabStatusIndicator(app, collabStatus);
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
@@ -8144,14 +8111,6 @@ function handleRibbonCommand(commandId: string): void {
     const cmd = commandRegistry.getCommand(commandId);
     if (cmd?.source.kind === "builtin") {
       executeBuiltinCommand(commandId);
-      return;
-    }
-
-    if (commandId.startsWith("format.numberFormat.")) {
-      executeBuiltinCommand(commandId);
-      // Formatting commands should leave the grid focused even if the underlying command
-      // is a no-op (e.g. selection size guard blocks).
-      app.focus();
       return;
     }
 
