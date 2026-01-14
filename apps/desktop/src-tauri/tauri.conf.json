@@ -39,6 +39,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": ["../../../LICENSE", "../../../NOTICE"],
     "fileAssociations": [
       {
         "ext": ["xlsx"],
@@ -115,7 +116,11 @@
           "libayatana-appindicator3-1 | libappindicator3-1",
           "librsvg2-2",
           "libssl3t64 | libssl3"
-        ]
+        ],
+        "files": {
+          "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
+          "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
+        }
       },
       "rpm": {
         "depends": [
@@ -124,7 +129,17 @@
           "((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))",
           "(librsvg2 or librsvg-2-2)",
           "(openssl-libs or libopenssl3)"
-        ]
+        ],
+        "files": {
+          "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
+          "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
+        }
+      },
+      "appimage": {
+        "files": {
+          "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
+          "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
+        }
       }
     },
     "macOS": {

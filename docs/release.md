@@ -200,6 +200,28 @@ Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level valida
 `latest.json.sig` from the draft release and checks targets, signatures, and referenced assets.
 The `--manifest/--sig` mode is an offline manifest structure check; use
 `scripts/ci/verify-updater-manifest-signature.mjs` to cryptographically verify `latest.json.sig`.
+
+## Compliance artifacts (LICENSE / NOTICE)
+
+Release installers/bundles include the repo root `LICENSE` and `NOTICE` files (and any third-party
+attribution content in `NOTICE`).
+
+Where to find them after installation:
+
+- macOS: `Formula.app/Contents/Resources/LICENSE` + `NOTICE`
+- Windows: inside the installed app directory (typically `<InstallDir>\\resources\\LICENSE` +
+  `<InstallDir>\\resources\\NOTICE`)
+- Linux:
+  - `.deb` / `.rpm`: `/usr/share/doc/formula-desktop/LICENSE` + `/usr/share/doc/formula-desktop/NOTICE`
+  - `.AppImage`: inside the image at `usr/share/doc/formula-desktop/LICENSE` +
+    `usr/share/doc/formula-desktop/NOTICE`
+
+CI validates these files are present in the built bundles via:
+
+```bash
+python scripts/ci/validate-desktop-bundle-compliance.py
+```
+
 ## Updater restart semantics (important)
 
 When an update is downloaded/installed, the desktop app should restart/exit using Tauri's supported

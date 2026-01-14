@@ -880,6 +880,7 @@ jobs:
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
           prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
+
       - name: Build desktop bundles (macOS universal, dry run)
         if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -1071,6 +1072,9 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
+
+      - name: Validate bundles include LICENSE/NOTICE
+        run: python scripts/ci/validate-desktop-bundle-compliance.py
 
       - name: Package Windows debug symbols (PDB)
         if: runner.os == 'Windows'
