@@ -509,7 +509,9 @@ impl Default for SubtotalPosition {
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
 pub struct GrandTotals {
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub rows: bool,
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub columns: bool,
 }
 
@@ -688,11 +690,13 @@ mod tests {
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "Sales".to_string(),
-                column: "Amount".to_string()
+                column: "Amount".to_string(),
             }
             .to_string(),
             "Sales[Amount]"
         );
+
+        // Tables containing non-identifier characters should be single-quoted with escaped quotes.
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "A-B".to_string(),
@@ -712,7 +716,7 @@ mod tests {
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "Dim Product".to_string(),
-                column: "Category".to_string()
+                column: "Category".to_string(),
             }
             .to_string(),
             "'Dim Product'[Category]"
@@ -720,11 +724,13 @@ mod tests {
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "O'Reilly".to_string(),
-                column: "Name".to_string()
+                column: "Name".to_string(),
             }
             .to_string(),
             "'O''Reilly'[Name]"
         );
+
+        // DAX keyword table names should be quoted.
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "VAR".to_string(),
@@ -733,6 +739,8 @@ mod tests {
             .to_string(),
             "'VAR'[X]"
         );
+
+        // Column names escape `]` by doubling it inside `[...]`.
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "var".to_string(),
@@ -749,6 +757,7 @@ mod tests {
             .to_string(),
             "T[Col]]Name]"
         );
+
         assert_eq!(
             PivotFieldRef::DataModelColumn {
                 table: "RETURN".to_string(),

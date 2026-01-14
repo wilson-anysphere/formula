@@ -1047,6 +1047,12 @@ impl XlsxPackage {
         let mut needs_jpg = false;
         let mut needs_jpeg = false;
         let mut needs_gif = false;
+        let mut needs_bmp = false;
+        let mut needs_emf = false;
+        let mut needs_wmf = false;
+        let mut needs_svg = false;
+        let mut needs_tif = false;
+        let mut needs_tiff = false;
         let mut needs_webp = false;
         for name in parts.keys() {
             let name = name.strip_prefix('/').unwrap_or(name);
@@ -1059,6 +1065,18 @@ impl XlsxPackage {
                 needs_jpeg = true;
             } else if lower.ends_with(".gif") {
                 needs_gif = true;
+            } else if lower.ends_with(".bmp") {
+                needs_bmp = true;
+            } else if lower.ends_with(".emf") {
+                needs_emf = true;
+            } else if lower.ends_with(".wmf") {
+                needs_wmf = true;
+            } else if lower.ends_with(".svg") {
+                needs_svg = true;
+            } else if lower.ends_with(".tif") {
+                needs_tif = true;
+            } else if lower.ends_with(".tiff") {
+                needs_tiff = true;
             } else if lower.ends_with(".webp") {
                 needs_webp = true;
             }
@@ -1075,6 +1093,24 @@ impl XlsxPackage {
         }
         if needs_gif {
             ensure_content_types_default(&mut parts, "gif", "image/gif")?;
+        }
+        if needs_bmp {
+            ensure_content_types_default(&mut parts, "bmp", "image/bmp")?;
+        }
+        if needs_emf {
+            ensure_content_types_default(&mut parts, "emf", "image/x-emf")?;
+        }
+        if needs_wmf {
+            ensure_content_types_default(&mut parts, "wmf", "image/x-wmf")?;
+        }
+        if needs_svg {
+            ensure_content_types_default(&mut parts, "svg", "image/svg+xml")?;
+        }
+        if needs_tif {
+            ensure_content_types_default(&mut parts, "tif", "image/tiff")?;
+        }
+        if needs_tiff {
+            ensure_content_types_default(&mut parts, "tiff", "image/tiff")?;
         }
         if needs_webp {
             ensure_content_types_default(&mut parts, "webp", "image/webp")?;
@@ -2455,6 +2491,45 @@ mod tests {
             })
             .expect("inserted Default");
         assert_eq!(node.tag_name().namespace(), Some(ct_ns));
+    }
+
+    #[test]
+    fn write_to_bytes_inserts_content_types_defaults_for_emf_wmf_svg_media() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/media/image1.emf", b"emf-bytes"),
+            ("xl/media/image2.wmf", b"wmf-bytes"),
+            ("xl/media/image3.svg", br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(ct).expect("parse content types");
+
+        for (ext, content_type) in [
+            ("emf", "image/x-emf"),
+            ("wmf", "image/x-wmf"),
+            ("svg", "image/svg+xml"),
+        ] {
+            assert!(
+                doc.descendants().any(|n| {
+                    n.is_element()
+                        && n.tag_name().name() == "Default"
+                        && n.attribute("Extension") == Some(ext)
+                        && n.attribute("ContentType") == Some(content_type)
+                }),
+                "expected {ext} Default to be inserted, got:\n{ct}"
+            );
+        }
     }
 
     #[test]
