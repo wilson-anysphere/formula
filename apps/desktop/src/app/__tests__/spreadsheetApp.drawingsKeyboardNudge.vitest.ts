@@ -180,6 +180,33 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
     }
   });
 
+  it("does not intercept grid arrow-key navigation when no drawing is selected", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      app.activateCell({ row: 2, col: 3 }, { scrollIntoView: false, focus: false });
+      const before = app.getActiveCell();
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+
+      expect(app.getActiveCell()).toEqual({ row: before.row, col: before.col + 1 });
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("accounts for zoom when nudging absolute anchors (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
