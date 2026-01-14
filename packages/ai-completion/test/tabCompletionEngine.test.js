@@ -212,6 +212,46 @@ test("Typing =HLO suggests HLOOKUP( and a modern XLOOKUP( alternative", async ()
   );
 });
 
+test("Typing =LOO suggests LOOKUP( and a modern XLOOKUP( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=LOO",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=LOOKUP("),
+    `Expected a LOOKUP( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP("),
+    `Expected an XLOOKUP( alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =MAT suggests MATCH( and a modern XMATCH( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=MAT",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH("),
+    `Expected a MATCH( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH("),
+    `Expected an XMATCH( alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 

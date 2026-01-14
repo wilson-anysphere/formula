@@ -420,6 +420,20 @@ export class TabCompletionEngine {
           type: "formula",
           confidence: 0.35,
         });
+      } else if (spec.name === "LOOKUP") {
+        suggestions.push({
+          text: replaceSpan(input, token.start, token.end, "XLOOKUP("),
+          displayText: "XLOOKUP(",
+          type: "formula",
+          confidence: 0.35,
+        });
+      } else if (spec.name === "MATCH") {
+        suggestions.push({
+          text: replaceSpan(input, token.start, token.end, "XMATCH("),
+          displayText: "XMATCH(",
+          type: "formula",
+          confidence: 0.35,
+        });
       }
     }
 
