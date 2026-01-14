@@ -206,23 +206,80 @@ function tryReadNumber(input: string, start: number): { text: string; end: numbe
 }
 
 function tryReadSheetPrefix(input: string, start: number): { text: string; end: number } | null {
-  if (input[start] === "'") {
-    // Excel escapes apostrophes inside sheet names using doubled quotes: ''.
-    let i = start + 1;
+  const scanQuotedSheetNameToken = (startIndex: number): number | null => {
+    // Excel escapes apostrophes inside quoted identifiers by doubling: `''` -> `'`.
+    if (input[startIndex] !== "'") return null;
+    let i = startIndex + 1;
     while (i < input.length) {
       if (input[i] === "'") {
         if (input[i + 1] === "'") {
           i += 2;
           continue;
         }
-        if (input[i + 1] === "!") {
-          return { text: input.slice(start, i + 2), end: i + 2 };
-        }
-        return null;
+        return i + 1;
       }
       i += 1;
     }
     return null;
+  };
+
+  const scanUnquotedNameToken = (startIndex: number): number | null => {
+    const first = codePointAt(input, startIndex);
+    if (!first || !isIdentifierStart(first.ch)) return null;
+    let i = first.nextIndex;
+    while (i < input.length) {
+      const next = codePointAt(input, i);
+      if (!next) break;
+      if (!isIdentifierPart(next.ch)) break;
+      i = next.nextIndex;
+    }
+    return i;
+  };
+
+  const scanSheetNameToken = (startIndex: number): { end: number; wasQuoted: boolean } | null => {
+    if (input[startIndex] === "'") {
+      const end = scanQuotedSheetNameToken(startIndex);
+      return end ? { end, wasQuoted: true } : null;
+    }
+    const end = scanUnquotedNameToken(startIndex);
+    return end ? { end, wasQuoted: false } : null;
+  };
+
+  const isValidUnquotedSheetNameToken = (raw: string): boolean => {
+    return !(
+      isReservedUnquotedSheetName(raw) ||
+      looksLikeA1CellReference(raw) ||
+      looksLikeR1C1CellReference(raw)
+    );
+  };
+
+  const scanSheetPrefix = (prefixStart: number): number | null => {
+    // Parse:
+    // - Sheet1!A1 / 'My Sheet'!A1
+    // - Sheet1:Sheet3!A1 / 'Sheet 1':'Sheet 3'!A1
+    // - Sheet1:'Sheet 3'!A1 / 'Sheet 1':Sheet3!A1
+    const token1 = scanSheetNameToken(prefixStart);
+    if (!token1) return null;
+    const sheet1 = input.slice(prefixStart, token1.end);
+    if (!token1.wasQuoted && !isValidUnquotedSheetNameToken(sheet1)) return null;
+
+    let pos = token1.end;
+    if (input[pos] === ":") {
+      const token2Start = pos + 1;
+      const token2 = scanSheetNameToken(token2Start);
+      if (!token2) return null;
+      const sheet2 = input.slice(token2Start, token2.end);
+      if (!token2.wasQuoted && !isValidUnquotedSheetNameToken(sheet2)) return null;
+      pos = token2.end;
+    }
+
+    if (input[pos] !== "!") return null;
+    return pos + 1;
+  };
+
+  if (input[start] === "'") {
+    const end = scanSheetPrefix(start);
+    return end ? { text: input.slice(start, end), end } : null;
   }
 
   // Only treat `Sheet!A1` as a sheet-qualified ref when the `Sheet` token starts
@@ -246,6 +303,8 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
 
   if (first.ch === "[") {
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
+    //
+    // Workbook names may contain literal `[` characters; treat them as plain text (no nesting).
     let i = first.nextIndex;
     while (i < input.length) {
       // Excel escapes `]` in external workbook names by doubling: `]]` -> literal `]`.
@@ -262,107 +321,14 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
     if (i >= input.length || input[i] !== "]") return null;
     i += 1;
 
-    const scanQuotedSheetNameToken = (startIndex: number): number | null => {
-      if (input[startIndex] !== "'") return null;
-      let j = startIndex + 1;
-      while (j < input.length) {
-        if (input[j] === "'") {
-          if (input[j + 1] === "'") {
-            j += 2;
-            continue;
-          }
-          return j + 1;
-        }
-        j += 1;
-      }
-      return null;
-    };
-
-    const scanUnquotedNameToken = (startIndex: number): number | null => {
-      const sheetStart = codePointAt(input, startIndex);
-      if (!sheetStart || !isIdentifierStart(sheetStart.ch)) return null;
-      let j = sheetStart.nextIndex;
-      while (j < input.length) {
-        const next = codePointAt(input, j);
-        if (!next) break;
-        if (!isIdentifierPart(next.ch)) break;
-        j = next.nextIndex;
-      }
-      return j;
-    };
-
-    const scanSheetNameToken = (startIndex: number): { end: number; wasQuoted: boolean } | null => {
-      if (input[startIndex] === "'") {
-        const end = scanQuotedSheetNameToken(startIndex);
-        return end ? { end, wasQuoted: true } : null;
-      }
-      const end = scanUnquotedNameToken(startIndex);
-      return end ? { end, wasQuoted: false } : null;
-    };
-
-    // External sheet tokens can be either unquoted identifiers (`Sheet1`) or quoted identifiers
-    // (`'My Sheet'`). Excel also permits 3D sheet spans like:
-    //   [Book.xlsx]'Sheet 1':'Sheet 3'!A1
-    // so parse up to two sheet tokens separated by a colon.
-    const token1 = scanSheetNameToken(i);
-    if (!token1) return null;
-    const sheet1 = input.slice(i, token1.end);
-    if (
-      !token1.wasQuoted &&
-      (isReservedUnquotedSheetName(sheet1) || looksLikeA1CellReference(sheet1) || looksLikeR1C1CellReference(sheet1))
-    ) {
-      return null;
-    }
-
-    let pos = token1.end;
-    if (input[pos] === ":") {
-      const token2Start = pos + 1;
-      const token2 = scanSheetNameToken(token2Start);
-      if (!token2) return null;
-      const sheet2 = input.slice(token2Start, token2.end);
-      if (
-        !token2.wasQuoted &&
-        (isReservedUnquotedSheetName(sheet2) || looksLikeA1CellReference(sheet2) || looksLikeR1C1CellReference(sheet2))
-      ) {
-        return null;
-      }
-      pos = token2.end;
-    }
-
-    if (input[pos] === "!") {
-      return { text: input.slice(start, pos + 1), end: pos + 1 };
-    }
-    return null;
+    const end = scanSheetPrefix(i);
+    return end ? { text: input.slice(start, end), end } : null;
   }
 
   if (!isIdentifierStart(first.ch)) return null;
 
-  let i = first.nextIndex;
-  while (i < input.length) {
-    const next = codePointAt(input, i);
-    if (!next) break;
-    if (next.ch === ":" || isIdentifierPart(next.ch)) {
-      i = next.nextIndex;
-      continue;
-    }
-    break;
-  }
-  if (input[i] === "!") {
-    const sheetSpec = input.slice(start, i);
-    const sheetNames = sheetSpec.split(":");
-    if (
-      sheetNames.some(
-        (name) =>
-          isReservedUnquotedSheetName(name) ||
-          looksLikeA1CellReference(name) ||
-          looksLikeR1C1CellReference(name)
-      )
-    ) {
-      return null;
-    }
-    return { text: input.slice(start, i + 1), end: i + 1 };
-  }
-  return null;
+  const end = scanSheetPrefix(start);
+  return end ? { text: input.slice(start, end), end } : null;
 }
 
 function tryReadExternalWorkbookNameRef(input: string, start: number): { text: string; end: number } | null {

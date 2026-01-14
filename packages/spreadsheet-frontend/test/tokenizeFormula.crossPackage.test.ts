@@ -35,6 +35,19 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(consumerRefs).toEqual(sharedRefs);
   });
 
+  it("matches between packages for 3D sheet refs with individually quoted sheet tokens", () => {
+    const input = "=SUM('Sheet 1':'Sheet 3'!A1, 1)";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["'Sheet 1':'Sheet 3'!A1"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
   it("matches between packages for external workbook refs with escaped closing brackets in the workbook name", () => {
     const input = "=SUM([Book]]Name.xlsx]Sheet1!A1, 1)";
     const sharedRefs = sharedTokenizeFormula(input)

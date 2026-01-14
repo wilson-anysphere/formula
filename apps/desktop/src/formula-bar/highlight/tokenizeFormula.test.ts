@@ -148,6 +148,12 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["[Book.xlsx]Sheet1!A1", "Sheet1:Sheet3!B2"]);
   });
 
+  it("tokenizes 3D sheet-qualified references with individually quoted sheet tokens", () => {
+    const tokens = tokenizeFormula("=SUM('Sheet 1':'Sheet 3'!A1, 1)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["'Sheet 1':'Sheet 3'!A1"]);
+  });
+
   it("tokenizes external workbook references with escaped closing brackets in the workbook name", () => {
     // Excel encodes literal `]` characters inside the `[Book]` segment by doubling them: `]]`.
     const tokens = tokenizeFormula("=SUM([Book]]Name.xlsx]Sheet1!A1, 1)");
