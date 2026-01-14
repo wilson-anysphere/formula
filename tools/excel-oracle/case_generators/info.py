@@ -55,22 +55,8 @@ def generate(
     add_case(cases, prefix="t", tags=["info", "T"], formula="=T(1)")
     add_case(cases, prefix="t", tags=["info", "T"], formula="=T(NA())")
 
-    # INFO / CELL (worksheet introspection)
-    add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("address",A1)')
-    add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("row",A10)')
-    add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("col",C1)')
-    add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("type",A1)')
-    add_case(
-        cases,
-        prefix="cell",
-        tags=["info", "CELL"],
-        formula='=CELL("contents",A1)',
-        inputs=[CellInput("A1", 5)],
-        description='CELL("contents") returns the value for constant cells',
-    )
-
-    add_case(cases, prefix="info", tags=["info", "INFO"], formula='=INFO("recalc")')
-    add_case(cases, prefix="info", tags=["info", "INFO", "error"], formula='=INFO("no_such_key")')
+    # NOTE: INFO/CELL are volatile (they depend on workbook/environment state) and are intentionally
+    # excluded from the oracle corpus so results can be pinned/stably compared.
 
     # Workbook / worksheet metadata functions (auditing helpers in modern Excel).
     add_case(cases, prefix="sheet", tags=["info", "SHEET"], formula="=SHEET()")

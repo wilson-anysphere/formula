@@ -80,6 +80,20 @@ def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
     return f"sha256={_sha256_text(url)}"
 
 
+def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
+    """Redact potentially sensitive free-form strings in privacy mode.
+
+    This is used for fields like file paths emitted by the Excel-oracle harness, which may include
+    local usernames/mount points in non-GitHub environments.
+    """
+
+    if not value or privacy_mode != _PRIVACY_PRIVATE:
+        return value
+    if value.startswith("sha256="):
+        return value
+    return f"sha256={_sha256_text(value)}"
+
+
 def _git_commit_sha(repo_root: Path) -> str | None:
     """
     Best-effort local fallback when not running in GitHub Actions.
@@ -563,9 +577,13 @@ def main() -> int:
         oracle_meta_parts.append(f"excludeTags: {_fmt_tags(oracle.exclude_tags, empty_text='<none>')}")
         oracle_meta_parts.append(f"maxCases: {_fmt_max_cases(oracle.max_cases)}")
         if oracle.expected_path:
-            oracle_meta_parts.append(f"expected: `{oracle.expected_path}`")
+            oracle_meta_parts.append(
+                f"expected: `{_redact_text(oracle.expected_path, privacy_mode=args.privacy_mode)}`"
+            )
         if oracle.actual_path:
-            oracle_meta_parts.append(f"actual: `{oracle.actual_path}`")
+            oracle_meta_parts.append(
+                f"actual: `{_redact_text(oracle.actual_path, privacy_mode=args.privacy_mode)}`"
+            )
         extra = f" ({', '.join(oracle_meta_parts)})" if oracle_meta_parts else ""
         lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`{extra}")
     else:
@@ -658,8 +676,12 @@ def main() -> int:
                     "excludeTags": oracle.exclude_tags if oracle else None,
                     "maxCases": oracle.max_cases if oracle else None,
                     "casesSha256": oracle.cases_sha256 if oracle else None,
-                    "expectedPath": oracle.expected_path if oracle else None,
-                    "actualPath": oracle.actual_path if oracle else None,
+                    "expectedPath": _redact_text(oracle.expected_path, privacy_mode=args.privacy_mode)
+                    if oracle
+                    else None,
+                    "actualPath": _redact_text(oracle.actual_path, privacy_mode=args.privacy_mode)
+                    if oracle
+                    else None,
                 },
             },
             "metrics": {
