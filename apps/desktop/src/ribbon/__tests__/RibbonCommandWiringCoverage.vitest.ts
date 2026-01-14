@@ -101,8 +101,9 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
 });
 
 const IMPLEMENTED_COMMAND_PREFIXES = [
-  // Handled by `handleRibbonCommand` prefix logic.
-  "view.zoom.zoom.",
+  // Handled by `handleRibbonCommand` prefix logic (see `apps/desktop/src/main.ts`).
+  "home.styles.cellStyles.",
+  "home.styles.formatAsTable.",
 ];
 
 function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): string[] {
@@ -254,6 +255,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
 
   it("ensures enabled ribbon ids that are not registered as commands are referenced in main.ts", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
+    const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
 
     const commandRegistry = new CommandRegistry();
@@ -269,15 +271,16 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     // Guard: we should always have at least one exempt/non-command ribbon id (e.g. File tab wiring).
     expect(enabledButUnregistered.length).toBeGreaterThan(0);
 
-    const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-    const source = readFileSync(mainTsPath, "utf8");
+    const implementedIds = extractImplementedCommandIdsFromMainTs(schemaIdSet);
+    const implementedSet = new Set(implementedIds);
 
-    const missing = enabledButUnregistered.filter((id) => !source.includes(`"${id}"`));
+    const missing = enabledButUnregistered.filter((id) => !implementedSet.has(id)).sort();
     expect(
       missing,
       [
-        "Found ribbon ids that would be enabled but are not registered as commands and are not referenced in main.ts.",
-        "These ids should either be registered as builtin commands or explicitly handled in the desktop shell.",
+        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in main.ts.",
+        "These ids should either be registered as builtin commands, explicitly handled in the desktop shell,",
+        "or removed from the CommandRegistry exemption list so they are disabled by default.",
         "",
         ...missing.map((id) => `- ${id}`),
       ].join("\n"),
