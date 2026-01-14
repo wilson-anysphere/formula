@@ -295,7 +295,7 @@ dialog.print-preview-dialog::backdrop {
   z-index: 10;
   box-sizing: border-box;
   padding: 2px 4px;
-  border: 2px solid var(--formula-grid-selection-border, var(--accent));
+  border: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline: none;
   resize: none;
   font: 14px/20px var(--font-mono);
