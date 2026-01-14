@@ -569,19 +569,9 @@ fn extract_open_file_paths(argv: &[String], cwd: Option<&Path>) -> Vec<String> {
 }
 
 fn extract_oauth_redirect_urls(argv: &[String]) -> Vec<String> {
-    argv.iter()
-        .filter_map(|arg| {
-            let trimmed = arg.trim().trim_matches('"');
-            if trimmed
-                .get(..8)
-                .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
-            {
-                Some(trimmed.to_string())
-            } else {
-                None
-            }
-        })
-        .collect()
+    // Keep argv extraction logic in the `desktop` crate so it can be unit-tested without
+    // requiring the full Tauri/WebView toolchain.
+    desktop::oauth_redirect::extract_oauth_redirect_urls_from_argv(argv)
 }
 
 fn cwd_from_single_instance_callback(cwd: String) -> Option<PathBuf> {

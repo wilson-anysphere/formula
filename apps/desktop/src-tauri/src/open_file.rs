@@ -40,10 +40,23 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 /// - handles `file://...` URLs (via [`Url::to_file_path`])
 /// - resolves relative paths using `cwd` when provided (falls back to `std::env::current_dir()`)
 /// - ignores args that look like flags (start with `-`)
+/// - caps the number of returned paths so a huge argv list cannot cause unbounded allocations
 pub fn extract_open_file_paths_from_argv(argv: &[String], cwd: Option<&Path>) -> Vec<PathBuf> {
-    argv.iter()
-        .filter_map(|arg| normalize_open_file_candidate(arg, cwd))
-        .collect()
+    // Treat argv as untrusted: a malicious sender can invoke the app with a huge argv list to
+    // force unbounded allocations and/or expensive file signature sniffing. Bound the output to
+    // the same cap as the pending open-file IPC queue.
+    let mut out_rev = Vec::with_capacity(MAX_OPEN_FILE_PENDING_PATHS.min(argv.len()));
+    for arg in argv.iter().rev() {
+        if out_rev.len() >= MAX_OPEN_FILE_PENDING_PATHS {
+            break;
+        }
+        let Some(path) = normalize_open_file_candidate(arg, cwd) else {
+            continue;
+        };
+        out_rev.push(path);
+    }
+    out_rev.reverse();
+    out_rev
 }
 
 /// Normalize an "open file" request payload.
@@ -282,6 +295,25 @@ mod tests {
         let paths = extract_open_file_paths_from_argv(&argv, Some(dir.path()));
 
         assert_eq!(paths, vec![file_path]);
+    }
+
+    #[test]
+    fn extract_open_file_paths_from_argv_caps_by_count_dropping_oldest() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        let mut argv = vec!["formula-desktop".to_string()];
+        for idx in 0..(MAX_OPEN_FILE_PENDING_PATHS + 7) {
+            argv.push(format!("p{idx}.xlsx"));
+        }
+
+        let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
+        assert_eq!(paths.len(), MAX_OPEN_FILE_PENDING_PATHS);
+
+        let expected: Vec<PathBuf> = (7..(MAX_OPEN_FILE_PENDING_PATHS + 7))
+            .map(|idx| cwd.join(format!("p{idx}.xlsx")))
+            .collect();
+        assert_eq!(paths, expected);
     }
 
     #[test]

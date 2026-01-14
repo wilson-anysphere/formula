@@ -5,6 +5,60 @@ use crate::oauth_redirect_ipc::{
     MAX_PENDING_URLS as MAX_OAUTH_REDIRECT_PENDING_URLS,
 };
 
+/// Extract OAuth redirect URL candidates from a process argv list.
+///
+/// Some platforms deliver custom scheme deep links (e.g. `formula://...`) via argv on cold start or
+/// via the single-instance plugin on warm start. Treat argv as untrusted: it can be arbitrarily
+/// large if a malicious sender invokes the app with a huge argument list.
+///
+/// This helper is intentionally bounded to keep allocations deterministic. When the cap is
+/// exceeded, we drop the **oldest** entries and keep the most recent ones ("latest user action
+/// wins"). The caps are aligned with the pending oauth-redirect IPC queue enforced by
+/// [`crate::oauth_redirect_ipc::OauthRedirectState`].
+pub fn extract_oauth_redirect_urls_from_argv(argv: &[String]) -> Vec<String> {
+    let mut out_rev = Vec::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(argv.len()));
+    let mut bytes = 0usize;
+
+    // Walk backwards so we keep the most recent entries, then reverse at the end to preserve the
+    // original order among kept URLs.
+    for arg in argv.iter().rev() {
+        if out_rev.len() >= MAX_OAUTH_REDIRECT_PENDING_URLS {
+            break;
+        }
+
+        let trimmed = arg.trim().trim_matches('"');
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Deep links are delivered via argv as raw URL strings. Filter down to the app scheme so
+        // we don't attempt to parse every argv entry as a URL.
+        if !trimmed
+            .get(..8)
+            .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
+        {
+            continue;
+        }
+
+        if trimmed.len() > MAX_OAUTH_REDIRECT_PENDING_BYTES {
+            // Single oversized entry; skip rather than exceeding the deterministic cap.
+            continue;
+        }
+
+        if bytes.saturating_add(trimmed.len()) > MAX_OAUTH_REDIRECT_PENDING_BYTES {
+            // Adding this (older) entry would exceed the byte cap; keep scanning in case smaller
+            // ones still fit.
+            continue;
+        }
+
+        bytes += trimmed.len();
+        out_rev.push(trimmed.to_string());
+    }
+
+    out_rev.reverse();
+    out_rev
+}
+
 /// Normalize OAuth redirect URLs passed to the desktop host.
 ///
 /// This filters and de-dupes a list of URL strings (argv, deep link plugin, etc) and returns only
@@ -186,6 +240,48 @@ mod tests {
         );
 
         let expected = urls[MAX_OAUTH_REDIRECT_PENDING_URLS - expected_len..].to_vec();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn extract_oauth_redirect_urls_from_argv_caps_by_count_dropping_oldest() {
+        let mut argv = vec!["formula-desktop".to_string()];
+        for idx in 0..(MAX_OAUTH_REDIRECT_PENDING_URLS + 3) {
+            argv.push(format!("formula://u{idx}"));
+        }
+
+        let out = extract_oauth_redirect_urls_from_argv(&argv);
+        assert_eq!(out.len(), MAX_OAUTH_REDIRECT_PENDING_URLS);
+
+        let expected: Vec<String> = (3..(MAX_OAUTH_REDIRECT_PENDING_URLS + 3))
+            .map(|idx| format!("formula://u{idx}"))
+            .collect();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn extract_oauth_redirect_urls_from_argv_caps_by_total_bytes_dropping_oldest_deterministically() {
+        // Use fixed-size strings so the expected trim point is deterministic.
+        let entry_len = 4096;
+        let prefix_len = "formula://000-".len();
+        let payload = "x".repeat(entry_len - prefix_len);
+
+        let mut argv = vec!["formula-desktop".to_string()];
+        for i in 0..MAX_OAUTH_REDIRECT_PENDING_URLS {
+            argv.push(format!("formula://{i:03}-{payload}"));
+        }
+
+        let out = extract_oauth_redirect_urls_from_argv(&argv);
+        let expected_len = MAX_OAUTH_REDIRECT_PENDING_BYTES / entry_len;
+        assert_eq!(out.len(), expected_len);
+
+        let total_bytes: usize = out.iter().map(|u| u.len()).sum();
+        assert!(
+            total_bytes <= MAX_OAUTH_REDIRECT_PENDING_BYTES,
+            "extracted bytes {total_bytes} exceeded cap {MAX_OAUTH_REDIRECT_PENDING_BYTES}"
+        );
+
+        let expected = argv[argv.len() - expected_len..].to_vec();
         assert_eq!(out, expected);
     }
 }
