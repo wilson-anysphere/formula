@@ -82,6 +82,40 @@ fn lex_fr_fr_supports_narrow_nbsp_thousands_separator_in_numbers() {
 }
 
 #[test]
+fn lex_fr_fr_supports_multiple_nbsp_thousands_separators_in_numbers() {
+    // Ensure we can handle more than one grouping separator in a single literal (e.g. 1 234 567).
+    let locale = LocaleConfig::fr_fr();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("SUM(1\u{00A0}234\u{00A0}567,89;0,5)", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+    assert!(matches!(tokens[1].kind, TokenKind::LParen));
+    assert!(matches!(tokens[2].kind, TokenKind::Number(ref n) if n == "1234567,89"));
+    assert!(matches!(tokens[3].kind, TokenKind::ArgSep));
+    assert!(matches!(tokens[4].kind, TokenKind::Number(ref n) if n == "0,5"));
+    assert!(matches!(tokens[5].kind, TokenKind::RParen));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
+fn lex_fr_fr_supports_mixed_nbsp_and_narrow_nbsp_thousands_separators_in_numbers() {
+    // Spreadsheets can sometimes mix NBSP and narrow NBSP for grouping; treat them equivalently.
+    let locale = LocaleConfig::fr_fr();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("SUM(1\u{00A0}234\u{202F}567,89;0,5)", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+    assert!(matches!(tokens[1].kind, TokenKind::LParen));
+    assert!(matches!(tokens[2].kind, TokenKind::Number(ref n) if n == "1234567,89"));
+    assert!(matches!(tokens[3].kind, TokenKind::ArgSep));
+    assert!(matches!(tokens[4].kind, TokenKind::Number(ref n) if n == "0,5"));
+    assert!(matches!(tokens[5].kind, TokenKind::RParen));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
 fn lex_es_es_decimal_and_arg_separators() {
     let locale = LocaleConfig::es_es();
     let mut opts = ParseOptions::default();
