@@ -66,6 +66,20 @@ pub fn extract_agile_encryption_info_xml(
         }
     }
 
+    // --- Fallback: scan for a `<encryption>...</encryption>` blob and ignore any trailing bytes. ---
+    if let Some(scanned) = scan_to_encryption_xml_blob(payload) {
+        match parse_utf8_xml(scanned) {
+            Ok(xml) => return Ok(xml),
+            Err(err) => errors.push(format!("blob+utf-8: {err}")),
+        }
+        if is_nul_heavy(scanned) {
+            match parse_utf16le_xml(scanned) {
+                Ok(xml) => return Ok(xml),
+                Err(err) => errors.push(format!("blob+utf-16le: {err}")),
+            }
+        }
+    }
+
     // --- Fallback: scan forward to the first `<` when the payload contains `<encryption` later. ---
     if let Some(scanned) = scan_to_first_xml_tag(payload) {
         match parse_utf8_xml(scanned) {
@@ -213,6 +227,24 @@ fn scan_to_first_xml_tag(payload: &[u8]) -> Option<&[u8]> {
     Some(&payload[idx..])
 }
 
+fn scan_to_encryption_xml_blob(payload: &[u8]) -> Option<&[u8]> {
+    const START: &[u8] = b"<encryption";
+    const END: &[u8] = b"</encryption>";
+
+    let start = payload
+        .windows(START.len())
+        .position(|w| w.eq_ignore_ascii_case(START))?;
+    let after_start = start.saturating_add(START.len());
+    let end_rel = payload
+        .get(after_start..)?
+        .windows(END.len())
+        .position(|w| w.eq_ignore_ascii_case(END))?;
+    let end = after_start
+        .saturating_add(end_rel)
+        .saturating_add(END.len());
+    payload.get(start..end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +291,18 @@ mod tests {
         payload.extend_from_slice(&(xml_bytes.len() as u32).to_le_bytes());
         payload.extend_from_slice(xml_bytes);
         payload.extend_from_slice(b"GARBAGE"); // non-whitespace bytes to force length-prefix slicing
+
+        let stream = make_stream(&payload);
+        let extracted = extract_agile_encryption_info_xml(&stream).expect("should parse");
+        assert_eq!(extracted, xml);
+    }
+
+    #[test]
+    fn extracts_utf8_xml_by_scanning_to_end_tag_when_trailing_bytes_exist() {
+        let xml = r#"<encryption><keyData/></encryption>"#;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(xml.as_bytes());
+        payload.extend_from_slice(b"GARBAGE");
 
         let stream = make_stream(&payload);
         let extracted = extract_agile_encryption_info_xml(&stream).expect("should parse");
