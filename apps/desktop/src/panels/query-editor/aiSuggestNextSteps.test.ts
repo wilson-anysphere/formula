@@ -81,13 +81,21 @@ describe("suggestQueryNextSteps", () => {
         role: "assistant",
         content: JSON.stringify([
           { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } },
+          { type: "addColumn", name: "Flag", formula: "1" },
+          { type: "removeColumns", columns: [] },
+          { type: "take", count: 25 },
           { type: "distinctRows", columns: null },
+          { type: "removeRowsWithErrors", columns: null },
         ]),
       },
     });
 
     const ops = await suggestQueryNextSteps("remove duplicates", { query: baseQuery(), preview: null });
-    expect(ops).toEqual([{ type: "distinctRows", columns: null }]);
+    expect(ops).toEqual([
+      { type: "take", count: 25 },
+      { type: "distinctRows", columns: null },
+      { type: "removeRowsWithErrors", columns: null },
+    ]);
   });
 
   it("throws a helpful error when the model returns invalid JSON", async () => {
@@ -100,4 +108,3 @@ describe("suggestQueryNextSteps", () => {
     );
   });
 });
-

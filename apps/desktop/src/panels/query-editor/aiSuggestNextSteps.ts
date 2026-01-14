@@ -154,6 +154,30 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
   const type = value.type;
   if (typeof type !== "string") return null;
 
+  // When we don't have a preview schema, avoid suggesting operations that
+  // reference column names or depend on column layout. Even if an operation could
+  // be technically valid (e.g. `removeColumns: []`), it's not helpful and may
+  // confuse users because the UI intentionally disables schema-dependent actions
+  // in that state.
+  if (allowedColumns.size === 0) {
+    if (type === "take") {
+      const count = (value as { count?: unknown }).count;
+      if (typeof count !== "number" || !Number.isFinite(count)) return null;
+      return { type: "take", count };
+    }
+    if (type === "distinctRows") {
+      const columns = (value as { columns?: unknown }).columns;
+      if (columns == null) return { type: "distinctRows", columns: null };
+      return null;
+    }
+    if (type === "removeRowsWithErrors") {
+      const columns = (value as { columns?: unknown }).columns;
+      if (columns == null) return { type: "removeRowsWithErrors", columns: null };
+      return null;
+    }
+    return null;
+  }
+
   switch (type) {
     case "take": {
       const count = (value as { count?: unknown }).count;
