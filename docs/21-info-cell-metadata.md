@@ -16,8 +16,13 @@ As of today:
 - `INFO("recalc")` and `INFO("numfile")` are implemented (engine-internal).
 - `INFO("system")` is implemented but currently hard-coded to `"pcdos"`.
 - Other `INFO()` keys listed below currently return `#N/A` (recognized but not available).
-- `CELL("filename")` currently always returns `""` (empty string), matching Excel’s “unsaved workbook” behavior.
-- `CELL("protect")`, `CELL("prefix")`, and `CELL("width")` currently return `#N/A` (recognized but not implemented).
+- `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
+- `CELL("protect")`, `CELL("prefix")`, and `CELL("width")` are recognized and return **best-effort defaults** today:
+  - `protect`: `1` (locked)
+  - `prefix`: `""` (no prefix)
+  - `width`: `8.43` (Excel default column width)
+
+  These are not yet fully Excel-compatible (they do not consult effective formatting / column metadata).
 
 Tracking implementation: `crates/formula-engine/src/functions/information/worksheet.rs`.
 
@@ -81,10 +86,10 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `col` | number | none | implemented |
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
-| `filename` | text | workbook file metadata + sheet name | **partially implemented** (currently always `""`) |
-| `protect` | number | **effective style** (`protection.locked`) | planned |
-| `prefix` | text | **effective style** (`alignment.horizontal`) | planned |
-| `width` | number | column width + column hidden state | planned |
+| `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
+| `protect` | number | **effective style** (`protection.locked`) | best-effort (currently always returns `1`) |
+| `prefix` | text | **effective style** (`alignment.horizontal`) | best-effort (currently always returns `""`) |
+| `width` | number | column width + column hidden state | best-effort (currently always returns `8.43`) |
 
 Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
 
@@ -112,24 +117,34 @@ Behavior:
   - workbook filename (including extension)
   - the referenced sheet name
 
+In this repo, hosts can inject this metadata via:
+
+- WASM/worker (`@formula/engine`): `EngineClient.setWorkbookFileMetadata(directory, filename)`
+
 Where this metadata comes from in this repo today:
 
 - Cross-platform workbook backends return `WorkbookInfo.path` (`@formula/workbook-backend`). Desktop implementations typically set it to an absolute path; the WASM backend currently returns `null` (no filesystem path in the browser).
 - For web, hosts generally only know a filename (e.g. from a file picker). When we implement workbook file metadata injection, web hosts should pass `fileName` only and leave `directory` empty.
 
-#### `CELL("protect")` (planned)
+#### `CELL("protect")` (planned full semantics)
 
 Excel returns:
 
 - `1` if the referenced cell is **locked**
 - `0` if the referenced cell is **unlocked**
 
-This must be computed from the cell’s **effective style**:
+Current behavior:
+
+- Returns `1` (locked) for all cells.
+
+Planned behavior:
+
+This should be computed from the cell’s **effective style**:
 
 - Use the merged style’s `protection.locked` field.
 - Default behavior should match Excel: if protection is unspecified, treat the cell as **locked**.
 
-#### `CELL("prefix")` (planned)
+#### `CELL("prefix")` (planned full semantics)
 
 Excel returns a **single-character prefix** describing the effective horizontal alignment.
 
@@ -143,16 +158,28 @@ Planned mapping (must match Excel exactly when implemented):
 | fill | `\` |
 | general/other/unspecified | `""` |
 
+Current behavior:
+
+- Returns `""` (empty string) for all cells.
+
+Planned behavior:
+
 This must use the cell’s **effective alignment** (layered style merge), not just a per-cell format.
 
-#### `CELL("width")` (planned)
+#### `CELL("width")` (planned full semantics)
 
 `CELL("width")` must reflect:
 
 - the effective **column width** for the referenced cell’s column
 - whether the column is **hidden**
 
-Excel uses a somewhat idiosyncratic numeric encoding for column width/hidden; we will document the exact encoding here once implemented. Until then, this key returns `#N/A` in `formula-engine`.
+Current behavior:
+
+- Returns `8.43` (default column width) for all references.
+
+Planned behavior:
+
+Excel uses a somewhat idiosyncratic numeric encoding for column width/hidden; we will document the exact encoding here once implemented.
 
 ---
 
@@ -239,6 +266,12 @@ There are two common representations in the codebase:
 - **UI units (pixels at zoom=1)**: the JS document model uses `sheet.view.colWidths` as “base units, zoom=1” and leaves interpretation to the UI grid. See `apps/desktop/src/document/documentController.js` (`SheetViewState.colWidths`).
 
 For Excel-compatible `CELL("width")`, the engine must ultimately work in **Excel column-width units**. Hosts that only have pixel widths must convert (conversion depends on font/DPI; do not assume a fixed ratio unless you intentionally accept approximation).
+
+This repo includes a best-effort conversion helper in `@formula/engine`:
+
+- `pixelsToExcelColWidthChars(pixels)` / `excelColWidthCharsToPixels(widthChars)` (`packages/engine/src/columnWidth.ts`)
+
+These implement Excel’s default-font conversion (Calibri 11, max digit width 7px, padding 5px) and are an approximation if the workbook’s default font differs.
 
 In the desktop JS document model, column width overrides are accessible via:
 
