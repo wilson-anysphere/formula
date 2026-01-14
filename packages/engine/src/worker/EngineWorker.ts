@@ -1014,7 +1014,8 @@ export class EngineWorker {
   }
 
   async setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
-    await this.flush();
+    // Origin is UI/view metadata (scroll position + frozen panes) and is independent of pending
+    // cell edits. Avoid forcing a `setCells` flush on high-frequency scroll updates.
     await this.invoke("setSheetOrigin", { sheet, origin }, options);
   }
 
