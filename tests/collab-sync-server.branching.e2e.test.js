@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 import { createCollabSession } from "../packages/collab/session/src/index.ts";
 import { CollabBranchingWorkflow } from "../packages/collab/branching/index.js";
-import { getYMap } from "@formula/collab-yjs-utils";
+import { getYMap } from "../packages/collab/yjs-utils/src/index.ts";
 import { BranchService, YjsBranchStore } from "../packages/versioning/branches/src/index.js";
 import {
   getAvailablePort,
