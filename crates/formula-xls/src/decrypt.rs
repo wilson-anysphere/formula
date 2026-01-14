@@ -1015,6 +1015,84 @@ mod filepass_tests {
         assert_eq!(key_40.len(), 16);
     }
 
+    #[test]
+    fn cryptoapi_rc4_md5_40bit_padding_ciphertext_vector() {
+        // Deterministic MD5 + 40-bit RC4 key padding vectors:
+        //
+        // - password="password"
+        // - salt=00..0f
+        // - spinCount=50,000
+        // - block=0
+        // - plaintext="Hello, RC4 CryptoAPI!"
+        //
+        // This mirrors `docs/offcrypto-standard-cryptoapi-rc4.md` and catches regressions where a
+        // 40-bit key is incorrectly treated as a raw 5-byte RC4 key (instead of a 16-byte key with
+        // the remaining bytes zero).
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        let h = derive_key_material(CryptoApiHashAlg::Md5, password, &salt);
+        assert_eq!(
+            h.as_slice(),
+            [
+                0x20, 0x79, 0x47, 0x60, 0x89, 0xFD, 0xA7, 0x84, 0xC3, 0xA3, 0xCF, 0xEB, 0x98,
+                0x10, 0x2C, 0x7E,
+            ]
+        );
+
+        let hb0 = md5_bytes(&[h.as_slice(), &0u32.to_le_bytes()]);
+        assert_eq!(
+            hb0,
+            [
+                0x69, 0xBA, 0xDC, 0xAE, 0x24, 0x48, 0x68, 0xE2, 0x09, 0xD4, 0xE0, 0x53, 0xCC,
+                0xD2, 0xA3, 0xBC,
+            ]
+        );
+
+        let key_material: [u8; 5] = hb0[..5].try_into().unwrap();
+        assert_eq!(key_material, [0x69, 0xBA, 0xDC, 0xAE, 0x24]);
+
+        let mut padded_key = [0u8; 16];
+        padded_key[..5].copy_from_slice(&key_material);
+        assert_eq!(
+            padded_key,
+            [
+                0x69, 0xBA, 0xDC, 0xAE, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00,
+            ]
+        );
+
+        let plaintext = b"Hello, RC4 CryptoAPI!";
+
+        // Ciphertext when using the padded 16-byte key (required by some CryptoAPI RC4 writers).
+        let mut ciphertext_padded = plaintext.to_vec();
+        let mut rc4_padded = Rc4::new(&padded_key);
+        rc4_padded.apply_keystream(&mut ciphertext_padded);
+        assert_eq!(
+            ciphertext_padded,
+            vec![
+                0x56, 0x50, 0x16, 0xA3, 0xD8, 0x15, 0x86, 0x32, 0xBB, 0x36, 0xCE, 0x1D, 0x76,
+                0x99, 0x66, 0x28, 0x51, 0x20, 0x61, 0xBF, 0xA3,
+            ]
+        );
+
+        // Ciphertext when using the raw 5-byte key material (different RC4 KSA).
+        let mut ciphertext_raw = plaintext.to_vec();
+        let mut rc4_raw = Rc4::new(&key_material);
+        rc4_raw.apply_keystream(&mut ciphertext_raw);
+        assert_eq!(
+            ciphertext_raw,
+            vec![
+                0xDB, 0x03, 0x7C, 0xD6, 0x0D, 0x38, 0xC8, 0x82, 0x01, 0x9B, 0x5F, 0x5D, 0x8C,
+                0x43, 0x38, 0x23, 0x73, 0xF4, 0x76, 0xDA, 0x28,
+            ]
+        );
+        assert_ne!(ciphertext_padded, ciphertext_raw);
+    }
+
     fn decrypts_rc4_cryptoapi_40_bit_impl(header_key_size_bits: u32) {
         // Build a minimal BIFF8 workbook stream:
         // BOF (plaintext) + FILEPASS (plaintext) + one record with encrypted payload + EOF.

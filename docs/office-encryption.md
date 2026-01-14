@@ -126,7 +126,8 @@ Currently supported in `formula-xls` (see also the fixture inventory in
   - `KeySizeBits` values: `0/40`, `56`, `128`
     - `KeySizeBits==0` is treated as 40-bit RC4.
     - Note (40-bit nuance): the derived 5-byte key material is **padded to 16 bytes** with 11 zero
-      bytes before running RC4 KSA (CryptoAPI interoperability quirk). 56-bit uses 7 bytes; 128-bit
+      bytes before running RC4 KSA (CryptoAPI interoperability quirk). `formula-xls` retries verifier
+      validation with the padded form when the raw 5-byte key fails. 56-bit uses 7 bytes; 128-bit
       uses 16 bytes.
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
