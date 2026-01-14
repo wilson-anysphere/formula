@@ -36,10 +36,10 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
    - `EncryptionInfo` header version **Major 4 / Minor 4**
    - Decrypts to `plaintext.xlsx` with password `""`
 - `agile-unicode.xlsx` – Agile encrypted OOXML with a Unicode open password.
-  - `EncryptionInfo` header version **Major 4 / Minor 4**
-  - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
+   - `EncryptionInfo` header version **Major 4 / Minor 4**
+   - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
 - `plaintext-large.xlsx` – unencrypted ZIP-based workbook, intentionally **> 4096 bytes**.
-  - Copied from `fixtures/xlsx/basic/comments.xlsx`.
+   - Copied from `fixtures/xlsx/basic/comments.xlsx`.
 - `agile-large.xlsx` – Agile encrypted OOXML.
    - `EncryptionInfo` header version **Major 4 / Minor 4**
    - Decrypts to `plaintext-large.xlsx` with password `password`
@@ -82,6 +82,9 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   Unicode-password fixtures).
 - `crates/formula-io/tests/encrypted_ooxml_fixture_validation.rs`:
   sanity checks that the OLE container and `EncryptionInfo` headers match expectations.
+- `crates/formula-io/tests/encrypted_ooxml_agile_params.rs`:
+  pins the committed Agile `EncryptionInfo` XML parameters (`spinCount` / algorithms) to prevent
+  accidental fixture regeneration drift (and to keep decryption CI performance predictable).
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
   end-to-end decryption for `agile.xlsx`, `agile-empty-password.xlsx`, and `agile-unicode.xlsx` against `plaintext.xlsx`,
   plus macro-enabled `.xlsm` fixture coverage (`agile-basic.xlsm` / `standard-basic.xlsm` against
@@ -133,6 +136,22 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 
 See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
 `EncryptedPackage`).
+
+## Agile `EncryptionInfo` parameters (pinned)
+
+The Agile fixtures in this directory are intended to be deterministic. In addition to asserting the
+`EncryptionInfo` version header (4.4), tests also **pin the Agile XML parameter choices** so that
+fixture regeneration can't silently change coverage or make decryption tests slow (e.g. by bumping
+`spinCount`).
+
+Pinned expectations:
+
+| fixture | `p:encryptedKey@spinCount` | `hashAlgorithm` | `keyData@keyBits` | `keyData@cipherAlgorithm` | `keyData@cipherChaining` | `keyData@blockSize` |
+| --- | ---: | --- | ---: | --- | --- | ---: |
+| `agile.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
+| `agile-large.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
+| `agile-unicode.xlsx` | 100000 | SHA512 | 256 | AES | ChainingModeCBC | 16 |
+| `agile-empty-password.xlsx` | 1000 | SHA256 | 128 | AES | ChainingModeCBC | 16 |
 
 ## Provenance
 
