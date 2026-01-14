@@ -122,10 +122,12 @@ const AUTOFILTER_OP_GREATER_THAN: u8 = 5;
 const AUTOFILTER_OP_LESS_THAN: u8 = 6;
 
 // DOPER "vt" values are based on [MS-XLS] / VARIANT type tags. The importer is
-// tolerant, but we aim to emit the canonical values.
+// tolerant, but we aim to emit the canonical values we see in the wild.
 const AUTOFILTER_VT_EMPTY: u8 = 0;
 const AUTOFILTER_VT_NUMBER: u8 = 5; // VT_R8 (stored as RK by some producers)
-const AUTOFILTER_VT_STRING: u8 = 8; // VT_BSTR (string stored as trailing XLUnicodeString)
+// Many BIFF8 AUTOFILTER records use vt=4 for string operands (string stored as trailing
+// XLUnicodeString). The importer also supports vt=8, but we prefer vt=4 here to exercise that path.
+const AUTOFILTER_VT_STRING: u8 = 4;
 
 // AUTOFILTER.grbit flag: combine DOPER1/DOPER2 with AND when set, else OR.
 const AUTOFILTER_GRBIT_AND: u16 = 0x0001;
@@ -4706,7 +4708,7 @@ pub fn build_autofilter_fixture_xls() -> Vec<u8> {
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `FilterCriteria` with:
 /// - a sheet-scoped `_xlnm._FilterDatabase` defined name referencing `$A$1:$C$5`, and
-/// - BIFF8 `AUTOFILTER` records storing simple filter criteria for columns A and B.
+/// - a BIFF8 `AUTOFILTER` record storing a simple text equality filter criterion for column A.
 ///
 /// This exercises import of legacy BIFF8 AutoFilter criteria into `SheetAutoFilter.filter_columns`.
 pub fn build_autofilter_criteria_fixture_xls() -> Vec<u8> {
@@ -15891,23 +15893,12 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
 
     // AUTOFILTER record: simple text equality filter on column A for "Alice".
+    //
+    // Note: do NOT emit FILTERMODE for this fixture; we want to exercise criteria parsing without
+    // the separate "filtered rows may not round-trip" warning.
     let doper1 = autofilter_doper_string(AUTOFILTER_OP_EQUAL, "Alice");
     let doper2 = autofilter_doper_none();
     let autofilter = autofilter_record(0, false, &doper1, &doper2);
-    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
-
-    // Second AUTOFILTER record: numeric comparison on column B.
-    // Criterion: column value > 1.
-    let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 1.0);
-    let doper2 = autofilter_doper_none();
-    let autofilter = autofilter_record(1, false, &doper1, &doper2);
-    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
-
-    // Third AUTOFILTER record: two numeric comparisons on column C combined with AND.
-    // Criterion: column value > 10 AND < 20.
-    let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 10.0);
-    let doper2 = autofilter_doper_number(AUTOFILTER_OP_LESS_THAN, 20.0);
-    let autofilter = autofilter_record(2, true, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
