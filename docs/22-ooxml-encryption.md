@@ -32,7 +32,8 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `Error::UnsupportedOoxmlEncryption`
   - Note: with the `formula-io` crate feature **`encrypted-workbooks`** enabled, the password-aware
     open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can also decrypt
-    and open Agile (4.4) encrypted `.xlsx`/`.xlsm` in memory (via the `formula-xlsx` decryptor).
+    and open Agile (4.4) encrypted `.xlsx`/`.xlsm`/`.xlsb` in memory (via the `formula-xlsx`
+    decryptor).
 - **Streaming decrypt reader (does not validate `dataIntegrity` HMAC):**
   - `crates/formula-io/src/encrypted_ooxml.rs`
   - `crates/formula-io/src/encrypted_package_reader.rs`
@@ -183,6 +184,25 @@ Notes:
 
 - The `saltValue` and `spinCount` come from `<p:encryptedKey ...>`, not `<keyData>`.
 - “Hash” is the algorithm named by `p:encryptedKey/@hashAlgorithm`.
+
+### Key derivation (`TruncateHash`) for verifier/key/HMAC purposes
+
+Agile derives different AES keys from the iterated password hash by hashing with a purpose-specific
+`blockKey` and then applying MS-OFFCRYPTO’s `TruncateHash`:
+
+```text
+derived = Hash(iterated_password_hash || blockKey)
+key     = TruncateHash(derived, keyLenBytes)
+```
+
+`TruncateHash` detail that matters for interoperability:
+
+- If `keyLenBytes <= hashLen`, take the prefix.
+- If `keyLenBytes > hashLen`, **pad the digest with `0x36` bytes** to reach `keyLenBytes` (this
+  matches Excel and `msoffcrypto-tool`).
+
+This is easy to miss when `hashAlgorithm="SHA1"` (20-byte digest) but `keyBits="192"`/`"256"` (24/32
+bytes).
 
 ### Password edge cases (do not accidentally change semantics)
 

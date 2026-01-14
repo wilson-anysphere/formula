@@ -29,7 +29,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 ### Summary table
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm` only) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
@@ -37,7 +37,7 @@ Important: `formula-io`’s public open APIs **detect** encryption and surface d
 (OOXML: `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`; legacy `.xls`:
 `EncryptedWorkbook`). By default they do not decrypt encrypted OOXML workbooks end-to-end, but with
 the `formula-io` crate feature **`encrypted-workbooks`** enabled they can decrypt and open Agile (4.4)
-encrypted `.xlsx`/`.xlsm` in memory. Standard encryption is not yet opened end-to-end via `formula-io`.
+encrypted `.xlsx`/`.xlsm`/`.xlsb` in memory. Standard encryption is not yet opened end-to-end via `formula-io`.
 
 ## Supported schemes / parameter subsets
 
@@ -142,12 +142,28 @@ for i in 0..spinCount:
   H = Hash(LE32(i) + H)
 
 derived = Hash(H + blockKey)
-key = derived[0..keyBits/8]
+key = TruncateHash(derived, keyBits/8)
 ```
 
 Notes:
 * `Hash` is the `hashAlgorithm` declared by the relevant XML node (`SHA1`/`SHA256`/`SHA384`/`SHA512`).
 * The iteration counter `i` is a **little-endian u32**.
+* `TruncateHash` truncates when `keyBits/8 <= hashLen`, otherwise it expands by padding with `0x36`
+  bytes to reach the requested length (matches Excel + `msoffcrypto-tool`).
+
+#### Spin count DoS limits
+
+`spinCount` is **attacker-controlled input**. Extremely large values can cause CPU DoS because the
+iterated hash loop runs `spinCount` digest operations.
+
+Current state in this repo:
+
+- `crates/formula-offcrypto` enforces a configurable maximum via `DecryptOptions` /
+  `DecryptLimits.max_spin_count` (default: `DEFAULT_MAX_SPIN_COUNT = 1_000_000`) and returns
+  `OffcryptoError::SpinCountTooLarge { spin_count, max }` when exceeded.
+- `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` currently accept the file’s
+  `spinCount` without a hard cap; callers decrypting untrusted files should consider applying their
+  own limit at a higher layer.
 
 #### Agile blockKey constants
 Agile defines several 8-byte `blockKey` constants. We use the canonical values from MS-OFFCRYPTO:

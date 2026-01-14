@@ -109,10 +109,9 @@ Current state in this repo (important nuance):
 - The high-level `formula-io` open path provides **detection + error classification** so callers can
   prompt for a password and route errors correctly.
   - With the `formula-io` cargo feature **`encrypted-workbooks`** enabled, the password-aware open
-    APIs can also decrypt and open **Agile (4.4)** encrypted `.xlsx`/`.xlsm` in memory (validates
+    APIs can also decrypt and open **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb` in memory (validates
     `dataIntegrity`).
-  - Standard encryption (minor=2) and encrypted `.xlsb` payloads are not yet opened end-to-end in
-    `formula-io`.
+  - Standard encryption (minor=2) is not yet opened end-to-end in `formula-io`.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
 because it determines which scheme you’re dealing with:
@@ -140,7 +139,7 @@ match open_workbook_with_password(path, None) {
         match open_workbook_with_password(path, Some(password)) {
             Ok(workbook) => {
                 // With `formula-io/encrypted-workbooks` enabled, this succeeds for Agile (4.4)
-                // encrypted `.xlsx`/`.xlsm` when the password is correct.
+                // encrypted `.xlsx`/`.xlsm`/`.xlsb` when the password is correct.
                 let _ = workbook;
             }
             Err(Error::InvalidPassword { .. }) => {
@@ -177,8 +176,8 @@ Behavior notes:
 - The `_with_password` variants are intended to work for both encrypted and unencrypted inputs; for
   unencrypted workbooks they behave like the non-password variants.
 - With `formula-io/encrypted-workbooks` enabled, the `_with_password` variants can open Agile (4.4)
-  encrypted `.xlsx`/`.xlsm` workbooks. Standard encryption (minor=2) and encrypted `.xlsb` payloads
-  are not yet opened end-to-end.
+  encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks. Standard encryption (minor=2) is not yet opened
+  end-to-end.
 - Without `formula-io/encrypted-workbooks`, the `_with_password` variants preserve the error
   classification (`PasswordRequired` vs `InvalidPassword`) but do not decrypt encrypted OOXML
   workbooks.
@@ -192,7 +191,7 @@ When handling user reports, these error variants map cleanly to “what happened
 | `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
 | `InvalidPassword` | Password was provided but the workbook could not be opened/decrypted. This can mean “wrong password”, Agile `dataIntegrity` mismatch, or (when `formula-io/encrypted-workbooks` is not enabled) “decryption not implemented in this layer”. | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
 | `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
-| `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`), or the encrypted workbook payload is not supported in this layer (currently this can surface for encrypted `.xlsb`). | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))` (routes to the `.xls` importer for legacy `.xls`). If that still fails, the encryption scheme may be unsupported; ask the user to remove encryption in Excel or provide an unencrypted copy. |
+| `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))` (routes to the `.xls` importer for legacy `.xls`). If that still fails, the encryption scheme may be unsupported; ask the user to remove encryption in Excel or provide an unencrypted copy. |
 | `UnsupportedEncryption` | (Lower-level decryptors) The encrypted OOXML wrapper was recognized, but the cipher/KDF parameters are unsupported by the decryptor. | Capture the `EncryptionInfo` version and decryptor error string; ask the user to remove encryption in Excel and re-save as a fallback. |
 
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo`
