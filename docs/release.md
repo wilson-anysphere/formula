@@ -438,13 +438,16 @@ CI behavior note:
 Note: `apps/desktop/src-tauri/tauri.conf.json` intentionally does **not** hardcode
 `bundle.macOS.signingIdentity`. This keeps local `tauri build` working on macOS machines without
 Developer ID certificates installed, and ensures CI uses the explicit `APPLE_SIGNING_IDENTITY`
-provided as a secret (avoids ambiguous identity selection when multiple certs exist).
+provided as a secret when available (avoids ambiguous identity selection when multiple certs exist).
 
-Secrets used by `tauri-apps/tauri-action` (if unset, the macOS build will be **unsigned**):
+Secrets used by `tauri-apps/tauri-action` (macOS build will be **unsigned** when the certificate secrets are not configured):
 
 - `APPLE_CERTIFICATE` – base64-encoded `.p12` Developer ID certificate
 - `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY` – required for macOS signing in this repo. If `APPLE_CERTIFICATE` is set but `APPLE_SIGNING_IDENTITY` is missing, the release workflow fails fast to avoid ambiguous identity selection (e.g. multiple certs installed). Example: `Developer ID Application: Your Company (TEAMID)`
+- `APPLE_SIGNING_IDENTITY` – optional but recommended; example: `Developer ID Application: Your Company (TEAMID)`.
+  - If set, CI will sign with this explicit identity (recommended to avoid ambiguity when multiple certs exist).
+  - If missing but the certificate/password secrets are present, CI falls back to the generic `Developer ID Application` identity selector.
+    (The workflow will emit a warning in this case.)
 - `APPLE_ID` – Apple ID email
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
