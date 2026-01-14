@@ -283,7 +283,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     import_xls_path_with_biff_reader(path.as_ref(), None, biff::read_workbook_stream_from_xls)
 }
 
-/// Import a legacy `.xls` workbook from disk using a password for BIFF `FILEPASS` encryption.
+/// Import a legacy `.xls` workbook from disk with an optional password for BIFF `FILEPASS`
+/// encryption.
 ///
 /// This supports BIFF5/BIFF8 `.xls` workbooks that use the legacy `FILEPASS` record for workbook
 /// password protection, including:
@@ -297,11 +298,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 /// - Some writers may emit an empty password; pass `""` to decrypt such files.
 pub fn import_xls_path_with_password(
     path: impl AsRef<Path>,
-    password: &str,
+    password: Option<&str>,
 ) -> Result<XlsImportResult, ImportError> {
     import_xls_path_with_biff_reader(
         path.as_ref(),
-        Some(password),
+        password,
         biff::read_workbook_stream_from_xls,
     )
 }

@@ -159,7 +159,7 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
         "expected WINDOW1 to appear after FILEPASS in fixture stream"
     );
 
-    let result = formula_xls::import_xls_path_with_password(fixture_path(), PASSWORD)
+    let result = formula_xls::import_xls_path_with_password(fixture_path(), Some(PASSWORD))
         .expect("expected decrypt + import to succeed");
 
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
@@ -181,14 +181,17 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
 
 #[test]
 fn rc4_cryptoapi_wrong_password_errors() {
-    let err = formula_xls::import_xls_path_with_password(fixture_path(), "wrong password")
+    let err = formula_xls::import_xls_path_with_password(fixture_path(), Some("wrong password"))
         .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]
 fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_password() {
-    let result = formula_xls::import_xls_path_with_password(unicode_fixture_path(), UNICODE_PASSWORD)
+    let result = formula_xls::import_xls_path_with_password(
+        unicode_fixture_path(),
+        Some(UNICODE_PASSWORD),
+    )
         .expect("expected decrypt + import to succeed");
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
     assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
@@ -196,7 +199,8 @@ fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_password() {
 
 #[test]
 fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
-    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), "wrong password")
+    let err =
+        formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some("wrong password"))
         .expect_err("expected wrong password error");
     assert!(
         matches!(err, formula_xls::ImportError::InvalidPassword),
@@ -225,7 +229,7 @@ fn rc4_cryptoapi_unicode_password_different_normalization_fails() {
         "strings should differ before UTF-16 encoding"
     );
 
-    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), nfd)
+    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some(nfd))
         .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
@@ -262,7 +266,7 @@ fn rc4_cryptoapi_unsupported_algorithm_errors() {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(&patched_xls).expect("write xls bytes");
 
-    let err = formula_xls::import_xls_path_with_password(tmp.path(), PASSWORD)
+    let err = formula_xls::import_xls_path_with_password(tmp.path(), Some(PASSWORD))
         .expect_err("expected unsupported encryption error");
     let msg = err.to_string();
     assert!(

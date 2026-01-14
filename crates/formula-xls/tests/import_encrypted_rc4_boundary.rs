@@ -61,7 +61,7 @@ fn imports_encrypted_xls_rc4_cryptoapi_across_1024_byte_boundary() {
         "expected >1024 bytes of encrypted payload after FILEPASS, got {encrypted_len}"
     );
 
-    let result = formula_xls::import_xls_path_with_password(&fixture_path, "password")
+    let result = formula_xls::import_xls_path_with_password(&fixture_path, Some("password"))
         .expect("import encrypted xls with password");
     let sheet = result
         .workbook
@@ -81,4 +81,3 @@ fn imports_encrypted_xls_rc4_cryptoapi_across_1024_byte_boundary() {
         "expected decrypted marker string in B400"
     );
 }
-

@@ -97,6 +97,15 @@ fn errors_on_encrypted_xls_fixtures() {
             "expected ImportError::EncryptedWorkbook for {path:?}, got {err:?}"
         );
 
+        // `import_xls_path_with_password` should preserve the legacy behavior when no password is
+        // supplied.
+        let err = formula_xls::import_xls_path_with_password(&path, None)
+            .expect_err(&format!("expected encrypted workbook error for {path:?}"));
+        assert!(
+            matches!(err, formula_xls::ImportError::EncryptedWorkbook),
+            "expected ImportError::EncryptedWorkbook for {path:?}, got {err:?}"
+        );
+
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("encrypted"),
@@ -130,7 +139,7 @@ fn import_with_password_surfaces_decrypt_error_for_malformed_filepass() {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(&bytes).expect("write xls bytes");
 
-    let err = formula_xls::import_xls_path_with_password(tmp.path(), "pw")
+    let err = formula_xls::import_xls_path_with_password(tmp.path(), Some("pw"))
         .expect_err("expected decrypt failure");
 
     assert!(

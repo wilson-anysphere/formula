@@ -10,7 +10,7 @@ fn imports_xor_encrypted_biff5_with_password() {
         .join("encrypted_xor_biff5.xls");
 
     let result =
-        formula_xls::import_xls_path_with_password(&fixture_path, "xorpass").expect("import xls");
+        formula_xls::import_xls_path_with_password(&fixture_path, Some("xorpass")).expect("import xls");
 
     let sheet = result
         .workbook
@@ -27,7 +27,7 @@ fn xor_encrypted_biff5_wrong_password_errors() {
         .join("fixtures")
         .join("encrypted_xor_biff5.xls");
 
-    let err = formula_xls::import_xls_path_with_password(&fixture_path, "wrong")
+    let err = formula_xls::import_xls_path_with_password(&fixture_path, Some("wrong"))
         .expect_err("expected wrong password");
 
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));

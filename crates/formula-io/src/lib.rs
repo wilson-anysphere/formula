@@ -954,43 +954,30 @@ pub fn open_workbook_model_with_options(
             })
         }
         WorkbookFormat::Xls => {
-            if let Some(password) = opts.password.as_deref() {
-                match xls::import_xls_path_with_password(path, password) {
-                    Ok(result) => Ok(result.workbook),
-                    Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
+            match xls::import_xls_path_with_password(path, opts.password.as_deref()) {
+                Ok(result) => Ok(result.workbook),
+                Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                }),
+                Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                }),
+                Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
+                    Err(Error::UnsupportedEncryption {
                         path: path.to_path_buf(),
-                    }),
-                    Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
-                        path: path.to_path_buf(),
-                    }),
-                    Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
-                        Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: scheme,
-                        })
-                    }
-                    Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
-                        path: path.to_path_buf(),
-                        kind: format!(
-                            "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
-                        ),
-                    }),
-                    Err(source) => Err(Error::OpenXls {
-                        path: path.to_path_buf(),
-                        source,
-                    }),
+                        kind: scheme,
+                    })
                 }
-            } else {
-                match xls::import_xls_path(path) {
-                    Ok(result) => Ok(result.workbook),
-                    Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
-                        path: path.to_path_buf(),
-                    }),
-                    Err(source) => Err(Error::OpenXls {
-                        path: path.to_path_buf(),
-                        source,
-                    }),
-                }
+                Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
+                    path: path.to_path_buf(),
+                    kind: format!(
+                        "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                    ),
+                }),
+                Err(source) => Err(Error::OpenXls {
+                    path: path.to_path_buf(),
+                    source,
+                }),
             }
         }
         WorkbookFormat::Xlsb => {
@@ -2941,43 +2928,30 @@ pub fn open_workbook_with_options(
             Ok(Workbook::Xlsx(package))
         }
         WorkbookFormat::Xls => {
-            if let Some(password) = opts.password.as_deref() {
-                match xls::import_xls_path_with_password(path, password) {
-                    Ok(result) => Ok(Workbook::Xls(result)),
-                    Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
+            match xls::import_xls_path_with_password(path, opts.password.as_deref()) {
+                Ok(result) => Ok(Workbook::Xls(result)),
+                Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                }),
+                Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                }),
+                Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
+                    Err(Error::UnsupportedEncryption {
                         path: path.to_path_buf(),
-                    }),
-                    Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
-                        path: path.to_path_buf(),
-                    }),
-                    Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
-                        Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: scheme,
-                        })
-                    }
-                    Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
-                        path: path.to_path_buf(),
-                        kind: format!(
-                            "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
-                        ),
-                    }),
-                    Err(source) => Err(Error::OpenXls {
-                        path: path.to_path_buf(),
-                        source,
-                    }),
+                        kind: scheme,
+                    })
                 }
-            } else {
-                match xls::import_xls_path(path) {
-                    Ok(result) => Ok(Workbook::Xls(result)),
-                    Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
-                        path: path.to_path_buf(),
-                    }),
-                    Err(source) => Err(Error::OpenXls {
-                        path: path.to_path_buf(),
-                        source,
-                    }),
-                }
+                Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
+                    path: path.to_path_buf(),
+                    kind: format!(
+                        "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                    ),
+                }),
+                Err(source) => Err(Error::OpenXls {
+                    path: path.to_path_buf(),
+                    source,
+                }),
             }
         }
         WorkbookFormat::Xlsb => {

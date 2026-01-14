@@ -130,7 +130,7 @@ fn decrypts_rc4_standard_biff8_xls() {
         "expected encrypted record-data stream to cross 1024-byte boundary; got {payload_bytes_after_filepass} bytes after FILEPASS"
     );
 
-    let result = formula_xls::import_xls_path_with_password(fixture_path(), PASSWORD)
+    let result = formula_xls::import_xls_path_with_password(fixture_path(), Some(PASSWORD))
         .expect("expected decrypt + import to succeed");
 
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
@@ -159,7 +159,7 @@ fn decrypts_rc4_standard_biff8_xls() {
 
 #[test]
 fn rc4_standard_wrong_password_errors() {
-    let err = formula_xls::import_xls_path_with_password(fixture_path(), "wrong password")
+    let err = formula_xls::import_xls_path_with_password(fixture_path(), Some("wrong password"))
         .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
@@ -175,7 +175,7 @@ fn rc4_standard_unsupported_version_errors() {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(&patched_xls).expect("write xls bytes");
 
-    let err = formula_xls::import_xls_path_with_password(tmp.path(), PASSWORD)
+    let err = formula_xls::import_xls_path_with_password(tmp.path(), Some(PASSWORD))
         .expect_err("expected unsupported encryption error");
     assert!(matches!(
         err,
@@ -187,7 +187,7 @@ fn rc4_standard_unsupported_version_errors() {
 fn import_unencrypted_xls_with_password_is_unaffected() {
     // Supplying a password for a non-encrypted workbook should be ignored and import should still
     // succeed.
-    let result = formula_xls::import_xls_path_with_password(basic_fixture_path(), PASSWORD)
+    let result = formula_xls::import_xls_path_with_password(basic_fixture_path(), Some(PASSWORD))
         .expect("import xls");
 
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");

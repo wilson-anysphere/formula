@@ -11,7 +11,7 @@ const PASSWORD: &str = "correct horse battery staple";
 fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
-    formula_xls::import_xls_path_with_password(tmp.path(), PASSWORD).expect("import xls")
+    formula_xls::import_xls_path_with_password(tmp.path(), Some(PASSWORD)).expect("import xls")
 }
 
 /// Ensure BIFF8 RC4 CryptoAPI decryption still routes the decrypted workbook stream through the
@@ -49,4 +49,3 @@ fn decrypts_and_imports_defined_names_split_across_continue_records() {
     assert_eq!(formula, "MyContinuedName");
     assert_parseable_formula(formula);
 }
-
