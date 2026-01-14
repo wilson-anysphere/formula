@@ -1281,6 +1281,56 @@ fn ignore_preset_excel_volatile_ids_suppresses_xr_uid_diffs() {
 }
 
 #[test]
+fn ignore_path_accepts_prefix_local_syntax_for_namespaced_attributes() {
+    let expected_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000001}"/>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000002}"/>"#,
+    )]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let base_report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        base_report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/workbook.xml" && d.kind == "attribute_changed"),
+        "expected an attribute_changed diff, got {:#?}",
+        base_report.differences
+    );
+
+    // Users often think in terms of XML prefixes (e.g. `xr:uid`), but diff paths include resolved
+    // namespace URIs (e.g. `@{uri}uid`). Ensure we accept the prefix form as a convenience.
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: Vec::new(),
+        ignore_paths: vec![IgnorePathRule {
+            part: None,
+            path_substring: "xr:uid".to_string(),
+            kind: None,
+        }],
+        strict_calc_chain: false,
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.is_empty(),
+        "expected no diffs after ignoring `xr:uid`, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn cli_ignore_preset_flag_suppresses_xr_uid_diffs() {
     let expected_zip = zip_bytes(&[(
         "xl/workbook.xml",

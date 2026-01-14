@@ -915,11 +915,69 @@ enum IgnorePathPartMatcher {
     Glob(globset::GlobMatcher),
 }
 
+fn normalize_ignore_path_substring(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let normalized = trimmed.replace('\\', "/");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return String::new();
+    }
+
+    // `XmlDiff.path` uses resolved namespace URIs (e.g. `@{uri}uid`), not prefixes (e.g. `xr:uid`).
+    // For convenience, accept simple `prefix:local` patterns by mapping them to `}local`, which
+    // matches the `QName` string form without requiring callers to spell out the full URI.
+    //
+    // Keep this intentionally conservative so we don't rewrite URL substrings or bracketed XPath-ish
+    // snippets.
+    let candidate = normalized.trim_start_matches('@');
+    if candidate.contains("://")
+        || candidate.contains('{')
+        || candidate.contains('}')
+        || candidate.contains('/')
+        || candidate.contains('[')
+        || candidate.contains(']')
+    {
+        return normalized.to_string();
+    }
+
+    let mut iter = candidate.splitn(3, ':');
+    let prefix = iter.next().unwrap_or_default();
+    let local = iter.next();
+    if iter.next().is_some() {
+        return normalized.to_string();
+    }
+    let Some(local) = local else {
+        return normalized.to_string();
+    };
+    if prefix.is_empty() || local.is_empty() {
+        return normalized.to_string();
+    }
+    if !is_simple_xml_name_segment(prefix) || !is_simple_xml_name_segment(local) {
+        return normalized.to_string();
+    }
+
+    format!("}}{local}")
+}
+
+fn is_simple_xml_name_segment(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
 impl IgnorePathMatcher {
     fn new(options: &DiffOptions) -> Self {
         let mut rules = Vec::new();
         for rule in &options.ignore_paths {
-            let path_substring = rule.path_substring.trim();
+            let path_substring = normalize_ignore_path_substring(&rule.path_substring);
             if path_substring.is_empty() {
                 continue;
             }
@@ -955,7 +1013,7 @@ impl IgnorePathMatcher {
 
             rules.push(IgnorePathRuleMatcher {
                 part,
-                path_substring: path_substring.to_string(),
+                path_substring,
                 kind,
             });
         }
