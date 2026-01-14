@@ -3599,13 +3599,18 @@ export class SpreadsheetApp {
       const activeId = this.sheetId;
       if (!activeId) return;
 
+      const docAny = this.document as any;
+      const sheetsMap: unknown = docAny?.model?.sheets;
+      const sheetMetaMap: unknown = docAny?.sheetMeta;
+      const visibility = (sheetMetaMap instanceof Map ? sheetMetaMap.get(activeId)?.visibility : undefined) ?? "visible";
+      const sheetExists = sheetsMap instanceof Map ? sheetsMap.has(activeId) : this.document.getSheetIds().includes(activeId);
+      const sheetIsVisible = visibility === "visible";
+      if (sheetExists && sheetIsVisible) return;
+
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length === 0) return;
 
       const visibleSheetIds = this.document.getVisibleSheetIds();
-      const hasSheet = sheetIds.includes(activeId);
-      const isVisible = visibleSheetIds.includes(activeId);
-      if (hasSheet && isVisible) return;
 
       const visibleSet = new Set(visibleSheetIds);
       const sheetIdSet = new Set(sheetIds);
