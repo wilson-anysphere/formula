@@ -95,6 +95,30 @@ fn evaluates_sum_over_sheet_range_area_ref() {
 }
 
 #[test]
+fn index_over_sheet_range_uses_tab_order_after_reorder() {
+    // This validates that evaluation-time ordering of multi-area 3D references (and therefore
+    // INDEX(..., area_num)) follows workbook tab order, not stable numeric sheet id.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,1))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(1.0));
+
+    // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(3.0));
+}
+
+#[test]
 fn evaluates_sum_over_sheet_range_column_range() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

@@ -9623,20 +9623,18 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
-        self.sheet_order.iter().position(|id| *id == sheet_id)
+        self.sheet_order.iter().position(|&id| id == sheet_id)
     }
 
     fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
         let start_idx = self.sheet_order_index(start_sheet_id)?;
         let end_idx = self.sheet_order_index(end_sheet_id)?;
-        if start_idx <= end_idx {
-            Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
+        let (start_idx, end_idx) = if start_idx <= end_idx {
+            (start_idx, end_idx)
         } else {
-            let mut out: Vec<usize> =
-                self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
-            out.reverse();
-            Some(out)
-        }
+            (end_idx, start_idx)
+        };
+        Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
     }
 
     fn sheet_count(&self) -> usize {
