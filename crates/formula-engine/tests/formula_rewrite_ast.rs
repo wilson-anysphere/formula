@@ -1,6 +1,7 @@
 use formula_engine::editing::rewrite::{
-    rewrite_formula_for_copy_delta, rewrite_formula_for_structural_edit,
-    rewrite_formula_for_structural_edit_with_sheet_order_resolver, StructuralEdit,
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map_with_resolver,
+    rewrite_formula_for_structural_edit, rewrite_formula_for_structural_edit_with_sheet_order_resolver,
+    GridRange, RangeMapEdit, StructuralEdit,
 };
 use formula_engine::CellAddr;
 use pretty_assertions::assert_eq;
@@ -190,6 +191,69 @@ fn structural_edits_use_tab_order_for_sheet_range_membership() {
     let origin = CellAddr::new(0, 0);
 
     let (out, changed) = rewrite_formula_for_structural_edit_with_sheet_order_resolver(
+        "=SUM(Sheet1:Sheet3!A1)",
+        "Summary",
+        origin,
+        &edit,
+        |name| match name {
+            "Sheet2" => Some(0),
+            "Sheet3" => Some(1),
+            "Sheet1" => Some(2),
+            "Summary" => Some(3),
+            _ => None,
+        },
+    );
+
+    assert!(!changed);
+    assert_eq!(out, "=SUM(Sheet1:Sheet3!A1)");
+}
+
+#[test]
+fn range_map_edits_rewrite_sheet_range_refs_when_edit_sheet_in_span() {
+    let edit = RangeMapEdit {
+        sheet: "Sheet2".to_string(),
+        moved_region: GridRange::new(0, 0, 0, 0),
+        delta_row: 1,
+        delta_col: 0,
+        deleted_region: None,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_range_map_with_resolver(
+        "=SUM(Sheet1:Sheet3!A1)",
+        "Summary",
+        origin,
+        &edit,
+        |name| match name {
+            "Sheet1" => Some(0),
+            "Sheet2" => Some(1),
+            "Sheet3" => Some(2),
+            "Summary" => Some(3),
+            _ => None,
+        },
+    );
+
+    assert!(changed);
+    assert_eq!(out, "=SUM(Sheet1:Sheet3!A2)");
+}
+
+#[test]
+fn range_map_edits_use_tab_order_for_sheet_range_membership() {
+    // Mirror `structural_edits_use_tab_order_for_sheet_range_membership`, but for move/range-map
+    // edits.
+    //
+    // Tab order is: Sheet2, Sheet3, Sheet1, Summary
+    // So the 3D span `Sheet1:Sheet3` includes Sheet3 and Sheet1, but *not* Sheet2.
+    let edit = RangeMapEdit {
+        sheet: "Sheet2".to_string(),
+        moved_region: GridRange::new(0, 0, 0, 0),
+        delta_row: 1,
+        delta_col: 0,
+        deleted_region: None,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_range_map_with_resolver(
         "=SUM(Sheet1:Sheet3!A1)",
         "Summary",
         origin,
