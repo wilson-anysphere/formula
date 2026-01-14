@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { getMapRoot, getYArray, getYMap } from "../../../collab/yjs-utils/src/index.ts";
+import { getDocTypeConstructors, getMapRoot, getYArray, getYMap } from "../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {"snapshot" | "checkpoint" | "restore"} VersionKind
@@ -301,18 +301,9 @@ export class YjsVersionStore {
     // allocate nested arrays even when different Yjs module instances are loaded
     // (e.g. pnpm workspaces where y-websocket uses CJS `require("yjs")` and the
     // app uses ESM `import "yjs"`).
-    const DocCtor = /** @type {any} */ (this.doc)?.constructor;
-    if (typeof DocCtor === "function") {
-      try {
-        const probe = new DocCtor();
-        const probeMapCtor = probe.getMap("__versioning_store_ctor_probe_map").constructor;
-        if (abstractTypeSuperclass(probeMapCtor) === moduleId) {
-          const probeArrayCtor = probe.getArray("__versioning_store_ctor_probe_array").constructor;
-          if (abstractTypeSuperclass(probeArrayCtor) === moduleId) return probeArrayCtor;
-        }
-      } catch {
-        // ignore
-      }
+    const { Map: docMapCtor, Array: docArrayCtor } = getDocTypeConstructors(this.doc);
+    if (abstractTypeSuperclass(docMapCtor) === moduleId && abstractTypeSuperclass(docArrayCtor) === moduleId) {
+      return docArrayCtor;
     }
 
     const existingOrder = this.meta.get("order");
