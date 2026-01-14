@@ -59,6 +59,8 @@ Notes / caveats:
 - The extracted spellings reflect the **active Excel UI language** (Office language packs + Excel
   display language settings). The script prints the detected Excel UI locale and warns if it does
   not match `-LocaleId`.
+- For `de-DE`/`es-ES`/`fr-FR`, the extractor also runs a quick sanity check on a few sentinel
+  translations (e.g. `SUM`/`IF`) and warns if Excel appears misconfigured.
 
 For debugging, you can also pass:
 

@@ -90,7 +90,9 @@ Notes / caveats:
 - The output reflects the **active Excel UI language**. Install the corresponding Office language
   pack and set the Excel display language before extracting.
 - The script prints the detected Excel UI locale and will warn if it does not match `-LocaleId`.
-- Use `-Visible` and/or `-MaxFunctions N` for debugging.
+- The script also does a small sanity-check on a few sentinel translations (e.g. `SUM`/`IF`) for
+  `de-DE`/`es-ES`/`fr-FR` and warns if Excel appears misconfigured.
+- Use `-Visible`, `-MaxFunctions N`, and/or PowerShell’s `-Verbose` switch for debugging.
 
 ## CI note (Excel availability)
 
