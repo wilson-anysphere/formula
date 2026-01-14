@@ -1070,6 +1070,22 @@ export class TabCompletionEngine {
     /** @type {Suggestion[]} */
     const suggestions = [];
 
+    const fallbackFunctionSuggestions = () => {
+      try {
+        const token = findFunctionTokenAtCursor(input, cursor);
+        if (!token) return [];
+        // Inside function args, keep this conservative: single-letter fallbacks tend to be noisy
+        // (e.g. string args where the user typed `d` but forgot quotes). Users can type another
+        // character to disambiguate the intended function.
+        if (token.text.length < 2) return [];
+        // Only complete tokens that are actually inside the current argument span.
+        if (token.start < spanStart || token.end > spanEnd) return [];
+        return this.suggestFunctionNames(context, token);
+      } catch {
+        return [];
+      }
+    };
+
     /**
      * @param {{ replacement: string, displayText?: string, confidence: number }} entry
      */
@@ -1152,35 +1168,40 @@ export class TabCompletionEngine {
       const enumEntries = getEnumEntries() ?? getCumulativeDistributionBooleanEnum(fnName, argIndex);
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
-        return dedupeSuggestions(suggestions);
+        const out = dedupeSuggestions(suggestions);
+        return out.length > 0 ? out : fallbackFunctionSuggestions();
       }
 
       for (const boolLiteral of ["TRUE", "FALSE"]) {
         addReplacement({ replacement: boolLiteral, confidence: 0.5 });
       }
-      return dedupeSuggestions(suggestions);
+      const out = dedupeSuggestions(suggestions);
+      return out.length > 0 ? out : fallbackFunctionSuggestions();
     }
 
     if (argType === "number") {
       const enumEntries = getEnumEntries();
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
-        return dedupeSuggestions(suggestions);
+        const out = dedupeSuggestions(suggestions);
+        return out.length > 0 ? out : fallbackFunctionSuggestions();
       }
 
       for (const n of ["1", "0"]) {
         addReplacement({ replacement: n, confidence: 0.4 });
       }
-      return dedupeSuggestions(suggestions);
+      const out = dedupeSuggestions(suggestions);
+      return out.length > 0 ? out : fallbackFunctionSuggestions();
     }
 
     if (argType === "string") {
       const enumEntries = getEnumEntries();
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
-        return dedupeSuggestions(suggestions);
+        const out = dedupeSuggestions(suggestions);
+        return out.length > 0 ? out : fallbackFunctionSuggestions();
       }
-      return [];
+      return fallbackFunctionSuggestions();
     }
 
     if (argType === "value") {
@@ -1200,10 +1221,10 @@ export class TabCompletionEngine {
           });
         }
       }
-      return suggestions;
+      return suggestions.length > 0 ? suggestions : fallbackFunctionSuggestions();
     }
 
-    return [];
+    return fallbackFunctionSuggestions();
   }
 
   /**

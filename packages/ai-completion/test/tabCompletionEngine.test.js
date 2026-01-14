@@ -2177,6 +2177,23 @@ test("Value-arg suggestions are pure insertions (ABS suggests left cell only whe
   assert.equal(vSuggestions.length, 0);
 });
 
+test("Function name completion works inside non-range args (=IF(VLO → =IF(VLOOKUP()", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=IF(VLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IF(VLOOKUP("),
+    `Expected IF to suggest VLOOKUP( inside an arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Numeric argument suggestions work with a unary '-' prefix", async () => {
   const engine = new TabCompletionEngine();
 
