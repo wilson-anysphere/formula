@@ -2594,6 +2594,39 @@ fn from_encrypted_xlsx_bytes_decrypts_and_loads_workbook() {
 }
 
 #[wasm_bindgen_test]
+fn from_encrypted_xlsx_bytes_rejects_invalid_password() {
+    let plaintext: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsx/tests/fixtures/rt_simple.xlsx"
+    ));
+    let password = "secret-password";
+
+    let encrypted = formula_office_crypto::encrypt_package_to_ole(
+        plaintext,
+        password,
+        formula_office_crypto::EncryptOptions {
+            key_bits: 128,
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha256,
+            spin_count: 1_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    let err = match WasmWorkbook::from_encrypted_xlsx_bytes(&encrypted, "wrong-password".to_string()) {
+        Ok(_) => panic!("expected invalid password error"),
+        Err(err) => err,
+    };
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert!(
+        message.to_lowercase().contains("invalid password"),
+        "expected invalid password error, got {message:?}"
+    );
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_reports_password_required_for_encrypted_inputs() {
     let plaintext: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
