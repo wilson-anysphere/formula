@@ -4,6 +4,7 @@ import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, typ
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
 import { getResizeHandleCenters, getRotationHandleCenter, RESIZE_HANDLE_SIZE_PX, ROTATION_HANDLE_SIZE_PX } from "./selectionHandles";
 import { applyTransformVector, degToRad } from "./transform";
+import { DrawingSpatialIndex } from "./spatialIndex";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 
@@ -289,6 +290,7 @@ export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });
   private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
+  private readonly spatialIndex = new DrawingSpatialIndex();
   private selectedId: number | null = null;
   private renderSeq = 0;
   private renderAbort: AbortController | null = null;
@@ -342,6 +344,16 @@ export class DrawingOverlay {
     this.colorTokens = null;
   }
 
+  /**
+   * Invalidates the cached spatial index (used for viewport culling).
+   *
+   * Call this when the underlying grid geometry changes (e.g. row/col resize) even
+   * if the `DrawingObject[]` reference is unchanged.
+   */
+  invalidateSpatialIndex(): void {
+    this.spatialIndex.invalidate();
+  }
+
   private getCssVarStyle(): CssVarStyle | null {
     if (this.cssVarStyle !== undefined) return this.cssVarStyle;
     this.cssVarStyle = getRootCssStyle();
@@ -385,12 +397,53 @@ export class DrawingOverlay {
 
     const cssVarStyle = this.getCssVarStyle();
     const colors = this.colorTokens ?? (this.colorTokens = resolveOverlayColorTokens(cssVarStyle));
-    const ordered = this.getOrderedObjects(objects);
     const zoom = viewport.zoom ?? 1;
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
     const prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
+
+    // Spatial index: compute a small candidate list for the current viewport rather
+    // than scanning every drawing on each render.
+    this.spatialIndex.rebuild(objects, this.geom, zoom);
+    const ordered: DrawingObject[] = [];
+    const frozenContentWidth = paneLayout.quadrants.topLeft.width;
+    const frozenContentHeight = paneLayout.quadrants.topLeft.height;
+    const addCandidates = (quadrant: PaneQuadrant, rect: { x: number; y: number; width: number; height: number }) => {
+      if (!(rect.width > 0 && rect.height > 0)) return;
+      const candidates = this.spatialIndex.query(rect);
+      if (candidates.length === 0) return;
+      for (const obj of candidates) {
+        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        if (pane.quadrant !== quadrant) continue;
+        ordered.push(obj);
+      }
+    };
+
+    addCandidates("topLeft", {
+      x: 0,
+      y: 0,
+      width: paneLayout.quadrants.topLeft.width,
+      height: paneLayout.quadrants.topLeft.height,
+    });
+    addCandidates("topRight", {
+      x: viewport.scrollX + frozenContentWidth,
+      y: 0,
+      width: paneLayout.quadrants.topRight.width,
+      height: paneLayout.quadrants.topRight.height,
+    });
+    addCandidates("bottomLeft", {
+      x: 0,
+      y: viewport.scrollY + frozenContentHeight,
+      width: paneLayout.quadrants.bottomLeft.width,
+      height: paneLayout.quadrants.bottomLeft.height,
+    });
+    addCandidates("bottomRight", {
+      x: viewport.scrollX + frozenContentWidth,
+      y: viewport.scrollY + frozenContentHeight,
+      width: paneLayout.quadrants.bottomRight.width,
+      height: paneLayout.quadrants.bottomRight.height,
+    });
 
     const selectedId = this.selectedId;
     let selectedScreenRect: Rect | null = null;
@@ -405,7 +458,7 @@ export class DrawingOverlay {
         if (obj.kind.type !== "image") continue;
         if (seq !== this.renderSeq || signal?.aborted) return;
 
-        const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
+        const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
         const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
@@ -438,7 +491,7 @@ export class DrawingOverlay {
       for (const obj of ordered) {
         if (seq !== this.renderSeq || signal?.aborted) return;
         if (obj.kind.type === "shape") shapeCount += 1;
-        const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
+        const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
         const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
@@ -724,7 +777,7 @@ export class DrawingOverlay {
         // Fallback: selection can still be rendered when `drawObjects` is disabled.
         const selected = ordered.find((o) => o.id === selectedId);
         if (selected) {
-          const rect = anchorToRectPx(selected.anchor, this.geom, zoom);
+          const rect = this.spatialIndex.getRect(selected.id) ?? anchorToRectPx(selected.anchor, this.geom, zoom);
           const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
           const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
           const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;

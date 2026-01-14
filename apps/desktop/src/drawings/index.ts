@@ -3,6 +3,7 @@ export * from "./constants";
 export * from "./imageBitmapCache";
 export * from "./overlay";
 export * from "./hitTest";
+export * from "./spatialIndex";
 export * from "./interaction";
 export * from "./insertImage";
 export * from "./modelAdapters";

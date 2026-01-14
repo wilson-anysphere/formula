@@ -7062,6 +7062,11 @@ export class SpreadsheetApp {
     if (!this.sharedGrid) return;
     this.clearSharedHoverCellCache();
     this.hideCommentTooltip();
+    // Keep drawings spatial indices in sync with axis size changes (row/col resize,
+    // auto-fit, etc). The drawing geometry is backed by live shared-grid scroll
+    // state, so cached sheet-space bounds must be recomputed.
+    const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    drawingOverlay?.invalidateSpatialIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
     // (cell editor, formula bar, inline edit). This keeps edit state isolated from unrelated
