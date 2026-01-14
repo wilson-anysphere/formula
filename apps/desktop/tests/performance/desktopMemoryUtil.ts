@@ -1,5 +1,7 @@
 import { resolve } from 'node:path';
 
+import { repoRoot } from './desktopStartupRunnerShared.ts';
+
 export type DesktopMemoryBenchEnv = {
   runs: number;
   timeoutMs: number;
@@ -59,7 +61,9 @@ export function resolveDesktopMemoryBenchEnv(options: {
   const enforce = env.FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH === '1';
 
   const rawBin = env.FORMULA_DESKTOP_BIN;
-  const binPath = rawBin && rawBin.trim() !== '' ? resolve(rawBin) : null;
+  // Mirror the startup benchmark behavior: resolve relative paths from the repo root, even if the
+  // caller invokes the benchmark from a different working directory.
+  const binPath = rawBin && rawBin.trim() !== '' ? resolve(repoRoot, rawBin) : null;
 
   return { runs, timeoutMs, settleMs, targetMb, enforce, binPath };
 }

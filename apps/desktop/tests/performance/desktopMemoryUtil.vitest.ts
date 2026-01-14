@@ -1,6 +1,9 @@
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { resolveDesktopMemoryBenchEnv } from './desktopStartupUtil.ts';
+import { repoRoot } from './desktopStartupUtil.ts';
 
 describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
   it('uses defaults when env is empty', () => {
@@ -36,6 +39,16 @@ describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
     });
   });
 
+  it('resolves relative FORMULA_DESKTOP_BIN paths from the repo root', () => {
+    expect(
+      resolveDesktopMemoryBenchEnv({
+        env: {
+          FORMULA_DESKTOP_BIN: 'target/release/formula-desktop',
+        },
+      }).binPath,
+    ).toBe(resolve(repoRoot, 'target/release/formula-desktop'));
+  });
+
   it('falls back when values are invalid or non-positive', () => {
     expect(
       resolveDesktopMemoryBenchEnv({
@@ -59,4 +72,3 @@ describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
     });
   });
 });
-
