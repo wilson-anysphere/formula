@@ -353,6 +353,30 @@ function main() {
     }
   }
 
+  // This repo's release workflow re-signs the combined updater manifest (`latest.json`) in Node
+  // (see scripts/ci/publish-updater-manifest.mjs). That signing path can load:
+  // - unencrypted minisign secret keys (74-byte payload), and
+  // - PKCS#8 keys (encrypted or not, via TAURI_KEY_PASSWORD)
+  //
+  // Minisign secret keys encrypted with a passphrase are not supported there, so fail fast here
+  // with an actionable error to avoid wasting build time.
+  const minisign = privateKey.trim().length > 0 ? analyzeMinisignKey(privateKey) : null;
+  if (minisign?.kind === "secret" && minisign.encrypted === true) {
+    errBlock(`Encrypted minisign TAURI_PRIVATE_KEY is not supported`, [
+      `TAURI_PRIVATE_KEY looks like an encrypted minisign secret key (generated with a password).`,
+      `This repository's release workflow currently requires an unencrypted minisign secret key so it can re-sign the combined updater manifest (latest.json).`,
+      `Fix: generate a new keypair WITHOUT a password:`,
+      `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+      `  # When prompted for a password, leave it blank.`,
+      `Then update BOTH:`,
+      `  - apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey (public key; safe to commit)`,
+      `  - GitHub Actions secret TAURI_PRIVATE_KEY (private key)`,
+      `See docs/release.md ("Tauri updater keys").`,
+    ]);
+    err(`\nUpdater signing secrets preflight failed. Fix TAURI_PRIVATE_KEY before tagging a release.\n`);
+    return;
+  }
+
   const passwordTrimmed = password.trim();
   const passwordMissing = passwordTrimmed.length === 0;
 

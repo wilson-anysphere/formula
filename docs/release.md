@@ -273,7 +273,7 @@ This repo already includes the updater **public key** in `apps/desktop/src-tauri
 Add the following repository secrets (required for updater signing; password optional):
 
 - `TAURI_PRIVATE_KEY` – the private key string printed by `cargo tauri signer generate` (minisign secret key; base64)
-- `TAURI_KEY_PASSWORD` – optional; only needed if the private key was generated with a password
+- `TAURI_KEY_PASSWORD` – optional; only used for encrypted PKCS#8 keys. (This repo's release workflow requires an **unencrypted** minisign secret key; leave the password blank when generating updater keys.)
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
 
@@ -304,6 +304,7 @@ bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --l
 
 # Generate keys (prints public + private key):
 (cd apps/desktop/src-tauri && cargo tauri signer generate)
+# Note: when prompted for a password, leave it blank (encrypted minisign keys are not supported by this repo's release workflow).
 
 # Agents:
 (cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)

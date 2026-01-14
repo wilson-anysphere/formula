@@ -87,17 +87,17 @@ test("fails when minisign TAURI_PRIVATE_KEY does not match plugins.updater.pubke
   assert.match(proc.stderr, /Tauri updater key mismatch/i);
 });
 
-test("requires TAURI_KEY_PASSWORD for encrypted minisign secret keys", () => {
+test("fails for encrypted minisign secret keys (unsupported by release tooling)", () => {
   const key = fakeMinisignSecretKey({ encrypted: true });
   {
     const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
     assert.notEqual(proc.status, 0);
-    assert.match(proc.stderr, /\bTAURI_KEY_PASSWORD\b/);
+    assert.match(proc.stderr, /Encrypted minisign TAURI_PRIVATE_KEY is not supported/);
   }
   {
     const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "pass" });
-    assert.equal(proc.status, 0, proc.stderr);
-    assert.match(proc.stdout, /preflight passed/i);
+    assert.notEqual(proc.status, 0);
+    assert.match(proc.stderr, /Encrypted minisign TAURI_PRIVATE_KEY is not supported/);
   }
 });
 
