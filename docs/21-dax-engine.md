@@ -150,8 +150,10 @@ The relationship is *oriented*: by default (`CrossFilterDirection::Single`) filt
 `to_table → from_table`. This orientation is meaningful for `Cardinality::ManyToMany` relationships
 as well (it defines default propagation and how `RELATED` / `RELATEDTABLE` navigate).
 
-Internally, `DataModel` materializes two indices (`RelationshipInfo`):
+Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`), including:
 
+- `from_idx: usize` — resolved column index of `from_column` in `from_table`
+- `to_idx: usize` — resolved column index of `to_column` in `to_table`
 - `to_index: HashMap<Value, RowSet>` mapping **to_table key → matching to_table row(s)**  
   `RowSet` is an internal compact representation:
   - `RowSet::One(row)` for the common unique-key case (no allocation)

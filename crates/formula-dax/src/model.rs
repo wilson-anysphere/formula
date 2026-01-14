@@ -613,10 +613,6 @@ impl UnmatchedFactRows {
             }
         }
     }
-
-    // NOTE: retain() is implemented above with a Vec-like signature so callers can filter the
-    // sparse representation while we keep the dense bitset compact (and potentially switch back
-    // to sparse when it becomes cheaper).
 }
 
 struct UnmatchedFactRowsBuilder {
@@ -884,18 +880,8 @@ impl DataModel {
         for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
             let rel = &rel_info.rel;
             if rel.to_table == table {
-                let to_idx = {
-                    let table_ref = self
-                        .tables
-                        .get(table)
-                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-                    table_ref.column_idx(&rel.to_column).ok_or_else(|| DaxError::UnknownColumn {
-                        table: table.to_string(),
-                        column: rel.to_column.clone(),
-                    })?
-                };
                 let key = full_row
-                    .get(to_idx)
+                    .get(rel_info.to_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
                 // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
@@ -990,18 +976,12 @@ impl DataModel {
                 let from_idx = self.relationships[rel_idx].from_idx;
                 if let Some(unmatched) = self.relationships[rel_idx].unmatched_fact_rows.as_mut() {
                     if let Some(from_table_ref) = self.tables.get(&from_table) {
-                        let old =
-                            std::mem::replace(unmatched, UnmatchedFactRows::Sparse(Vec::new()));
-                        let mut builder = UnmatchedFactRowsBuilder::new(from_table_ref.row_count());
-                        old.for_each_row(|row| {
+                        unmatched.retain(|&row| {
                             let v = from_table_ref
                                 .value_by_idx(row, from_idx)
                                 .unwrap_or(Value::Blank);
-                            if v.is_blank() || v != key_for_updates {
-                                builder.push(row);
-                            }
+                            v.is_blank() || v != key_for_updates
                         });
-                        *unmatched = builder.finish();
                     }
                 }
             }

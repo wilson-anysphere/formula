@@ -2215,6 +2215,7 @@ impl DaxEngine {
             row_ctx: &RowContext,
             env: &mut VarEnv,
             keep_filters: bool,
+            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -2380,6 +2381,7 @@ impl DaxEngine {
                     row_ctx,
                     env,
                     keep_filters,
+                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -2396,6 +2398,7 @@ impl DaxEngine {
                         row_ctx,
                         env,
                         keep_filters,
+                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?
@@ -4064,14 +4067,8 @@ impl DaxEngine {
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
-                        let to_idx = to_table_ref
-                            .column_idx(&rel.rel.to_column)
-                            .ok_or_else(|| DaxError::UnknownColumn {
-                                table: current_table.to_string(),
-                                column: rel.rel.to_column.clone(),
-                            })?;
                         let key = to_table_ref
-                            .value_by_idx(current_row, to_idx)
+                            .value_by_idx(current_row, rel.to_idx)
                             .unwrap_or(Value::Blank);
 
                         let sets = resolve_row_sets(model, filter)?;
@@ -4174,19 +4171,13 @@ impl DaxEngine {
                         let to_table_ref = model
                             .table(&rel_info.rel.to_table)
                             .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
-                        let to_idx = to_table_ref
-                            .column_idx(&rel_info.rel.to_column)
-                            .ok_or_else(|| DaxError::UnknownColumn {
-                                table: rel_info.rel.to_table.clone(),
-                                column: rel_info.rel.to_column.clone(),
-                            })?;
 
                         let mut key_set: HashSet<Value> = HashSet::new();
                         let mut keys: Vec<Value> = Vec::new();
                         let mut include_blank = false;
                         for &to_row in &current_rows {
                             let key = to_table_ref
-                                .value_by_idx(to_row, to_idx)
+                                .value_by_idx(to_row, rel_info.to_idx)
                                 .unwrap_or(Value::Blank);
                             if key.is_blank() {
                                 include_blank = true;
