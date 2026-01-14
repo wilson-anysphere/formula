@@ -231,133 +231,142 @@ fn build_minimal_xlsx_with_noncanonical_entries() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
-#[test]
-fn worksheet_parts_from_reader_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let parts = worksheet_parts_from_reader(Cursor::new(bytes)).expect("worksheet parts");
-    assert_eq!(parts.len(), 1);
-    assert_eq!(parts[0].name, "Sheet1");
-    assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet1.xml");
-}
+// The CI filter uses `-- leading_slash_zip_entries`; wrapping tests in this module ensures the
+// substring matches and the intended subset runs.
+mod leading_slash_zip_entries_tests {
+    use super::*;
 
-#[test]
-fn read_workbook_model_from_bytes_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
-    assert_eq!(workbook.sheets.len(), 1);
-    assert_eq!(workbook.sheets[0].name, "Sheet1");
-}
+    #[test]
+    fn worksheet_parts_from_reader_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let parts = worksheet_parts_from_reader(Cursor::new(bytes)).expect("worksheet parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "Sheet1");
+        assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet1.xml");
+    }
 
-#[test]
-fn load_from_bytes_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let doc = load_from_bytes(&bytes).expect("load xlsx document");
-    assert_eq!(doc.workbook.sheets.len(), 1);
-    assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
-}
+    #[test]
+    fn read_workbook_model_from_bytes_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+    }
 
-#[test]
-fn merge_cells_reader_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
-    let merges =
-        formula_xlsx::merge_cells::read_merge_cells_from_xlsx(&mut archive, "xl/worksheets/sheet1.xml")
-            .expect("merge cells");
-    assert_eq!(merges, vec![Range::from_a1("A1:B2").unwrap()]);
-}
+    #[test]
+    fn load_from_bytes_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let doc = load_from_bytes(&bytes).expect("load xlsx document");
+        assert_eq!(doc.workbook.sheets.len(), 1);
+        assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
+    }
 
-#[test]
-fn streaming_patcher_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let patch = WorksheetCellPatch::new(
-        "xl/worksheets/sheet1.xml",
-        CellRef::new(0, 0),
-        CellValue::Number(42.0),
-        None,
-    );
-    let mut out = Cursor::new(Vec::new());
-    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch]).expect("streaming patch");
+    #[test]
+    fn merge_cells_reader_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
+        let merges = formula_xlsx::merge_cells::read_merge_cells_from_xlsx(
+            &mut archive,
+            "xl/worksheets/sheet1.xml",
+        )
+        .expect("merge cells");
+        assert_eq!(merges, vec![Range::from_a1("A1:B2").unwrap()]);
+    }
 
-    let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
-    let sheet_xml = std::str::from_utf8(
-        pkg.part("xl/worksheets/sheet1.xml")
-            .expect("worksheet part present"),
-    )
-    .expect("worksheet xml utf-8");
-    assert!(
-        sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
-        "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
-    );
-}
+    #[test]
+    fn streaming_patcher_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let patch = WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::new(0, 0),
+            CellValue::Number(42.0),
+            None,
+        );
+        let mut out = Cursor::new(Vec::new());
+        patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch]).expect("streaming patch");
 
-#[test]
-fn print_settings_writer_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_entries();
-    let mut settings = read_workbook_print_settings(&bytes).expect("read print settings");
-    assert_eq!(settings.sheets.len(), 1);
+        let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
+        let sheet_xml = std::str::from_utf8(
+            pkg.part("xl/worksheets/sheet1.xml")
+                .expect("worksheet part present"),
+        )
+        .expect("worksheet xml utf-8");
+        assert!(
+            sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+            "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+        );
+    }
 
-    settings.sheets[0].print_area = Some(vec![CellRange {
-        start_row: 1,
-        end_row: 2,
-        start_col: 1,
-        end_col: 2,
-    }]);
+    #[test]
+    fn print_settings_writer_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_entries();
+        let mut settings = read_workbook_print_settings(&bytes).expect("read print settings");
+        assert_eq!(settings.sheets.len(), 1);
 
-    let rewritten = write_workbook_print_settings(&bytes, &settings).expect("write print settings");
-    let reread = read_workbook_print_settings(&rewritten).expect("re-read print settings");
-    assert_eq!(
-        reread.sheets[0].print_area.as_deref(),
-        settings.sheets[0].print_area.as_deref()
-    );
-}
+        settings.sheets[0].print_area = Some(vec![CellRange {
+            start_row: 1,
+            end_row: 2,
+            start_col: 1,
+            end_col: 2,
+        }]);
 
-#[test]
-fn preserve_pivot_parts_from_reader_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_pivot_part();
-    let preserved = preserve_pivot_parts_from_reader(Cursor::new(bytes)).expect("preserve pivots");
-    assert!(
-        preserved
-            .parts
-            .contains_key("xl/pivotTables/pivotTable1.xml"),
-        "expected preserved pivot parts to include xl/pivotTables/pivotTable1.xml"
-    );
-}
+        let rewritten =
+            write_workbook_print_settings(&bytes, &settings).expect("write print settings");
+        let reread = read_workbook_print_settings(&rewritten).expect("re-read print settings");
+        assert_eq!(
+            reread.sheets[0].print_area.as_deref(),
+            settings.sheets[0].print_area.as_deref()
+        );
+    }
 
-#[test]
-fn preserve_drawing_parts_from_reader_tolerates_leading_slash_entries() {
-    let bytes = build_minimal_xlsx_with_leading_slash_drawing_part();
-    let preserved =
-        preserve_drawing_parts_from_reader(Cursor::new(bytes)).expect("preserve drawings");
-    assert!(
-        preserved.parts.contains_key("xl/drawings/drawing1.xml"),
-        "expected preserved drawing parts to include xl/drawings/drawing1.xml"
-    );
-}
+    #[test]
+    fn preserve_pivot_parts_from_reader_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_pivot_part();
+        let preserved = preserve_pivot_parts_from_reader(Cursor::new(bytes)).expect("preserve pivots");
+        assert!(
+            preserved
+                .parts
+                .contains_key("xl/pivotTables/pivotTable1.xml"),
+            "expected preserved pivot parts to include xl/pivotTables/pivotTable1.xml"
+        );
+    }
 
-#[test]
-fn read_workbook_model_from_bytes_tolerates_noncanonical_zip_entries() {
-    let bytes = build_minimal_xlsx_with_noncanonical_entries();
-    let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
-    assert_eq!(workbook.sheets.len(), 1);
-    assert_eq!(workbook.sheets[0].name, "Sheet1");
-}
+    #[test]
+    fn preserve_drawing_parts_from_reader_tolerates_leading_slash_entries() {
+        let bytes = build_minimal_xlsx_with_leading_slash_drawing_part();
+        let preserved = preserve_drawing_parts_from_reader(Cursor::new(bytes)).expect("preserve drawings");
+        assert!(
+            preserved.parts.contains_key("xl/drawings/drawing1.xml"),
+            "expected preserved drawing parts to include xl/drawings/drawing1.xml"
+        );
+    }
 
-#[test]
-fn load_from_bytes_tolerates_noncanonical_zip_entries() {
-    let bytes = build_minimal_xlsx_with_noncanonical_entries();
-    let doc = load_from_bytes(&bytes).expect("load xlsx document");
-    assert_eq!(doc.workbook.sheets.len(), 1);
-    assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
-}
+    #[test]
+    fn read_workbook_model_from_bytes_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+    }
 
-#[test]
-fn xlsx_package_part_lookup_tolerates_noncanonical_zip_entries() {
-    let bytes = build_minimal_xlsx_with_noncanonical_entries();
-    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
-    let workbook_xml = std::str::from_utf8(pkg.part("xl/workbook.xml").expect("workbook.xml part"))
-        .expect("workbook.xml utf-8");
-    assert!(
-        workbook_xml.contains("<sheet name=\"Sheet1\""),
-        "expected workbook.xml to contain sheet, got:\n{workbook_xml}"
-    );
+    #[test]
+    fn load_from_bytes_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let doc = load_from_bytes(&bytes).expect("load xlsx document");
+        assert_eq!(doc.workbook.sheets.len(), 1);
+        assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
+    }
+
+    #[test]
+    fn xlsx_package_part_lookup_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+        let workbook_xml =
+            std::str::from_utf8(pkg.part("xl/workbook.xml").expect("workbook.xml part"))
+                .expect("workbook.xml utf-8");
+        assert!(
+            workbook_xml.contains("<sheet name=\"Sheet1\""),
+            "expected workbook.xml to contain sheet, got:\n{workbook_xml}"
+        );
+    }
 }
