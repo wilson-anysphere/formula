@@ -15,6 +15,8 @@
  *      configuration for the current CI run (so unsigned bundles still build).
  *   3) Exports signing/notarization env vars to subsequent steps via `$GITHUB_ENV` only when all
  *      required secrets are present. This avoids `tauri-action` attempting partial signing flows.
+ *   4) Exports Tauri updater signing env vars (`TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD`) only
+ *      when configured. This keeps forks/dry-runs from passing empty secrets to the build toolchain.
  *
  * If maintainers set the GitHub Actions variable `FORMULA_REQUIRE_CODESIGN=1`, this script switches
  * to enforcement mode and **fails fast** when platform signing secrets are missing (instead of

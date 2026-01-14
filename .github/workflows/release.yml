@@ -436,6 +436,10 @@ jobs:
       # still succeeds (unsigned artifacts), and we only export notarization env vars when all
       # required credentials are configured.
       #
+      # This helper also exports Tauri updater signing env vars (`TAURI_PRIVATE_KEY` /
+      # `TAURI_KEY_PASSWORD`) only when configured, so forks/dry-runs don't pass empty secrets into
+      # `cargo tauri` / `tauri-action`.
+      #
       # When maintainers set FORMULA_REQUIRE_CODESIGN=1, this step switches to enforcement mode and
       # fails early if platform signing secrets are missing.
       - name: Prepare optional Tauri signing config (macOS/Windows)
