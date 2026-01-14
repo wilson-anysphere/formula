@@ -47,6 +47,13 @@ Environment (startup):
   FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS
     - optional shell-only override (falls back to FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)
 
+Environment (memory):
+  FORMULA_DESKTOP_MEMORY_RUNS
+  FORMULA_DESKTOP_MEMORY_TIMEOUT_MS
+  FORMULA_DESKTOP_MEMORY_SETTLE_MS
+  FORMULA_DESKTOP_IDLE_RSS_TARGET_MB / FORMULA_DESKTOP_MEMORY_TARGET_MB
+    - p95 budget for idle RSS (default: 100MB)
+
 Notes:
   - These commands are safe to run locally: they use a repo-local HOME so they don't touch
     ~/.config, ~/Library, etc.
