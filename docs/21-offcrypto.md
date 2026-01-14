@@ -207,6 +207,29 @@ If the decrypted bytes do **not** start with `PK`, treat that as either:
 - unsupported/corrupt encryption wrapper (the decryptor should ideally surface `InvalidPassword` /
   `UnsupportedEncryption` / `InvalidFormat` in these cases).
 
+### Inspecting Agile `EncryptionInfo` XML (debug-only)
+
+For **Agile** encryption (`EncryptionInfo` version `4.4`), the remainder of the `EncryptionInfo`
+stream is typically an XML descriptor. If you need to capture the exact cipher/KDF parameters for a
+bug report, `formula-io` has a helper that extracts and validates that XML while handling common
+real-world encodings (UTF-8 vs UTF-16LE, optional length prefixes, padding):
+
+```rust
+use std::io::Read;
+
+let mut ole = cfb::CompoundFile::open(std::fs::File::open("encrypted.xlsx")?)?;
+let mut encryption_info = Vec::new();
+ole.open_stream("EncryptionInfo")?
+    .read_to_end(&mut encryption_info)?;
+
+let xml = formula_io::extract_agile_encryption_info_xml(&encryption_info)?;
+println!("{xml}");
+```
+
+This is safe to log from a password perspective (it does **not** include the password), but it does
+include salts/IV material and other encryption metadata, so treat it as sensitive file content in
+privacy-sensitive environments.
+
 ## Test fixtures and attribution
 
 Encrypted workbook fixtures are stored under:
