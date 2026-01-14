@@ -149,10 +149,10 @@ describe("FormulaBarView tab completion (integration)", () => {
     const engineStub = {
       parseFormulaPartial: async (...args: unknown[]) => {
         calls.push(args);
-        // In de-DE, `SUM` is localized as `SUMME`. The engine returns the locale's function name,
-        // and the desktop adapter canonicalizes it so completion can still look up range-arg
-        // metadata against the canonical FunctionRegistry.
-        return { context: { function: { name: "SUMME", argIndex: 0 } }, error: null, ast: {} };
+        // In de-DE, `COUNTIF` is localized as `ZÄHLENWENN`. The engine returns the locale's
+        // function name, and the desktop adapter canonicalizes it so completion can still look up
+        // range-arg metadata against the canonical FunctionRegistry.
+        return { context: { function: { name: "ZÄHLENWENN", argIndex: 0 } }, error: null, ast: {} };
       },
     };
     const completion = new FormulaBarTabCompletionController({
@@ -169,14 +169,14 @@ describe("FormulaBarView tab completion (integration)", () => {
       view.setActiveCell({ address: "B11", input: "", value: null });
 
       view.focus({ cursor: "end" });
-      view.textarea.value = "=SUMME(A";
+      view.textarea.value = "=ZÄHLENWENN(A";
       view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
       view.textarea.dispatchEvent(new Event("input"));
 
       await completion.flushTabCompletion();
 
       expect(calls).toHaveLength(1);
-      expect(view.model.aiSuggestion()).toBe("=SUMME(A1:A10)");
+      expect(view.model.aiSuggestion()).toBe("=ZÄHLENWENN(A1:A10");
     } finally {
       completion.destroy();
       host.remove();
