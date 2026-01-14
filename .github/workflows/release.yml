@@ -1287,9 +1287,15 @@ jobs:
             echo "::endgroup::"
 
             # Ensure key runtime deps are declared (at least: WebKitGTK + GTK + AppIndicator).
+            depends_line="$(grep -i '^ Depends:' dpkg-info.txt | head -n 1 || true)"
+            if [[ -z "${depends_line}" ]]; then
+              echo "::error::Could not find 'Depends:' in dpkg -I output for ${deb}" >&2
+              exit 1
+            fi
+            echo "dpkg Depends: ${depends_line# Depends: }"
             for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
-              if ! grep -qi "$needle" dpkg-info.txt; then
-                echo "::error::Expected runtime dependency '$needle' missing from dpkg -I output for ${deb}"
+              if ! grep -qi "$needle" <<<"${depends_line}"; then
+                echo "::error::Expected runtime dependency '$needle' missing from dpkg Depends for ${deb}" >&2
                 exit 1
               fi
             done
