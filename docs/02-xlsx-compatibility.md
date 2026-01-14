@@ -357,13 +357,13 @@ Notes:
 | `t="e"` | Error | Error string (#VALUE!, etc.) |
 | `t="d"` | Date (typed) | ISO-8601 text in `<v>`.<br>Excel should interpret as a date serial for calculation.<br>Round-trip must preserve `t` and the original ISO string. |
 
-### Tables (`xl/tables/table*.xml`)
+#### Tables (`xl/tables/table*.xml`)
 
 Excel “tables” (ListObjects) are stored in separate parts like `xl/tables/table1.xml` and linked from
 the worksheet via `<tableParts>` plus a `.../relationships/table` relationship in
 `xl/worksheets/_rels/sheetN.xml.rels`.
 
-#### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
+##### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
 
 `table*.xml` can contain an `<autoFilter>` element whose schema/behavior matches the worksheet-level
 `<autoFilter>` (same `filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
@@ -374,7 +374,9 @@ the worksheet via `<tableParts>` plus a `.../relationships/table` relationship i
 
 For forward compatibility, any advanced filter criteria we don’t model (e.g. newer filter elements or
 `extLst` payloads) should be preserved by storing the original XML fragments in the `raw_xml` fields
-on the AutoFilter / FilterColumn structs and re-emitting them unchanged.
+on the AutoFilter / FilterColumn structs and re-emitting them unchanged. Worksheet autoFilters
+already do this via `crates/formula-xlsx/src/autofilter/*`; table autoFilters should follow the same
+pattern when we extend `crates/formula-xlsx/src/tables/xml.rs` beyond the common subset.
 
 #### Images in Cells (`IMAGE()` / “Place in Cell”) (Rich Data + `metadata.xml`)
 
