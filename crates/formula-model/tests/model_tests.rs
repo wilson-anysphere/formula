@@ -230,7 +230,10 @@ fn row_and_col_style_id_overrides_treat_zero_as_clear() {
     sheet.set_row_style_id(5, Some(42));
     assert_eq!(sheet.row_properties(5).unwrap().style_id, Some(42));
     sheet.set_row_style_id(5, Some(0));
-    assert!(sheet.row_properties(5).is_none(), "expected Some(0) to clear row style");
+    assert!(
+        sheet.row_properties(5).is_none(),
+        "expected Some(0) to clear row style"
+    );
 
     sheet.set_col_style_id(7, Some(24));
     assert_eq!(sheet.col_properties(7).unwrap().style_id, Some(24));
