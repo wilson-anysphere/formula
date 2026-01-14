@@ -6,6 +6,7 @@ use std::fmt;
 use crate::serde_defaults::default_true;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
+
 /// Canonical reference to a field used by a pivot configuration.
 ///
 /// Pivot tables can be sourced from either:
