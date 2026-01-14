@@ -731,7 +731,6 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             len: ciphertext.len(),
         });
     }
-
     // --- Guardrails for malicious `declared_len` ---
     //
     // `EncryptedPackage` stores the unencrypted package size (`declared_len`) separately from the
@@ -749,8 +748,11 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
         });
     }
 
-    // Guardrail: ciphertext must be long enough to possibly contain `declared_len` bytes
-    // (accounting for AES block padding).
+    // DoS hardening: validate that the ciphertext is long enough to plausibly contain the declared
+    // plaintext size *before* allocating based on the untrusted header.
+    //
+    // For Agile `EncryptedPackage`, only the last segment can be padded, so the minimum ciphertext
+    // length implied by `declared_len` is `ceil(declared_len / 16) * 16`.
     let expected_min_ciphertext_len = declared_len_u64
         .checked_add((AES_BLOCK_SIZE - 1) as u64)
         .and_then(|v| v.checked_div(AES_BLOCK_SIZE as u64))
@@ -763,16 +765,6 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
                 ciphertext.len()
             ),
         })?;
-    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
-        return Err(OffCryptoError::InvalidAttribute {
-            element: "EncryptedPackage".to_string(),
-            attr: "originalSize".to_string(),
-            reason: format!(
-                "ciphertext length {} is too short for declared orig_size {declared_len_u64}",
-                ciphertext.len()
-            ),
-        });
-    }
 
     let declared_len: usize = declared_len_u64
         .try_into()
@@ -782,6 +774,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             reason: format!("orig_size {declared_len_u64} does not fit into usize"),
         })?;
 
+    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
+        return Err(OffCryptoError::DecryptedLengthShorterThanHeader {
+            declared_len,
+            available_len: ciphertext.len(),
+        });
+    }
     // Decrypt segment-by-segment until we have produced `declared_len` bytes.
     let mut out = Vec::with_capacity(declared_len);
     let mut offset = 0usize;
@@ -830,7 +828,9 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
 
         out.extend_from_slice(&decrypted);
         offset += seg_len;
-        segment_index = segment_index.saturating_add(1);
+        segment_index = segment_index.checked_add(1).ok_or(OffCryptoError::InvalidAgileParameter {
+            param: "EncryptedPackage segment index overflow",
+        })?;
     }
 
     if out.len() < declared_len {
@@ -884,7 +884,7 @@ mod tests {
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
       <p:encryptedKey saltSize="16" blockSize="16" keyBits="256" hashSize="32"
                       spinCount="100000" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA256"
-                      saltValue="AQIDBA=="
+                      saltValue="AAECAwQFBgcICQoLDA0ODw=="
                       encryptedVerifierHashInput="CQoLDA=="
                       encryptedVerifierHashValue="DQ4PEA=="
                       encryptedKeyValue="BQYHCA=="/>
@@ -965,6 +965,69 @@ mod tests {
 
         let parsed = parse_stream_payload(&payload);
         assert_eq!(parsed, expected);
+    }
+
+    fn dummy_key_data() -> AgileKeyData {
+        AgileKeyData {
+            salt_value: vec![0u8; 16],
+            hash_algorithm: HashAlgorithm::Sha1,
+            cipher_algorithm: "AES".to_string(),
+            cipher_chaining: "ChainingModeCBC".to_string(),
+            key_bits: 128,
+            block_size: 16,
+            hash_size: 20,
+        }
+    }
+
+    #[test]
+    fn encrypted_package_errors_on_short_stream() {
+        let err = decrypt_agile_encrypted_package_stream_with_key(&[0u8; 7], &dummy_key_data(), &[0u8; 16])
+            .expect_err("expected EncryptedPackageTooShort");
+        assert!(
+            matches!(err, OffCryptoError::EncryptedPackageTooShort { len: 7 }),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn encrypted_package_errors_on_non_block_aligned_ciphertext() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 15]); // not multiple of 16
+
+        let err = decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
+            .expect_err("expected CiphertextNotBlockAligned");
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::CiphertextNotBlockAligned {
+                    field: "EncryptedPackage",
+                    len: 15
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn encrypted_package_errors_when_length_header_exceeds_ciphertext() {
+        // Header declares 32 bytes, but we only have a single AES block of ciphertext.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&32u64.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 16]);
+
+        let err = decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
+            .expect_err("expected DecryptedLengthShorterThanHeader");
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::DecryptedLengthShorterThanHeader {
+                    declared_len: 32,
+                    available_len: 16
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -1318,7 +1381,7 @@ mod tests {
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue=""/>
+                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
                   <c:encryptedKey/>
@@ -1326,7 +1389,7 @@ mod tests {
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="99" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue=""
+                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                 </keyEncryptor>
@@ -1347,7 +1410,7 @@ mod tests {
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue=""/>
+                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
                   <c:encryptedKey/>
@@ -1378,19 +1441,19 @@ mod tests {
                 xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue=""/>
+                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue=""
+                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                 </keyEncryptor>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="2" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue=""
+                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                 </keyEncryptor>
