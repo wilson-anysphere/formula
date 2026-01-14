@@ -160,6 +160,38 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("Escape clears chart selection", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    expect(chart).toBeTruthy();
+
+    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    const clickX = originX + rect.left + 2;
+    const clickY = originY + rect.top + 2;
+    dispatchPointerEvent(root, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 1 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 1 });
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(app.getSelectedChartId()).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("ignores pointerdown events from scrollbars (does not select/deselect charts)", () => {
     const root = createRoot();
     const status = {

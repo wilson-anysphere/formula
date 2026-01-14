@@ -6039,9 +6039,10 @@ export class SpreadsheetApp {
     }
     const hasDrawings = this.drawingObjects.length !== 0;
     const hasComments = this.commentMetaByCoord.size !== 0;
+    const hasCharts = this.chartStore.listCharts().some((chart) => chart.sheetId === this.sheetId);
 
-    // Fast path: if the active sheet has neither comments nor drawings, skip all hover work.
-    if (!hasComments && !hasDrawings) {
+    // Fast path: if the active sheet has no hover-relevant overlays, skip all work.
+    if (!hasComments && !hasDrawings && !hasCharts) {
       if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
         this.clearSharedHoverCellCache();
       }
@@ -6097,15 +6098,24 @@ export class SpreadsheetApp {
       return;
     }
 
+    const chartCursor = this.chartCursorAtPoint(x, y);
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const nextCursor = drawingCursor ?? "";
+    const nextCursor = chartCursor ?? drawingCursor ?? "";
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
     // In shared-grid mode, the selection canvas sets its own cursor value, so apply drawing
     // cursor feedback there as well when the pointermove targets the canvas surface.
-    if (drawingCursor && this.selectionCanvas.style.cursor !== drawingCursor) {
-      this.selectionCanvas.style.cursor = drawingCursor;
+    const cursorOverride = chartCursor ?? drawingCursor;
+    if (cursorOverride && this.selectionCanvas.style.cursor !== cursorOverride) {
+      this.selectionCanvas.style.cursor = cursorOverride;
+    }
+
+    if (chartCursor) {
+      // Charts sit above cell content; suppress comment tooltips while hovering chart bounds.
+      this.clearSharedHoverCellCache();
+      this.hideCommentTooltip();
+      return;
     }
 
     if (!hasComments) {
@@ -6483,6 +6493,71 @@ export class SpreadsheetApp {
     const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
     if (handle) return cursorForResizeHandle(handle, hit.object.transform);
     return "move";
+  }
+
+  private chartCursorAtPoint(x: number, y: number): string | null {
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (charts.length === 0) return null;
+
+    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    const px = x - layout.originX;
+    const py = y - layout.originY;
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    if (px < 0 || py < 0) return null;
+
+    const intersect = (
+      a: { left: number; top: number; width: number; height: number },
+      b: { left: number; top: number; width: number; height: number },
+    ): { left: number; top: number; width: number; height: number } | null => {
+      const left = Math.max(a.left, b.left);
+      const top = Math.max(a.top, b.top);
+      const right = Math.min(a.left + a.width, b.left + b.width);
+      const bottom = Math.min(a.top + a.height, b.top + b.height);
+      const width = right - left;
+      const height = bottom - top;
+      if (width <= 0 || height <= 0) return null;
+      return { left, top, width, height };
+    };
+
+    const { frozenRows, frozenCols } = this.getFrozen();
+    const selectedId = this.selectedChartId;
+
+    for (let i = charts.length - 1; i >= 0; i -= 1) {
+      const chart = charts[i]!;
+      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      if (!rect) continue;
+
+      const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+      const inFrozenRows = fromRow < frozenRows;
+      const inFrozenCols = fromCol < frozenCols;
+      const paneKey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" =
+        inFrozenRows && inFrozenCols
+          ? "topLeft"
+          : inFrozenRows && !inFrozenCols
+            ? "topRight"
+            : !inFrozenRows && inFrozenCols
+              ? "bottomLeft"
+              : "bottomRight";
+      const paneRect = layout.paneRects[paneKey];
+      const visible = intersect(rect, { left: paneRect.x, top: paneRect.y, width: paneRect.width, height: paneRect.height });
+      if (!visible) continue;
+      if (px < visible.left || px > visible.left + visible.width) continue;
+      if (py < visible.top || py > visible.top + visible.height) continue;
+
+      if (selectedId === chart.id) {
+        const handle = hitTestResizeHandle(
+          { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+          px,
+          py,
+        );
+        if (handle) return cursorForResizeHandle(handle);
+      }
+
+      return "move";
+    }
+
+    return null;
   }
 
   async getCellDisplayValueA1(a1: string): Promise<string> {
@@ -11166,10 +11241,17 @@ export class SpreadsheetApp {
       x <= fillHandle.x + fillHandle.width &&
       y >= fillHandle.y &&
       y <= fillHandle.y + fillHandle.height;
+    const chartCursor = this.chartCursorAtPoint(x, y);
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const nextCursor = drawingCursor ?? (overFillHandle ? "crosshair" : "");
+    const nextCursor = chartCursor ?? drawingCursor ?? (overFillHandle ? "crosshair" : "");
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
+    }
+
+    if (chartCursor) {
+      // Charts sit above cell content; suppress comment tooltips while hovering the chart area.
+      this.hideCommentTooltip();
+      return;
     }
 
     if (this.commentsPanelVisible) {
@@ -11715,6 +11797,27 @@ export class SpreadsheetApp {
       if (this.sharedGrid?.cancelFillHandleDrag()) {
         e.preventDefault();
         return;
+      }
+
+      // Excel-like: Escape clears chart selection / cancels an in-progress chart drag.
+      //
+      // Do not interfere with formula bar editing: Escape should cancel the edit there (handled below).
+      if (!this.formulaBar?.isEditing() && !this.formulaEditCell) {
+        if (this.chartDragState) {
+          e.preventDefault();
+          const state = this.chartDragState;
+          this.chartDragState = null;
+          this.chartDragAbort?.abort();
+          this.chartDragAbort = null;
+          // Revert the anchor to the initial pointerdown snapshot.
+          this.chartStore.updateChartAnchor(state.chartId, state.startAnchor as any);
+          return;
+        }
+        if (this.selectedChartId != null) {
+          e.preventDefault();
+          this.setSelectedChartId(null);
+          return;
+        }
       }
     }
 
