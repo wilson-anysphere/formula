@@ -2493,18 +2493,15 @@ export class ContextManager {
               };
 
               const safeWorkbookId = (() => {
-                // If the document itself is explicitly classified above the allowed threshold, treat the id
-                // as part of that restricted metadata.
-                const classification = index?.docClassificationMax ?? { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
-                const decision = evaluatePolicy({
-                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
-                  classification,
-                  policy: dlp.policy,
-                  options: { includeRestrictedContent },
-                });
-                return decision.decision === DLP_DECISION.ALLOW
-                  ? redactSchemaToken(summary.id, "workbook_summary")
-                  : "[REDACTED]";
+                // When structured DLP requires redaction anywhere in the workbook (document/sheet/range),
+                // treat the workbook id as disallowed metadata too. Workbook ids can be user-controlled and
+                // may contain non-heuristic sensitive strings (e.g. "TopSecret") that a no-op redactor cannot
+                // detect.
+                if (structuredOverallDecision?.decision && structuredOverallDecision.decision !== DLP_DECISION.ALLOW) {
+                  return "[REDACTED]";
+                }
+                // Otherwise, keep the previous heuristic-only behavior.
+                return redactSchemaToken(summary.id, "workbook_summary");
               })();
 
               return {
