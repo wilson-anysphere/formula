@@ -425,6 +425,7 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
 
   const typedPrefix = input.slice(replaceStart, cursor);
   if (typedPrefix.length < 1) return null;
+
   // Only trigger on identifier-looking starts.
   // (We handle `_xlfn.` separately below.)
   if (!/^[_A-Za-z]/.test(typedPrefix)) return null;
@@ -3426,6 +3427,11 @@ export class FormulaBarView {
 
       // `mousemove` can fire repeatedly while still over the same token; avoid
       // re-emitting identical hover previews.
+      //
+      // Note: some consumers (e.g. SpreadsheetApp's range preview tooltip) may want to
+      // refresh derived UI when the underlying document changes even if the hovered
+      // reference span is unchanged. Still emit the text-aware callback so consumers
+      // can apply their own caching (e.g. by document version).
       if (this.#lastEmittedHoverText === text && sameRange) {
         this.#hoverOverrideText = text;
         this.#hoverOverride = nextRange;

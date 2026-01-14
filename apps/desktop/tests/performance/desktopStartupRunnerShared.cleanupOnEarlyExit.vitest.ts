@@ -29,7 +29,6 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       // This test relies on POSIX process group semantics (`process.kill(-pgid, ...)`).
       return;
     }
-
     const profileDir = `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`;
     // `runOnce` resolves `profileDir` relative to the repo root (not the vitest CWD),
     // so compute the pid file path the same way.

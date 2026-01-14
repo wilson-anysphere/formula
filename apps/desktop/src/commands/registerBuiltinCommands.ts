@@ -776,7 +776,13 @@ export function registerBuiltinCommands(params: {
     () => {
       // Always call openPanel so we activate docked panels and also trigger a layout re-render
       // even when the panel is already floating (useful for refreshing panel-local state).
-      const layout = (layoutController as any)?.layout ?? null;
+      const layout = (() => {
+        try {
+          return (layoutController as any)?.layout ?? null;
+        } catch {
+          return null;
+        }
+      })();
       const placement = (() => {
         try {
           if (layout) return getPanelPlacement(layout, PanelIds.PIVOT_BUILDER);

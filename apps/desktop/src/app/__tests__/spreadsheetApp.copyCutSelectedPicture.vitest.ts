@@ -398,6 +398,12 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     await app.whenIdle();
     createImageBitmapMock.mockClear();
 
+    // The drawings overlay may attempt to decode the picture bytes for rendering; this test is
+    // specifically asserting that the *copy* path does not require createImageBitmap to
+    // transcode incorrect mimeType metadata.
+    await app.whenIdle();
+    createImageBitmapMock.mockClear();
+
     app.copy();
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });

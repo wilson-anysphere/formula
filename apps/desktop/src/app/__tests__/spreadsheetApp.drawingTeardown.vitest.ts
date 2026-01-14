@@ -222,7 +222,9 @@ describe("SpreadsheetApp drawings teardown", () => {
     const interactionTarget = selectionCanvas!;
     // JSDOM returns a default zero-sized rect for canvases; align with our stubbed root rect so
     // pointer coordinate conversion + hit-testing behaves consistently.
-    interactionTarget.getBoundingClientRect = root.getBoundingClientRect;
+    (interactionTarget as any).getBoundingClientRect = root.getBoundingClientRect;
+    (interactionTarget as any).setPointerCapture ??= () => {};
+    (interactionTarget as any).releasePointerCapture ??= () => {};
 
     // Drag the object slightly: should call `setObjects`.
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 1, button: 0 });
@@ -230,7 +232,8 @@ describe("SpreadsheetApp drawings teardown", () => {
     expect(selectSpy.mock.calls.at(-1)?.[0]).toBe(1);
     dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 80, clientY: 55, pointerId: 1 });
     expect(setObjectsSpy).toHaveBeenCalled();
-    // End the gesture before disposing so teardown doesn't have to handle an in-flight drag.
+    // End the gesture so `dispose()` doesn't need to cancel an in-flight drag (which can
+    // legitimately call `setObjects` while restoring pre-gesture state).
     dispatchPointerEvent(interactionTarget, "pointerup", { clientX: 80, clientY: 55, pointerId: 1 });
 
     clearSpy.mockClear();

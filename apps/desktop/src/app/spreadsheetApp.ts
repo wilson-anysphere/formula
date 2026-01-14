@@ -13437,8 +13437,8 @@ export class SpreadsheetApp {
       // never surface as unhandled promise rejections.
       try {
         const result = overlay.render([], viewport, { drawObjects: false }) as unknown;
-        if (result && typeof (result as any).catch === "function") {
-          void (result as Promise<void>).catch((err) => {
+        if (isThenable(result)) {
+          void Promise.resolve(result).catch((err) => {
             console.warn("Chart selection overlay render failed", err);
           });
         }
@@ -13458,8 +13458,8 @@ export class SpreadsheetApp {
     overlay.setSelectedId(drawingId);
     try {
       const result = overlay.render([obj], viewport, { drawObjects: false }) as unknown;
-      if (result && typeof (result as any).catch === "function") {
-        void (result as Promise<void>).catch((err) => {
+      if (isThenable(result)) {
+        void Promise.resolve(result).catch((err) => {
           console.warn("Chart selection overlay render failed", err);
         });
       }
@@ -13747,19 +13747,18 @@ export class SpreadsheetApp {
     // Only treat pointerdown events originating from the grid surface (canvases/root) as
     // drawing selection. This avoids interfering with interactive DOM overlays
     // (scrollbars, outline buttons, comments panel, etc) even when drawings extend underneath them.
-    //
-    // When invoked programmatically in unit tests, `e.target` may be null; treat that as
-    // "no overlay target" so tests can exercise selection logic without a full dispatch.
-    if (target) {
-      const isGridSurface =
-        target === this.root ||
-        target === this.selectionCanvas ||
-        target === this.gridCanvas ||
-        target === this.referenceCanvas ||
-        target === this.auditingCanvas ||
-        target === this.presenceCanvas;
-      if (!isGridSurface) return;
-    }
+    const isGridSurface =
+      !target ||
+      target === this.root ||
+      target === this.selectionCanvas ||
+      target === this.gridCanvas ||
+      target === this.drawingCanvas ||
+      target === this.chartCanvas ||
+      target === this.chartSelectionCanvas ||
+      target === this.referenceCanvas ||
+      target === this.auditingCanvas ||
+      target === this.presenceCanvas;
+    if (!isGridSurface) return;
     const objects = this.listDrawingObjectsForSheet();
     const prevSelected = this.selectedDrawingId;
     const editorWasOpen = this.editor.isOpen();
@@ -15032,8 +15031,8 @@ export class SpreadsheetApp {
     // promises so we never surface unhandled rejections during scroll/resize-driven repaint storms.
     try {
       const result = overlay.render(objects, viewport) as unknown;
-      if (result && typeof (result as any).catch === "function") {
-        void (result as Promise<void>).catch((err) => {
+      if (isThenable(result)) {
+        void Promise.resolve(result).catch((err) => {
           console.warn("Drawing overlay render failed", err);
         });
       }
