@@ -220,6 +220,25 @@ test("chunkToText does not misclassify multi-word headers as title rows", () => 
   assert.doesNotMatch(text, /PRE-HEADER ROWS:/);
 });
 
+test("chunkToText treats single-word caption rows (e.g. 'Summary') as title rows when followed by a real header", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Data region A1:C3",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 2, c1: 2 },
+    cells: [
+      [{ v: "Summary" }, {}, {}],
+      [{ v: "Region" }, { v: "Revenue" }, { v: "Units" }],
+      [{ v: "North" }, { v: 1200 }, { v: 10 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /PRE-HEADER ROWS:/);
+  assert.match(text, /Summary/);
+  assert.match(text, /Region=North/);
+});
+
 test("chunkToText includes column truncation indicator in PRE-HEADER ROWS when table is wide", () => {
   const colCount = 25;
   const titleRow = [{ v: "Revenue Summary" }, ...Array.from({ length: colCount - 1 }, () => ({}))];

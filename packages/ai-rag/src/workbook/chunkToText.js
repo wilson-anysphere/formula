@@ -180,13 +180,33 @@ function inferHeaderRow(cells) {
     // "Customer Name"). Prefer false negatives (treat as a header) over false
     // positives (treating data as headers).
     const titleKeywordsRe = /\b(summary|report|overview|dashboard|analysis|results|totals)\b/i;
+    const firstString = row0.firstString;
+    const keywordTitle = typeof firstString === "string" && titleKeywordsRe.test(firstString);
+    const punctTitle = typeof firstString === "string" && /[:–—]/.test(firstString);
+    const hasSpaces = typeof firstString === "string" && /\s/.test(firstString);
+
+    // If the first row is a single keyword-y label like "Summary" / "Report",
+    // only treat it as a title row if a later header candidate looks multi-column.
+    let laterMultiColHeader = false;
+    if (keywordTitle) {
+      for (let r = 1; r < maxRowsToCheck; r += 1) {
+        const stats = rowStats(r);
+        if (!isHeaderCandidate(stats)) continue;
+        if (stats.nonEmpty >= 2) {
+          laterMultiColHeader = true;
+          break;
+        }
+      }
+    }
+
     const titleLike =
       row0.nonEmpty === 1 &&
       maxColCount > 1 &&
-      typeof row0.firstString === "string" &&
-      row0.firstString.length >= 12 &&
-      /\s/.test(row0.firstString) &&
-      (titleKeywordsRe.test(row0.firstString) || row0.firstString.length >= 24 || /[:–—]/.test(row0.firstString));
+      typeof firstString === "string" &&
+      ((hasSpaces &&
+        firstString.length >= 12 &&
+        (keywordTitle || firstString.length >= 24 || punctTitle)) ||
+        (keywordTitle && laterMultiColHeader));
     if (!titleLike) return 0;
   }
 
