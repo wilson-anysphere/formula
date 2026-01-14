@@ -2330,6 +2330,12 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       }
     })();
 
+    const stripMenuPrefix = (value: string): string => {
+      const idx = value.indexOf(":");
+      if (idx === -1) return value;
+      return value.slice(idx + 1).trim() || value;
+    };
+
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
       "view.appearance.theme": themeLabel,
@@ -2342,12 +2348,20 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.numberFormat.longDate": t("command.format.numberFormat.longDate"),
       "format.numberFormat.time": t("command.format.numberFormat.time"),
       "format.numberFormat.percent": t("command.format.numberFormat.percent"),
+      "format.numberFormat.commaStyle": t("command.format.numberFormat.commaStyle"),
+      "format.numberFormat.increaseDecimal": t("command.format.numberFormat.increaseDecimal"),
+      "format.numberFormat.decreaseDecimal": t("command.format.numberFormat.decreaseDecimal"),
       "format.numberFormat.fraction": t("command.format.numberFormat.fraction"),
       "format.numberFormat.scientific": t("command.format.numberFormat.scientific"),
       "format.numberFormat.text": t("command.format.numberFormat.text"),
       // Number format dialog entrypoints.
       "format.openFormatCells": t("command.format.openFormatCells"),
       "home.number.moreFormats.custom": t("command.home.number.moreFormats.custom"),
+      // Accounting symbol picker menu items (Home → Number → Accounting dropdown).
+      "format.numberFormat.accounting.usd": stripMenuPrefix(t("command.format.numberFormat.accounting.usd")),
+      "format.numberFormat.accounting.eur": stripMenuPrefix(t("command.format.numberFormat.accounting.eur")),
+      "format.numberFormat.accounting.gbp": stripMenuPrefix(t("command.format.numberFormat.accounting.gbp")),
+      "format.numberFormat.accounting.jpy": stripMenuPrefix(t("command.format.numberFormat.accounting.jpy")),
       "view.appearance.theme.system": t("ribbon.theme.system"),
       "view.appearance.theme.light": t("ribbon.theme.light"),
       "view.appearance.theme.dark": t("ribbon.theme.dark"),

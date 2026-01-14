@@ -113,6 +113,11 @@ export const RibbonButton = React.memo(function RibbonButton({
     [button.id, domInstanceId],
   );
   const label = labelOverride ?? labelById?.[button.id] ?? button.label;
+  const ariaLabel =
+    // For icon-only buttons, the label is visually hidden so it's especially important that
+    // assistive technology uses a localized name when available. Prefer the label override
+    // when provided (e.g. from desktop i18n `labelById` overrides).
+    size === "icon" && typeof labelOverride === "string" && labelOverride.trim() !== "" ? labelOverride : button.ariaLabel;
   const disabledByIdOverride = disabledById?.[button.id];
   const disabled =
     typeof disabledOverride === "boolean"
@@ -121,7 +126,10 @@ export const RibbonButton = React.memo(function RibbonButton({
         ? disabledByIdOverride
         : Boolean(button.disabled);
   const shortcut = shortcutOverride ?? shortcutById?.[button.id];
-  const title = formatTooltipTitle(button.ariaLabel, shortcut);
+  const title = formatTooltipTitle(
+    size === "icon" && typeof labelOverride === "string" && labelOverride.trim() !== "" ? labelOverride : button.ariaLabel,
+    shortcut,
+  );
   const ariaKeyShortcuts = ariaKeyShortcutsOverride ?? ariaKeyShortcutsById?.[button.id];
 
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -203,7 +211,7 @@ export const RibbonButton = React.memo(function RibbonButton({
       ]
         .filter(Boolean)
         .join(" ")}
-      aria-label={button.ariaLabel}
+      aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       aria-haspopup={ariaHaspopup}
       aria-expanded={hasMenu ? menuOpen : undefined}
