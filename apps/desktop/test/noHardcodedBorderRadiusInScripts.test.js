@@ -139,10 +139,10 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
     /** @type {{ re: RegExp, kind: string }[]} */
     const patterns = [
       // Style strings (e.g. `style: "border-radius: 4px;"`, `border-radius: calc(4px)`)
-      { re: /\bborder-radius\s*:\s*(?<value>[^;"'`}]*)/gi, kind: "border-radius" },
+      { re: /\bborder-radius\s*:\s*(?<value>[^;"'`]*)/gi, kind: "border-radius" },
       // Longhand border radii in style strings (e.g. `border-top-left-radius: 4px`)
       {
-        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(?<value>[^;"'`}]*)/gi,
+        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(?<value>[^;"'`]*)/gi,
         kind: "border-*-radius",
       },
       // React style objects (e.g. `{ borderRadius: 4 }`) interpret numeric values as px.
