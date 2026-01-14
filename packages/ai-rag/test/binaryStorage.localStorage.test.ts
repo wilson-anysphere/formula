@@ -273,6 +273,22 @@ test("ChunkedLocalStorageBinaryStorage clears absurd chunk counts in meta (corru
   }
 });
 
+test("ChunkedLocalStorageBinaryStorage.save guards against pathological chunk counts", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "too-many-chunks",
+    chunkSizeChars: 4,
+  });
+
+  // With chunkSizeChars=4, each chunk represents 3 bytes. 3,000,003 bytes -> 1,000,001 chunks.
+  const bytes = new Uint8Array(3_000_003);
+  await expect(storage.save(bytes)).rejects.toThrow(/would require .* chunks/i);
+
+  // Should fail before writing anything.
+  expect(listKeysWithPrefix(getTestLocalStorage(), `${storage.key}:`)).toEqual([]);
+  expect(getTestLocalStorage().getItem(storage.key)).toBeNull();
+});
+
 test("ChunkedLocalStorageBinaryStorage works with minimal Storage implementations (no key/length/removeItem)", async () => {
   const jsdomWindow = (globalThis as any)?.jsdom?.window as Window | undefined;
   if (!jsdomWindow) throw new Error("Expected vitest jsdom environment to provide globalThis.jsdom.window");

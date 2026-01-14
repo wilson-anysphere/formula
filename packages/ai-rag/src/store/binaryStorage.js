@@ -292,6 +292,18 @@ export class ChunkedLocalStorageBinaryStorage {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
 
+    // Protect against pathological configurations: if chunkSizeChars is too small,
+    // a moderately sized payload could result in millions of localStorage keys (slow,
+    // likely to exceed quota, and can hang the main thread).
+    const MAX_CHUNKS = 1_000_000;
+    const base64Len = data.byteLength === 0 ? 0 : Math.ceil(data.byteLength / 3) * 4;
+    const estimatedChunks = base64Len === 0 ? 0 : Math.ceil(base64Len / this.chunkSizeChars);
+    if (estimatedChunks > MAX_CHUNKS) {
+      throw new Error(
+        `ChunkedLocalStorageBinaryStorage.save would require ${estimatedChunks} chunks; increase chunkSizeChars`
+      );
+    }
+
     // Rollback protection: `setItem` can throw (quota / permissions). Since we write chunks to
     // stable keys (`${key}:0`, `${key}:1`, ...), a mid-write failure could otherwise corrupt
     // previously-saved data (meta would still point at the old chunk count, but chunk 0 might
