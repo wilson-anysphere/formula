@@ -80,5 +80,8 @@ fn imports_print_settings_multi_sheet_and_sorts_by_sheet_order() {
         })
     );
     assert_eq!(workbook.print_settings.sheets[1].print_area, None);
-}
 
+    // Full-fidelity reader should match.
+    let doc = formula_xlsx::load_from_bytes(&bytes).unwrap();
+    assert_eq!(doc.workbook.print_settings, workbook.print_settings);
+}
