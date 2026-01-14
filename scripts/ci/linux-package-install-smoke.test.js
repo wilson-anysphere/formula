@@ -6,8 +6,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "linux-package-install-smoke.sh");
+const scriptContents = stripHashComments(readFileSync(scriptPath, "utf8"));
 
 function run(args) {
   const proc = spawnSync("bash", [scriptPath, ...args], {
@@ -36,34 +39,30 @@ test("linux-package-install-smoke: invalid arg exits with usage (status 2)", () 
 });
 
 test("linux-package-install-smoke: uses token-based Exec= matching (avoid substring grep)", () => {
-  const script = readFileSync(scriptPath, "utf8");
-  assert.match(script, /target the expected executable/i);
-  assert.doesNotMatch(script, /Exec referencing/i);
+  assert.match(scriptContents, /target the expected executable/i);
+  assert.doesNotMatch(scriptContents, /Exec referencing/i);
   // Historical implementation used `grep -rlE` to find a desktop file by substring.
-  assert.doesNotMatch(script, /grep -rlE/);
+  assert.doesNotMatch(scriptContents, /grep -rlE/);
 });
 
 test("linux-package-install-smoke: uses identifier-based Parquet shared-mime-info path", () => {
-  const script = readFileSync(scriptPath, "utf8");
-  assert.match(script, /FORMULA_TAURI_IDENTIFIER/);
+  assert.match(scriptContents, /FORMULA_TAURI_IDENTIFIER/);
   assert.ok(
-    script.includes('mime_xml="/usr/share/mime/packages/${ident}.xml"'),
+    scriptContents.includes('mime_xml="/usr/share/mime/packages/${ident}.xml"'),
     "Expected linux-package-install-smoke.sh to build the shared-mime-info XML path from the Tauri identifier (mime_xml=/usr/share/mime/packages/${ident}.xml).",
   );
   // Avoid hardcoding the current identifier filename so we don't regress if identifier changes.
-  assert.doesNotMatch(script, /app\\.formula\\.desktop\\.xml/);
+  assert.doesNotMatch(scriptContents, /app\\.formula\\.desktop\\.xml/);
 });
 
 test("linux-package-install-smoke: rejects path separators in the Tauri identifier", () => {
-  const script = readFileSync(scriptPath, "utf8");
-  assert.match(script, /invalid tauri identifier \(contains path separators\)/i);
+  assert.match(scriptContents, /invalid tauri identifier \(contains path separators\)/i);
 });
 
 test("linux-package-install-smoke: validates URL scheme handler(s) from tauri.conf.json (no hardcoded formula)", () => {
-  const script = readFileSync(scriptPath, "utf8");
-  assert.match(script, /FORMULA_DEEP_LINK_SCHEMES/);
+  assert.match(scriptContents, /FORMULA_DEEP_LINK_SCHEMES/);
   // Validate that the script doesn't hardcode only the `formula` scheme in its desktop entry checks.
-  assert.doesNotMatch(script, /x-scheme-handler\/formula/);
+  assert.doesNotMatch(scriptContents, /x-scheme-handler\/formula/);
 });
 
 test("linux-package-install-smoke: can print --help without a working python3/node (sed fallback for identifier)", () => {

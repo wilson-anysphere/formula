@@ -5,12 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EXPECTED_PLATFORM_KEYS } from "../ci/validate-updater-manifest.mjs";
+import { stripHtmlComments } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const docPath = path.join(repoRoot, "docs", "desktop-updater-target-mapping.md");
 
 test("docs/desktop-updater-target-mapping.md stays in sync with required updater platform keys", async () => {
-  const text = await readFile(docPath, "utf8");
+  const text = stripHtmlComments(await readFile(docPath, "utf8"));
   for (const key of EXPECTED_PLATFORM_KEYS) {
     assert.ok(
       text.includes(`\`${key}\``),
@@ -18,4 +19,3 @@ test("docs/desktop-updater-target-mapping.md stays in sync with required updater
     );
   }
 });
-

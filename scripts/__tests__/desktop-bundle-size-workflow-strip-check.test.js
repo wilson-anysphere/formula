@@ -4,11 +4,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "desktop-bundle-size.yml");
 
 async function readWorkflow() {
-  return await readFile(workflowPath, "utf8");
+  return stripHashComments(await readFile(workflowPath, "utf8"));
 }
 
 /**

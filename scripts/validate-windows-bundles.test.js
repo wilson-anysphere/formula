@@ -4,9 +4,11 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripPowerShellComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "validate-windows-bundles.ps1");
-const text = readFileSync(scriptPath, "utf8");
+const text = stripPowerShellComments(readFileSync(scriptPath, "utf8"));
 
 test("validate-windows-bundles.ps1 inspects MSI tables via Windows Installer COM", () => {
   assert.match(
@@ -57,8 +59,13 @@ test("validate-windows-bundles.ps1 performs best-effort NSIS marker scanning", (
   );
   assert.match(
     text,
-    /\.xlsx/i,
-    "Expected validator to scan for .xlsx marker strings in NSIS installers.",
+    /\$dotExt\s*=\s*"\."\s*\+/,
+    "Expected validator to build dotted file-extension markers (e.g. .xlsx) for NSIS installer scanning.",
+  );
+  assert.match(
+    text,
+    /Extensions\s*=\s*@\(\s*"xlsx"\s*\)/,
+    "Expected validator to include a stable representative extension (xlsx) for best-effort NSIS marker scanning.",
   );
 });
 

@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function readJson(relPath) {
@@ -44,7 +46,7 @@ test("desktop dev/build scripts do not bundle Pyodide by default", () => {
 
 test("maybe-ensure script gates bundling behind FORMULA_BUNDLE_PYODIDE_ASSETS", () => {
   const absPath = path.join(repoRoot, "apps/desktop/scripts/maybe-ensure-pyodide-assets.mjs");
-  const src = readFileSync(absPath, "utf8");
+  const src = stripComments(readFileSync(absPath, "utf8"));
 
   assert.match(
     src,

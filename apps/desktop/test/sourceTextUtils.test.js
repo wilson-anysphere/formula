@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { stripComments, stripCssComments, stripHtmlComments, stripHashComments } from "./sourceTextUtils.js";
+import {
+  stripComments,
+  stripCssComments,
+  stripHtmlComments,
+  stripHashComments,
+  stripPowerShellComments,
+  stripPythonComments,
+} from "./sourceTextUtils.js";
 
 test("stripComments strips line/block comments but preserves string literals", () => {
   const input = [
@@ -108,4 +115,43 @@ test("stripHashComments strips # line comments but preserves strings/urls", () =
   assert.match(out, /name:\s*"build #1"/);
   assert.match(out, /https:\/\/example\.com\/#anchor/);
   assert.match(out, /single:\s*'it''s # not a comment'/);
+});
+
+test("stripPowerShellComments strips # and <# #> comments but preserves strings + here-strings", () => {
+  const input = [
+    `$x = $env:FORMULA_TAURI_CONF_PATH # trailing comment`,
+    `# full line comment: $env:FORMULA_TAURI_CONF_PATH`,
+    `<#`,
+    `block comment: $env:FORMULA_TAURI_CONF_PATH`,
+    `#>`,
+    `Write-Host "FORMULA_TAURI_CONF_PATH # not a comment"`,
+    `@'`,
+    `here-string content # not a comment`,
+    `'@`,
+  ].join("\n");
+
+  const out = stripPowerShellComments(input);
+  assert.match(out, /\$env:FORMULA_TAURI_CONF_PATH/);
+  assert.doesNotMatch(out, /\btrailing comment\b/);
+  assert.doesNotMatch(out, /\bfull line comment\b/);
+  assert.doesNotMatch(out, /\bblock comment\b/);
+  assert.match(out, /"FORMULA_TAURI_CONF_PATH # not a comment"/);
+  assert.match(out, /here-string content # not a comment/);
+});
+
+test("stripPythonComments strips # comments but preserves strings (including triple quotes)", () => {
+  const input = [
+    `x = 1  # trailing`,
+    `y = "# not a comment"`,
+    `z = """`,
+    `triple string # not a comment`,
+    `"""`,
+    `# full line`,
+  ].join("\n");
+
+  const out = stripPythonComments(input);
+  assert.doesNotMatch(out, /\btrailing\b/);
+  assert.doesNotMatch(out, /\bfull line\b/);
+  assert.match(out, /"# not a comment"/);
+  assert.match(out, /triple string # not a comment/);
 });

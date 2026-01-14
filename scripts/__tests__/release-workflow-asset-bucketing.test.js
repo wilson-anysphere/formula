@@ -4,11 +4,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
 
 async function readWorkflow() {
-  return await readFile(workflowPath, "utf8");
+  return stripHashComments(await readFile(workflowPath, "utf8"));
 }
 
 test("release workflow buckets Linux AppImage tarballs as linux (includes *.AppImage.tgz)", async () => {
@@ -30,4 +32,3 @@ test("release workflow buckets Linux AppImage tarballs as linux (includes *.AppI
     `Expected linux bucket_for() branch to include *.AppImage.tgz.\nSaw snippet:\n${snippet}`,
   );
 });
-

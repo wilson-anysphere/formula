@@ -4,6 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const scripts = [
@@ -14,7 +16,7 @@ const scripts = [
 
 test("Linux bundle validators do not hardcode x-scheme-handler/formula", () => {
   for (const scriptPath of scripts) {
-    const contents = readFileSync(scriptPath, "utf8");
+    const contents = stripHashComments(readFileSync(scriptPath, "utf8"));
     assert.doesNotMatch(
       contents,
       /x-scheme-handler\/formula/,
@@ -22,4 +24,3 @@ test("Linux bundle validators do not hardcode x-scheme-handler/formula", () => {
     );
   }
 });
-

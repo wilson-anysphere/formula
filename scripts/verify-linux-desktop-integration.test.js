@@ -6,11 +6,13 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripPythonComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "verify_linux_desktop_integration.py");
 
 test("verify_linux_desktop_integration avoids Path.rglob() scans (perf guardrail)", () => {
-  const contents = readFileSync(scriptPath, "utf8");
+  const contents = stripPythonComments(readFileSync(scriptPath, "utf8"));
   assert.doesNotMatch(contents, /\.rglob\(/, "Expected verifier to avoid unbounded recursive scans");
 });
 

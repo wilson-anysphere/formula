@@ -12,6 +12,8 @@ import {
   verifyUpdaterManifestSignature,
 } from "./verify-desktop-release-assets.mjs";
 
+import { stripComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 function assetMap(names) {
   return new Map(names.map((name) => [name, { name }]));
 }
@@ -24,7 +26,7 @@ test("filenameFromUrl extracts decoded filename and strips query", () => {
 });
 
 test("verify-desktop-release-assets supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
-  const source = readFileSync(new URL("./verify-desktop-release-assets.mjs", import.meta.url), "utf8");
+  const source = stripComments(readFileSync(new URL("./verify-desktop-release-assets.mjs", import.meta.url), "utf8"));
   assert.match(source, /FORMULA_TAURI_CONF_PATH/);
 });
 

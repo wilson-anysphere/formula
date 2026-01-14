@@ -388,3 +388,210 @@ export function stripHashComments(source) {
 
   return out;
 }
+
+export function stripPowerShellComments(source) {
+  // Strip PowerShell line comments (`# ...`) and block comments (`<# ... #>`) while preserving:
+  // - string literals (single/double quoted)
+  // - here-strings (@' ... '@ / @" ... "@)
+  // - newlines (so we don't accidentally join tokens)
+  //
+  // This is intentionally lightweight (not a full PowerShell parser), but is sufficient for
+  // "source scanning" guardrail tests so commented-out script logic can't satisfy or fail checks.
+  const text = String(source);
+  let out = "";
+  /** @type {"code" | "single" | "double" | "hereSingle" | "hereDouble" | "lineComment" | "blockComment"} */
+  let state = "code";
+  let lineStart = true;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+
+    if (state === "lineComment") {
+      if (ch === "\n") {
+        out += "\n";
+        state = "code";
+        lineStart = true;
+      } else {
+        out += " ";
+        lineStart = false;
+      }
+      continue;
+    }
+
+    if (state === "blockComment") {
+      if (ch === "#" && next === ">") {
+        out += "  ";
+        i += 1;
+        state = "code";
+        lineStart = false;
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      lineStart = ch === "\n";
+      continue;
+    }
+
+    if (state === "hereSingle" || state === "hereDouble") {
+      const quote = state === "hereSingle" ? "'" : '"';
+      if (lineStart && ch === quote && next === "@") {
+        out += `${ch}${next}`;
+        i += 1;
+        state = "code";
+        lineStart = false;
+        continue;
+      }
+      out += ch;
+      lineStart = ch === "\n";
+      continue;
+    }
+
+    if (state === "single") {
+      out += ch;
+      if (ch === "'" && next === "'") {
+        // PowerShell escapes a single quote by doubling it: `''` => literal `'`.
+        out += next;
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+      if (ch === "'") state = "code";
+      lineStart = ch === "\n";
+      continue;
+    }
+
+    if (state === "double") {
+      out += ch;
+      if (ch === "`" && next) {
+        // Backtick escapes the following character.
+        out += next;
+        i += 1;
+        lineStart = next === "\n";
+        continue;
+      }
+      if (ch === '"') state = "code";
+      lineStart = ch === "\n";
+      continue;
+    }
+
+    // state === "code"
+    if (ch === "@" && (next === "'" || next === '"')) {
+      // Here-string start: @' or @" (terminator must be `'@`/`"@` at start of line).
+      out += `${ch}${next}`;
+      i += 1;
+      state = next === "'" ? "hereSingle" : "hereDouble";
+      lineStart = false;
+      continue;
+    }
+
+    if (ch === "<" && next === "#") {
+      out += "  ";
+      i += 1;
+      state = "blockComment";
+      lineStart = false;
+      continue;
+    }
+
+    if (ch === "#") {
+      out += " ";
+      state = "lineComment";
+      lineStart = false;
+      continue;
+    }
+
+    if (ch === "'") {
+      state = "single";
+      out += ch;
+      lineStart = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      state = "double";
+      out += ch;
+      lineStart = false;
+      continue;
+    }
+
+    out += ch;
+    lineStart = ch === "\n";
+  }
+
+  return out;
+}
+
+export function stripPythonComments(source) {
+  // Strip Python `# ...` line comments while preserving string literals (including triple quotes)
+  // and newlines.
+  //
+  // This is intentionally lightweight: it does not attempt to parse all Python syntax, but is
+  // sufficient for guardrail tests scanning `.py` sources where commented-out code must not
+  // satisfy or fail assertions.
+  const text = String(source);
+  let out = "";
+  /** @type {"code" | "single" | "double" | "tripleSingle" | "tripleDouble"} */
+  let state = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+
+    if (state === "code") {
+      if (ch === "#") {
+        // Line comment: replace with spaces until newline, then preserve the newline.
+        while (i < text.length && text[i] !== "\n") {
+          out += " ";
+          i += 1;
+        }
+        if (i < text.length) out += "\n";
+        continue;
+      }
+
+      if (ch === "'" || ch === '"') {
+        const quote = ch;
+        const isTriple = text[i + 1] === quote && text[i + 2] === quote;
+        if (isTriple) {
+          out += `${quote}${quote}${quote}`;
+          i += 2;
+          state = quote === "'" ? "tripleSingle" : "tripleDouble";
+          continue;
+        }
+        out += quote;
+        state = quote === "'" ? "single" : "double";
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    if (state === "single" || state === "double") {
+      const quote = state === "single" ? "'" : '"';
+      out += ch;
+      if (ch === "\\") {
+        // Escape sequence.
+        if (next) {
+          out += next;
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === quote) state = "code";
+      continue;
+    }
+
+    if (state === "tripleSingle" || state === "tripleDouble") {
+      const quote = state === "tripleSingle" ? "'" : '"';
+      if (ch === quote && text[i + 1] === quote && text[i + 2] === quote) {
+        out += `${quote}${quote}${quote}`;
+        i += 2;
+        state = "code";
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+  }
+
+  return out;
+}

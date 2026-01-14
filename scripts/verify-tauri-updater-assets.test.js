@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { findPlatformsObject, isMacUpdaterArchiveAssetName } from "./verify-tauri-updater-assets.mjs";
+import { stripComments } from "../apps/desktop/test/sourceTextUtils.js";
 
 test("isMacUpdaterArchiveAssetName matches macOS updater tarballs but rejects Linux AppImage tarballs", () => {
   assert.equal(isMacUpdaterArchiveAssetName("Formula.app.tar.gz"), true);
@@ -45,6 +46,6 @@ test("findPlatformsObject returns null when missing", () => {
 });
 
 test("verify-tauri-updater-assets supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
-  const source = readFileSync(new URL("./verify-tauri-updater-assets.mjs", import.meta.url), "utf8");
+  const source = stripComments(readFileSync(new URL("./verify-tauri-updater-assets.mjs", import.meta.url), "utf8"));
   assert.match(source, /FORMULA_TAURI_CONF_PATH/);
 });

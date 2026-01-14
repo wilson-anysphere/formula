@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-appimage.sh");
 
@@ -30,7 +32,7 @@ test("check-appimage: --help prints usage and mentions FORMULA_TAURI_CONF_PATH",
 });
 
 test("check-appimage avoids unbounded find scans when directory args are provided (perf guardrail)", () => {
-  const raw = fs.readFileSync(scriptPath, "utf8");
+  const raw = stripHashComments(fs.readFileSync(scriptPath, "utf8"));
   // Historical versions used `find "$arg" -type f -name '*.AppImage'` which can be
   // extremely slow when callers pass a Cargo `target/` directory.
   assert.ok(

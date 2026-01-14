@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tauriConf = JSON.parse(readFileSync(path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 
@@ -244,7 +246,7 @@ test("verify-linux-package-deps passes when bundles include Parquet shared-mime-
 });
 
 test("verify-linux-package-deps guardrails validate identifier-derived MIME XML filename (no path separators)", { skip: !hasBash }, () => {
-  const script = readFileSync(path.join(repoRoot, "scripts", "ci", "verify-linux-package-deps.sh"), "utf8");
+  const script = stripHashComments(readFileSync(path.join(repoRoot, "scripts", "ci", "verify-linux-package-deps.sh"), "utf8"));
   assert.match(script, /contains path separators/i);
 });
 

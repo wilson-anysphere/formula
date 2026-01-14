@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { stripComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
 // automatically skip this suite when TypeScript execution isn't available.
 //
@@ -26,7 +28,7 @@ test("workbook-backend is importable under Node ESM when executing TS sources di
     /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)\s*['"]\.\.?\/[^'"\n]+?\.(?:ts|tsx)(?:[?#][^'"\n]*)?['"]/;
   const indexSrc = readFileSync(new URL("../packages/workbook-backend/src/index.ts", import.meta.url), "utf8");
   assert.ok(
-    !tsSpecifierRe.test(indexSrc),
+    !tsSpecifierRe.test(stripComments(indexSrc)),
     "packages/workbook-backend/src/index.ts must not use .ts specifiers",
   );
 

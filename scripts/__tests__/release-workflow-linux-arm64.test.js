@@ -4,11 +4,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
 
 async function readReleaseWorkflow() {
-  return await readFile(releaseWorkflowPath, "utf8");
+  return stripHashComments(await readFile(releaseWorkflowPath, "utf8"));
 }
 
 /**

@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const workflows = [
@@ -48,7 +50,7 @@ function yamlListItemBlock(lines, startIdx) {
 
 for (const wf of workflows) {
   test(`${wf.name} builds the desktop release binary with codegen-units=1 (matches Cargo.toml release profile)`, async () => {
-    const text = await readFile(wf.path, "utf8");
+    const text = stripHashComments(await readFile(wf.path, "utf8"));
     const lines = text.split(/\r?\n/);
     const idx = lines.findIndex((line) => line.includes(wf.stepName));
     assert.ok(
@@ -63,4 +65,3 @@ for (const wf of workflows) {
     );
   });
 }
-

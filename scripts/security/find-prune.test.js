@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function read(relPath) {
@@ -11,8 +13,8 @@ function read(relPath) {
 }
 
 test("security scripts prune target/node_modules in find-based scans (perf guardrail)", () => {
-  const configHardening = read("scripts/security/config_hardening.sh");
-  const securityCi = read("scripts/security/ci.sh");
+  const configHardening = stripHashComments(read("scripts/security/config_hardening.sh"));
+  const securityCi = stripHashComments(read("scripts/security/ci.sh"));
 
   // Ensure we don't regress back to `-not -path "*/target/*"` filters (which still traverse the
   // tree). Comments are allowed; we're looking for the previous invocation shape.
