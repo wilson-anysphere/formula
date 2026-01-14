@@ -4,6 +4,9 @@ use pkcs8::DecodePublicKey;
 use serde::{de, Deserialize};
 use std::fmt;
 
+#[cfg(feature = "desktop")]
+use crate::resource_limits::LimitedString;
+
 // NOTE: Keep these limits in sync with the browser verifier in
 // `shared/extension-package/v2-browser.mjs`.
 const MAX_SIGNATURE_PAYLOAD_BYTES: usize = 5 * 1024 * 1024; // 5MB
@@ -109,8 +112,8 @@ pub fn verify_ed25519_signature_payload(
 pub fn verify_ed25519_signature(
     window: tauri::WebviewWindow,
     payload: LimitedByteVec<MAX_SIGNATURE_PAYLOAD_BYTES>,
-    signature_base64: String,
-    public_key_pem: String,
+    signature_base64: LimitedString<MAX_SIGNATURE_BASE64_BYTES>,
+    public_key_pem: LimitedString<MAX_PUBLIC_KEY_PEM_BYTES>,
 ) -> Result<bool, String> {
     use crate::ipc_origin::Verb;
 
@@ -119,7 +122,7 @@ pub fn verify_ed25519_signature(
     let url = window.url().map_err(|err| err.to_string())?;
     crate::ipc_origin::ensure_trusted_origin(&url, "ed25519 verification", Verb::Is)?;
 
-    verify_ed25519_signature_payload(&payload.0, &signature_base64, &public_key_pem)
+    verify_ed25519_signature_payload(&payload.0, signature_base64.as_ref(), public_key_pem.as_ref())
 }
 
 #[cfg(test)]
