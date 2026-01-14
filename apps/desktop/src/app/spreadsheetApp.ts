@@ -8550,7 +8550,6 @@ export class SpreadsheetApp {
   }
 
   deleteSelectedDrawing(): void {
-    const prevSelected = this.getSelectedDrawingId();
     const drawingId = this.selectedDrawingId;
     if (drawingId == null) return;
 
@@ -8661,9 +8660,6 @@ export class SpreadsheetApp {
     // Emit explicit notifications so panels like Selection Pane update immediately even
     // if DocumentController emits change events asynchronously.
     this.emitDrawingsChanged();
-    if (this.getSelectedDrawingId() !== prevSelected) {
-      this.emitDrawingSelectionChanged();
-    }
   }
 
   duplicateSelectedDrawing(): void {
@@ -12786,7 +12782,6 @@ export class SpreadsheetApp {
         this.selectedDrawingIndex = null;
         this.dispatchDrawingSelectionChanged();
         this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-        this.emitDrawingSelectionChanged();
       }
       return;
     }
@@ -12851,7 +12846,6 @@ export class SpreadsheetApp {
           this.selectedDrawingIndex = null;
           this.dispatchDrawingSelectionChanged();
           this.renderDrawings(sharedViewport);
-          this.emitDrawingSelectionChanged();
         }
       }
       return;
@@ -12892,7 +12886,6 @@ export class SpreadsheetApp {
     if (this.selectedDrawingId !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
-      this.emitDrawingSelectionChanged();
     }
 
     if (isContextClick) {
@@ -18900,7 +18893,6 @@ export class SpreadsheetApp {
   private async cutSelectedDrawingToClipboard(): Promise<void> {
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
-    const prevSelected = this.getSelectedDrawingId();
 
     await this.copySelectedDrawingToClipboard();
 
@@ -18997,9 +18989,6 @@ export class SpreadsheetApp {
     this.drawingHitTestIndexObjects = null;
     this.refresh();
     this.emitDrawingsChanged();
-    if (this.getSelectedDrawingId() !== prevSelected) {
-      this.emitDrawingSelectionChanged();
-    }
     this.focus();
   }
 
@@ -19250,7 +19239,6 @@ export class SpreadsheetApp {
       throw err;
     }
 
-    const prevEffectiveSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
     this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
@@ -19277,9 +19265,6 @@ export class SpreadsheetApp {
     }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     this.emitDrawingsChanged();
-    if (this.getSelectedDrawingId() !== prevEffectiveSelected) {
-      this.emitDrawingSelectionChanged();
-    }
     this.focus();
     return true;
   }
