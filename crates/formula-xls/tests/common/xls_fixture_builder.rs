@@ -570,7 +570,7 @@ pub fn build_shared_formula_shrfmla_ref8_header_fixture_xls() -> Vec<u8> {
 /// - `B2`: `A2+1` (via `PtgExp`)
 ///
 /// The shared formula `rgce` intentionally includes:
-/// `PtgRefN` + `PtgMemAreaN(cce=0)` + `PtgInt(1)` + `PtgAdd`
+/// `PtgRefN` + `PtgMemAreaN(cce=0)` + `PtgMemAreaN(cce=3, rgce=PtgInt(0))` + `PtgInt(1)` + `PtgAdd`
 ///
 /// `PtgMem*` tokens are no-ops for printing but carry a variable-length payload; if the shared
 /// formula decoder mishandles them, subsequent tokens will be mis-parsed.
@@ -8066,7 +8066,7 @@ fn build_array_formula_workbook_stream() -> Vec<u8> {
 
 fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
     // Minimal single-sheet workbook containing a shared formula where the shared SHRFMLA.rgce
-    // includes a PtgMemAreaN token (with cce=0).
+    // includes PtgMemAreaN tokens (one with cce=0 and one with cce=3).
     let xf_cell = 16u16;
     let sheet = build_shared_formula_ptgmemarean_sheet_stream(xf_cell);
     build_single_sheet_workbook_stream("Shared", &sheet, 1252)
@@ -12253,7 +12253,7 @@ fn build_shared_formula_ptgmemarean_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_FORMULA, &b1);
 
     // Shared SHRFMLA record containing the base rgce in relative form:
-    //   PtgRefN(row_off=0,col_off=-1) + PtgMemAreaN(cce=0) + PtgInt(1) + PtgAdd
+    //   PtgRefN(row_off=0,col_off=-1) + PtgMemAreaN(cce=0) + PtgMemAreaN(cce=3, rgce=PtgInt(0)) + PtgInt(1) + PtgAdd
     //
     // Note: PtgMemAreaN is a no-op for printing but carries a payload; decoders must still skip the
     // `cce` field to keep the token stream aligned.
@@ -12263,6 +12263,10 @@ fn build_shared_formula_ptgmemarean_sheet_stream(xf_cell: u16) -> Vec<u8> {
         0xFF, 0xFF, // col_off = -1 (14-bit two's complement) + row/col relative flags
         0x2E, // PtgMemAreaN
         0x00, 0x00, // cce = 0
+        0x2E, // PtgMemAreaN (with a nested rgce payload)
+        0x03, 0x00, // cce = 3
+        0x1E, // PtgInt
+        0x00, 0x00, // 0
         0x1E, // PtgInt
         0x01, 0x00, // 1
         0x03, // PtgAdd
