@@ -226,33 +226,34 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX identifiers (when unquoted) follow an identifier-like grammar. Everything else (spaces,
-    // punctuation, leading digits, etc.) must be wrapped in single quotes.
+    // DAX table identifiers can be written without quotes when they are simple identifier tokens.
+    // Quote anything containing whitespace/punctuation or reserved keywords like VAR/RETURN/IN.
     //
-    // Use Unicode-aware character classes so names like `Straße` can remain unquoted.
-    // Also quote identifiers that collide with keywords like `VAR`/`RETURN`/`IN`.
+    // Keep this conservative—quoting is always accepted by DAX.
     let raw = raw.trim();
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
     };
 
-    let is_keyword = raw.eq_ignore_ascii_case("VAR")
+    if raw.eq_ignore_ascii_case("VAR")
         || raw.eq_ignore_ascii_case("RETURN")
-        || raw.eq_ignore_ascii_case("IN");
-    if is_keyword {
+        || raw.eq_ignore_ascii_case("IN")
+    {
         return true;
     }
 
-    if first != '_' && !first.is_alphabetic() {
+    if !(first.is_ascii_alphabetic() || first == '_') {
         return true;
     }
+
     for ch in chars {
-        if ch == '_' || ch.is_alphanumeric() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
             continue;
         }
         return true;
     }
+
     false
 }
 

@@ -431,7 +431,7 @@ fn trim_float(value: f64) -> String {
             return as_f32.to_string();
         }
     }
-
+ 
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s.is_empty() {
