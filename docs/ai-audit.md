@@ -299,6 +299,7 @@ const store = await createDefaultAIAuditStore({
   max_age_ms: 30 * 24 * 60 * 60 * 1000,
   // `bounded` is enabled by default (per-entry size cap defense-in-depth).
   // bounded: false,
+  // bounded: { max_entry_chars: 100_000 },
   // prefer: "indexeddb" | "localstorage" | "memory",
 });
 ```
