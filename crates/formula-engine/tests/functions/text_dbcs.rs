@@ -165,6 +165,16 @@ fn asc_and_dbcs_convert_under_cp932() {
         sheet.eval("=ASC(\"ハ\u{309A}\")"),
         Value::Text("ﾊﾟ".to_string())
     );
+
+    // Decomposed rare voiced katakana should match precomposed behavior.
+    assert_eq!(
+        sheet.eval("=ASC(\"ヰ\u{3099}\")"),
+        Value::Text("ｲﾞ".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ASC(\"ヱ\u{3099}\")"),
+        Value::Text("ｴﾞ".to_string())
+    );
 }
 
 #[test]

@@ -361,6 +361,26 @@ fn asc_cp932(input: &str) -> String {
             continue;
         }
 
+        // Handle decomposed rare voiced katakana like `ヸ`/`ヹ` (U+30F0/U+30F1 + U+3099).
+        //
+        // These correspond to the precomposed `ヸ`/`ヹ` characters, which Excel's `ASC` converts to
+        // the halfwidth base + dakuten mark (`ｲﾞ`/`ｴﾞ`). If the input text is normalized into a
+        // decomposed form, preserve Excel's behavior.
+        if matches!(ch, 'ヰ' | 'ヱ') {
+            if let Some(&next) = iter.peek() {
+                if next == COMBINING_DAKUTEN {
+                    out.push_str(match ch {
+                        'ヰ' => "\u{FF72}", // ｲ
+                        'ヱ' => "\u{FF74}", // ｴ
+                        _ => unreachable!("matches! ensures only ヰ/ヱ"),
+                    });
+                    out.push(HALFWIDTH_DAKUTEN);
+                    iter.next(); // consume combining mark
+                    continue;
+                }
+            }
+        }
+
         if let Some(mapped) = fullwidth_katakana_to_halfwidth(ch) {
             // Handle decomposed voiced/semi-voiced katakana like `ガ` (U+30AB + U+3099).
             // Excel's ASC emits the halfwidth base + dakuten/handakuten marks (`ｶﾞ`).
