@@ -137,6 +137,88 @@ test("buildContext: heuristic DLP detects class instance cell values via toStrin
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildContext: heuristic DLP detects plain-object toString overrides and prevents them from leaking (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  const sneaky = {
+    // Override the stringification path that `valuesRangeToTsv` uses for some object values.
+    // This should never leak under DLP REDACT.
+    toString() {
+      return "alice@example.com";
+    },
+  };
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      // Needs at least 2 connected non-empty cells for region detection.
+      values: [[sneaky, "Hello"]],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /## dlp/i);
+});
+
+test("buildContext: heuristic DLP detects Symbol.toPrimitive cell values and prevents them from leaking (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  const sneaky = {};
+  sneaky[Symbol.toPrimitive] = () => "alice@example.com";
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [[sneaky, "Hello"]],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /## dlp/i);
+});
+
 test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
   const embedder = new CapturingEmbedder();
   const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });

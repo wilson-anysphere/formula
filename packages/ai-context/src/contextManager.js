@@ -3802,7 +3802,9 @@ function redactStructuredValue(value, redactor, options = {}) {
     // Empty plain objects are a common sparse-cell representation (treated as blank), and are safe
     // to preserve. Other "opaque" objects (including instances with custom `toString()` or
     // non-enumerable secrets) should be treated as prompt-unsafe under DLP redaction.
-    if (proto === Object.prototype && Object.getOwnPropertyNames(value).length === 0) return value;
+    const ownNames = Object.getOwnPropertyNames(value);
+    const ownSymbols = typeof Object.getOwnPropertySymbols === "function" ? Object.getOwnPropertySymbols(value) : [];
+    if (proto === Object.prototype && ownNames.length === 0 && ownSymbols.length === 0) return value;
     return /** @type {T} */ ("[REDACTED]");
   }
   // For class instances and other non-plain objects, fall back to a shallow key/value
@@ -3818,6 +3820,13 @@ function redactStructuredValue(value, redactor, options = {}) {
   let redactedKeyIndex = 0;
   for (const [key, v] of entries) {
     throwIfAborted(signal);
+    // `valuesRangeToTsv` uses `String(value)` as a fallback for some object-like values. If we
+    // preserve user-provided `toString`/`valueOf`/`toJSON` methods, they can leak sensitive
+    // strings into prompt context even under DLP redaction. Drop these well-known hooks when
+    // they are callable.
+    if ((key === "toString" || key === "valueOf" || key === "toJSON") && typeof v === "function") {
+      continue;
+    }
     let outKey = key;
     if (!restrictedAllowed) {
       const redactedKey = redactor(key);
