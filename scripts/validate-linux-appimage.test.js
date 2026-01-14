@@ -31,6 +31,7 @@ function writeFakeAppImage(
     withDesktopFile = true,
     withXlsxMime = true,
     withMimeTypeEntry = true,
+    execLine = "formula-desktop %U",
     appImageVersion = expectedVersion,
   } = {},
 ) {
@@ -44,7 +45,7 @@ function writeFakeAppImage(
         "cat > squashfs-root/usr/share/applications/formula.desktop <<'DESKTOP'",
         "[Desktop Entry]",
         "Name=Formula",
-        "Exec=formula-desktop %U",
+        `Exec=${execLine}`,
         ...(appImageVersion ? [`X-AppImage-Version=${appImageVersion}`] : []),
         ...(withMimeTypeEntry ? [`MimeType=${desktopMime}`] : []),
         "DESKTOP",
@@ -150,4 +151,14 @@ test("validate-linux-appimage fails when X-AppImage-Version does not match tauri
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /AppImage version mismatch/i);
+});
+
+test("validate-linux-appimage fails when Exec= lacks file placeholder", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, execLine: "formula-desktop" });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Exec=.*placeholder|invalid Exec=/i);
 });
