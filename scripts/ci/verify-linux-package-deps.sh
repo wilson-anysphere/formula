@@ -48,6 +48,8 @@ require_cmd cpio
 TAURI_CONF_PATH="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
 EXPECTED_DESKTOP_VERSION=""
 EXPECTED_PACKAGE_NAME=""
+EXPECTED_IDENTIFIER=""
+PARQUET_ASSOCIATION=0
 if [[ -f "${TAURI_CONF_PATH}" ]]; then
   if command -v python3 >/dev/null 2>&1; then
     EXPECTED_DESKTOP_VERSION="$(
@@ -68,6 +70,39 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 print((conf.get("mainBinaryName") or "").strip())
 PY
     )"
+    EXPECTED_IDENTIFIER="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print((conf.get("identifier") or "").strip())
+PY
+    )"
+    PARQUET_ASSOCIATION="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+assocs = conf.get("bundle", {}).get("fileAssociations", [])
+def has_parquet(a):
+    if not isinstance(a, dict):
+        return False
+    mt = a.get("mimeType")
+    if isinstance(mt, str) and mt.strip().lower() == "application/vnd.apache.parquet":
+        return True
+    exts = a.get("ext")
+    if isinstance(exts, str):
+        exts = [exts]
+    if isinstance(exts, list):
+        for e in exts:
+            if isinstance(e, str) and e.strip().lower().lstrip(".") == "parquet":
+                return True
+    return False
+print("1" if any(has_parquet(a) for a in assocs) else "0")
+PY
+    )"
   fi
 
   if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
@@ -82,14 +117,32 @@ PY
       sed -nE 's/^[[:space:]]*"mainBinaryName"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${TAURI_CONF_PATH}" | head -n 1
     )"
   fi
+
+  if [[ -z "${EXPECTED_IDENTIFIER}" ]]; then
+    EXPECTED_IDENTIFIER="$(
+      sed -nE 's/^[[:space:]]*"identifier"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${TAURI_CONF_PATH}" | head -n 1
+    )"
+  fi
+
+  if [[ -z "${PARQUET_ASSOCIATION}" ]]; then
+    if grep -q 'application/vnd.apache.parquet' "${TAURI_CONF_PATH}"; then
+      PARQUET_ASSOCIATION=1
+    else
+      PARQUET_ASSOCIATION=0
+    fi
+  fi
 fi
 if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
   fail "Unable to determine expected desktop version from ${TAURI_CONF_PATH}"
 fi
 : "${EXPECTED_PACKAGE_NAME:=formula-desktop}"
+: "${EXPECTED_IDENTIFIER:=app.formula.desktop}"
+: "${PARQUET_ASSOCIATION:=0}"
 
 echo "verify-linux-package-deps: expected desktop version: ${EXPECTED_DESKTOP_VERSION}"
 echo "verify-linux-package-deps: expected package/binary name: ${EXPECTED_PACKAGE_NAME}"
+echo "verify-linux-package-deps: expected tauri identifier: ${EXPECTED_IDENTIFIER}"
+echo "verify-linux-package-deps: parquet association configured: ${PARQUET_ASSOCIATION}"
 
 target_dirs=()
 
@@ -381,6 +434,15 @@ for deb in "${debs[@]}"; do
   tmpdirs+=("$tmpdir")
   dpkg-deb -x "$deb" "$tmpdir"
   assert_stripped_elf "$tmpdir/usr/bin/${EXPECTED_PACKAGE_NAME}" "$(basename "$deb")"
+  if [[ "${PARQUET_ASSOCIATION}" -eq 1 ]]; then
+    mime_xml="$tmpdir/usr/share/mime/packages/${EXPECTED_IDENTIFIER}.xml"
+    if [[ ! -f "${mime_xml}" ]]; then
+      fail "$deb: missing Parquet shared-mime-info definition file at: ${mime_xml}"
+    fi
+    if ! grep -Fq 'application/vnd.apache.parquet' "${mime_xml}" || ! grep -Fq '*.parquet' "${mime_xml}"; then
+      fail "$deb: Parquet shared-mime-info definition file is missing expected content: ${mime_xml}"
+    fi
+  fi
   rm -rf "$tmpdir"
   echo "::endgroup::"
 done
@@ -443,6 +505,15 @@ for rpm_path in "${rpms[@]}"; do
     rpm2cpio "$rpm_path" | cpio -idm --quiet --no-absolute-filenames
   )
   assert_stripped_elf "$tmpdir/usr/bin/${EXPECTED_PACKAGE_NAME}" "$(basename "$rpm_path")"
+  if [[ "${PARQUET_ASSOCIATION}" -eq 1 ]]; then
+    mime_xml="$tmpdir/usr/share/mime/packages/${EXPECTED_IDENTIFIER}.xml"
+    if [[ ! -f "${mime_xml}" ]]; then
+      fail "$rpm_path: missing Parquet shared-mime-info definition file at: ${mime_xml}"
+    fi
+    if ! grep -Fq 'application/vnd.apache.parquet' "${mime_xml}" || ! grep -Fq '*.parquet' "${mime_xml}"; then
+      fail "$rpm_path: Parquet shared-mime-info definition file is missing expected content: ${mime_xml}"
+    fi
+  fi
   rm -rf "$tmpdir"
   echo "::endgroup::"
 done
