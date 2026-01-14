@@ -56,12 +56,13 @@ function writeConfigWithAssociations(
 function writeParquetMimeDefinition(
   pkgRoot,
   {
-    filename = "app.formula.desktop.xml",
+    identifier = "app.formula.desktop",
+    filename = `${identifier}.xml`,
     xmlContent = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
       '  <mime-type type="application/vnd.apache.parquet">',
-      '    <glob pattern="*.parquet" />',
+        '    <glob pattern="*.parquet" />',
       "  </mime-type>",
       "</mime-info>",
     ].join("\n"),
