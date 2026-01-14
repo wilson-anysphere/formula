@@ -396,8 +396,9 @@ Implementation note:
   - if present: Formula validates the HMAC as described below
   - if absent: Formula decrypts successfully but does **not** verify integrity (and
     `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`)
-- `crates/formula-office-crypto` currently requires `<dataIntegrity>` and treats a missing element as
-  a malformed wrapper.
+- `crates/formula-office-crypto` treats `<dataIntegrity>` as **optional**:
+  - if present: Formula validates the HMAC as described below
+  - if absent: Formula decrypts successfully but does **not** verify integrity
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting with
   `formula_offcrypto::decrypt_encrypted_package` and `DecryptOptions.verify_integrity = true`
   (default: `false`).
@@ -430,7 +431,7 @@ files (including our committed fixture corpus), Formula’s decryptors are curre
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
   - HMAC over ciphertext only (excludes the 8-byte size header)
   - HMAC over plaintext only (decrypted ZIP bytes)
-  - HMAC over (8-byte size header + plaintext ZIP bytes)
+  - HMAC over header + plaintext (8-byte size header + plaintext ZIP bytes)
 - `crates/formula-offcrypto` accepts:
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
     when integrity verification is enabled (`DecryptOptions.verify_integrity = true`); it does not

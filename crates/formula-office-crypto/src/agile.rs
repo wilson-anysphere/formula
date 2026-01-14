@@ -657,7 +657,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
         // However, in the wild there are at least three compatibility variants:
         // - HMAC over the ciphertext bytes only (excluding the 8-byte size prefix)
         // - HMAC over the decrypted package bytes (plaintext ZIP)
-        // - HMAC over (8-byte size prefix + plaintext ZIP)
+        // - HMAC over header + plaintext (8-byte size prefix + plaintext ZIP bytes)
         //
         // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage stream.
         if let (Some(hmac_key_plain), Some(expected_hmac)) = (&hmac_key_plain, &expected_hmac) {
