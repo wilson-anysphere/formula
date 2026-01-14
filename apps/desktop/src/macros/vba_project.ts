@@ -1,3 +1,5 @@
+import { getTauriInvokeOrThrow } from "../tauri/api";
+
 export type VbaReferenceSummary = {
   name: string | null;
   guid: string | null;
@@ -19,16 +21,6 @@ export type VbaProjectSummary = {
   references: VbaReferenceSummary[];
   modules: VbaModuleSummary[];
 };
-
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
 
 function normalizeReference(raw: any): VbaReferenceSummary {
   return {
@@ -55,7 +47,7 @@ function normalizeModule(raw: any): VbaModuleSummary {
  * The backend returns `null` if the workbook has no `xl/vbaProject.bin`.
  */
 export async function getVbaProject(workbookId: string): Promise<VbaProjectSummary | null> {
-  const invoke = getTauriInvoke();
+  const invoke = getTauriInvokeOrThrow();
   const raw = await invoke("get_vba_project", { workbook_id: workbookId });
   if (!raw) return null;
 
@@ -66,4 +58,3 @@ export async function getVbaProject(workbookId: string): Promise<VbaProjectSumma
     modules: Array.isArray(raw?.modules) ? raw.modules.map(normalizeModule) : [],
   };
 }
-

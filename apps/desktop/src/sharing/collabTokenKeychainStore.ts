@@ -1,15 +1,7 @@
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (typeof invoke !== "function") {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
+import { getTauriInvokeOrThrow, hasTauriInvoke as hasTauriInvokeRuntime, type TauriInvoke } from "../tauri/api";
 
 export function hasTauriInvoke(): boolean {
-  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  return hasTauriInvokeRuntime();
 }
 
 export type CollabTokenKeychainEntry = {
@@ -36,7 +28,7 @@ export class CollabTokenKeychainStore {
   private invoke: TauriInvoke;
 
   constructor(opts?: { invoke?: TauriInvoke }) {
-    this.invoke = opts?.invoke ?? getTauriInvoke();
+    this.invoke = opts?.invoke ?? getTauriInvokeOrThrow();
   }
 
   async get(tokenKey: string): Promise<CollabTokenKeychainEntry | null> {

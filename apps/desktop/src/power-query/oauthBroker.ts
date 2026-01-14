@@ -1,4 +1,5 @@
 import { shellOpen } from "../tauri/shellOpen.ts";
+import { getTauriInvokeOrNull } from "../tauri/api";
 
 export type OAuthBroker = {
   /**
@@ -147,8 +148,8 @@ export class DesktopOAuthBroker implements OAuthBroker {
       try {
         const parsedRedirect = new URL(redirectUri);
         if (isLoopbackRedirectUrl(parsedRedirect)) {
-          const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
-          if (typeof invoke === "function") {
+          const invoke = getTauriInvokeOrNull();
+          if (invoke) {
             await invoke("oauth_loopback_listen", { redirect_uri: redirectUri });
           }
         }

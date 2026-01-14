@@ -13,7 +13,7 @@ import {
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { getTauriEventApiOrNull, hasTauri } from "../../tauri/api";
+import { getTauriEventApiOrNull, hasTauri, hasTauriInvoke } from "../../tauri/api";
 import { showInputBox } from "../../extensions/ui.js";
 
 import { PanelIds } from "../panelRegistry.js";
@@ -72,7 +72,7 @@ function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
 
     // Loopback redirect capture (RFC 8252) for providers that support it.
     if (isLoopbackRedirectUrl(url)) {
-      return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      return hasTauriInvoke();
     }
 
     return false;

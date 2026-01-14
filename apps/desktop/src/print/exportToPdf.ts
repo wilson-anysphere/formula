@@ -1,5 +1,7 @@
 import type { CellRange, PageSetup } from "./types";
 
+import { getTauriInvokeOrThrow } from "../tauri/api";
+
 export type PdfExportRequest = {
   sheetName: string;
   range: CellRange;
@@ -31,13 +33,7 @@ export async function exportSheetRangePdfViaTauri(args: {
   colWidthsPoints?: number[];
   rowHeightsPoints?: number[];
 }): Promise<Uint8Array> {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as
-    | ((cmd: string, args?: any) => Promise<any>)
-    | undefined;
-
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
+  const invoke = getTauriInvokeOrThrow();
 
   const b64 = await invoke("export_sheet_range_pdf", {
     sheet_id: args.sheetId,

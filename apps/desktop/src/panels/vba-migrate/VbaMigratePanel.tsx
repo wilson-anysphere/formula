@@ -6,10 +6,9 @@ import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.j
 import { createClipboardProvider } from "../../clipboard/index.js";
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
 import { getDesktopLLMClient, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
+import { getTauriInvokeOrNull, type TauriInvoke } from "../../tauri/api";
 
 import "./vba-migrate.css";
-
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
 type MacroUiContext = {
   sheetId: string;
@@ -298,7 +297,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     setProjectError(null);
     try {
       const workbookId = props.workbookId ?? "local-workbook";
-      const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+      const invoke = getTauriInvokeOrNull();
       const [result, macros] = await Promise.all([
         getVbaProject(workbookId),
         invoke
@@ -466,9 +465,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     setValidationError(null);
     setValidationReport(null);
     try {
-      const invoke =
-        props.invoke ??
-        ((globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined);
+      const invoke = props.invoke ?? getTauriInvokeOrNull();
       if (!invoke) {
         throw new Error("Tauri invoke API not available");
       }

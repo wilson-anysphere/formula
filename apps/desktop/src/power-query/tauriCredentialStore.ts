@@ -1,17 +1,9 @@
 import { credentialScopeKey } from "@formula/power-query";
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (typeof invoke !== "function") {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
+import { getTauriInvokeOrThrow, hasTauriInvoke as hasTauriInvokeRuntime, type TauriInvoke } from "../tauri/api";
 
 export function hasTauriInvoke(): boolean {
-  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  return hasTauriInvokeRuntime();
 }
 
 type CredentialEntry = { id: string; secret: unknown };
@@ -26,7 +18,7 @@ export class TauriCredentialStore {
   private invoke: TauriInvoke;
 
   constructor(opts?: { invoke?: TauriInvoke }) {
-    this.invoke = opts?.invoke ?? getTauriInvoke();
+    this.invoke = opts?.invoke ?? getTauriInvokeOrThrow();
   }
 
   async get(scope: any): Promise<CredentialEntry | null> {

@@ -1,6 +1,7 @@
 import { CredentialStoreOAuthTokenStore, OAuth2Manager, QueryEngine, type Query, type QueryExecutionContext, type RefreshPolicy } from "@formula/power-query";
 
 import type { DocumentController } from "../document/documentController.js";
+import { getTauriInvokeOrNull as getBaseTauriInvokeOrNull, type TauriInvoke } from "../tauri/api";
 
 import { createPowerQueryCredentialManager, type PowerQueryCredentialPrompt } from "./credentialManager.ts";
 import { maybeGetPowerQueryDlpContext } from "./dlpContext.ts";
@@ -16,15 +17,18 @@ import { createPowerQueryRefreshStateStore, type RefreshStateStore } from "./ref
 import { loadOAuth2ProviderConfigs } from "./oauthProviders.ts";
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvokeOrNull(): TauriInvoke | null {
   // Prefer a host-provided queued invoke (set by the desktop entrypoint) so writes
   // like `power_query_state_set` cannot race ahead of pending workbook edits/saves.
-  const invoke = ((globalThis as any).__FORMULA_WORKBOOK_INVOKE__ ??
-    (globalThis as any).__TAURI__?.core?.invoke) as TauriInvoke | undefined;
-  if (typeof invoke !== "function") return null;
-  return invoke;
+  try {
+    const queued = (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ as unknown;
+    if (typeof queued === "function") return queued as TauriInvoke;
+  } catch {
+    // ignore
+  }
+
+  return getBaseTauriInvokeOrNull();
 }
 
 function getLocalStorageOrNull(): StorageLike | null {

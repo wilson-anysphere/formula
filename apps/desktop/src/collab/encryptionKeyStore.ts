@@ -1,9 +1,4 @@
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvokeOrNull(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
-}
+import { getTauriInvokeOrNull, type TauriInvoke } from "../tauri/api";
 
 // Collaborative cell encryption currently uses 32-byte AES-256-GCM keys.
 const CELL_ENCRYPTION_KEY_BYTES = 32;

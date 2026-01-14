@@ -23,6 +23,7 @@ import { effectiveDocumentClassification, effectiveRangeClassification } from ".
 import type { DocumentController } from "../document/documentController.js";
 import { getTableSignatureRegistry } from "./tableSignatures.ts";
 import * as nativeDialogs from "../tauri/nativeDialogs.ts";
+import { getTauriInvokeOrNull, getTauriInvokeOrThrow, hasTauriInvoke, type TauriInvoke } from "../tauri/api";
 
 type DlpContext = {
   documentId: string;
@@ -173,20 +174,6 @@ function permissionPromptCacheKey(
   } catch {
     return null;
   }
-}
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
-
-function hasTauriInvoke(): boolean {
-  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
 }
 
 function abortError(): Error {
@@ -361,7 +348,7 @@ function createDefaultFileAdapter(): FileAdapter {
   // Prefer Formula's hardened invoke commands when available. These enforce backend-side scope and
   // size limits; the official FS plugin APIs may allow unbounded in-memory reads.
   if (hasTauriInvoke()) {
-    const invoke = getTauriInvoke();
+    const invoke = getTauriInvokeOrThrow();
     return {
       readText: async (path) => String(await invoke("read_text_file", { path })),
       readBinary: async (path) => {
@@ -636,17 +623,17 @@ function createDefaultFileAdapter(): FileAdapter {
         // Prefer the backend `list_dir` command when available. It returns mtime/size and enforces
         // backend-side resource limits to prevent excessive memory/CPU usage.
         if (hasTauriInvoke()) {
-          const invoke = getTauriInvoke();
-           let payload: unknown;
-           try {
-             payload = await invoke("list_dir", { path, recursive });
-           } catch (err) {
-             const message = normalizeInvokeErrorMessage(err);
-             if (isListDirLimitError(message)) {
-               throw new Error(
-                 `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
-               );
-             }
+          const invoke = getTauriInvokeOrThrow();
+          let payload: unknown;
+          try {
+            payload = await invoke("list_dir", { path, recursive });
+          } catch (err) {
+            const message = normalizeInvokeErrorMessage(err);
+            if (isListDirLimitError(message)) {
+              throw new Error(
+                `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+              );
+            }
             throw err instanceof Error ? err : new Error(message);
           }
           if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
@@ -746,7 +733,7 @@ function createDesktopCacheCryptoProvider(): CacheCryptoProvider {
   const ensureProvider = async () => {
     if (!desktopCacheCryptoProviderPromise) {
       desktopCacheCryptoProviderPromise = (async () => {
-        const invoke = getTauriInvoke();
+        const invoke = getTauriInvokeOrThrow();
         const payload = (await invoke("power_query_cache_key_get_or_create")) as any;
         const keyVersion = typeof payload?.keyVersion === "number" ? payload.keyVersion : null;
         const keyBase64 = typeof payload?.keyBase64 === "string" ? payload.keyBase64 : null;
@@ -1238,8 +1225,16 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
 
   // Prefer a host-provided queued invoke (set by the desktop entrypoint) so reads
   // like `list_tables`/`get_range` cannot race ahead of pending workbook writes.
-  const tauriInvoke = ((globalThis as any).__FORMULA_WORKBOOK_INVOKE__ ??
-    (globalThis as any).__TAURI__?.core?.invoke) as TauriInvoke | undefined;
+  let tauriInvoke: TauriInvoke | null = null;
+  try {
+    const queued = (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ as unknown;
+    if (typeof queued === "function") {
+      tauriInvoke = queued as TauriInvoke;
+    }
+  } catch {
+    // ignore
+  }
+  tauriInvoke ??= getTauriInvokeOrNull();
   const tableAdapter =
     typeof tauriInvoke === "function"
       ? {
@@ -1370,7 +1365,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     sql: string,
     queryOptions: { params?: unknown[]; signal?: AbortSignal; credentials?: unknown } = {},
   ) => {
-    const invoke = getTauriInvoke();
+    const invoke = getTauriInvokeOrThrow();
     let credentials = queryOptions.credentials;
     if (
       credentials &&
@@ -1415,7 +1410,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     request: { connection: unknown; sql: string },
     schemaOptions: { signal?: AbortSignal; credentials?: unknown } = {},
   ) => {
-    const invoke = getTauriInvoke();
+    const invoke = getTauriInvokeOrThrow();
     let credentials = schemaOptions.credentials;
     if (
       credentials &&

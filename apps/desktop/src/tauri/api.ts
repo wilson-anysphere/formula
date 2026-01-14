@@ -3,7 +3,7 @@ export type TauriDialogSave = (options?: Record<string, unknown>) => Promise<str
 export type TauriDialogConfirm = (message: string, options?: Record<string, unknown>) => Promise<boolean>;
 export type TauriDialogMessage = (message: string, options?: Record<string, unknown>) => Promise<void>;
 
-export type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+export type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
 export type TauriDialogApi = {
   open: TauriDialogOpen;

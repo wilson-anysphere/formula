@@ -1,5 +1,7 @@
 import type { RefreshPolicy } from "@formula/power-query";
 
+import { getTauriInvokeOrNull, type TauriInvoke } from "../tauri/api";
+
 export type RefreshStateEntry = { policy: RefreshPolicy; lastRunAtMs?: number };
 export type RefreshState = Record<string, RefreshStateEntry>;
 
@@ -20,13 +22,6 @@ export type StorageLike = {
   setItem(key: string, value: string): void;
   removeItem?(key: string): void;
 };
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriInvokeOrNull(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
-}
 
 class TauriPowerQueryRefreshStateStore implements RefreshStateStore {
   private readonly workbookId: string;

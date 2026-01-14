@@ -12,7 +12,7 @@ import type {
   MacroTrustDecision,
 } from "./types";
 
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
+import { getTauriInvokeOrThrow, type TauriInvoke } from "../tauri/api";
 
 function nonNegativeInt(value: unknown): number {
   const num = typeof value === "number" ? value : Number(value);
@@ -20,14 +20,6 @@ function nonNegativeInt(value: unknown): number {
   const floored = Math.floor(num);
   if (!Number.isSafeInteger(floored) || floored < 0) return 0;
   return floored;
-}
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
 }
 
 function errorMessage(err: unknown): string {
@@ -147,7 +139,7 @@ export class TauriMacroBackend implements MacroBackend {
   private readonly invoke: TauriInvoke;
 
   constructor(options: { invoke?: TauriInvoke } = {}) {
-    this.invoke = options.invoke ?? getTauriInvoke();
+    this.invoke = options.invoke ?? getTauriInvokeOrThrow();
   }
 
   async listMacros(workbookId: string): Promise<MacroInfo[]> {

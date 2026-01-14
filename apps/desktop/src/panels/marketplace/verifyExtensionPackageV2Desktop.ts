@@ -3,6 +3,7 @@ import type { VerifiedExtensionPackageV2 } from "../../../../../shared/extension
 // Import the ESM wrapper so Vite can serve it without relying on CommonJS transforms (which
 // are only applied during production builds).
 import v2Core from "../../../../../shared/extension-package/core/v2-core.mjs";
+import { getTauriInvokeOrNull } from "../../tauri/api";
 
 const {
   PACKAGE_FORMAT_VERSION,
@@ -110,8 +111,8 @@ async function verifyEd25519SignatureViaTauri(
   signatureBase64: string,
   publicKeyPem: string
 ): Promise<boolean> {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke;
-  if (typeof invoke !== "function") {
+  const invoke = getTauriInvokeOrNull();
+  if (!invoke) {
     throw new Error(
       "This environment's WebCrypto implementation does not support Ed25519 and Tauri invoke() is not available."
     );

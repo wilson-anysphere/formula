@@ -144,7 +144,7 @@ import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
 import { DesktopImageStore } from "../images/imageStore.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
-import { getTauriDialogOpenOrNull } from "../tauri/api";
+import { getTauriDialogOpenOrNull, getTauriInvokeOrNull, hasTauriInvoke, type TauriInvoke } from "../tauri/api";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import {
@@ -9704,16 +9704,7 @@ export class SpreadsheetApp {
     // Desktop/Tauri: prefer native dialog + backend reads (avoids `<input type=file>` sandbox quirks).
     // Web fallback below retains the persistent `<input>` element so unit tests can interact with it.
     const tauriDialogOpenAvailable = getTauriDialogOpenOrNull() != null;
-    const tauriInvokeAvailable = (() => {
-      // `__TAURI__` access is intentionally limited; core.invoke checks are allowed
-      // (dialog/window/event access is centralized in `src/tauri/api`).
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-      } catch {
-        return false;
-      }
-    })();
+    const tauriInvokeAvailable = hasTauriInvoke();
     if (tauriDialogOpenAvailable && tauriInvokeAvailable) {
       const startSheetId = this.sheetId;
       void (async () => {
@@ -15529,15 +15520,16 @@ export class SpreadsheetApp {
     return `${sheetId}:${row},${col}:${transitive ? "t" : "d"}`;
   }
 
-  private getTauriInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
-    const queued = (globalThis as any).__formulaQueuedInvoke;
-    if (typeof queued === "function") {
-      return queued;
+  private getTauriInvoke(): TauriInvoke | null {
+    try {
+      const queued = (globalThis as any).__formulaQueuedInvoke as unknown;
+      if (typeof queued === "function") {
+        return queued as TauriInvoke;
+      }
+    } catch {
+      // ignore
     }
-
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke;
-    if (typeof invoke !== "function") return null;
-    return invoke;
+    return getTauriInvokeOrNull();
   }
 
   private maybeScheduleAuditingUpdate(): void {
