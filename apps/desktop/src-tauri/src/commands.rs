@@ -641,7 +641,8 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_FORMATTING_RUNS_PER_COL;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_FORMATTING_RUNS_PER_COL {
                         return Err(de::Error::custom(format!(
                             "formatRunsByCol[].runs is too large (max {MAX_SHEET_FORMATTING_RUNS_PER_COL} runs per column)"
@@ -649,15 +650,25 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<SheetFormatRunDelta>()? {
-                    if out.len() >= MAX_SHEET_FORMATTING_RUNS_PER_COL {
-                        return Err(de::Error::custom(format!(
-                            "formatRunsByCol[].runs is too large (max {MAX_SHEET_FORMATTING_RUNS_PER_COL} runs per column)"
-                        )));
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_RUNS_PER_COL)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_SHEET_FORMATTING_RUNS_PER_COL {
+                    match seq.next_element::<SheetFormatRunDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetFormatRunDeltas(out)),
                     }
-                    out.push(v);
                 }
+
+                // Detect overflow without allocating/parsing the next element into a structured type.
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "formatRunsByCol[].runs is too large (max {MAX_SHEET_FORMATTING_RUNS_PER_COL} runs per column)"
+                    )));
+                }
+
                 Ok(LimitedSheetFormatRunDeltas(out))
             }
         }
@@ -698,7 +709,8 @@ impl<'de> Deserialize<'de> for LimitedSheetRowFormatDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_FORMATTING_ROW_DELTAS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_FORMATTING_ROW_DELTAS {
                         return Err(de::Error::custom(format!(
                             "rowFormats is too large (max {MAX_SHEET_FORMATTING_ROW_DELTAS} deltas)"
@@ -706,15 +718,24 @@ impl<'de> Deserialize<'de> for LimitedSheetRowFormatDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<SheetRowFormatDelta>()? {
-                    if out.len() >= MAX_SHEET_FORMATTING_ROW_DELTAS {
-                        return Err(de::Error::custom(format!(
-                            "rowFormats is too large (max {MAX_SHEET_FORMATTING_ROW_DELTAS} deltas)"
-                        )));
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_ROW_DELTAS)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_SHEET_FORMATTING_ROW_DELTAS {
+                    match seq.next_element::<SheetRowFormatDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetRowFormatDeltas(out)),
                     }
-                    out.push(v);
                 }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "rowFormats is too large (max {MAX_SHEET_FORMATTING_ROW_DELTAS} deltas)"
+                    )));
+                }
+
                 Ok(LimitedSheetRowFormatDeltas(out))
             }
         }
@@ -748,7 +769,8 @@ impl<'de> Deserialize<'de> for LimitedSheetColFormatDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_FORMATTING_COL_DELTAS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_FORMATTING_COL_DELTAS {
                         return Err(de::Error::custom(format!(
                             "colFormats is too large (max {MAX_SHEET_FORMATTING_COL_DELTAS} deltas)"
@@ -756,15 +778,24 @@ impl<'de> Deserialize<'de> for LimitedSheetColFormatDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<SheetColFormatDelta>()? {
-                    if out.len() >= MAX_SHEET_FORMATTING_COL_DELTAS {
-                        return Err(de::Error::custom(format!(
-                            "colFormats is too large (max {MAX_SHEET_FORMATTING_COL_DELTAS} deltas)"
-                        )));
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_COL_DELTAS)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_SHEET_FORMATTING_COL_DELTAS {
+                    match seq.next_element::<SheetColFormatDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetColFormatDeltas(out)),
                     }
-                    out.push(v);
                 }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "colFormats is too large (max {MAX_SHEET_FORMATTING_COL_DELTAS} deltas)"
+                    )));
+                }
+
                 Ok(LimitedSheetColFormatDeltas(out))
             }
         }
@@ -798,7 +829,8 @@ impl<'de> Deserialize<'de> for LimitedSheetCellFormatDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_FORMATTING_CELL_DELTAS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_FORMATTING_CELL_DELTAS {
                         return Err(de::Error::custom(format!(
                             "cellFormats is too large (max {MAX_SHEET_FORMATTING_CELL_DELTAS} deltas)"
@@ -806,15 +838,24 @@ impl<'de> Deserialize<'de> for LimitedSheetCellFormatDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<SheetCellFormatDelta>()? {
-                    if out.len() >= MAX_SHEET_FORMATTING_CELL_DELTAS {
-                        return Err(de::Error::custom(format!(
-                            "cellFormats is too large (max {MAX_SHEET_FORMATTING_CELL_DELTAS} deltas)"
-                        )));
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_CELL_DELTAS)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_SHEET_FORMATTING_CELL_DELTAS {
+                    match seq.next_element::<SheetCellFormatDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetCellFormatDeltas(out)),
                     }
-                    out.push(v);
                 }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "cellFormats is too large (max {MAX_SHEET_FORMATTING_CELL_DELTAS} deltas)"
+                    )));
+                }
+
                 Ok(LimitedSheetCellFormatDeltas(out))
             }
         }
@@ -848,7 +889,8 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunsByColDeltas {
             {
                 use crate::resource_limits::MAX_SHEET_FORMATTING_RUN_COLS;
 
-                if let Some(hint) = seq.size_hint() {
+                let hint = seq.size_hint();
+                if let Some(hint) = hint {
                     if hint > MAX_SHEET_FORMATTING_RUN_COLS {
                         return Err(de::Error::custom(format!(
                             "formatRunsByCol is too large (max {MAX_SHEET_FORMATTING_RUN_COLS} columns)"
@@ -856,15 +898,24 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunsByColDeltas {
                     }
                 }
 
-                let mut out = Vec::new();
-                while let Some(v) = seq.next_element::<SheetFormatRunsByColDelta>()? {
-                    if out.len() >= MAX_SHEET_FORMATTING_RUN_COLS {
-                        return Err(de::Error::custom(format!(
-                            "formatRunsByCol is too large (max {MAX_SHEET_FORMATTING_RUN_COLS} columns)"
-                        )));
+                let mut out = match hint {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_RUN_COLS)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_SHEET_FORMATTING_RUN_COLS {
+                    match seq.next_element::<SheetFormatRunsByColDelta>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedSheetFormatRunsByColDeltas(out)),
                     }
-                    out.push(v);
                 }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "formatRunsByCol is too large (max {MAX_SHEET_FORMATTING_RUN_COLS} columns)"
+                    )));
+                }
+
                 Ok(LimitedSheetFormatRunsByColDeltas(out))
             }
         }
