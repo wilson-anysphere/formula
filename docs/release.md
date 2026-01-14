@@ -1029,6 +1029,11 @@ bash scripts/validate-linux-rpm.sh --rpm "$rpm_pkg"
 bash scripts/validate-linux-rpm.sh --no-container
 ```
 
+Note: the Fedora container install smoke test runs on the **same CPU architecture as the host**
+(x86_64 Fedora image on x86_64 hosts; aarch64 Fedora image on aarch64 hosts). Validate ARM64 RPMs on
+an ARM64 host/runner (or use QEMU/binfmt emulation), or use `--no-container` for metadata-only
+checks.
+
 From `apps/desktop/src-tauri`:
 
 ```bash
@@ -1099,6 +1104,9 @@ bash scripts/ci/check-appimage.sh
 
 CI note: the release workflow also runs a lightweight smoke test that validates AppImage extraction
 +ELF architecture + `ldd` (no GUI): `bash scripts/ci/check-appimage.sh`.
+
+Note: AppImage validation executes the AppImage to extract it (`--appimage-extract`), so the
+AppImage’s CPU architecture must match the host (x86_64 vs aarch64) unless you are using emulation.
 
 Manual inspection (useful when debugging bundling issues):
 
