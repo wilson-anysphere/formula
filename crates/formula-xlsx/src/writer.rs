@@ -797,6 +797,29 @@ fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> St
     s
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        let width = trim_float(width as f64);
+        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        let height = trim_float(height as f64);
+        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    format!(r#"<sheetFormatPr{attrs}/>"#)
+}
+
 fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<&[u32]>) -> String {
     if sheet.conditional_formatting_rules.is_empty() {
         return String::new();
