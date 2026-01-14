@@ -33,4 +33,3 @@ fn chart_model_deserializes_missing_series_idx_order_as_position() {
     assert_eq!(model.series[1].idx, Some(1));
     assert_eq!(model.series[1].order, Some(1));
 }
-

@@ -225,7 +225,10 @@ fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() 
         column: "Amount".to_string(),
     };
     assert_eq!(spaced_table.to_string(), "'Sales Table'[Amount]");
-    assert_eq!(spaced_table.canonical_name().as_ref(), "Sales Table[Amount]");
+    assert_eq!(
+        spaced_table.canonical_name().as_ref(),
+        "Sales Table[Amount]"
+    );
     assert_eq!(spaced_table.display_string(), "Sales Table[Amount]");
 
     // Table names that are not valid "C identifiers" need quoting.
@@ -273,7 +276,10 @@ fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() 
     assert_eq!(parsed_col.to_string(), "Orders[Gross]]Margin]");
 
     let parsed_measure = PivotFieldRef::from_unstructured("[My]]Measure]");
-    assert_eq!(parsed_measure, PivotFieldRef::DataModelMeasure("My]Measure".to_string()));
+    assert_eq!(
+        parsed_measure,
+        PivotFieldRef::DataModelMeasure("My]Measure".to_string())
+    );
     assert_eq!(parsed_measure.to_string(), "[My]]Measure]");
 }
 
