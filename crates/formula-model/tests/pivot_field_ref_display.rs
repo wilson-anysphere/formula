@@ -40,6 +40,13 @@ fn pivot_field_ref_display_quotes_dax_keywords() {
         column: "Amount".to_string(),
     };
     assert_eq!(in_kw.to_string(), "'in'[Amount]");
+
+    // Ensure we don't over-quote identifiers that merely start with a keyword.
+    let var_suffix = PivotFieldRef::DataModelColumn {
+        table: "VAR_1".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(var_suffix.to_string(), "VAR_1[Amount]");
 }
 
 #[test]
