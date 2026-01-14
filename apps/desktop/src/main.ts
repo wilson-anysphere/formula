@@ -68,6 +68,7 @@ import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
 import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
+import { resolveEnableDrawingInteractions } from "./drawings/drawingInteractionsFlag.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
@@ -1257,6 +1258,7 @@ const app = new SpreadsheetApp(
     formulaBar: formulaBarRoot,
     workbookId,
     sheetNameResolver,
+    enableDrawingInteractions: resolveEnableDrawingInteractions(),
     // Legacy renderer uses a smaller grid by default for performance reasons. When users
     // explicitly raise the workbook load limits (via query params/env), align the legacy
     // grid limits so the loaded data is reachable.
