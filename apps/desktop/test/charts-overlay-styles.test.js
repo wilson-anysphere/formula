@@ -73,6 +73,11 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
 
   // Shared grid drawings overlay canvases (split view) are also non-interactive.
   assert.match(css, /\.grid-canvas--drawings\s*\{[^}]*pointer-events:\s*none\s*;/);
+  // Back-compat: allow overriding the older `--grid-z-drawing-overlay` token.
+  assert.match(
+    css,
+    /\.grid-canvas--drawings\s*\{[\s\S]*?z-index:\s*var\(--grid-z-drawings-overlay,\s*var\(--grid-z-drawing-overlay,\s*3\)\)\s*;/,
+  );
 
   // Collaboration presence overlay is non-interactive.
   assert.match(css, /\.grid-canvas--presence\s*\{[^}]*pointer-events:\s*none\s*;/);

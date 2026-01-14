@@ -92,7 +92,7 @@
 .grid-canvas--drawings {
   pointer-events: none;
   z-index: 3;
-  z-index: var(--grid-z-drawings-overlay, 3);
+  z-index: var(--grid-z-drawings-overlay, var(--grid-z-drawing-overlay, 3));
 }
 
 .grid-canvas--shared-drawings {
