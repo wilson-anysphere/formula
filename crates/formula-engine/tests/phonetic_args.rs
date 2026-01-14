@@ -14,7 +14,10 @@ fn phonetic_accepts_scalar_string_literals() {
         .set_cell_formula("Sheet1", "A1", r#"=PHONETIC("abc")"#)
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("abc".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("abc".to_string())
+    );
 }
 
 #[test]
@@ -50,7 +53,10 @@ fn phonetic_propagates_scalar_errors() {
         .set_cell_formula("Sheet1", "A1", "=PHONETIC(NA())")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -62,7 +68,12 @@ fn phonetic_lifts_over_array_literals() {
     engine.recalculate_single_threaded();
 
     // Dynamic arrays should spill across the input array shape.
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("a".to_string()));
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("b".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("a".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("b".to_string())
+    );
 }
-
