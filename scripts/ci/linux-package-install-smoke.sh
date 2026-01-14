@@ -252,12 +252,42 @@ deb_smoke_test_dir() {
         exit 1
       fi
 
-      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*${bin}" /usr/share/applications 2>/dev/null | head -n 1 || true)"
-      if [ -z "${desktop_file}" ]; then
-        echo "No installed .desktop file found with Exec referencing ${bin} under /usr/share/applications" >&2
+      desktop_files=(/usr/share/applications/*.desktop)
+      if [ ! -e "${desktop_files[0]}" ]; then
+        echo "No .desktop files found under /usr/share/applications after DEB install." >&2
         ls -lah /usr/share/applications || true
         exit 1
       fi
+
+      # Filter to the .desktop entries that actually launch our app (Exec= references the expected binary).
+      bin_re="$(printf "%s" "${bin}" | sed -e "s/[][(){}.^$*+?|\\\\]/\\\\&/g")"
+      exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${bin_re}([[:space:]]|$)"
+      matching_desktop_files=()
+      for f in "${desktop_files[@]}"; do
+        exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"
+        exec_value="$(printf "%s" "${exec_line}" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//I")"
+        # Normalize quoted Exec tokens (e.g. Exec="/usr/bin/formula-desktop" %U)
+        exec_value="${exec_value//\"/}"
+        sq="$(printf "%b" "\\x27")"
+        exec_value="${exec_value//${sq}/}"
+        if [ -n "${exec_value}" ] && printf "%s" "${exec_value}" | grep -Eq "${exec_token_re}"; then
+          matching_desktop_files+=("$f")
+        fi
+      done
+      if [ "${#matching_desktop_files[@]}" -eq 0 ]; then
+        echo "No installed .desktop files appear to target the expected executable ${bin} in their Exec= entry." >&2
+        echo "Installed .desktop files inspected:" >&2
+        for f in "${desktop_files[@]}"; do
+          exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"
+          if [ -z "${exec_line}" ]; then
+            exec_line="(no Exec= entry)"
+          fi
+          echo "  - ${f}: ${exec_line}" >&2
+        done
+        exit 1
+      fi
+
+      desktop_file="${matching_desktop_files[0]}"
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
@@ -336,12 +366,42 @@ rpm_smoke_test_dir() {
         exit 1
       fi
 
-      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*${bin}" /usr/share/applications 2>/dev/null | head -n 1 || true)"
-      if [ -z "${desktop_file}" ]; then
-        echo "No installed .desktop file found with Exec referencing ${bin} under /usr/share/applications" >&2
+      desktop_files=(/usr/share/applications/*.desktop)
+      if [ ! -e "${desktop_files[0]}" ]; then
+        echo "No .desktop files found under /usr/share/applications after RPM install." >&2
         ls -lah /usr/share/applications || true
         exit 1
       fi
+
+      # Filter to the .desktop entries that actually launch our app (Exec= references the expected binary).
+      bin_re="$(printf "%s" "${bin}" | sed -e "s/[][(){}.^$*+?|\\\\]/\\\\&/g")"
+      exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${bin_re}([[:space:]]|$)"
+      matching_desktop_files=()
+      for f in "${desktop_files[@]}"; do
+        exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"
+        exec_value="$(printf "%s" "${exec_line}" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//I")"
+        # Normalize quoted Exec tokens (e.g. Exec="/usr/bin/formula-desktop" %U)
+        exec_value="${exec_value//\"/}"
+        sq="$(printf "%b" "\\x27")"
+        exec_value="${exec_value//${sq}/}"
+        if [ -n "${exec_value}" ] && printf "%s" "${exec_value}" | grep -Eq "${exec_token_re}"; then
+          matching_desktop_files+=("$f")
+        fi
+      done
+      if [ "${#matching_desktop_files[@]}" -eq 0 ]; then
+        echo "No installed .desktop files appear to target the expected executable ${bin} in their Exec= entry." >&2
+        echo "Installed .desktop files inspected:" >&2
+        for f in "${desktop_files[@]}"; do
+          exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"
+          if [ -z "${exec_line}" ]; then
+            exec_line="(no Exec= entry)"
+          fi
+          echo "  - ${f}: ${exec_line}" >&2
+        done
+        exit 1
+      fi
+
+      desktop_file="${matching_desktop_files[0]}"
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"

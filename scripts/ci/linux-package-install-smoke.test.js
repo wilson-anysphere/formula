@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -32,3 +33,10 @@ test("linux-package-install-smoke: invalid arg exits with usage (status 2)", () 
   assert.match(proc.stderr, /usage:/i);
 });
 
+test("linux-package-install-smoke: uses token-based Exec= matching (avoid substring grep)", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  assert.match(script, /target the expected executable/i);
+  assert.doesNotMatch(script, /Exec referencing/i);
+  // Historical implementation used `grep -rlE` to find a desktop file by substring.
+  assert.doesNotMatch(script, /grep -rlE/);
+});
