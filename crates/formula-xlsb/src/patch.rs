@@ -1683,8 +1683,28 @@ fn value_record_expected_payload_len(record_id: u32, payload: &[u8]) -> Result<u
                 return Ok(expected_simple);
             }
 
-            let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
-            Ok(ws.end)
+            match parse_wide_string_offsets(payload, 8, FlagsWidth::U8) {
+                Ok(ws) => Ok(ws.end),
+                Err(Error::UnexpectedEof) => {
+                    // Malformed flagged wide strings: flags indicate rich/phonetic blocks, but the
+                    // blocks are missing. Treat the defined payload as just:
+                    //   [cch:u32][flags:u8][utf16 bytes...]
+                    // and let callers decide what to do with any trailing bytes.
+                    //
+                    // This is primarily used as a guard when converting value records into
+                    // formulas: we should not hard-fail when the existing record is short/malformed
+                    // in this specific way.
+                    let utf16_start = 13usize;
+                    let utf16_end = utf16_start
+                        .checked_add(utf16_len)
+                        .ok_or(Error::UnexpectedEof)?;
+                    payload
+                        .get(utf16_start..utf16_end)
+                        .ok_or(Error::UnexpectedEof)?;
+                    Ok(utf16_end)
+                }
+                Err(e) => Err(e),
+            }
         }
         _ => Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -2258,7 +2278,38 @@ fn patch_cell_st<W: io::Write>(
 
     // Flagged wide-string layout: parse to determine the original flags and whether rich /
     // phonetic blocks were present.
-    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
+    let ws = match parse_wide_string_offsets(payload, 8, FlagsWidth::U8) {
+        Ok(ws) => ws,
+        Err(Error::UnexpectedEof) => {
+            // Some producers set `FLAG_RICH` / `FLAG_PHONETIC` in the u8 flags byte but omit the
+            // corresponding payload blocks. This makes the record malformed under the strict
+            // `XLWideString` interpretation and breaks text-changing edits.
+            //
+            // Fall back to a minimal interpretation that treats the payload as:
+            //   [cch:u32][flags:u8][utf16 bytes...]
+            // with no rich/phonetic bytes present. When writing the updated record, we preserve
+            // the original flags byte and emit empty block headers (`cRun=0` / `cb=0`) when those
+            // bits are set so the output is parseable.
+            let cch = read_u32(payload, 8)? as usize;
+            let flags = read_u8(payload, 12)? as u16;
+            let utf16_start = 13usize;
+            let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+            let utf16_end = utf16_start
+                .checked_add(utf16_len)
+                .ok_or(Error::UnexpectedEof)?;
+            payload
+                .get(utf16_start..utf16_end)
+                .ok_or(Error::UnexpectedEof)?;
+            WideStringOffsets {
+                cch,
+                flags,
+                utf16_start,
+                utf16_end,
+                end: utf16_end,
+            }
+        }
+        Err(e) => return Err(e),
+    };
     let flags_u8 = ws.flags as u8;
 
     let desired_cch = text.encode_utf16().count();

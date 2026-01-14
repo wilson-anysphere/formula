@@ -149,3 +149,45 @@ fn flagged_inline_string_text_change_is_not_treated_as_noop() {
         .expect("find cell");
     assert_eq!(cell.value, CellValue::Text(new_text));
 }
+
+#[test]
+fn malformed_flagged_inline_string_text_change_succeeds_and_is_parseable() {
+    // Some producers set rich/phonetic bits in the flags byte but omit the corresponding blocks.
+    // The patcher should still be able to rewrite the text and emit a parseable record by
+    // inserting empty block headers.
+    let old_text = "Old".to_string();
+    let new_text = "New".to_string();
+
+    let cch = old_text.encode_utf16().count() as u32;
+    let utf16 = utf16_le_bytes(&old_text);
+
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&cch.to_le_bytes());
+    cell_st_payload.push(0x83); // flags: rich + phonetic (+ reserved), but blocks are missing
+    cell_st_payload.extend_from_slice(&utf16);
+
+    let sheet_bin = sheet_with_single_cell_st(&cell_st_payload);
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(new_text.clone()),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    };
+
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let parsed = parse_sheet_bin(&mut Cursor::new(&patched), &[]).expect("parse patched sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(new_text));
+}
