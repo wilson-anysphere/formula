@@ -71,6 +71,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // - a digit, or
   // - a decimal literal that starts with `.`, e.g. `.5`
   const rgbColor = /\brgb(a)?\s*\(\s*(?:\d|\.\d)/gi;
+  // Same logic for hsl()/hsla(). Require a numeric channel so we don't match parsing helpers like
+  // `hsl()` in comments, regex literals, or `hsl(var(--foo))`.
+  const hslColor = /\bhsl(a)?\s*\(\s*(?:\d|\.\d)/gi;
 
   // CSS also supports named colors (`crimson`, `red`, etc). These are disallowed in core UI;
   // use tokens instead (e.g. `var(--error)`), except for a few safe keywords.
@@ -173,6 +176,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     const stripped = ext === ".css" ? stripCssNonSemanticText(content) : stripComments(content);
     const hex = stripped.match(hexColor);
     const rgb = stripped.match(rgbColor);
+    const hsl = stripped.match(hslColor);
     /** @type {string | null} */
     let named = null;
     if (ext === ".css") {
@@ -210,6 +214,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     }
     if (hex) violations.push({ file, match: hex[0] });
     if (rgb) violations.push({ file, match: "rgb(...)" });
+    if (hsl) violations.push({ file, match: "hsl(...)" });
   }
 
   assert.deepEqual(
