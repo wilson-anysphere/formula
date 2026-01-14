@@ -494,7 +494,7 @@ fn decrypt_biff_xor_obfuscation(
     // This uses the legacy worksheet/workbook protection password hash as a verifier and applies
     // a repeating XOR keystream across record payload bytes.
     let expected = xor::xor_password_verifier(password);
-    if expected != verifier {
+    if !ct_eq(&expected.to_le_bytes(), &verifier.to_le_bytes()) {
         return Err(DecryptError::WrongPassword);
     }
 
