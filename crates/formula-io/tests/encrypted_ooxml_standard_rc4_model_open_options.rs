@@ -47,7 +47,7 @@ fn open_workbook_model_with_options_standard_rc4_missing_password_is_password_re
             ..Default::default()
         },
     )
-        .expect_err("expected password required");
+    .expect_err("expected password required");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
         "expected Error::PasswordRequired, got {err:?}"
