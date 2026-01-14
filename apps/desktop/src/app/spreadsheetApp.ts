@@ -22653,6 +22653,11 @@ export class SpreadsheetApp {
         return;
       }
       e.preventDefault();
+      // Do not mutate outline state while any editor is active (cell editor / formula bar / inline edit),
+      // including split-view secondary editors reported via the desktop-shell-owned global flag.
+      if (this.isSpreadsheetEditingIncludingSecondary()) {
+        return;
+      }
       const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
       if (!range) return;
 
