@@ -101,6 +101,7 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /desktop_size_report\.py/) return 1
       if (s ~ /desktop_binary_size_report\.py/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
+      if (s ~ /(^|[[:space:];&|()])wasm-pack([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1
       return 0
