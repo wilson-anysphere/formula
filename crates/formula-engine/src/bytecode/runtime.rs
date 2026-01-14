@@ -10246,11 +10246,14 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         }
     }
 
-    fn text_like_str(v: &Value) -> Option<&str> {
+    fn text_like_str(v: &Value) -> Option<Cow<'_, str>> {
         match v {
-            Value::Text(s) => Some(s.as_ref()),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
+            Value::Text(s) => Some(Cow::Borrowed(s.as_ref())),
+            Value::Entity(v) => Some(Cow::Borrowed(v.display.as_str())),
+            Value::Record(record) => match coerce_to_cow_str(v) {
+                Ok(s) => Some(s),
+                Err(_) => Some(Cow::Borrowed(record.display.as_str())),
+            },
             _ => None,
         }
     }
@@ -10274,12 +10277,14 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         (Value::Number(x), Value::Empty | Value::Missing) => {
             Some(ordering_to_i32(x.partial_cmp(&0.0_f64)?))
         }
-        (Value::Empty | Value::Missing, other) if text_like_str(other).is_some() => Some(
-            ordering_to_i32(cmp_case_insensitive("", text_like_str(other).unwrap())),
-        ),
-        (other, Value::Empty | Value::Missing) if text_like_str(other).is_some() => Some(
-            ordering_to_i32(cmp_case_insensitive(text_like_str(other).unwrap(), "")),
-        ),
+        (Value::Empty | Value::Missing, other) if text_like_str(other).is_some() => {
+            let other = text_like_str(other)?;
+            Some(ordering_to_i32(cmp_case_insensitive("", other.as_ref())))
+        }
+        (other, Value::Empty | Value::Missing) if text_like_str(other).is_some() => {
+            let other = text_like_str(other)?;
+            Some(ordering_to_i32(cmp_case_insensitive(other.as_ref(), "")))
+        }
         (Value::Empty | Value::Missing, Value::Bool(y)) => Some(ordering_to_i32(false.cmp(y))),
         (Value::Bool(x), Value::Empty | Value::Missing) => Some(ordering_to_i32(x.cmp(&false))),
         _ => {
@@ -10291,10 +10296,11 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 
             match (a, b) {
                 (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
-                (a, b) if type_rank(a) == Some(1) => Some(ordering_to_i32(cmp_case_insensitive(
-                    text_like_str(a)?,
-                    text_like_str(b)?,
-                ))),
+                (a, b) if type_rank(a) == Some(1) => {
+                    let a = text_like_str(a)?;
+                    let b = text_like_str(b)?;
+                    Some(ordering_to_i32(cmp_case_insensitive(a.as_ref(), b.as_ref())))
+                }
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => Some(0),
                 (Value::Error(x), Value::Error(y)) => {

@@ -135,7 +135,7 @@ fn lookup_cmp_with_equality(ctx: &LookupContext, a: &Value, b: &Value) -> Orderi
     if values_equal_for_lookup(ctx, a, b) {
         Ordering::Equal
     } else {
-        lookup_cmp(a, b)
+        lookup_cmp(ctx, a, b)
     }
 }
 
@@ -233,12 +233,25 @@ impl TryFrom<i64> for SearchMode {
     }
 }
 
-fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
-    fn text_like_str(v: &Value) -> Option<&str> {
+fn lookup_cmp(ctx: &LookupContext, a: &Value, b: &Value) -> Ordering {
+    fn text_like_str<'a>(ctx: &LookupContext, v: &'a Value) -> Option<Cow<'a, str>> {
         match v {
-            Value::Text(s) => Some(s.as_str()),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
+            Value::Text(s) => Some(Cow::Borrowed(s.as_str())),
+            Value::Entity(entity) => Some(Cow::Borrowed(entity.display.as_str())),
+            Value::Record(record) => {
+                if record.display_field.is_none() {
+                    return Some(Cow::Borrowed(record.display.as_str()));
+                }
+
+                match coerce_to_string_with_general_options(
+                    v,
+                    ctx.value_locale.separators,
+                    ctx.date_system,
+                ) {
+                    Ok(s) => Some(Cow::Owned(s)),
+                    Err(_) => Some(Cow::Borrowed(record.display.as_str())),
+                }
+            }
             _ => None,
         }
     }
@@ -253,11 +266,15 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         }
         (Value::Blank, Value::Bool(y)) => return false.cmp(y),
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
-        (Value::Blank, other) if text_like_str(other).is_some() => {
-            return cmp_case_insensitive("", text_like_str(other).unwrap())
+        (Value::Blank, other) => {
+            if let Some(other) = text_like_str(ctx, other) {
+                return cmp_case_insensitive("", other.as_ref());
+            }
         }
-        (other, Value::Blank) if text_like_str(other).is_some() => {
-            return cmp_case_insensitive(text_like_str(other).unwrap(), "")
+        (other, Value::Blank) => {
+            if let Some(other) = text_like_str(ctx, other) {
+                return cmp_case_insensitive(other.as_ref(), "");
+            }
         }
         _ => {}
     }
@@ -284,8 +301,10 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
 
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
+        (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
+            let a = text_like_str(ctx, a).unwrap();
+            let b = text_like_str(ctx, b).unwrap();
+            cmp_case_insensitive(a.as_ref(), b.as_ref())
         }
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
@@ -691,10 +710,12 @@ fn xmatch_binary(
         return Err(ErrorKind::Value);
     }
 
-    let cmp = if descending {
-        |a: &Value, b: &Value| lookup_cmp(b, a)
-    } else {
-        lookup_cmp
+    let cmp = |a: &Value, b: &Value| {
+        if descending {
+            lookup_cmp(ctx, b, a)
+        } else {
+            lookup_cmp(ctx, a, b)
+        }
     };
 
     let effective_mode = if descending {
@@ -795,10 +816,12 @@ fn xmatch_binary_accessor(
         return Err(ErrorKind::Value);
     }
 
-    let cmp = if descending {
-        |a: &Value, b: &Value| lookup_cmp(b, a)
-    } else {
-        lookup_cmp
+    let cmp = |a: &Value, b: &Value| {
+        if descending {
+            lookup_cmp(ctx, b, a)
+        } else {
+            lookup_cmp(ctx, a, b)
+        }
     };
 
     let effective_mode = if descending {

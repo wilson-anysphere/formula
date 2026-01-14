@@ -88,7 +88,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
 
             let row_offset = if approx {
-                match approximate_match_in_first_col_array(&lookup_value, &table) {
+                match approximate_match_in_first_col_array(ctx, &lookup_value, &table) {
                     Some(r) => r,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -183,7 +183,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
 
             let col_offset = if approx {
-                match approximate_match_in_first_row_array(&lookup_value, &table) {
+                match approximate_match_in_first_row_array(ctx, &lookup_value, &table) {
                     Some(c) => c,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -762,8 +762,8 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             match match_type {
                 0 => exact_match_values(ctx, &lookup, &arr.values),
-                1 => approximate_match_values(&lookup, &arr.values, true),
-                -1 => approximate_match_values(&lookup, &arr.values, false),
+                1 => approximate_match_values(ctx, &lookup, &arr.values, true),
+                -1 => approximate_match_values(ctx, &lookup, &arr.values, false),
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
@@ -2131,7 +2131,12 @@ fn exact_match_values(
     values.iter().position(|v| excel_eq(ctx, lookup, v))
 }
 
-fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -> Option<usize> {
+fn approximate_match_values(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    values: &[Value],
+    ascending: bool,
+) -> Option<usize> {
     if values.is_empty() {
         return None;
     }
@@ -2145,9 +2150,9 @@ fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -
         let mid = lo + (hi - lo) / 2;
         let v = &values[mid];
         let ok = if ascending {
-            excel_le(v, lookup)?
+            excel_le(ctx, v, lookup)?
         } else {
-            excel_ge(v, lookup)?
+            excel_ge(ctx, v, lookup)?
         };
         if ok {
             lo = mid + 1;
@@ -2297,7 +2302,7 @@ fn approximate_match_in_first_col(
             col: table.start.col,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_le(&key, lookup)? {
+        if excel_le(ctx, &key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2327,7 +2332,7 @@ fn approximate_match_in_first_col_desc(
             col: table.start.col,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_ge(&key, lookup)? {
+        if excel_ge(ctx, &key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2337,7 +2342,11 @@ fn approximate_match_in_first_col_desc(
     lo.checked_sub(1).map(|idx| idx as u32)
 }
 
-fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> {
+fn approximate_match_in_first_col_array(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Array,
+) -> Option<u32> {
     if table.rows == 0 {
         return None;
     }
@@ -2347,7 +2356,7 @@ fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         let key = table.get(mid, 0).unwrap_or(&Value::Blank);
-        if excel_le(key, lookup)? {
+        if excel_le(ctx, key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2376,7 +2385,7 @@ fn approximate_match_in_first_row(
             col: table.start.col + mid as u32,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_le(&key, lookup)? {
+        if excel_le(ctx, &key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2405,7 +2414,7 @@ fn approximate_match_in_first_row_desc(
             col: table.start.col + mid as u32,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_ge(&key, lookup)? {
+        if excel_ge(ctx, &key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2415,7 +2424,11 @@ fn approximate_match_in_first_row_desc(
     lo.checked_sub(1).map(|idx| idx as u32)
 }
 
-fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> {
+fn approximate_match_in_first_row_array(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Array,
+) -> Option<u32> {
     if table.cols == 0 {
         return None;
     }
@@ -2425,7 +2438,7 @@ fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         let key = table.get(0, mid).unwrap_or(&Value::Blank);
-        if excel_le(key, lookup)? {
+        if excel_le(ctx, key, lookup)? {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -2544,15 +2557,15 @@ fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
     }
 }
 
-fn excel_le(a: &Value, b: &Value) -> Option<bool> {
-    excel_cmp(a, b).map(|o| o <= 0)
+fn excel_le(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<bool> {
+    excel_cmp(ctx, a, b).map(|o| o <= 0)
 }
 
-fn excel_ge(a: &Value, b: &Value) -> Option<bool> {
-    excel_cmp(a, b).map(|o| o >= 0)
+fn excel_ge(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<bool> {
+    excel_cmp(ctx, a, b).map(|o| o >= 0)
 }
 
-fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
+fn excel_cmp(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<i32> {
     fn ordering_to_i32(ord: std::cmp::Ordering) -> i32 {
         match ord {
             std::cmp::Ordering::Less => -1,
@@ -2561,11 +2574,22 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         }
     }
 
-    fn text_like_str(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
-        match v {
+    fn text_like_str<'a>(
+        ctx: &dyn FunctionContext,
+        value: &'a Value,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        match value {
             Value::Text(s) => Some(std::borrow::Cow::Borrowed(s)),
             Value::Entity(v) => Some(std::borrow::Cow::Borrowed(v.display.as_str())),
-            Value::Record(v) => Some(std::borrow::Cow::Borrowed(v.display.as_str())),
+            Value::Record(record) => {
+                if record.display_field.is_none() {
+                    return Some(std::borrow::Cow::Borrowed(record.display.as_str()));
+                }
+                match value.coerce_to_string_with_ctx(ctx) {
+                    Ok(s) => Some(std::borrow::Cow::Owned(s)),
+                    Err(_) => Some(std::borrow::Cow::Borrowed(record.display.as_str())),
+                }
+            }
             _ => None,
         }
     }
@@ -2597,16 +2621,16 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Equal => Some(0),
             std::cmp::Ordering::Greater => Some(1),
         },
-        (Value::Blank, other) if text_like_str(other).is_some() => {
-            let other = text_like_str(other)?;
+        (Value::Blank, other) if text_like_str(ctx, other).is_some() => {
+            let other = text_like_str(ctx, other)?;
             Some(match cmp_case_insensitive("", other.as_ref()) {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
                 std::cmp::Ordering::Greater => 1,
             })
         }
-        (other, Value::Blank) if text_like_str(other).is_some() => {
-            let other = text_like_str(other)?;
+        (other, Value::Blank) if text_like_str(ctx, other).is_some() => {
+            let other = text_like_str(ctx, other)?;
             Some(match cmp_case_insensitive(other.as_ref(), "") {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
@@ -2632,9 +2656,9 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 
             match (a, b) {
                 (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
-                (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-                    let a = text_like_str(a)?;
-                    let b = text_like_str(b)?;
+                (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
+                    let a = text_like_str(ctx, a)?;
+                    let b = text_like_str(ctx, b)?;
                     Some(ordering_to_i32(cmp_case_insensitive(
                         a.as_ref(),
                         b.as_ref(),

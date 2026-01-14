@@ -107,6 +107,41 @@ fn match_compares_against_record_display_field_for_exact_match() {
 }
 
 #[test]
+fn match_approximate_compares_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    // Set a conflicting fallback display to ensure comparisons use display_field.
+                    display: "ZzzFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        // Default MATCH match_type is 1 (approximate match).
+        engine
+            .set_cell_formula("Sheet1", "B1", r#"=MATCH("Banana", A1:A1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected MATCH formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    }
+}
+
+#[test]
 fn match_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
     for bytecode_enabled in [false, true] {
         let mut engine = Engine::new();
@@ -222,6 +257,41 @@ fn vlookup_compares_against_record_display_field_for_exact_match() {
 }
 
 #[test]
+fn vlookup_approximate_compares_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "ZzzFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "B1", 42.0).unwrap();
+        // Default VLOOKUP range_lookup is TRUE (approximate match).
+        engine
+            .set_cell_formula("Sheet1", "C1", r#"=VLOOKUP("Banana", A1:B1, 2)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected VLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(42.0));
+    }
+}
+
+#[test]
 fn vlookup_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
     for bytecode_enabled in [false, true] {
         let mut engine = Engine::new();
@@ -319,6 +389,40 @@ fn xmatch_compares_against_record_display_field_for_exact_match() {
 }
 
 #[test]
+fn xmatch_approximate_compares_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "ZzzFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        // match_mode=-1 => exact match or next smaller item.
+        engine
+            .set_cell_formula("Sheet1", "B1", r#"=XMATCH("Banana", A1:A1, -1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected XMATCH formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    }
+}
+
+#[test]
 fn hlookup_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
     for bytecode_enabled in [false, true] {
         let mut engine = Engine::new();
@@ -384,6 +488,41 @@ fn hlookup_compares_against_record_display_field_for_exact_match() {
         engine.set_cell_value("Sheet1", "A2", 42.0).unwrap();
         engine
             .set_cell_formula("Sheet1", "B1", r#"=HLOOKUP("Apple", A1:A2, 2, FALSE)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected HLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(42.0));
+    }
+}
+
+#[test]
+fn hlookup_approximate_compares_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "ZzzFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "A2", 42.0).unwrap();
+        // Default HLOOKUP range_lookup is TRUE (approximate match).
+        engine
+            .set_cell_formula("Sheet1", "B1", r#"=HLOOKUP("Banana", A1:A2, 2)"#)
             .unwrap();
         engine.recalculate_single_threaded();
 
@@ -494,6 +633,45 @@ fn xlookup_compares_against_record_display_field_for_exact_match() {
         engine.set_cell_value("Sheet1", "B1", 42.0).unwrap();
         engine
             .set_cell_formula("Sheet1", "C1", r#"=XLOOKUP("Apple", A1:A1, B1:B1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected XLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(42.0));
+    }
+}
+
+#[test]
+fn xlookup_approximate_compares_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "ZzzFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "B1", 42.0).unwrap();
+        // match_mode=-1 => exact match or next smaller item.
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "C1",
+                r#"=XLOOKUP("Banana", A1:A1, B1:B1, "not found", -1)"#,
+            )
             .unwrap();
         engine.recalculate_single_threaded();
 
