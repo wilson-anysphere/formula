@@ -2830,10 +2830,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         match sheet {
             SheetReference::Current => Some(vec![FnSheetId::Local(self.ctx.current_sheet)]),
             SheetReference::Sheet(id) => Some(vec![FnSheetId::Local(*id)]),
-            SheetReference::SheetRange(a, b) => {
-                let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-                Some((start..=end).map(FnSheetId::Local).collect())
-            }
+            SheetReference::SheetRange(a, b) => self
+                .resolver
+                .expand_sheet_span(*a, *b)
+                .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
             SheetReference::External(key) => {
                 if crate::eval::is_valid_external_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);

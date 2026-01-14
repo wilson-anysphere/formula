@@ -150,6 +150,26 @@ pub trait ValueResolver {
     fn sheet_count(&self) -> usize {
         1
     }
+    /// Expand a 3D sheet span into its component sheets in workbook tab order.
+    ///
+    /// Excel resolves `Sheet1:Sheet3!A1` by including all sheets between the boundary sheets in the
+    /// workbook's **current sheet tab order**, inclusive. This means:
+    /// - Intermediate sheets are determined by the current tab order (not by numeric sheet id).
+    /// - Reversed spans are allowed (e.g. `Sheet3:Sheet1!A1`) and refer to the same set of sheets.
+    ///
+    /// Returning `None` indicates either boundary sheet could not be located in the workbook order
+    /// (and should therefore evaluate to `#REF!`).
+    ///
+    /// The default implementation preserves historical behavior by expanding to the numeric
+    /// `min..=max` sheet id range.
+    fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
+        let (start, end) = if start_sheet_id <= end_sheet_id {
+            (start_sheet_id, end_sheet_id)
+        } else {
+            (end_sheet_id, start_sheet_id)
+        };
+        Some((start..=end).collect())
+    }
 
     /// Host-provided system metadata used by the Excel `INFO()` worksheet function.
     ///
@@ -1126,10 +1146,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         match sheet {
             SheetReference::Current => Some(vec![FnSheetId::Local(self.ctx.current_sheet)]),
             SheetReference::Sheet(id) => Some(vec![FnSheetId::Local(*id)]),
-            SheetReference::SheetRange(a, b) => {
-                let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-                Some((start..=end).map(FnSheetId::Local).collect())
-            }
+            SheetReference::SheetRange(a, b) => self
+                .resolver
+                .expand_sheet_span(*a, *b)
+                .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
             SheetReference::External(key) => {
                 if is_valid_external_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);

@@ -7625,6 +7625,22 @@ impl crate::eval::ValueResolver for Snapshot {
         self.sheets.contains(&sheet_id)
     }
 
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        self.sheet_order.iter().position(|id| *id == sheet_id)
+    }
+
+    fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
+        let start_idx = self.sheet_order_index(start_sheet_id)?;
+        let end_idx = self.sheet_order_index(end_sheet_id)?;
+        if start_idx <= end_idx {
+            Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
+        } else {
+            let mut out: Vec<usize> = self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
+            out.reverse();
+            Some(out)
+        }
+    }
+
     fn sheet_count(&self) -> usize {
         self.sheet_order.len()
     }
@@ -13847,6 +13863,45 @@ mod tests {
 
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
+    }
+
+    #[test]
+    fn ast_sheet_span_expansion_respects_tab_order_after_reorder_and_rebuild() {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(false);
+        for sheet in ["Sheet1", "Sheet2", "Sheet3", "Sheet4"] {
+            engine.ensure_sheet(sheet);
+        }
+
+        engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+        engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+        engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+        engine.set_cell_value("Sheet4", "A1", 4.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A1)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B2", "=SUM(Sheet3:Sheet1!A1)")
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(6.0));
+
+        // Reorder the tab order so Sheet4 falls within the Sheet1:Sheet3 span.
+        let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+        let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+        let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+        let sheet4_id = engine.workbook.sheet_id("Sheet4").unwrap();
+        engine
+            .workbook
+            .set_sheet_order(vec![sheet1_id, sheet4_id, sheet2_id, sheet3_id]);
+
+        engine.rebuild_graph().unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(10.0));
     }
 
     #[test]
