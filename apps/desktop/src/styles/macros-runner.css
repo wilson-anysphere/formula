@@ -8,7 +8,7 @@
 .macros-runner {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   min-height: 0;
 }
 
@@ -19,7 +19,7 @@
 
 .macros-runner__security-banner {
   white-space: pre-wrap;
-  padding: 8px;
+  padding: var(--space-4);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -37,14 +37,14 @@
 .macros-runner__controls {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
 .macros-runner__select {
   flex: 1 1 180px;
   min-width: 0;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -59,7 +59,7 @@
 
 .macros-runner__button {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -89,7 +89,7 @@
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 8px;
+  padding: var(--space-4);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   background: var(--bg-primary);
