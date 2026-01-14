@@ -37,7 +37,12 @@ fn is_error_tsv_comment_line(line: &str) -> bool {
         return true;
     }
     if trimmed.starts_with('#') {
-        return matches!(trimmed.as_bytes().get(1), Some(b' ') | Some(b'\t'));
+        // Error literals start with `#`, so treat comments as `#` followed by whitespace (or a bare
+        // `#`), matching the runtime loader + generator conventions.
+        return trimmed
+            .chars()
+            .nth(1)
+            .is_some_and(|c| c.is_whitespace());
     }
     false
 }
