@@ -175,11 +175,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "insert.illustrations.pictures.onlinePictures",
   "insert.illustrations.onlinePictures",
 
-  // --- Page Layout -----------------------------------------------------------
-  // These commands are routed via `createRibbonActionsFromCommands.commandOverrides` in main.ts.
-  "pageLayout.arrange.bringForward",
-  "pageLayout.arrange.sendBackward",
-
   // --- View -------------------------------------------------------------------
   "view.appearance.theme.system",
   "view.appearance.theme.light",
