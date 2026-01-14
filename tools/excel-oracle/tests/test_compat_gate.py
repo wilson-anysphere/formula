@@ -406,6 +406,62 @@ class CompatGateDryRunTests(unittest.TestCase):
                 out,
             )
 
+    def test_dry_run_private_mode_redacts_custom_tags_in_printed_commands(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+
+            cases_path.write_text('{"schemaVersion":1,"cases":[]}\n', encoding="utf-8", newline="\n")
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel"},
+                "caseSet": {"path": str(cases_path), "count": 0},
+                "results": [],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            # Use a synthetic custom tag value; should be hashed in privacy-mode private command output.
+            custom_tag = "CORP.ADDIN.FOO"
+            expected_hash = hashlib.sha256(custom_tag.encode("utf-8")).hexdigest()
+
+            old_argv = sys.argv[:]
+            stdout = StringIO()
+            stderr = StringIO()
+            try:
+                sys.argv = [
+                    "compat_gate.py",
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(tmp_path / "actual.json"),
+                    "--report",
+                    str(tmp_path / "report.json"),
+                    "--include-tag",
+                    custom_tag,
+                    "--privacy-mode",
+                    "private",
+                    "--dry-run",
+                ]
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    rc = compat_gate.main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertEqual(rc, 0)
+            out = stdout.getvalue() + "\n" + stderr.getvalue()
+            self.assertNotIn(custom_tag, out)
+            self.assertIn(f"sha256={expected_hash}", out)
+
 
 class CompatGateSyntheticExpectedDatasetTests(unittest.TestCase):
     def _load_compat_gate(self):

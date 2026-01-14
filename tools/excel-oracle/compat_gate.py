@@ -116,6 +116,54 @@ _TIER_TO_INCLUDE_TAGS: dict[str, list[str]] = {
 _PRIVACY_PUBLIC = "public"
 _PRIVACY_PRIVATE = "private"
 
+_KNOWN_FUNCTION_NAMES: set[str] | None = None
+
+
+def _load_known_function_names() -> set[str]:
+    global _KNOWN_FUNCTION_NAMES
+    if _KNOWN_FUNCTION_NAMES is not None:
+        return _KNOWN_FUNCTION_NAMES
+
+    names: set[str] = set()
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+        catalog_path = repo_root / "shared" / "functionCatalog.json"
+        data = json.loads(catalog_path.read_text(encoding="utf-8"))
+        funcs = data.get("functions") if isinstance(data, dict) else None
+        if isinstance(funcs, list):
+            for entry in funcs:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name.upper())
+    except Exception:  # noqa: BLE001 (best-effort; privacy mode still works without allowlist)
+        names = set()
+
+    _KNOWN_FUNCTION_NAMES = names
+    return names
+
+
+def _redact_tag_name(tag: str, *, privacy_mode: str) -> str:
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return tag
+    if not tag or tag.startswith("sha256="):
+        return tag
+
+    raw = tag.strip()
+    normalized = raw.upper()
+    if normalized.startswith("_XLFN."):
+        normalized = normalized[len("_XLFN.") :]
+
+    # Heuristic: treat lowercase tags as category tags; hash uppercase/function-like tags that are
+    # not allowlisted Excel functions, and always hash dotted namespaces.
+    if "." not in raw and any(ch.islower() for ch in raw):
+        return tag
+
+    if normalized in _load_known_function_names():
+        return tag
+    return f"sha256={_sha256_text(normalized)}"
+
 
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -783,14 +831,39 @@ def main() -> int:
     if args.dry_run:
         def fmt(cmd: list[str]) -> str:
             # Print a shell-ready representation (useful for copy/paste).
-            return " ".join(
-                shlex.quote(
-                    _redact_path_str(
-                        Path(part), privacy_mode=args.privacy_mode, repo_root=repo_root
+            out: list[str] = []
+            i = 0
+            while i < len(cmd):
+                part = cmd[i]
+                if part in ("--include-tag", "--exclude-tag") and i + 1 < len(cmd):
+                    out.append(shlex.quote(part))
+                    out.append(
+                        shlex.quote(_redact_tag_name(cmd[i + 1], privacy_mode=args.privacy_mode))
+                    )
+                    i += 2
+                    continue
+
+                if part in ("--tag-abs-tol", "--tag-rel-tol") and i + 1 < len(cmd):
+                    out.append(shlex.quote(part))
+                    raw = cmd[i + 1]
+                    if isinstance(raw, str) and "=" in raw:
+                        tag, rest = raw.split("=", 1)
+                        redacted = f"{_redact_tag_name(tag, privacy_mode=args.privacy_mode)}={rest}"
+                    else:
+                        redacted = raw
+                    out.append(shlex.quote(redacted))
+                    i += 2
+                    continue
+
+                out.append(
+                    shlex.quote(
+                        _redact_path_str(
+                            Path(part), privacy_mode=args.privacy_mode, repo_root=repo_root
+                        )
                     )
                 )
-                for part in cmd
-            )
+                i += 1
+            return " ".join(out)
 
         matched, selected = _count_selected_cases(
             cases_path=cases_path,
