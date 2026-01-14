@@ -22,13 +22,28 @@ type Summary = {
 };
 
 const perfHome = resolvePerfHome();
-const perfTmp = resolve(perfHome, "tmp");
-const perfXdgConfig = resolve(perfHome, "xdg-config");
-const perfXdgCache = resolve(perfHome, "xdg-cache");
-const perfXdgState = resolve(perfHome, "xdg-state");
-const perfXdgData = resolve(perfHome, "xdg-data");
-const perfAppData = resolve(perfHome, "AppData", "Roaming");
-const perfLocalAppData = resolve(perfHome, "AppData", "Local");
+
+function resolveProfileDirs(profileDir: string): {
+  home: string;
+  tmp: string;
+  xdgConfig: string;
+  xdgCache: string;
+  xdgState: string;
+  xdgData: string;
+  appData: string;
+  localAppData: string;
+} {
+  return {
+    home: profileDir,
+    tmp: resolve(profileDir, "tmp"),
+    xdgConfig: resolve(profileDir, "xdg-config"),
+    xdgCache: resolve(profileDir, "xdg-cache"),
+    xdgState: resolve(profileDir, "xdg-state"),
+    xdgData: resolve(profileDir, "xdg-data"),
+    appData: resolve(profileDir, "AppData", "Roaming"),
+    localAppData: resolve(profileDir, "AppData", "Local"),
+  };
+}
 
 function isSubpath(parentDir: string, maybeChild: string): boolean {
   const rel = relative(parentDir, maybeChild);
@@ -57,7 +72,9 @@ function usage(): string {
     "  -h, --help                 Show this help and exit",
     "",
     "Notes:",
-    "  - Uses an isolated HOME under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "  - Uses an isolated profile directory under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "    Each invocation uses a unique profile dir to avoid persistent cache pollution across runs.",
+    "  - Set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to delete the profile dir before each iteration.",
     "  - Windows reports process-tree Working Set (closest analogue to RSS).",
     "",
   ].join("\n");
@@ -280,11 +297,16 @@ function processTreeMemoryMb(rootPid: number): number {
   return processTreeRssKb(rootPid) / 1024;
 }
 
-async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
+async function runOnce(binPath: string, timeoutMs: number, settleMs: number, profileDir: string): Promise<number> {
+  const dirs = resolveProfileDirs(profileDir);
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === "1") {
+    const profileRootDir = parse(dirs.home).root;
+    if (dirs.home === profileRootDir || dirs.home === repoRoot) {
+      throw new Error(`Refusing to reset unsafe desktop benchmark profile dir: ${dirs.home}`);
+    }
     const rootDir = parse(perfHome).root;
     if (perfHome === rootDir || perfHome === repoRoot) {
-      throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
+      throw new Error(`Refusing to reset unsafe desktop benchmark perf home dir: ${perfHome}`);
     }
     const safeRoot = resolve(repoRoot, "target");
     if (perfHome === safeRoot) {
@@ -298,22 +320,27 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       String(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN ?? "")
         .trim()
         .toLowerCase() === "true";
-    if (!isSubpath(safeRoot, perfHome) && !allowUnsafe) {
+    if (!isSubpath(safeRoot, dirs.home) && !allowUnsafe) {
       throw new Error(
-        `Refusing to reset FORMULA_PERF_HOME outside ${safeRoot} (got ${perfHome}).\n` +
+        `Refusing to reset benchmark profile dir outside ${safeRoot} (got ${dirs.home}).\n` +
           "Pick a path under target/ (recommended), or set FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1 to override (DANGEROUS).",
       );
     }
-    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (dirs.home !== perfHome && !isSubpath(perfHome, dirs.home)) {
+      throw new Error(
+        `Refusing to reset desktop benchmark profile dir outside FORMULA_PERF_HOME=${perfHome} (got ${dirs.home})`,
+      );
+    }
+    rmSync(dirs.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-  mkdirSync(perfHome, { recursive: true });
-  mkdirSync(perfTmp, { recursive: true });
-  mkdirSync(perfXdgConfig, { recursive: true });
-  mkdirSync(perfXdgCache, { recursive: true });
-  mkdirSync(perfXdgState, { recursive: true });
-  mkdirSync(perfXdgData, { recursive: true });
-  mkdirSync(perfAppData, { recursive: true });
-  mkdirSync(perfLocalAppData, { recursive: true });
+  mkdirSync(dirs.home, { recursive: true });
+  mkdirSync(dirs.tmp, { recursive: true });
+  mkdirSync(dirs.xdgConfig, { recursive: true });
+  mkdirSync(dirs.xdgCache, { recursive: true });
+  mkdirSync(dirs.xdgState, { recursive: true });
+  mkdirSync(dirs.xdgData, { recursive: true });
+  mkdirSync(dirs.appData, { recursive: true });
+  mkdirSync(dirs.localAppData, { recursive: true });
 
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, "scripts/xvfb-run-safe.sh");
@@ -329,17 +356,17 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     // Optional: allow downstream tooling to discover the chosen HOME root.
     FORMULA_PERF_HOME: perfHome,
     // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
-    HOME: perfHome,
-    USERPROFILE: perfHome,
-    XDG_CONFIG_HOME: perfXdgConfig,
-    XDG_CACHE_HOME: perfXdgCache,
-    XDG_STATE_HOME: perfXdgState,
-    XDG_DATA_HOME: perfXdgData,
-    APPDATA: perfAppData,
-    LOCALAPPDATA: perfLocalAppData,
-    TMPDIR: perfTmp,
-    TEMP: perfTmp,
-    TMP: perfTmp,
+    HOME: dirs.home,
+    USERPROFILE: dirs.home,
+    XDG_CONFIG_HOME: dirs.xdgConfig,
+    XDG_CACHE_HOME: dirs.xdgCache,
+    XDG_STATE_HOME: dirs.xdgState,
+    XDG_DATA_HOME: dirs.xdgData,
+    APPDATA: dirs.appData,
+    LOCALAPPDATA: dirs.localAppData,
+    TMPDIR: dirs.tmp,
+    TEMP: dirs.tmp,
+    TMP: dirs.tmp,
   } satisfies NodeJS.ProcessEnv;
 
   return await new Promise<number>((resolvePromise, rejectPromise) => {
@@ -563,6 +590,7 @@ async function main(): Promise<void> {
   }
 
   const memoryKind = process.platform === "win32" ? "Working Set" : "RSS";
+  const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
   // eslint-disable-next-line no-console
   console.log(
     `[desktop-memory] measuring idle memory for the desktop app (${memoryKind} after TTI).\n` +
@@ -570,7 +598,8 @@ async function main(): Promise<void> {
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
       `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
       `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
-      `- home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
+      `- perf-home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
+      `- profile: ${profileRoot}\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
@@ -580,7 +609,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory] run ${i + 1}/${runs}...`);
-    const rss = await runOnce(binPath, timeoutMs, settleMs);
+    const rss = await runOnce(binPath, timeoutMs, settleMs, profileRoot);
     results.push(rss);
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory]   idleRssMb=${rss.toFixed(1)}MB`);
@@ -613,6 +642,7 @@ async function main(): Promise<void> {
           // Keeping this explicit in the JSON helps cross-platform comparisons.
           measurement,
           binPath,
+          profileDir: profileRoot,
           runs: results.length,
           settleMs,
           targetMb,
