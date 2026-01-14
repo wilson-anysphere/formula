@@ -58,7 +58,7 @@ describe("pythonPanelMount", () => {
     const container = document.createElement("div");
     const doc: any = { setCellInput: vi.fn(), beginBatch: vi.fn(), endBatch: vi.fn(), cancelBatch: vi.fn() };
 
-    mountPythonPanel({
+    const mounted = mountPythonPanel({
       doc,
       container,
       workbookId: "wb1",
@@ -88,6 +88,8 @@ describe("pythonPanelMount", () => {
       workbook_id: "wb1",
       code: expect.any(String),
     });
+
+    mounted.dispose();
   });
 
   it("applies native Python updates via applyExternalDeltas (and tags them as python)", async () => {
@@ -106,7 +108,7 @@ describe("pythonPanelMount", () => {
       applyExternalDeltas,
     };
 
-    mountPythonPanel({
+    const mounted = mountPythonPanel({
       doc,
       container,
       workbookId: "wb1",
@@ -126,6 +128,8 @@ describe("pythonPanelMount", () => {
 
     expect(applyExternalDeltas).toHaveBeenCalledTimes(1);
     expect(applyExternalDeltas.mock.calls[0]?.[1]).toMatchObject({ source: "python" });
+
+    mounted.dispose();
   });
 
   it("falls back to main-thread Pyodide when SharedArrayBuffer is unavailable", async () => {
@@ -141,7 +145,7 @@ describe("pythonPanelMount", () => {
       const container = document.createElement("div");
       const doc: any = {};
 
-      mountPythonPanel({
+      const mounted = mountPythonPanel({
         doc,
         container,
         getActiveSheetId: () => "Sheet1",
@@ -171,9 +175,79 @@ describe("pythonPanelMount", () => {
 
       expect(__pyodideMocks.initialize).toHaveBeenCalledTimes(1);
       expect(__pyodideMocks.execute).toHaveBeenCalledTimes(1);
+
+      mounted.dispose();
     } finally {
       (globalThis as any).SharedArrayBuffer = originalSab;
       (globalThis as any).crossOriginIsolated = originalIsolation;
     }
+  });
+
+  it("disables running while editing (and re-enables when editing ends)", async () => {
+    const invoke = vi.fn(async (_cmd: string, _args?: any) => ({ ok: true, stdout: "", stderr: "", updates: [] }));
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    let editing = true;
+    const container = document.createElement("div");
+    const doc: any = {};
+
+    const mounted = mountPythonPanel({
+      doc,
+      container,
+      workbookId: "wb1",
+      drainBackendSync: async () => {},
+      getActiveSheetId: () => "Sheet1",
+      getSelection: () => ({ sheet_id: "Sheet1", start_row: 0, start_col: 0, end_row: 0, end_col: 0 }),
+      isEditing: () => editing,
+    });
+
+    const runButton = container.querySelector<HTMLButtonElement>('[data-testid="python-panel-run"]');
+    expect(runButton).not.toBeNull();
+    expect(runButton?.disabled).toBe(true);
+
+    runButton?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invoke).toHaveBeenCalledTimes(0);
+
+    editing = false;
+    window.dispatchEvent(new CustomEvent("formula:spreadsheet-editing-changed", { detail: { isEditing: false } }));
+    expect(runButton?.disabled).toBe(false);
+
+    runButton?.click();
+    for (let i = 0; i < 5 && invoke.mock.calls.length === 0; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    mounted.dispose();
+  });
+
+  it("disables running while read-only", async () => {
+    const invoke = vi.fn(async (_cmd: string, _args?: any) => ({ ok: true, stdout: "", stderr: "", updates: [] }));
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const container = document.createElement("div");
+    const doc: any = {};
+
+    const mounted = mountPythonPanel({
+      doc,
+      container,
+      workbookId: "wb1",
+      drainBackendSync: async () => {},
+      getActiveSheetId: () => "Sheet1",
+      getSelection: () => ({ sheet_id: "Sheet1", start_row: 0, start_col: 0, end_row: 0, end_col: 0 }),
+      isReadOnly: () => true,
+    });
+
+    const runButton = container.querySelector<HTMLButtonElement>('[data-testid="python-panel-run"]');
+    expect(runButton).not.toBeNull();
+    expect(runButton?.disabled).toBe(true);
+
+    runButton?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invoke).toHaveBeenCalledTimes(0);
+
+    mounted.dispose();
   });
 });

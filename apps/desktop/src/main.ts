@@ -7639,7 +7639,12 @@ if (
             return;
           }
 
-          const mounted = mod.mountScriptEditorPanel({ workbook, container });
+          const mounted = mod.mountScriptEditorPanel({
+            workbook,
+            container,
+            isEditing: () => isSpreadsheetEditing(),
+            isReadOnly: () => app.isReadOnly?.() === true,
+          });
           scriptEditorReady = true;
           flushPendingScriptEditorCode();
           mount!.dispose = () => {
@@ -7690,6 +7695,8 @@ if (
               workbookId,
               invoke: queuedInvoke ?? undefined,
               drainBackendSync,
+              isEditing: () => isSpreadsheetEditing(),
+              isReadOnly: () => app.isReadOnly?.() === true,
               getActiveSheetId: () => app.getCurrentSheetId(),
               getSelection: () => {
                 const ranges = app.getSelectionRanges();

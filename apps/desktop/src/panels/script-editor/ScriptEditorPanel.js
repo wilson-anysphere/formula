@@ -10,6 +10,7 @@
  */
 
 import { FORMULA_API_DTS, ScriptRuntime } from "@formula/scripting/web";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards.js";
 
 /**
  * @typedef {import("@formula/scripting").Workbook} Workbook
@@ -20,10 +21,12 @@ import { FORMULA_API_DTS, ScriptRuntime } from "@formula/scripting/web";
  *   workbook: Workbook,
  *   container: HTMLElement,
  *   monaco?: any,
+ *   isEditing?: () => boolean,
+ *   isReadOnly?: () => boolean,
  * }} params
  * @returns {{ dispose: () => void }}
  */
-export function mountScriptEditorPanel({ workbook, container, monaco }) {
+export function mountScriptEditorPanel({ workbook, container, monaco, isEditing, isReadOnly }) {
   const runtime = new ScriptRuntime(workbook);
   container.innerHTML = "";
 
@@ -54,6 +57,12 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
   let editor = null;
   let currentCode = defaultScript();
   const setCodeEvent = "formula:script-editor:set-code";
+  const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const eventSignal = abort?.signal;
+  let isRunning = false;
+  let lastEditing = (globalThis.__formulaSpreadsheetIsEditing ?? false) === true;
+  let lastReadOnly = false;
+  let blockedOutputReason = null;
 
   const fallbackEditor = document.createElement("textarea");
   fallbackEditor.value = currentCode;
@@ -95,8 +104,88 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
     consoleHost.textContent = text;
   };
 
+  const getEditingState = () => {
+    if (typeof isEditing === "function") {
+      try {
+        return Boolean(isEditing());
+      } catch {
+        return false;
+      }
+    }
+    return lastEditing;
+  };
+
+  const getReadOnlyState = () => {
+    if (typeof isReadOnly === "function") {
+      try {
+        return Boolean(isReadOnly());
+      } catch {
+        return false;
+      }
+    }
+    return lastReadOnly;
+  };
+
+  const getBlockedReason = () => {
+    if (getReadOnlyState()) return READ_ONLY_SHEET_MUTATION_MESSAGE;
+    if (getEditingState()) return "Finish editing to run scripts.";
+    return null;
+  };
+
+  const syncRunButtonDisabledState = () => {
+    const reason = getBlockedReason();
+    const blocked = Boolean(reason);
+    runButton.disabled = isRunning || blocked;
+    if (blocked) {
+      runButton.title = reason;
+      runButton.dataset.blockedReason = reason;
+      const current = String(consoleHost.textContent ?? "").trim();
+      if (current === "" || current === "Output…" || (blockedOutputReason && current === blockedOutputReason.trim())) {
+        updateConsole(reason);
+        blockedOutputReason = reason;
+      }
+      return;
+    }
+    runButton.removeAttribute("title");
+    delete runButton.dataset.blockedReason;
+    const current = String(consoleHost.textContent ?? "").trim();
+    if (blockedOutputReason && current === blockedOutputReason.trim()) {
+      updateConsole("Output…");
+    }
+    blockedOutputReason = null;
+  };
+
+  syncRunButtonDisabledState();
+
+  if (typeof window !== "undefined") {
+    window.addEventListener(
+      "formula:spreadsheet-editing-changed",
+      (evt) => {
+        lastEditing = Boolean(evt?.detail?.isEditing);
+        syncRunButtonDisabledState();
+      },
+      eventSignal ? { signal: eventSignal } : undefined,
+    );
+    window.addEventListener(
+      "formula:read-only-changed",
+      (evt) => {
+        lastReadOnly = Boolean(evt?.detail?.readOnly);
+        syncRunButtonDisabledState();
+      },
+      eventSignal ? { signal: eventSignal } : undefined,
+    );
+  }
+
   runButton.addEventListener("click", async () => {
-    runButton.disabled = true;
+    const blockedReason = getBlockedReason();
+    if (blockedReason) {
+      updateConsole(blockedReason);
+      syncRunButtonDisabledState();
+      return;
+    }
+
+    isRunning = true;
+    syncRunButtonDisabledState();
     updateConsole("");
     try {
       await ensureMonaco();
@@ -107,12 +196,14 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
       const logs = result.logs.map((l) => `[${l.level}] ${l.message}`).join("\n");
       updateConsole(logs + (result.error ? `\n[error] ${result.error.message}` : ""));
     } finally {
-      runButton.disabled = false;
+      isRunning = false;
+      syncRunButtonDisabledState();
     }
   });
 
   return {
     dispose: () => {
+      abort?.abort();
       window.removeEventListener(setCodeEvent, handleSetCode);
       if (editor) {
         editor.dispose();

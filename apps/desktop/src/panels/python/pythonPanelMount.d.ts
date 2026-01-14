@@ -7,5 +7,6 @@ export function mountPythonPanel(params: {
   getActiveSheetId?: () => string;
   getSelection?: () => { sheet_id: string; start_row: number; start_col: number; end_row: number; end_col: number };
   setSelection?: (selection: { sheet_id: string; start_row: number; start_col: number; end_row: number; end_col: number }) => void;
+  isEditing?: () => boolean;
+  isReadOnly?: () => boolean;
 }): { dispose: () => void };
-

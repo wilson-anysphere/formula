@@ -2,6 +2,7 @@ import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { getTauriInvokeOrNull } from "../../tauri/invoke.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards.js";
 const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -69,6 +70,8 @@ function getTauriInvoke(explicit) {
  *   getActiveSheetId?: () => string,
  *   getSelection?: () => { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number },
  *   setSelection?: (selection: { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number }) => void,
+ *   isEditing?: () => boolean,
+ *   isReadOnly?: () => boolean,
  * }} params
  * @returns {{ dispose: () => void }}
  */
@@ -81,11 +84,20 @@ export function mountPythonPanel({
   getActiveSheetId,
   getSelection,
   setSelection,
+  isEditing,
+  isReadOnly,
 }) {
   const isolation = {
     crossOriginIsolated: globalThis.crossOriginIsolated === true,
     sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
   };
+
+  const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const eventSignal = abort?.signal;
+  let isRunning = false;
+  let lastEditing = (globalThis.__formulaSpreadsheetIsEditing ?? false) === true;
+  let lastReadOnly = false;
+  let blockedOutputReason = null;
 
   let initPromise = null;
   /** @type {PyodideRuntime | null} */
@@ -164,6 +176,57 @@ export function mountPythonPanel({
     consoleHost.textContent = text;
   };
 
+  const getEditingState = () => {
+    if (typeof isEditing === "function") {
+      try {
+        return Boolean(isEditing());
+      } catch {
+        return false;
+      }
+    }
+    return lastEditing;
+  };
+
+  const getReadOnlyState = () => {
+    if (typeof isReadOnly === "function") {
+      try {
+        return Boolean(isReadOnly());
+      } catch {
+        return false;
+      }
+    }
+    return lastReadOnly;
+  };
+
+  const getBlockedReason = () => {
+    if (getReadOnlyState()) return READ_ONLY_SHEET_MUTATION_MESSAGE;
+    if (getEditingState()) return "Finish editing to run Python.";
+    return null;
+  };
+
+  const syncRunButtonDisabledState = () => {
+    const reason = getBlockedReason();
+    const blocked = Boolean(reason);
+    runButton.disabled = isRunning || blocked;
+    if (blocked) {
+      runButton.title = reason;
+      runButton.dataset.blockedReason = reason;
+      const current = String(consoleHost.textContent ?? "").trim();
+      if (current === "" || current === "Output…" || (blockedOutputReason && current === blockedOutputReason.trim())) {
+        setOutput(reason);
+        blockedOutputReason = reason;
+      }
+      return;
+    }
+    runButton.removeAttribute("title");
+    delete runButton.dataset.blockedReason;
+    const current = String(consoleHost.textContent ?? "").trim();
+    if (blockedOutputReason && current === blockedOutputReason.trim()) {
+      setOutput("Output…");
+    }
+    blockedOutputReason = null;
+  };
+
   const effectivePyodideBackendMode = () => {
     if (pyodideRuntime && typeof pyodideRuntime.getBackendMode === "function") {
       return pyodideRuntime.getBackendMode();
@@ -189,11 +252,31 @@ export function mountPythonPanel({
   };
 
   updateRuntimeStatus();
+  syncRunButtonDisabledState();
 
   runtimeSelect.addEventListener("change", () => {
     updateRuntimeStatus();
     setOutput("");
   });
+
+  if (typeof window !== "undefined") {
+    window.addEventListener(
+      "formula:spreadsheet-editing-changed",
+      (evt) => {
+        lastEditing = Boolean(evt?.detail?.isEditing);
+        syncRunButtonDisabledState();
+      },
+      eventSignal ? { signal: eventSignal } : undefined,
+    );
+    window.addEventListener(
+      "formula:read-only-changed",
+      (evt) => {
+        lastReadOnly = Boolean(evt?.detail?.readOnly);
+        syncRunButtonDisabledState();
+      },
+      eventSignal ? { signal: eventSignal } : undefined,
+    );
+  }
 
   class PanelBridge extends DocumentControllerBridge {
     constructor(doc, options) {
@@ -266,7 +349,15 @@ export function mountPythonPanel({
   }
 
   runButton.addEventListener("click", async () => {
-    runButton.disabled = true;
+    const blockedReason = getBlockedReason();
+    if (blockedReason) {
+      setOutput(blockedReason);
+      syncRunButtonDisabledState();
+      return;
+    }
+
+    isRunning = true;
+    syncRunButtonDisabledState();
     setOutput("");
 
     try {
@@ -352,12 +443,14 @@ export function mountPythonPanel({
         .join("\n\n");
       setOutput(details ? `${message}\n\n${details}` : message);
     } finally {
-      runButton.disabled = false;
+      isRunning = false;
+      syncRunButtonDisabledState();
     }
   });
 
   return {
     dispose: () => {
+      abort?.abort();
       pyodideRuntime?.destroy();
       container.innerHTML = "";
     },
