@@ -382,6 +382,68 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("patches flattened twoCell offsets (dxEmu/dyEmu on from/to) when committing move interactions", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "twoCell",
+        from: { cell: { row: 0, col: 0 }, dxEmu: pxToEmu(0), dyEmu: pxToEmu(0) },
+        to: { cell: { row: 1, col: 1 }, dxEmu: pxToEmu(0), dyEmu: pxToEmu(0) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("twoCell");
+    if (before.anchor.type !== "twoCell") {
+      throw new Error("Expected twoCell anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        from: {
+          ...before.anchor.from,
+          offset: { xEmu: pxToEmu(10), yEmu: pxToEmu(5) },
+        },
+        to: {
+          ...before.anchor.to,
+          offset: { xEmu: pxToEmu(20), yEmu: pxToEmu(15) },
+        },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.type).toBe("twoCell");
+    // Preserve the flattened schema while updating the values.
+    expect(updated?.anchor?.from?.dxEmu).toBe(pxToEmu(10));
+    expect(updated?.anchor?.from?.dyEmu).toBe(pxToEmu(5));
+    expect(updated?.anchor?.to?.dxEmu).toBe(pxToEmu(20));
+    expect(updated?.anchor?.to?.dyEmu).toBe(pxToEmu(15));
+    expect(Object.prototype.hasOwnProperty.call(updated?.anchor?.from ?? {}, "offset")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(updated?.anchor?.to ?? {}, "offset")).toBe(false);
+
+    app.dispose();
+    root.remove();
+  });
+
   it("patches root size fields on oneCell anchors (cx/cy) when committing resize interactions", () => {
     const root = createRoot();
     const status = {
