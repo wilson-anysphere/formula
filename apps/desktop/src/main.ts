@@ -2332,6 +2332,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "clipboard.pasteSpecial.formats": true,
             "clipboard.pasteSpecial.transpose": true,
             // Structural edits should not be available in read-only mode.
+            "home.cells.insert.insertCells": true,
+            "home.cells.delete.deleteCells": true,
             "home.cells.insert.insertSheetRows": true,
             "home.cells.insert.insertSheetColumns": true,
             "home.cells.insert.insertCells": true,

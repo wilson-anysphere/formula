@@ -36,6 +36,10 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
   // Always restore focus to the grid after the command completes/cancels (ribbon commands
   // otherwise leave focus on the trigger button).
   try {
+    if (typeof (app as any).isReadOnly === "function" && (app as any).isReadOnly()) {
+      showToast("Read-only: you don't have permission to edit cells.", "warning");
+      return true;
+    }
     const ranges = app.getSelectionRanges();
     const range: Range | null =
       ranges.length === 0
