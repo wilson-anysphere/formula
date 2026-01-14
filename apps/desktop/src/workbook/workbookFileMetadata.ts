@@ -58,3 +58,34 @@ export function getWorkbookFileMetadataFromWorkbookInfo(
   return parsed;
 }
 
+const WORKBOOK_SAVE_EXTENSIONS = new Set(["xlsx", "xlsm", "xltx", "xltm", "xlam", "xlsb"]);
+
+/**
+ * Mirror the desktop backend's save-path coercion behavior.
+ *
+ * The Tauri backend may rewrite saves for non-workbook origins (CSV/Parquet/etc) and legacy
+ * formats (XLS) by changing the file extension to `.xlsx` when the user uses plain "Save"
+ * instead of "Save As".
+ *
+ * Keep this logic in sync with `apps/desktop/src-tauri/src/commands.rs:coerce_save_path_to_xlsx`.
+ */
+export function coerceSavePathToXlsx(path: string): string {
+  const raw = String(path ?? "");
+  if (!raw) return raw;
+
+  const lastSlash = raw.lastIndexOf("/");
+  const lastBackslash = raw.lastIndexOf("\\");
+  const lastSep = Math.max(lastSlash, lastBackslash);
+  const basename = raw.slice(lastSep + 1);
+
+  const lastDot = basename.lastIndexOf(".");
+  if (lastDot <= 0) return raw; // no extension or hidden file like `.foo`
+  if (lastDot >= basename.length - 1) return raw; // empty extension (e.g. `foo.`)
+
+  const ext = basename.slice(lastDot + 1);
+  if (WORKBOOK_SAVE_EXTENSIONS.has(ext.toLowerCase())) return raw;
+
+  const coercedBasename = `${basename.slice(0, lastDot)}.xlsx`;
+  const prefix = lastSep >= 0 ? raw.slice(0, lastSep + 1) : "";
+  return `${prefix}${coercedBasename}`;
+}

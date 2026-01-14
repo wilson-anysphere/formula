@@ -223,7 +223,7 @@ import {
   type SheetFormattingSnapshot,
   type SnapshotCell,
 } from "./workbook/mergeFormattingIntoSnapshot.js";
-import { getWorkbookFileMetadataFromWorkbookInfo } from "./workbook/workbookFileMetadata.js";
+import { coerceSavePathToXlsx, getWorkbookFileMetadataFromWorkbookInfo } from "./workbook/workbookFileMetadata.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
@@ -9789,14 +9789,35 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
     return;
   }
 
+  const savePath = coerceSavePathToXlsx(activeWorkbook.path);
+
   if (options.notifyExtensions !== false) {
     try {
-      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions());
+      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions({ pathOverride: savePath }));
     } catch {
       // Ignore extension host errors; save should still succeed.
     }
   }
+  const previousPanelWorkbookId = activePanelWorkbookId;
   await workbookSync.markSaved();
+
+  // Some desktop backends (CSV/XLS imports, etc) coerce "Save" targets to `.xlsx` by updating the
+  // underlying workbook path without an explicit Save As flow. Keep the UI + WASM workbook metadata
+  // in sync with that new identity so Excel-compatible functions update immediately.
+  if (savePath !== activeWorkbook.path) {
+    activeWorkbook = { ...activeWorkbook, path: savePath };
+    syncTitlebar();
+
+    const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path: savePath, origin_path: null });
+    void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename);
+
+    await copyPowerQueryPersistence(previousPanelWorkbookId, savePath);
+    activePanelWorkbookId = savePath;
+    // Ensure zoom persistence follows the workbook when its id changes due to save-path coercion.
+    persistCurrentSharedGridZoom();
+    startPowerQueryService();
+    rerenderLayout?.();
+  }
 }
 
 async function handleSaveAs(
@@ -9836,33 +9857,34 @@ async function handleSaveAsPath(
   if (typeof path !== "string" || path.trim() === "") return;
 
   const previousPanelWorkbookId = options.previousPanelWorkbookId ?? activePanelWorkbookId;
+  const savePath = coerceSavePathToXlsx(path);
 
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));
   await drainBackendSync();
   if (options.notifyExtensions !== false) {
     try {
-      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions({ pathOverride: path }));
+      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions({ pathOverride: savePath }));
     } catch {
       // Ignore extension host errors; save should still succeed.
     }
   }
   if (queuedInvoke) {
-    await queuedInvoke("save_workbook", { path });
+    await queuedInvoke("save_workbook", { path: savePath });
   } else {
-    await tauriBackend.saveWorkbook(path);
+    await tauriBackend.saveWorkbook(savePath);
   }
-  activeWorkbook = { ...activeWorkbook, path };
+  activeWorkbook = { ...activeWorkbook, path: savePath };
   app.getDocument().markSaved();
   syncTitlebar();
 
   // Save As establishes a new file identity; keep the WASM engine workbook metadata in sync so
   // `CELL("filename")` / `INFO("directory")` update immediately (Excel semantics).
-  const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path, origin_path: null });
+  const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path: savePath, origin_path: null });
   void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename);
 
-  await copyPowerQueryPersistence(previousPanelWorkbookId, path);
-  activePanelWorkbookId = path;
+  await copyPowerQueryPersistence(previousPanelWorkbookId, savePath);
+  activePanelWorkbookId = savePath;
   // Ensure zoom persistence follows the workbook when its id changes (e.g. Save As).
   persistCurrentSharedGridZoom();
   startPowerQueryService();
