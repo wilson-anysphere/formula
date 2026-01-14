@@ -61,8 +61,26 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
 
       await expect.poll(() => getA1NumberFormat(page), { timeout: 5_000 }).toBe("#,##0");
 
+      // Verify invalid number format codes show a toast and do not apply.
+      await page.evaluate(() => {
+        document.getElementById("toast-root")?.replaceChildren();
+      });
+      await ribbon.locator('[data-command-id="home.number.moreFormats"]').click();
+      await page.locator('[role="menuitem"][data-command-id="home.number.moreFormats.custom"]').click();
+      await expect(dialog).toBeVisible();
+      await expect(field).toHaveValue("#,##0");
+
+      await field.fill('"0.00'); // unbalanced quotes -> invalid
+      await page.getByTestId("input-box-ok").click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.getByTestId("toast").first()).toHaveText("Invalid number format code.");
+      await expect.poll(() => getA1NumberFormat(page), { timeout: 5_000 }).toBe("#,##0");
+
       // Re-open the prompt to verify it pre-fills with the newly-applied format and that "General"
       // clears the custom number format.
+      await page.evaluate(() => {
+        document.getElementById("toast-root")?.replaceChildren();
+      });
       await ribbon.locator('[data-command-id="home.number.moreFormats"]').click();
       await page.locator('[role="menuitem"][data-command-id="home.number.moreFormats.custom"]').click();
       await expect(dialog).toBeVisible();
