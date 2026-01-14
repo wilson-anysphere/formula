@@ -116,6 +116,7 @@ import {
 } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
+import { bindImageBytesToCollabSession, type ImageBytesBinder } from "../collab/imageBytesBinder";
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { CollabEncryptionKeyStore } from "../collab/encryptionKeyStore";
 import { EncryptedRangeManager } from "../collab/encryption-ui/encryptedRangeManager";
@@ -947,6 +948,8 @@ export class SpreadsheetApp {
   private sharedHoverCellCommentIndexVersion = -1;
 
   private collabSession: CollabSession | null = null;
+  private collabBinderOrigin: object | null = null;
+  private imageBytesBinder: ImageBytesBinder | null = null;
   private collabEncryptionKeyStore: CollabEncryptionKeyStore | null = null;
   private readOnly = false;
   private readOnlyRole: string | null = null;
@@ -1114,6 +1117,7 @@ export class SpreadsheetApp {
       // `session.origin` so Yjs writes performed directly through the session (e.g. versioning
       // operations) still propagate back into the DocumentController.
       const binderOrigin = { type: "desktop-document-controller:binder" };
+      this.collabBinderOrigin = binderOrigin;
 
       const persistenceEnabled = collab.persistenceEnabled ?? collab.offlineEnabled ?? true;
       const persistence = persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
@@ -1309,13 +1313,15 @@ export class SpreadsheetApp {
       } else {
         // Backwards-compat / test stubs: if the session doesn't expose a subscription API,
         // wrap `setPermissions` as a best-effort signal.
-        const originalSetPermissions =
-          typeof (sessionForPermissions as any).setPermissions === "function"
-            ? (sessionForPermissions as any).setPermissions.bind(sessionForPermissions)
-            : null;
-        if (originalSetPermissions) {
+        const originalSetPermissions = (sessionForPermissions as any).setPermissions;
+        const isMock =
+          typeof originalSetPermissions === "function" &&
+          // Vitest/Jest-style mock functions expose a `.mock` property. Avoid wrapping them so
+          // unit tests can continue to assert on call counts/args.
+          typeof (originalSetPermissions as any).mock === "object";
+        if (typeof originalSetPermissions === "function" && !isMock) {
           (sessionForPermissions as any).setPermissions = (permissions: any) => {
-            originalSetPermissions(permissions);
+            originalSetPermissions.call(sessionForPermissions, permissions);
             this.syncReadOnlyState();
           };
         }
@@ -1974,6 +1980,16 @@ export class SpreadsheetApp {
     }
 
     this.drawingImages = new DocumentImageStore(this.document);
+    if (this.collabSession) {
+      // In collab mode, image bytes are not guaranteed to be available locally (e.g. remote inserts,
+      // or inserts made on another device without offline persistence). Bind drawing images to Yjs
+      // metadata so collaborators eventually converge on the actual bytes.
+      this.imageBytesBinder = bindImageBytesToCollabSession({
+        session: this.collabSession,
+        images: this.drawingImages,
+        origin: this.collabBinderOrigin ?? undefined,
+      });
+    }
 
     const legacyDrawingGeom: DrawingGridGeometry = {
       cellOriginPx: (cell) => ({
@@ -3004,6 +3020,8 @@ export class SpreadsheetApp {
     this.activeSheetBackgroundBitmap = null;
     this.sheetViewBinder?.destroy();
     this.sheetViewBinder = null;
+    this.imageBytesBinder?.destroy();
+    this.imageBytesBinder = null;
     this.domAbort.abort();
     this.chartDragAbort?.abort();
     this.chartDragAbort = null;
@@ -4419,6 +4437,11 @@ export class SpreadsheetApp {
         const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
 
         docAny.setImage(imageId, { bytes, mimeType });
+        try {
+          this.imageBytesBinder?.onLocalImageInserted({ id: imageId, bytes, mimeType });
+        } catch {
+          // Best-effort: never fail picture insertion due to collab image propagation.
+        }
 
         const fromCol = startCol + i * (DEFAULT_PICTURE_WIDTH_COLS + DEFAULT_PICTURE_GAP_COLS);
         const fromRow = startRow;

@@ -268,21 +268,43 @@ export function bindImageBytesToCollabSession(options: {
   // metadata keys change.
   const hydratedRawValues = new Map<string, unknown>();
 
-  const ensureImagesMap = (): Y.Map<any> | null => ensureNestedYMap(metadata, DRAWING_IMAGES_KEY);
+  const getImagesContainerRaw = (): unknown => {
+    try {
+      return metadata.get(DRAWING_IMAGES_KEY);
+    } catch {
+      return null;
+    }
+  };
+
+  const getImagesMap = (): Y.Map<any> | null => getYMap(getImagesContainerRaw());
+
+  const getImagesRecord = (): Record<string, any> | null => {
+    const raw = getImagesContainerRaw();
+    return isRecord(raw) ? (raw as Record<string, any>) : null;
+  };
+
+  // Only create the nested Y.Map when we have bytes to publish. Avoid writing an empty map
+  // during binder setup so we don't emit spurious Yjs updates on document open.
+  const ensureImagesMapForWrite = (): Y.Map<any> | null => ensureNestedYMap(metadata, DRAWING_IMAGES_KEY);
 
   const hydrateImageIds = (ids: Iterable<string> | null): void => {
     if (destroyed) return;
-    const imagesMap = ensureImagesMap();
-    if (!imagesMap) return;
+    const imagesMap = getImagesMap();
+    const imagesRecord = imagesMap ? null : getImagesRecord();
+    if (!imagesMap && !imagesRecord) return;
 
-    const toHydrate = ids ? Array.from(ids) : Array.from(imagesMap.keys());
+    const toHydrate = ids
+      ? Array.from(ids)
+      : imagesMap
+        ? Array.from(imagesMap.keys())
+        : Object.keys(imagesRecord ?? {});
 
     // Defensive cap: avoid decoding an unbounded number of images even if a doc is corrupt/malicious.
     const capped = toHydrate.slice(0, Math.max(0, Math.trunc(maxImages)));
 
     for (const imageId of capped) {
       try {
-        const raw = imagesMap.get(imageId);
+        const raw = imagesMap ? imagesMap.get(imageId) : (imagesRecord as any)?.[imageId];
         if (!raw) continue;
 
         // Avoid re-decoding the exact same Yjs value (common when multiple observe events fire).
@@ -320,19 +342,17 @@ export function bindImageBytesToCollabSession(options: {
     const origin = transaction?.origin ?? null;
     if (origin === binderOrigin) return;
 
-    const imagesMap = ensureImagesMap();
-    if (!imagesMap) return;
+    const imagesMap = getImagesMap();
 
     let shouldHydrateAll = false;
     const changedIds = new Set<string>();
 
     for (const event of events) {
       const path = event?.path;
-      if (Array.isArray(path) && path.length > 0) {
-        if (path[0] === DRAWING_IMAGES_KEY) {
-          if (typeof path[1] === "string") changedIds.add(path[1]);
-          else shouldHydrateAll = true;
-        }
+      if (Array.isArray(path) && path.length >= 2 && path[0] === DRAWING_IMAGES_KEY && typeof path[1] === "string") {
+        // If a future schema stores nested Yjs types (e.g. a Y.Map per image id), we can still
+        // hydrate the updated image by looking at the second path component.
+        changedIds.add(path[1]);
       }
 
       if (event?.target === metadata) {
@@ -342,7 +362,7 @@ export function bindImageBytesToCollabSession(options: {
         }
       }
 
-      if (event?.target === imagesMap) {
+      if (imagesMap && event?.target === imagesMap) {
         const keys = event?.changes?.keys;
         if (keys && typeof keys.keys === "function") {
           for (const key of keys.keys()) {
@@ -353,6 +373,9 @@ export function bindImageBytesToCollabSession(options: {
         }
       }
     }
+
+    // If we don't have an images container yet, only hydrate on root-level changes.
+    if (!imagesMap && !shouldHydrateAll) return;
 
     if (shouldHydrateAll) {
       hydrateAll();
@@ -389,7 +412,7 @@ export function bindImageBytesToCollabSession(options: {
 
       doc.transact(
         () => {
-          const imagesMap = ensureImagesMap();
+          const imagesMap = ensureImagesMapForWrite();
           if (!imagesMap) return;
 
           const existing = imagesMap.get(imageId);
