@@ -12,8 +12,21 @@ export type WorkbookSchemaRectInput =
   | { startRow: number; startCol: number; endRow: number; endCol: number }
   | { start: { row: number; col: number }; end: { row: number; col: number } };
 
+export type WorkbookSchemaCollection<T> =
+  | ReadonlyArray<T>
+  | Map<any, T>
+  | Set<T>
+  | Record<string, T>;
+
 export interface WorkbookSchemaSheet {
   name: string;
+}
+
+export interface WorkbookSchemaSheetInput extends WorkbookSchemaSheet {
+  cells?: unknown;
+  values?: unknown[][];
+  origin?: { row: number; col: number };
+  getCell?: (row: number, col: number) => unknown;
 }
 
 export interface WorkbookSchemaTable {
@@ -42,18 +55,24 @@ export interface WorkbookSchemaSummary {
   namedRanges: WorkbookSchemaNamedRange[];
 }
 
+export interface WorkbookSchemaTableInput {
+  name: string;
+  sheetName: string;
+  rect: WorkbookSchemaRectInput;
+}
+
+export interface WorkbookSchemaNamedRangeInput {
+  name: string;
+  sheetName: string;
+  rect: WorkbookSchemaRectInput;
+}
+
 export function extractWorkbookSchema(
   workbook: {
     id: string;
-    sheets: Array<{
-      name: string;
-      cells?: unknown;
-      values?: unknown[][];
-      origin?: { row: number; col: number };
-      getCell?: (row: number, col: number) => unknown;
-    }>;
-    tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRectInput }>;
-    namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRectInput }>;
+    sheets: WorkbookSchemaCollection<WorkbookSchemaSheetInput>;
+    tables?: WorkbookSchemaCollection<WorkbookSchemaTableInput>;
+    namedRanges?: WorkbookSchemaCollection<WorkbookSchemaNamedRangeInput>;
   },
   options?: { maxAnalyzeRows?: number; maxAnalyzeCols?: number; signal?: AbortSignal },
 ): WorkbookSchemaSummary;
