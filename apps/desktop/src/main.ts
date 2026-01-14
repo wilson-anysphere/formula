@@ -10891,12 +10891,12 @@ async function openWorkbookWithPasswordPrompt(
       if (password == null) return await tauriBackend.openWorkbook(path);
       return await tauriBackend.openWorkbook(path, { password });
     } catch (err) {
-      const msg = extractInvokeErrorMessage(err);
-      if (msg.startsWith(OPEN_WORKBOOK_PASSWORD_REQUIRED_PREFIX)) {
+      const msg = extractInvokeErrorMessage(err).trim();
+      if (msg.includes(OPEN_WORKBOOK_PASSWORD_REQUIRED_PREFIX)) {
         password = await promptPassword("This workbook is password-protected. Enter password to open.");
         continue;
       }
-      if (msg.startsWith(OPEN_WORKBOOK_INVALID_PASSWORD_PREFIX)) {
+      if (msg.includes(OPEN_WORKBOOK_INVALID_PASSWORD_PREFIX)) {
         password = await promptPassword("Invalid password. Try again.");
         continue;
       }
