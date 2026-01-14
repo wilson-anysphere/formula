@@ -227,7 +227,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the result of a number raised to a power.",
     args: [
       { name: "number", type: "value" },
-      { name: "power", type: "number" },
+      { name: "power", type: "value" },
     ],
   },
   {
@@ -303,7 +303,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns a number shifted left by a specified number of bits.",
     args: [
       { name: "number", type: "value" },
-      { name: "shift_amount", type: "number" },
+      { name: "shift_amount", type: "value" },
     ],
   },
   {
@@ -311,7 +311,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns a number shifted right by a specified number of bits.",
     args: [
       { name: "number", type: "value" },
-      { name: "shift_amount", type: "number" },
+      { name: "shift_amount", type: "value" },
     ],
   },
   {

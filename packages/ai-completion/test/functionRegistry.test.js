@@ -86,7 +86,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("TRUNC")?.args?.[1]?.optional, "Expected TRUNC num_digits to be optional");
   assert.equal(registry.getArgType("TRUNC", 1), "value", "Expected TRUNC num_digits to be value-like");
   assert.equal(registry.getArgType("POWER", 0), "value", "Expected POWER number to be value-like");
-  assert.equal(registry.getArgType("POWER", 1), "number", "Expected POWER power to be a number");
+  assert.equal(registry.getArgType("POWER", 1), "value", "Expected POWER power to be value-like");
   assert.equal(registry.getArgType("SQRT", 0), "value", "Expected SQRT number to be value-like");
   assert.equal(registry.getArgType("LOG", 0), "value", "Expected LOG number to be value-like");
   assert.ok(registry.getFunction("LOG")?.args?.[1]?.optional, "Expected LOG base to be optional");
@@ -98,9 +98,9 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("BITXOR", 0), "value", "Expected BITXOR number1 to be value-like");
   assert.equal(registry.getArgType("BITXOR", 1), "value", "Expected BITXOR number2 to be value-like");
   assert.equal(registry.getArgType("BITLSHIFT", 0), "value", "Expected BITLSHIFT number to be value-like");
-  assert.equal(registry.getArgType("BITLSHIFT", 1), "number", "Expected BITLSHIFT shift_amount to be a number");
+  assert.equal(registry.getArgType("BITLSHIFT", 1), "value", "Expected BITLSHIFT shift_amount to be value-like");
   assert.equal(registry.getArgType("BITRSHIFT", 0), "value", "Expected BITRSHIFT number to be value-like");
-  assert.equal(registry.getArgType("BITRSHIFT", 1), "number", "Expected BITRSHIFT shift_amount to be a number");
+  assert.equal(registry.getArgType("BITRSHIFT", 1), "value", "Expected BITRSHIFT shift_amount to be value-like");
   assert.equal(registry.getArgType("ISEVEN", 0), "value", "Expected ISEVEN number to be value-like");
   assert.equal(registry.getArgType("ISODD", 0), "value", "Expected ISODD number to be value-like");
   assert.equal(registry.getArgType("FACT", 0), "value", "Expected FACT number to be value-like");
