@@ -7581,6 +7581,30 @@ registerDesktopCommands({
   isEditing: isSpreadsheetEditing,
   focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
   getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
+  sheetStructureHandlers: {
+    insertSheet: handleAddSheet,
+    deleteActiveSheet: handleDeleteActiveSheet,
+    openOrganizeSheets,
+  },
+  autoFilterHandlers: {
+    toggle: () => {
+      // Excel-style: "Filter" is a toggle. For this MVP we treat it as:
+      // - if any filter is active on the sheet, clear it
+      // - otherwise, prompt for values and apply a simple row-hiding filter
+      if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
+        clearRibbonAutoFiltersForActiveSheet();
+        return;
+      }
+      void applyRibbonAutoFilterFromSelection().catch((err) => {
+        console.error("Failed to apply filter:", err);
+        showToast(`Failed to apply filter: ${String(err)}`, "error");
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+      });
+    },
+    clear: () => clearRibbonAutoFiltersForActiveSheet(),
+    reapply: () => reapplyRibbonAutoFiltersForActiveSheet(),
+  },
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
   onExtensionsLoaded: () => {
     updateKeybindingsRef?.();
@@ -7635,11 +7659,6 @@ registerDesktopCommands({
     clearPrintArea: () => handleRibbonClearPrintArea(),
     addToPrintArea: () => handleRibbonAddToPrintArea(),
     exportPdf: () => handleRibbonExportPdf(),
-  },
-  sheetStructureHandlers: {
-    insertSheet: handleAddSheet,
-    deleteActiveSheet: handleDeleteActiveSheet,
-    openOrganizeSheets,
   },
   workbenchFileHandlers: {
     newWorkbook: () => {

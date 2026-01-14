@@ -39,17 +39,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "file.print.pageSetup.margins",
   "file.options.close",
 
-  // --- Ribbon-only handlers (not CommandRegistry yet) --------------------------
-  //
-  // These ids currently dispatch through `onUnknownCommand` / ribbon overrides in the
-  // desktop shell. If/when they become real commands, remove them from this list.
-  // Home → Editing.
-  // Data → Sort & Filter.
-  "data.sortFilter.filter",
-  "data.sortFilter.clear",
-  "data.sortFilter.reapply",
-  "data.sortFilter.advanced.clearFilter",
-
   // (Removed: Home → Styles items are either registered via CommandRegistry or intentionally disabled;
   // What-If Analysis + Solver are registered commands and do not require exemptions.)
 

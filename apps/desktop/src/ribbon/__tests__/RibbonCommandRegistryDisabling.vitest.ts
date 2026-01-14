@@ -168,16 +168,13 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps exempt ribbon-only commands enabled via the exemption list (not CommandRegistry)", () => {
+  it("keeps exempt ribbon ids enabled via the exemption list (not CommandRegistry)", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
-    // so they must be exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["data.sortFilter.filter"]).toBeUndefined();
-    expect(baselineDisabledById["data.sortFilter.clear"]).toBeUndefined();
-    expect(baselineDisabledById["data.sortFilter.reapply"]).toBeUndefined();
-    expect(baselineDisabledById["data.sortFilter.advanced.clearFilter"]).toBeUndefined();
+    // File tab ids are routed through special-case ribbon overrides in the desktop shell (not CommandRegistry),
+    // so they must remain exempt from the registry-backed disabling allowlist.
+    expect(baselineDisabledById["file.save.save"]).toBeUndefined();
 
     // Organize Sheets is now a real CommandRegistry command, so it should be disabled in the baseline
     // state when the registry does not register it.
@@ -298,6 +295,33 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
+  it("registers Organize Sheets ribbon id as a CommandRegistry command (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const id = "home.cells.format.organizeSheets";
+    expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+    expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+    expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+  });
+
+  it("registers ribbon AutoFilter ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "data.sortFilter.filter",
+      "data.sortFilter.clear",
+      "data.sortFilter.reapply",
+      "data.sortFilter.advanced.clearFilter",
+    ] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
   it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
@@ -347,21 +371,18 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   menuItems: [
                     { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
                     { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
-                    // Exempt id: intentionally handled outside CommandRegistry, so it must remain enabled even
-                    // when the CommandRegistry does not register it.
-                    { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear" },
+                    // Exempt id: File tab actions are intentionally handled outside CommandRegistry, so they
+                    // must remain enabled even when the CommandRegistry does not register them.
+                    { id: "file.save.save", label: "Save", ariaLabel: "Save" },
                   ],
                  },
-                 // Exempt command id to prove the exemption list keeps implemented ribbon-only
-                 // actions enabled even when the CommandRegistry doesn't register them.
-                { id: "file.save.save", label: "Save", ariaLabel: "Save" },
                  // Non-exempt id to prove the baseline is still working.
                  { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
                ],
               },
-          ],
-        },
-      ],
+           ],
+         },
+       ],
     };
 
     const commandRegistry = new CommandRegistry();
@@ -389,10 +410,6 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const save = container.querySelector<HTMLButtonElement>('[data-command-id="file.save.save"]');
-    expect(save).toBeInstanceOf(HTMLButtonElement);
-    expect(save?.disabled).toBe(false);
-
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);
     expect(unknown?.disabled).toBe(true);
@@ -403,10 +420,10 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
     const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
-    const clear = container.querySelector<HTMLButtonElement>('[data-command-id="data.sortFilter.clear"]');
+    const save = container.querySelector<HTMLButtonElement>('[data-command-id="file.save.save"]');
     expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
     expect(colWidth).toBeInstanceOf(HTMLButtonElement);
-    expect(clear).toBeInstanceOf(HTMLButtonElement);
+    expect(save).toBeInstanceOf(HTMLButtonElement);
 
     // Row/column sizing menu items are backed by CommandRegistry commands, so they should be disabled
     // when the registry does not register them.
@@ -414,7 +431,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(colWidth?.disabled).toBe(true);
 
     // Exempt menu items remain enabled even without a corresponding CommandRegistry entry.
-    expect(clear?.disabled).toBe(false);
+    expect(save?.disabled).toBe(false);
 
     act(() => root.unmount());
   });

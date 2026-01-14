@@ -71,6 +71,23 @@ export type SheetStructureCommandHandlers = {
   openOrganizeSheets?: (() => void | Promise<void>) | null;
 };
 
+export type RibbonAutoFilterCommandHandlers = {
+  /**
+   * Toggle the ribbon AutoFilter state for the active sheet.
+   *
+   * The desktop shell owns the MVP AutoFilter store + dialog UI, so this is passed in from `main.ts`.
+   */
+  toggle: () => void | Promise<void>;
+  /**
+   * Clear any active ribbon AutoFilters on the active sheet.
+   */
+  clear: () => void | Promise<void>;
+  /**
+   * Reapply the current ribbon AutoFilters for the active sheet.
+   */
+  reapply: () => void | Promise<void>;
+};
+
 export function registerDesktopCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
@@ -107,6 +124,13 @@ export function registerDesktopCommands(params: {
    */
   sheetStructureHandlers?: SheetStructureCommandHandlers | null;
   /**
+   * Optional handlers for the MVP ribbon AutoFilter commands (`data.sortFilter.*`).
+   *
+   * AutoFilter logic currently lives in `main.ts` (local-only UI + store). Register the commands in
+   * CommandRegistry so baseline ribbon enable/disable can rely on registration (no exemptions needed).
+   */
+  autoFilterHandlers?: RibbonAutoFilterCommandHandlers | null;
+  /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
    * overridden to invoke this handler (instead of the built-in no-op registration).
    */
@@ -139,12 +163,14 @@ export function registerDesktopCommands(params: {
     dataQueriesHandlers = null,
     pageLayoutHandlers = null,
     sheetStructureHandlers = null,
+    autoFilterHandlers = null,
     openCommandPalette = null,
     openGoalSeekDialog = null,
   } = params;
 
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryEditing = t("commandCategory.editing");
+  const commandCategoryData = t("commandCategory.data");
   const isEditingFn =
     isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
   const focusGrid = (): void => {
@@ -671,6 +697,85 @@ export function registerDesktopCommands(params: {
   });
 
   registerSortFilterCommands({ commandRegistry, app, isEditing });
+
+  // Data → Sort & Filter: MVP AutoFilter commands.
+  //
+  // These ids exist in `defaultRibbonSchema` but the MVP implementation lives in `main.ts`
+  // (local-only UI + store). Register them in CommandRegistry so baseline ribbon disabling
+  // can rely on registration instead of exemptions.
+  const getAutoFilterHandlers = (): RibbonAutoFilterCommandHandlers | null => {
+    const handlers = autoFilterHandlers ?? null;
+    if (!handlers) {
+      safeShowToast("Filtering is not available in this environment.", "warning");
+      focusGrid();
+      return null;
+    }
+    return handlers;
+  };
+  commandRegistry.registerBuiltinCommand(
+    "data.sortFilter.filter",
+    "Filter",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handlers = getAutoFilterHandlers();
+      if (!handlers) return;
+      await handlers.toggle();
+    },
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Toggle AutoFilter for the active sheet",
+      keywords: ["filter", "auto filter", "autofilter", "sort & filter"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "data.sortFilter.clear",
+    "Clear",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handlers = getAutoFilterHandlers();
+      if (!handlers) return;
+      await handlers.clear();
+    },
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Clear the current AutoFilter",
+      keywords: ["clear", "filter", "auto filter", "autofilter"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "data.sortFilter.reapply",
+    "Reapply",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handlers = getAutoFilterHandlers();
+      if (!handlers) return;
+      await handlers.reapply();
+    },
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Reapply the current AutoFilter",
+      keywords: ["reapply", "filter", "auto filter", "autofilter"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "data.sortFilter.advanced.clearFilter",
+    "Clear Filter",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handlers = getAutoFilterHandlers();
+      if (!handlers) return;
+      await handlers.clear();
+    },
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Clear the current AutoFilter",
+      keywords: ["clear filter", "filter", "auto filter", "autofilter"],
+    },
+  );
 
   registerFormatAlignmentCommands({
     commandRegistry,
