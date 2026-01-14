@@ -8770,6 +8770,15 @@ function handleRibbonCommand(commandId: string): void {
       }
     }
 
+    // Custom number formats are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep this id explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (commandId === "home.number.moreFormats.custom") {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
+    }
+
     if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
       return;
     }
