@@ -21,12 +21,14 @@ crate-type = ["cdylib", "rlib"]
 default = ["dax"]
 # Optional bindings for `formula-dax` (Power Pivot / pivot table engine).
 dax = ["dep:formula-dax"]
+# Optional VBA parsing/signature helpers via `formula-xlsx`'s `vba` feature.
+xlsx-vba = ["formula-xlsx/vba"]
 
 [dependencies]
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-office-crypto = { path = "../formula-office-crypto" }
-formula-xlsx = { path = "../formula-xlsx" }
+formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-dax = { path = "../formula-dax", optional = true, features = ["pivot-model"] }
 getrandom = { version = "0.2", features = ["js"] }
 js-sys = "0.3"
