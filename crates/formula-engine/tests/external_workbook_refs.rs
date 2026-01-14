@@ -478,6 +478,77 @@ fn precedents_include_dynamic_external_precedents_from_indirect_ref_text_cell() 
 }
 
 #[test]
+fn precedents_include_dynamic_external_range_from_indirect() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=SUM(INDIRECT("[Book.xlsx]Sheet1!A1:A2"))"#,
+        )
+        .unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalRange {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 1, col: 0 },
+        }]
+    );
+}
+
+#[test]
+fn precedents_include_dynamic_external_range_from_indirect_ref_text_cell() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1:A2")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(INDIRECT(B1))")
+        .unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 }, // B1
+            },
+            PrecedentNode::ExternalRange {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 1, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
 fn precedents_include_dynamic_external_precedents_from_offset() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 41.0);
