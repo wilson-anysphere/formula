@@ -55,6 +55,33 @@ function closeDialog(dialog: HTMLDialogElement, returnValue: string): void {
   dialog.dispatchEvent(new Event("close"));
 }
 
+function trapTabNavigation(dialog: HTMLDialogElement, event: KeyboardEvent): void {
+  if (event.key !== "Tab") return;
+  const focusables = Array.from(
+    dialog.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => el.getAttribute("aria-hidden") !== "true");
+  if (focusables.length === 0) return;
+  const first = focusables[0]!;
+  const last = focusables[focusables.length - 1]!;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) return;
+
+  if (event.shiftKey) {
+    if (active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+    return;
+  }
+
+  if (active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function normalizeRange(range: Range): Range {
   return {
     startRow: Math.min(range.startRow, range.endRow),
@@ -179,6 +206,9 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
     e.preventDefault();
     closeDialog(dialog, "cancel");
   });
+
+  // Trap Tab navigation within the modal so focus doesn't escape back to the grid/ribbon.
+  dialog.addEventListener("keydown", (event) => trapTabNavigation(dialog, event));
 
   root.render(
     <SortDialog
