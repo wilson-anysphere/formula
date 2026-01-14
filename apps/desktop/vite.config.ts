@@ -235,56 +235,22 @@ export default defineConfig({
     include: [
       "src/**/*.vitest.ts",
       "src/**/*.vitest.tsx",
-      // Formula bar tests use the `.test.ts` suffix and rely on per-file `@vitest-environment`
-      // directives (jsdom). Include them explicitly so:
-      // - `pnpm -C apps/desktop test` runs formula-bar coverage
-      // - `pnpm -C apps/desktop vitest run apps/desktop/src/formula-bar/…` works reliably
-      //   (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like `apps/desktop/src/...`
-      //   to `src/...` when running via the desktop package script)
-      "src/formula-bar/**/*.test.ts",
-      // Command palette tests are `.test.ts` but historically ran via `*.vitest.ts` wrapper
-      // entrypoints. Include them directly so we don't need wrapper files just to satisfy the
-      // desktop-scoped Vitest include list.
-      "src/command-palette/__tests__/**/*.test.ts",
-      // Some grid/shared and layout tests use the `.test.ts` suffix but are part of the
-      // desktop package's unit suite. Include them directly so they don't need wrapper
-      // `*.vitest.ts` entrypoints.
-      "src/grid/shared/**/*.test.ts",
-      "src/grid/auditing-overlays/__tests__/**/*.test.ts",
-      // Small sheet/address helpers also use `.test.ts`; include them so they run under the
-      // desktop-scoped Vitest config.
-      "src/sheet/**/*.test.ts",
-      // Clipboard + extension helpers have a few small `.test.ts` suites as well.
-      "src/clipboard/**/__tests__/**/*.test.ts",
-      "src/extensions/**/*.test.ts",
-      // Some panel unit tests use the `.test.ts(x)` suffix.
-      "src/panels/**/*.test.ts",
-      "src/panels/**/*.test.tsx",
-      // Misc small leaf packages with `.test.ts` suites.
-      "src/tauri/__tests__/**/*.test.ts",
-      "src/macros/**/*.test.ts",
-      "src/charts/__tests__/**/*.test.ts",
-      "src/sheets/**/*.test.ts",
-      "src/sort-filter/**/__tests__/**/*.test.ts",
-      "src/scripting/**/*.test.ts",
-      "src/dlp/**/*.test.ts",
-      // Spreadsheet model/evaluation suites use `.test.ts`.
-      "src/spreadsheet/**/*.test.ts",
-      "src/layout/__tests__/**/*.test.ts",
-      // AI tests are `.test.ts` (not `*.vitest.ts`) across several subdirectories.
-      "src/ai/**/*.test.ts",
-      "src/editor/cellEditorOverlay.f4.test.ts",
-      // Drawing overlay interaction unit tests live under `src/drawings/__tests__` but use the
-      // `.test.ts` suffix for historical reasons.
-      // Include these explicitly so they run under the desktop-scoped Vitest config, and so:
-      //   pnpm -C apps/desktop vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
-      // works reliably (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like
-      // `apps/desktop/src/...` to `src/...` when running via the desktop package script).
-      "src/drawings/__tests__/**/*.test.ts",
+      // Most desktop unit tests use `.test.ts(x)` and rely on per-file `@vitest-environment`
+      // directives. Include them globally, excluding large integration suites under `src/app/**`
+      // (see `exclude` below).
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
     ],
-    exclude: ["tests/e2e/**", "node_modules/**"],
+    exclude: [
+      "tests/e2e/**",
+      "node_modules/**",
+      // Desktop `src/app/**` `.test.ts` suites are large integration tests and are exercised by the
+      // repo-root Vitest run; keep the desktop-scoped suite focused and fast.
+      "src/app/**/*.test.ts",
+      "src/app/**/*.test.tsx",
+    ],
   },
 });
