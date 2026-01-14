@@ -1514,7 +1514,8 @@ function drawSelection(
   ctx.fillStyle = colors.selectionHandleFill;
   ctx.strokeStyle = colors.selectionStroke;
   ctx.lineWidth = 1;
-  for (const p of points) {
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i]!;
     ctx.beginPath();
     ctx.rect(p.x - half, p.y - half, handle, handle);
     ctx.fill();

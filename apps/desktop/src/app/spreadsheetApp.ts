@@ -27,10 +27,12 @@ import {
   cursorForResizeHandle,
   cursorForResizeHandleWithTransform,
   getResizeHandleCenters,
+  getResizeHandleCentersInto,
   hitTestRotationHandle,
   hitTestResizeHandle,
   RESIZE_HANDLE_SIZE_PX,
   type ResizeHandle,
+  type ResizeHandleCenter,
 } from "../drawings/selectionHandles";
 import {
   DrawingOverlay,
@@ -242,6 +244,9 @@ const MAX_CHART_DATA_CELLS = 100_000;
 const MAX_FORMULA_RANGE_PREVIEW_CELLS = 100;
 const FORMULA_RANGE_PREVIEW_SAMPLE_ROWS = 3;
 const FORMULA_RANGE_PREVIEW_SAMPLE_COLS = 3;
+
+const LINE_DASH_NONE: number[] = [];
+const LINE_DASH_FILL_PREVIEW: number[] = [4, 3];
 let formulaRangePreviewTooltipIdCounter = 0;
 function nextFormulaRangePreviewTooltipId(): string {
   formulaRangePreviewTooltipIdCounter += 1;
@@ -1216,6 +1221,7 @@ export class SpreadsheetApp {
   private splitViewDrawingHitTestIndexRowsVersion: number | null = null;
   private splitViewDrawingHitTestIndexColsVersion: number | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly drawingSelectionHandleCentersScratch: ResizeHandleCenter[] = [];
   private selectedDrawingId: DrawingObjectId | null = null;
   private selectedDrawingIndex: number | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
@@ -14606,7 +14612,7 @@ export class SpreadsheetApp {
         this.selectionCtx.clip();
         this.selectionCtx.strokeStyle = resolveCssVar("--warning", { root: this.root, fallback: "CanvasText" });
         this.selectionCtx.lineWidth = 2;
-        this.selectionCtx.setLineDash([4, 3]);
+        this.selectionCtx.setLineDash(LINE_DASH_FILL_PREVIEW);
         this.selectionCtx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
         this.selectionCtx.restore();
       }
@@ -14616,8 +14622,16 @@ export class SpreadsheetApp {
     // are *not* using the dedicated DrawingInteractionController. When the controller is enabled,
     // selection chrome is rendered by the DrawingOverlay instead.
     if (this.selectedDrawingId != null && this.drawingInteractionController == null) {
-      const objects = this.listDrawingObjectsForSheet();
-      const selected = objects.find((obj) => obj.id === this.selectedDrawingId) ?? null;
+      const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+      let selected: DrawingObject | null = null;
+      const selectedId = this.selectedDrawingId;
+      for (let i = 0; i < objects.length; i += 1) {
+        const obj = objects[i]!;
+        if (obj.id === selectedId) {
+          selected = obj;
+          break;
+        }
+      }
       if (selected) {
         const viewport = this.getDrawingInteractionViewport();
         const rootRect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
@@ -14645,7 +14659,7 @@ export class SpreadsheetApp {
 
         this.selectionCtx.strokeStyle = stroke;
         this.selectionCtx.lineWidth = 2;
-        this.selectionCtx.setLineDash([]);
+        this.selectionCtx.setLineDash(LINE_DASH_NONE);
         if (hasNonIdentityTransform) {
           const cx = rootRect.x + rootRect.width / 2;
           const cy = rootRect.y + rootRect.height / 2;
@@ -14662,7 +14676,9 @@ export class SpreadsheetApp {
         this.selectionCtx.fillStyle = handleFill;
         this.selectionCtx.strokeStyle = stroke;
         this.selectionCtx.lineWidth = 1;
-        for (const c of getResizeHandleCenters(rootRect, transform)) {
+        const centers = getResizeHandleCentersInto(rootRect, transform, this.drawingSelectionHandleCentersScratch);
+        for (let i = 0; i < centers.length; i += 1) {
+          const c = centers[i]!;
           this.selectionCtx.beginPath();
           this.selectionCtx.rect(c.x - half, c.y - half, handleSize, handleSize);
           this.selectionCtx.fill();
