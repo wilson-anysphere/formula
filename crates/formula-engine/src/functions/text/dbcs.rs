@@ -367,6 +367,21 @@ fn asc_cp932(input: &str) -> String {
             continue;
         }
 
+        // Convert Japanese combining dakuten/handakuten marks into the halfwidth voiced/semi-voiced
+        // sound marks. This matches Excel's tendency to emit the spacing halfwidth marks (ﾞ/ﾟ)
+        // rather than leaving combining marks in the output.
+        //
+        // This also makes `ASC` robust to inputs that contain decomposed sequences applied to
+        // halfwidth katakana (e.g. `ｶ゙`).
+        if ch == COMBINING_DAKUTEN {
+            out.push(HALFWIDTH_DAKUTEN);
+            continue;
+        }
+        if ch == COMBINING_HANDAKUTEN {
+            out.push(HALFWIDTH_HANDAKUTEN);
+            continue;
+        }
+
         // Handle decomposed rare voiced katakana like `ヸ`/`ヹ` (U+30F0/U+30F1 + U+3099).
         //
         // These correspond to the precomposed `ヸ`/`ヹ` characters, which Excel's `ASC` converts to

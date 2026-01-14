@@ -175,6 +175,19 @@ fn asc_and_dbcs_convert_under_cp932() {
         sheet.eval("=ASC(\"ヱ\u{3099}\")"),
         Value::Text("ｴﾞ".to_string())
     );
+
+    // Standalone combining dakuten/handakuten should be converted to the spacing halfwidth marks,
+    // and should also work when applied to halfwidth katakana.
+    assert_eq!(sheet.eval("=ASC(\"\u{3099}\")"), Value::Text("ﾞ".to_string()));
+    assert_eq!(sheet.eval("=ASC(\"\u{309A}\")"), Value::Text("ﾟ".to_string()));
+    assert_eq!(
+        sheet.eval("=ASC(\"ｶ\u{3099}\")"),
+        Value::Text("ｶﾞ".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ASC(\"ﾊ\u{309A}\")"),
+        Value::Text("ﾊﾟ".to_string())
+    );
 }
 
 #[test]
