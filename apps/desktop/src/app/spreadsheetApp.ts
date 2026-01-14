@@ -1659,6 +1659,7 @@ export class SpreadsheetApp {
   private imageBytesBinder: ImageBytesBinder | null = null;
   private collabEncryptionKeyStore: CollabEncryptionKeyStore | null = null;
   private reservedRootGuardToastUnsubscribe: (() => void) | null = null;
+  private collabEncryptedRangesSchemaToastUnsubscribe: (() => void) | null = null;
   private readOnly = false;
   private readOnlyRole: string | null = null;
   private collabPermissionsUnsubscribe: (() => void) | null = null;
@@ -2006,6 +2007,53 @@ export class SpreadsheetApp {
         },
       });
       encryptionPolicy = createEncryptionPolicyFromDoc(this.collabSession.doc);
+
+      // If `metadata.encryptedRanges` is present but in an unknown schema, the policy helper fails closed
+      // (treats all valid cells as requiring encryption but cannot determine a key id). Surface this
+      // as an actionable toast so users know why editing may be blocked across the workbook.
+      this.collabEncryptedRangesSchemaToastUnsubscribe?.();
+      this.collabEncryptedRangesSchemaToastUnsubscribe = null;
+      try {
+        let toastShown = false;
+        const check = () => {
+          if (toastShown) return;
+          const probeSheetId = String(this.sheetId ?? "").trim() || "Sheet1";
+          const probeCell = { sheetId: probeSheetId, row: 0, col: 0 };
+          if (encryptionPolicy?.shouldEncryptCell(probeCell) && !encryptionPolicy?.keyIdForCell(probeCell)) {
+            toastShown = true;
+            try {
+              showToast(
+                "Encrypted range metadata is in an unsupported format. Update Formula to edit encrypted ranges.",
+                "error",
+                { timeoutMs: 15_000 },
+              );
+            } catch {
+              // Best-effort; `showToast` requires a DOM #toast-root and should never block startup.
+            }
+          }
+        };
+        check();
+
+        const metadata = this.collabSession.metadata as any;
+        const handler = (e: any) => {
+          const keysChanged = e?.keysChanged;
+          if (keysChanged && typeof keysChanged.has === "function" && keysChanged.has("encryptedRanges")) {
+            check();
+          }
+        };
+        if (metadata && typeof metadata.observe === "function" && typeof metadata.unobserve === "function") {
+          metadata.observe(handler);
+          this.collabEncryptedRangesSchemaToastUnsubscribe = () => {
+            try {
+              metadata.unobserve(handler);
+            } catch {
+              // ignore
+            }
+          };
+        }
+      } catch {
+        // ignore (defensive: never block collab startup on toast wiring)
+      }
 
       // If the sync-server reserved root guard is enabled, writing to in-doc versioning /
       // branching roots will cause the server to close the websocket (1008 "reserved root
@@ -4702,6 +4750,8 @@ export class SpreadsheetApp {
     this.setCollabUndoService(null);
     this.reservedRootGuardToastUnsubscribe?.();
     this.reservedRootGuardToastUnsubscribe = null;
+    this.collabEncryptedRangesSchemaToastUnsubscribe?.();
+    this.collabEncryptedRangesSchemaToastUnsubscribe = null;
     this.collabPermissionsUnsubscribe?.();
     this.collabPermissionsUnsubscribe = null;
     this.collabSelectionUnsubscribe?.();
