@@ -99,6 +99,41 @@ test("CellStructuralConflictMonitor caps age-prune work per pass and schedules f
   doc.destroy();
 });
 
+test("CellStructuralConflictMonitor schedules a deferred prune for late-arriving expired records", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const ops = doc.getMap("cellStructuralOps");
+
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "local",
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  const now = Date.now();
+  const oldId = "op-old-deferred";
+  doc.transact(() => {
+    ops.set(oldId, {
+      id: oldId,
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  // Old record should not be pruned immediately (it was just added in this transaction).
+  assert.equal(ops.has(oldId), true);
+  // But a deferred prune should be scheduled so the expired record is eventually cleaned up.
+  assert.equal(monitor._agePruneTimer != null, true);
+
+  monitor.dispose();
+  doc.destroy();
+});
+
 test("CellStructuralConflictMonitor prunes old shared op records by age when enabled", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
