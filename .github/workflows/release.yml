@@ -1822,7 +1822,7 @@ jobs:
             )
             echo "::endgroup::"
 
-            python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
+            python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
 
             rm -rf "${tmpdir}"
             trap - EXIT
@@ -2261,7 +2261,7 @@ jobs:
           plutil -p "${info_plist}" | head -n 200
           echo "::endgroup::"
 
-          python scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
+          python3 scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
 
       - name: Verify Linux desktop integration in packages (.deb + .rpm)
         if: runner.os == 'Linux'
@@ -2298,7 +2298,7 @@ jobs:
           echo "Validating .deb desktop integration: ${deb}"
           tmpdir_deb="$(mktemp -d)"
           dpkg-deb -x "${deb}" "${tmpdir_deb}"
-          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
+          python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
 
           shopt -s nullglob
           rpms=()
@@ -2332,7 +2332,7 @@ jobs:
           # `find` may return a relative path; run `rpm2cpio` from the repo root and only `cd`
           # for the `cpio` extraction destination.
           rpm2cpio "${rpm_path}" | (cd "${tmpdir_rpm}" && cpio -idm --quiet --no-absolute-filenames)
-          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
+          python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
 
       - name: Smoke test Linux .deb install in clean Ubuntu container
         if: runner.os == 'Linux'

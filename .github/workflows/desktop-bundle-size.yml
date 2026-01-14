@@ -314,11 +314,11 @@ jobs:
  
           echo "Validating .deb desktop integration: ${deb}"
           dpkg-deb -x "${deb}" "${tmpdir_deb}"
-          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
+          python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
  
           echo "Validating .rpm desktop integration: ${rpm_path}"
           rpm2cpio "${rpm_path}" | (cd "${tmpdir_rpm}" && cpio -idm --quiet --no-absolute-filenames)
-          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
+          python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
 
       - name: Desktop dist asset report
         run: node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets-report.json

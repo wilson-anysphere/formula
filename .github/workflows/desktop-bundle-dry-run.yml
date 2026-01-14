@@ -768,7 +768,7 @@ jobs:
           plutil -p "${info_plist}" | head -n 200
           echo "::endgroup::"
 
-          python scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
+          python3 scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
 
       - name: Validate Linux AppImage bundle
         if: runner.os == 'Linux'
@@ -972,7 +972,7 @@ jobs:
             )
             echo "::endgroup::"
 
-            python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
+            python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
 
             rm -rf "${tmpdir}"
             trap - EXIT
@@ -1018,7 +1018,7 @@ jobs:
  
             # Extract the RPM into a synthetic filesystem root so we can inspect its .desktop metadata.
             rpm2cpio "${rpm_path}" | (cd "${tmpdir}" && cpio -idm --quiet --no-absolute-filenames)
-            python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
+            python3 scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
  
             rm -rf "${tmpdir}"
             trap - EXIT
