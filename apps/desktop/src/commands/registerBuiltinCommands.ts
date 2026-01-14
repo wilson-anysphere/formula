@@ -461,22 +461,6 @@ export function registerBuiltinCommands(params: {
     input.click();
   };
 
-  const refresh = (): void => {
-    try {
-      refreshRibbonUiState?.();
-    } catch {
-      // ignore (best-effort only)
-    }
-  };
-
-  const focusApp = (): void => {
-    try {
-      (app as any)?.focus?.();
-    } catch {
-      // ignore (tests/minimal harnesses)
-    }
-  };
-
   const applyThemePreference = (preference: "system" | "light" | "dark" | "high-contrast"): void => {
     if (!themeController) return;
     try {
