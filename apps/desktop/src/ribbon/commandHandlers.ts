@@ -210,16 +210,44 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "format.toggleWrapText":
       ctx.applyFormattingToSelection("Wrap", (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges));
       return true;
+    case "format.clearFormats":
+      ctx.applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
+        let applied = true;
+        for (const range of ranges) {
+          const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
+          if (ok === false) applied = false;
+        }
+        return applied;
+      });
+      return true;
+    case "format.clearContents":
+      ctx.applyFormattingToSelection("Clear contents", (doc, sheetId, ranges) => {
+        for (const range of ranges) {
+          doc.clearRange(sheetId, range, { label: "Clear contents" });
+        }
+      });
+      return true;
+    case "format.clearAll":
+      ctx.applyFormattingToSelection(
+        "Clear all",
+        (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            doc.clearRange(sheetId, range, { label: "Clear all" });
+            const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        },
+        { forceBatch: true },
+      );
+      return true;
     default:
       break;
   }
 
-  const fontNamePrefix = commandId.startsWith("home.font.fontName.")
-    ? "home.font.fontName."
-    : commandId.startsWith("format.fontName.")
-      ? "format.fontName."
-      : null;
-  if (fontNamePrefix) {
+  const fontNamePrefix = "format.fontName.";
+  if (commandId.startsWith(fontNamePrefix)) {
     const preset = commandId.slice(fontNamePrefix.length);
     const fontName = (() => {
       switch (preset) {
@@ -247,24 +275,16 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const fontSizePrefix = commandId.startsWith("home.font.fontSize.")
-    ? "home.font.fontSize."
-    : commandId.startsWith("format.fontSize.")
-      ? "format.fontSize."
-      : null;
-  if (fontSizePrefix) {
+  const fontSizePrefix = "format.fontSize.";
+  if (commandId.startsWith(fontSizePrefix)) {
     const size = Number(commandId.slice(fontSizePrefix.length));
     if (!Number.isFinite(size) || size <= 0) return true;
     ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
     return true;
   }
 
-  const fillColorPrefix = commandId.startsWith("home.font.fillColor.")
-    ? "home.font.fillColor."
-    : commandId.startsWith("format.fillColor.")
-      ? "format.fillColor."
-      : null;
-  if (fillColorPrefix) {
+  const fillColorPrefix = "format.fillColor.";
+  if (commandId.startsWith(fillColorPrefix)) {
     const preset = commandId.slice(fillColorPrefix.length);
     if (preset === "moreColors") {
       // Prefer delegating to the builtin command (which opens the picker UI).
@@ -306,12 +326,8 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const fontColorPrefix = commandId.startsWith("home.font.fontColor.")
-    ? "home.font.fontColor."
-    : commandId.startsWith("format.fontColor.")
-      ? "format.fontColor."
-      : null;
-  if (fontColorPrefix) {
+  const fontColorPrefix = "format.fontColor.";
+  if (commandId.startsWith(fontColorPrefix)) {
     const preset = commandId.slice(fontColorPrefix.length);
     if (preset === "moreColors") {
       // Prefer delegating to the builtin command (which opens the picker UI).
@@ -351,53 +367,8 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const clearPrefix = "home.font.clearFormatting.";
-  if (commandId.startsWith(clearPrefix)) {
-    const kind = commandId.slice(clearPrefix.length);
-    if (kind === "clearFormats") {
-      ctx.applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
-        let applied = true;
-        for (const range of ranges) {
-          const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
-          if (ok === false) applied = false;
-        }
-        return applied;
-      });
-      return true;
-    }
-    if (kind === "clearContents") {
-      ctx.applyFormattingToSelection("Clear contents", (doc, sheetId, ranges) => {
-        for (const range of ranges) {
-          doc.clearRange(sheetId, range, { label: "Clear contents" });
-        }
-      });
-      return true;
-    }
-    if (kind === "clearAll") {
-      ctx.applyFormattingToSelection(
-        "Clear all",
-        (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear all" });
-            const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        },
-        { forceBatch: true },
-      );
-      return true;
-    }
-    return true;
-  }
-
-  const bordersPrefix = commandId.startsWith("home.font.borders.")
-    ? "home.font.borders."
-    : commandId.startsWith("format.borders.")
-      ? "format.borders."
-      : null;
-  if (bordersPrefix) {
+  const bordersPrefix = "format.borders.";
+  if (commandId.startsWith(bordersPrefix)) {
     const kind = commandId.slice(bordersPrefix.length);
     const defaultBorderColor = ["#", "FF", "000000"].join("");
     if (kind === "none") {
@@ -506,12 +477,8 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const numberFormatPrefix = commandId.startsWith("home.number.numberFormat.")
-    ? "home.number.numberFormat."
-    : commandId.startsWith("format.numberFormat.")
-      ? "format.numberFormat."
-      : null;
-  if (numberFormatPrefix) {
+  const numberFormatPrefix = "format.numberFormat.";
+  if (commandId.startsWith(numberFormatPrefix)) {
     const kind = commandId.slice(numberFormatPrefix.length);
     if (kind === "general") {
       ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
@@ -594,12 +561,8 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const accountingPrefix = commandId.startsWith("home.number.accounting.")
-    ? "home.number.accounting."
-    : commandId.startsWith("format.numberFormat.accounting.")
-      ? "format.numberFormat.accounting."
-      : null;
-  if (accountingPrefix) {
+  const accountingPrefix = "format.numberFormat.accounting.";
+  if (commandId.startsWith(accountingPrefix)) {
     const currency = commandId.slice(accountingPrefix.length);
     const symbol = (() => {
       switch (currency) {
