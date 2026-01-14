@@ -8457,14 +8457,20 @@ impl Engine {
     }
     fn rebuild_graph(&mut self) -> Result<(), EngineError> {
         let sheet_names = sheet_names_by_id(&self.workbook);
-        let mut formulas: Vec<(String, CellAddr, String)> = Vec::new();
+        let mut formulas: Vec<(SheetId, String, CellAddr, String, Option<String>)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             let Some(sheet_name) = sheet_names.get(&sheet_id).cloned() else {
                 continue;
             };
             for (addr, cell) in &sheet.cells {
                 if let Some(formula) = &cell.formula {
-                    formulas.push((sheet_name.clone(), *addr, formula.to_string()));
+                    formulas.push((
+                        sheet_id,
+                        sheet_name.clone(),
+                        *addr,
+                        formula.clone(),
+                        cell.phonetic.clone(),
+                    ));
                 }
             }
         }
@@ -8488,9 +8494,21 @@ impl Engine {
             sheet.origin_dependents.clear();
         }
 
-        for (sheet_name, addr, formula) in formulas {
+        for (sheet_id, sheet_name, addr, formula, phonetic) in formulas {
             let addr_a1 = cell_addr_to_a1(addr);
             self.set_cell_formula(&sheet_name, &addr_a1, &formula)?;
+            if let Some(phonetic) = phonetic {
+                // Rebuilding the dependency graph recompiles formulas but should not clear
+                // cell-level phonetic metadata (used by `PHONETIC()`).
+                if let Some(cell) = self
+                    .workbook
+                    .sheets
+                    .get_mut(sheet_id)
+                    .and_then(|sheet| sheet.cells.get_mut(&addr))
+                {
+                    cell.phonetic = Some(phonetic);
+                }
+            }
         }
         Ok(())
     }

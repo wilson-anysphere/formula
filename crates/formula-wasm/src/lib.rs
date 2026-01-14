@@ -3550,6 +3550,11 @@ impl WorkbookState {
                             engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
                         });
 
+                    let phonetic = self
+                        .engine
+                        .get_cell_phonetic(&sheet, &address)
+                        .map(|s| s.to_string());
+
                     // Reset stored value to blank while preserving the formula. This matches the
                     // `setCell` behavior where formula results are treated as unknown until recalc.
                     self.engine
@@ -3558,6 +3563,13 @@ impl WorkbookState {
                     self.engine
                         .set_cell_formula(&sheet, &address, formula)
                         .map_err(|err| js_err(err.to_string()))?;
+                    if let Some(phonetic) = phonetic {
+                        // `Engine::set_cell_value`/`set_cell_formula` clear phonetic metadata, but
+                        // structural edits should preserve it.
+                        self.engine
+                            .set_cell_phonetic(&sheet, &address, Some(phonetic))
+                            .map_err(|err| js_err(err.to_string()))?;
+                    }
                 } else {
                     // This cell is now a literal (or empty) value; remove any stale baseline.
                     self.pending_formula_baselines.remove(&key);
@@ -8352,6 +8364,40 @@ mod tests {
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B2"], json!("=A2"));
         assert!(parsed["sheets"]["Sheet1"]["cells"].get("A1").is_none());
         assert!(parsed["sheets"]["Sheet1"]["cells"].get("B1").is_none());
+    }
+
+    #[test]
+    fn apply_operation_insert_rows_preserves_phonetic_metadata_on_formula_cells() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=\"漢字\""))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=PHONETIC(A1)"))
+            .unwrap();
+        wb.engine
+            .set_cell_phonetic(DEFAULT_SHEET, "A1", Some("かんじ".to_string()))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("かんじ".to_string())
+        );
+
+        wb.apply_operation_internal(EditOpDto::InsertRows {
+            sheet: DEFAULT_SHEET.to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.engine.get_cell_phonetic(DEFAULT_SHEET, "A2"),
+            Some("かんじ")
+        );
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "B2"),
+            EngineValue::Text("かんじ".to_string())
+        );
     }
 
     #[test]
