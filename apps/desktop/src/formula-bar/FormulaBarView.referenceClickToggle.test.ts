@@ -16,6 +16,7 @@ describe("FormulaBarView reference token click selection toggle", () => {
     view.focus({ cursor: "end" });
 
     view.textarea.value = "=A1+B1";
+    view.textarea.dispatchEvent(new Event("input"));
 
     // Place caret inside "A1" (between A and 1), then click: Excel UX should expand
     // selection to the full reference token.
@@ -120,6 +121,7 @@ describe("FormulaBarView reference token click selection toggle", () => {
 
     const refText = "Table1[Amount]";
     view.textarea.value = `=${refText}+B1`;
+    view.textarea.dispatchEvent(new Event("input"));
 
     const refStart = view.textarea.value.indexOf(refText);
     const refEnd = refStart + refText.length;
