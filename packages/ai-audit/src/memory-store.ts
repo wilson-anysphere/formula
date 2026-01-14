@@ -129,8 +129,9 @@ function isEntryBeforeCursor(
 ): boolean {
   if (entry.timestamp_ms < cursor.before_timestamp_ms) return true;
   if (entry.timestamp_ms > cursor.before_timestamp_ms) return false;
-  if (!cursor.before_id) return false;
-  return compareIdsDesc(entry.id, cursor.before_id) > 0;
+  const beforeId = typeof cursor.before_id === "string" ? cursor.before_id : undefined;
+  if (!beforeId) return false;
+  return compareIdsDesc(entry.id, beforeId) > 0;
 }
 
 function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {

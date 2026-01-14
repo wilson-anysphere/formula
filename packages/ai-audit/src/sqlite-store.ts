@@ -201,9 +201,10 @@ export class SqliteAIAuditStore implements AIAuditStore {
       params.push(before_timestamp_ms);
     }
     if (cursor) {
-      if (cursor.before_id) {
+      const beforeId = typeof cursor.before_id === "string" ? cursor.before_id : undefined;
+      if (beforeId) {
         where.push("(timestamp_ms < ? OR (timestamp_ms = ? AND id < ?))");
-        params.push(cursor.before_timestamp_ms, cursor.before_timestamp_ms, cursor.before_id);
+        params.push(cursor.before_timestamp_ms, cursor.before_timestamp_ms, beforeId);
       } else {
         where.push("timestamp_ms < ?");
         params.push(cursor.before_timestamp_ms);
