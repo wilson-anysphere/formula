@@ -81,6 +81,16 @@ function runValidator({ configPath, infoPlistPath }) {
   return proc;
 }
 
+function runValidatorUsingEnv({ configPath, infoPlistPath }) {
+  const proc = spawnSync("python3", [scriptPath, "--info-plist", infoPlistPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, FORMULA_TAURI_CONF_PATH: configPath },
+  });
+  if (proc.error) throw proc.error;
+  return proc;
+}
+
 test("verify_macos_bundle_associations passes when Info.plist declares xlsx document types and formula:// scheme", { skip: !hasPython3 }, () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
   mkdirSync(tmp, { recursive: true });
@@ -88,6 +98,16 @@ test("verify_macos_bundle_associations passes when Info.plist declares xlsx docu
   const infoPlistPath = writeInfoPlist(tmp, { includeXlsxDocumentType: true, includeUrlScheme: true });
 
   const proc = runValidator({ configPath, infoPlistPath });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("verify_macos_bundle_associations honors FORMULA_TAURI_CONF_PATH", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+  mkdirSync(tmp, { recursive: true });
+  const configPath = writeConfig(tmp);
+  const infoPlistPath = writeInfoPlist(tmp, { includeXlsxDocumentType: true, includeUrlScheme: true });
+
+  const proc = runValidatorUsingEnv({ configPath, infoPlistPath });
   assert.equal(proc.status, 0, proc.stderr);
 });
 

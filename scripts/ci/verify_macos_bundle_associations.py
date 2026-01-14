@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import plistlib
 import re
 import sys
@@ -223,9 +224,19 @@ def main() -> int:
         type=Path,
         help="Path to the built .app bundle Info.plist (e.g. Formula.app/Contents/Info.plist)",
     )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    override = os.environ.get("FORMULA_TAURI_CONF_PATH", "").strip()
+    if override:
+        tauri_default = Path(override)
+        if not tauri_default.is_absolute():
+            tauri_default = repo_root / tauri_default
+    else:
+        tauri_default = repo_root / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
+
     parser.add_argument(
         "--tauri-config",
-        default=Path("apps/desktop/src-tauri/tauri.conf.json"),
+        default=tauri_default,
         type=Path,
         help="Path to tauri.conf.json (source of truth for expected file associations)",
     )

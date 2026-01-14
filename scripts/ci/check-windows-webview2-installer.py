@@ -50,14 +50,23 @@ WEBVIEW2_MARKER_STRINGS = [
 ]
 
 
-def _load_configured_webview_install_mode(repo_root: Path) -> str | None:
+def _resolve_tauri_config_path(repo_root: Path) -> Path:
+    override = os.environ.get("FORMULA_TAURI_CONF_PATH", "").strip()
+    if override:
+        p = Path(override)
+        if not p.is_absolute():
+            p = repo_root / p
+        return p
+    return repo_root / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
+
+
+def _load_configured_webview_install_mode(conf_path: Path) -> str | None:
     """
     Read `bundle.windows.webviewInstallMode` from apps/desktop/src-tauri/tauri.conf.json.
 
     The config can be either a string (shorthand) or an object with a `type` field.
     """
 
-    conf_path = repo_root / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
     if not conf_path.is_file():
         return None
     try:
@@ -342,10 +351,17 @@ def _detect_webview2_marker(installer: Path) -> str | None:
 def main() -> int:
     repo_root = Path.cwd()
 
-    configured_mode = _load_configured_webview_install_mode(repo_root)
+    tauri_conf_path = _resolve_tauri_config_path(repo_root)
+    tauri_conf_display = tauri_conf_path
+    try:
+        tauri_conf_display = tauri_conf_path.relative_to(repo_root)
+    except ValueError:
+        pass
+
+    configured_mode = _load_configured_webview_install_mode(tauri_conf_path)
     if configured_mode is None:
         print(
-            "webview2-check: ERROR bundle.windows.webviewInstallMode is not set in apps/desktop/src-tauri/tauri.conf.json.\n"
+            f"webview2-check: ERROR bundle.windows.webviewInstallMode is not set in {tauri_conf_display}.\n"
             "The Windows installer must be configured to install WebView2 when it is missing (do not rely on users having it preinstalled).",
             file=sys.stderr,
         )

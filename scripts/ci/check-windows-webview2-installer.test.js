@@ -36,7 +36,7 @@ const pythonExe = detectPythonExecutable();
 const hasPython = Boolean(pythonExe);
 
 /**
- * @param {{ installerBytes: Buffer }} opts
+ * @param {{ installerBytes: Buffer; webviewInstallMode?: string }} opts
  */
 function run(opts) {
   assert.ok(pythonExe, "python executable not found");
@@ -48,6 +48,17 @@ function run(opts) {
   const installerPath = path.join(installerDir, "FormulaInstaller.exe");
   writeFileSync(installerPath, opts.installerBytes);
 
+  const configPath = path.join(tmpdir, "tauri.conf.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      { bundle: { windows: { webviewInstallMode: opts.webviewInstallMode ?? "downloadBootstrapper" } } },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
   const proc = spawnSync(pythonExe, [scriptPath], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -56,6 +67,7 @@ function run(opts) {
       // Point the verifier at our temp bundle output so the test does not depend on any
       // real build artifacts being present.
       CARGO_TARGET_DIR: targetDir,
+      FORMULA_TAURI_CONF_PATH: configPath,
     },
   });
 
@@ -78,4 +90,13 @@ test("fails when installer contains no WebView2 markers", { skip: !hasPython }, 
   });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /no WebView2 installer markers found|does not appear to bundle\/reference/i);
+});
+
+test("fails when webviewInstallMode is set to skip (via FORMULA_TAURI_CONF_PATH)", { skip: !hasPython }, () => {
+  const proc = run({
+    installerBytes: Buffer.from("...MicrosoftEdgeWebView2Setup.exe...", "utf8"),
+    webviewInstallMode: "skip",
+  });
+  assert.equal(proc.status, 2);
+  assert.match(proc.stderr, /webviewInstallMode.*skip/i);
 });
