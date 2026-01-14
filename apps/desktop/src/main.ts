@@ -64,6 +64,7 @@ import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisab
 import type { CellRange as GridCellRange } from "@formula/grid";
 
 import { rewriteDocumentFormulasForSheetDelete, rewriteDocumentFormulasForSheetRename } from "./sheets/sheetFormulaRewrite";
+import { pickAdjacentVisibleSheetId } from "./sheets/sheetNavigation";
 
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
@@ -3606,8 +3607,20 @@ function installSheetStoreSubscription(): void {
         // active sheet id and do not resurrect the deleted sheet.
         const activeSheetId = app.getCurrentSheetId();
         if (removed.includes(activeSheetId)) {
-          const fallback =
-            workbookSheetStore.listVisible().at(0)?.id ?? workbookSheetStore.listAll().at(0)?.id ?? null;
+          // Mirror Excel: deleting the active sheet activates the next visible sheet to the right,
+          // otherwise the previous visible sheet. Use the *pre-delete* sheet ordering (prev snapshot)
+          // to pick the adjacent sheet.
+          const prevSheets = prevOrder.map((sheetId) => ({
+            id: sheetId,
+            visibility: prevById.get(sheetId)?.visibility ?? ("visible" satisfies SheetVisibility),
+          }));
+          const preferred = pickAdjacentVisibleSheetId(prevSheets, activeSheetId);
+          const preferredMeta = preferred ? nextById.get(preferred) : null;
+          const preferredIsValid = Boolean(preferred && preferredMeta && preferredMeta.visibility === "visible");
+
+          const fallback = preferredIsValid
+            ? preferred
+            : (workbookSheetStore.listVisible().at(0)?.id ?? workbookSheetStore.listAll().at(0)?.id ?? null);
           if (fallback && fallback !== activeSheetId) {
             app.activateSheet(fallback);
           }
