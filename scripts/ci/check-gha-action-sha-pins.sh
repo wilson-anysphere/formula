@@ -58,6 +58,53 @@ trim() {
   printf '%s' "$s"
 }
 
+extract_uses_lines() {
+  local workflow="$1"
+  # Print lines in the format: file:line:content
+  #
+  # Important: avoid matching `uses:` strings inside YAML block scalars (e.g. `run: |` scripts)
+  # to prevent false positives.
+  awk '
+    function indent(line) {
+      match(line, /^[ \t]*/);
+      return RLENGTH;
+    }
+    {
+      raw=$0;
+      sub(/\r$/, "", raw);
+
+      ind=indent(raw);
+
+      trimmed=raw;
+      sub(/^[ \t]*/, "", trimmed);
+
+      # Best-effort strip trailing comments for block-scalar detection.
+      code=trimmed;
+      sub(/[ \t]+#.*/, "", code);
+
+      if (in_block) {
+        # YAML block scalars end when indentation returns to the block-start level (or less).
+        if (trimmed != "" && ind <= block_indent) {
+          in_block=0;
+        } else {
+          next;
+        }
+      }
+
+      # Detect the start of a block scalar (e.g. `run: |`, `script: >-`).
+      if (code ~ /^[^:#]+:[ \t]*[>|][+-]?[ \t]*$/) {
+        in_block=1;
+        block_indent=ind;
+      }
+
+      # Match YAML keys (including job-level reusable workflows) and step entries.
+      if (trimmed ~ /^-?[ \t]*uses:[ \t]*/) {
+        print FILENAME ":" NR ":" raw;
+      }
+    }
+  ' "$workflow"
+}
+
 for workflow in "${workflows[@]}"; do
 
 while IFS= read -r match; do
@@ -122,7 +169,7 @@ while IFS= read -r match; do
       fail=1
     fi
   fi
-done <<<"$(grep -nHE '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" || true)"
+done <<<"$(extract_uses_lines "$workflow" || true)"
 
 done
 
