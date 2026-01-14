@@ -133,6 +133,16 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("does not let unbalanced parentheses inside array literals affect argument indexing", () => {
+    const formula = "=SUM({1,(2,3}, 4)";
+    const insideSecondArg = formula.indexOf("4") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "4",
+    });
+  });
+
   it("ignores commas inside curly braces (array literals)", () => {
     const formula = "=SUM({1,2,3}, 4)";
     const insideSecondArg = formula.indexOf("4") + 1;

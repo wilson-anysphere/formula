@@ -175,19 +175,28 @@ function findArgumentEnd(formulaText: string, start: number): number {
     // Treat parentheses inside `[]` / `{}` as plain characters so structured references
     // like `Table1[Amount)]` don't accidentally break argument parsing.
     if (ch === "(") {
+      // Array literals (`{...}`) can contain unbalanced parentheses while the user is typing.
+      // Treat them as plain characters so we don't leak `parenDepth` out of the brace scope and
+      // mis-detect argument boundaries.
+      if (braceDepth > 0) {
+        i += 1;
+        continue;
+      }
       parenDepth += 1;
       i += 1;
       continue;
     }
     if (ch === ")") {
+      if (braceDepth > 0) {
+        i += 1;
+        continue;
+      }
       if (parenDepth > 0) {
         parenDepth -= 1;
         i += 1;
         continue;
       }
-      if (braceDepth === 0) return i;
-      i += 1;
-      continue;
+      return i;
     }
 
     if ((ch === "," || ch === ";") && parenDepth === 0 && braceDepth === 0) return i;
