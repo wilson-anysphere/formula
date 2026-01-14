@@ -514,6 +514,47 @@ pub(crate) enum RowSet {
     Many(Vec<usize>),
 }
 
+/// Lookup structure for the relationship key on the [`Relationship::to_table`] side.
+///
+/// For many-to-many relationships the `to_table` side may contain a very large number of duplicate
+/// keys (especially when backed by a columnar table). Storing `Vec<usize>` row lists per key can
+/// become a major memory sink.
+///
+/// When the `to_table` is columnar and the relationship is many-to-many, we store only the set of
+/// distinct keys and rely on [`crate::backend::TableBackend::filter_eq`] /
+/// [`crate::backend::TableBackend::filter_in`] to retrieve matching row indices on demand.
+#[derive(Clone, Debug)]
+pub(crate) enum ToIndex {
+    /// Full mapping from key -> row set(s).
+    RowSets {
+        map: HashMap<Value, RowSet>,
+        /// Whether any key maps to more than one row.
+        has_duplicates: bool,
+    },
+    /// Scalable representation for columnar many-to-many `to_table` lookups.
+    KeySet {
+        keys: HashSet<Value>,
+        /// Whether any key occurs more than once in the `to_table`.
+        has_duplicates: bool,
+    },
+}
+
+impl ToIndex {
+    pub(crate) fn contains_key(&self, key: &Value) -> bool {
+        match self {
+            ToIndex::RowSets { map, .. } => map.contains_key(key),
+            ToIndex::KeySet { keys, .. } => keys.contains(key),
+        }
+    }
+
+    pub(crate) fn has_duplicates(&self) -> bool {
+        match self {
+            ToIndex::RowSets { has_duplicates, .. } => *has_duplicates,
+            ToIndex::KeySet { has_duplicates, .. } => *has_duplicates,
+        }
+    }
+}
+
 impl RowSet {
     pub(crate) fn push(&mut self, row: usize) {
         match self {
@@ -574,6 +615,7 @@ impl UnmatchedFactRows {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&usize) -> bool) {
         match self {
             UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(row)),
@@ -794,8 +836,11 @@ impl UnmatchedFactRowsBuilder {
 /// Internal relationship representation with precomputed key indices used by filter propagation
 /// and row-context navigation.
 ///
-/// - `to_index` maps each key value in `to_table[to_column]` to the set of matching row indices in
-///   `to_table` (see [`RowSet`] for how this is represented compactly).
+/// - `to_index` provides lookups for keys in `to_table[to_column]`.
+///   - For most relationships, it maps each key value to the set of matching row indices in
+///     `to_table` (see [`RowSet`] for how this is represented compactly).
+///   - For many-to-many relationships where `to_table` is columnar, it stores only the set of
+///     distinct keys and relies on backend filter primitives to retrieve row indices on demand.
 /// - `from_index`, when present, maps each key value in `from_table[from_column]` to the list of
 ///   matching row indices in `from_table`. Columnar fact tables omit this index and rely on
 ///   backend filter primitives instead.
@@ -810,7 +855,7 @@ pub(crate) struct RelationshipInfo {
     pub(crate) from_idx: usize,
     /// Column index of `rel.to_column` in the `to_table`.
     pub(crate) to_idx: usize,
-    pub(crate) to_index: HashMap<Value, RowSet>,
+    pub(crate) to_index: ToIndex,
     /// Relationship index for the fact-side (from_table) foreign key.
     ///
     /// For in-memory fact tables, we build an index of `FK -> fact row indices` to enable fast
@@ -1111,20 +1156,35 @@ impl DataModel {
             // Keep a copy for any downstream bookkeeping (e.g. updating cached unmatched fact
             // rows for columnar relationships).
             let key_for_updates = key.clone();
-            match self.relationships[rel_idx].rel.cardinality {
-                Cardinality::OneToMany | Cardinality::OneToOne => {
-                    self.relationships[rel_idx]
-                        .to_index
-                        .insert(key, RowSet::One(row_index));
-                }
-                Cardinality::ManyToMany => match self.relationships[rel_idx].to_index.entry(key) {
-                    Entry::Vacant(v) => {
-                        v.insert(RowSet::One(row_index));
+            let cardinality = self.relationships[rel_idx].rel.cardinality;
+            match &mut self.relationships[rel_idx].to_index {
+                ToIndex::RowSets {
+                    map,
+                    has_duplicates,
+                } => match cardinality {
+                    Cardinality::OneToMany | Cardinality::OneToOne => {
+                        map.insert(key, RowSet::One(row_index));
                     }
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().push(row_index);
-                    }
+                    Cardinality::ManyToMany => match map.entry(key) {
+                        Entry::Vacant(v) => {
+                            v.insert(RowSet::One(row_index));
+                        }
+                        Entry::Occupied(mut o) => {
+                            *has_duplicates = true;
+                            o.get_mut().push(row_index);
+                        }
+                    },
                 },
+                ToIndex::KeySet {
+                    keys,
+                    has_duplicates,
+                } => {
+                    // Columnar tables are immutable, so this should be unreachable. Keep the
+                    // structure consistent in case a mutable columnar backend is introduced.
+                    if !keys.insert(key) {
+                        *has_duplicates = true;
+                    }
+                }
             }
 
             // If this relationship tracks unmatched fact rows (columnar from-table), inserting a
@@ -1299,29 +1359,53 @@ impl DataModel {
         let from_column_key = normalize_ident(&relationship.from_column);
         let to_column_key = normalize_ident(&relationship.to_column);
 
-        let mut to_index = HashMap::<Value, RowSet>::new();
-        for row in 0..to_table.row_count() {
-            let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-            match relationship.cardinality {
-                Cardinality::OneToMany | Cardinality::OneToOne => {
-                    if to_index.insert(value.clone(), RowSet::One(row)).is_some() {
-                        return Err(DaxError::NonUniqueKey {
-                            table: relationship.to_table.clone(),
-                            column: relationship.to_column.clone(),
-                            value: value.clone(),
-                        });
+        let to_index = match (&to_table.storage, relationship.cardinality) {
+            // For many-to-many relationships where the `to_table` is columnar, storing per-key row
+            // lists can be prohibitively expensive when keys are highly duplicated. Store only the
+            // key set and rely on backend filter primitives to retrieve row indices on demand.
+            (TableStorage::Columnar(_), Cardinality::ManyToMany) => {
+                let mut keys = HashSet::<Value>::new();
+                let mut has_duplicates = false;
+                for row in 0..to_table.row_count() {
+                    let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
+                    if !keys.insert(value) {
+                        has_duplicates = true;
                     }
                 }
-                Cardinality::ManyToMany => match to_index.entry(value) {
-                    Entry::Vacant(v) => {
-                        v.insert(RowSet::One(row));
-                    }
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().push(row);
-                    }
-                },
+                ToIndex::KeySet {
+                    keys,
+                    has_duplicates,
+                }
             }
-        }
+            _ => {
+                let mut map = HashMap::<Value, RowSet>::new();
+                let mut has_duplicates = false;
+                for row in 0..to_table.row_count() {
+                    let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
+                    match relationship.cardinality {
+                        Cardinality::OneToMany | Cardinality::OneToOne => {
+                            if map.insert(value.clone(), RowSet::One(row)).is_some() {
+                                return Err(DaxError::NonUniqueKey {
+                                    table: relationship.to_table.clone(),
+                                    column: relationship.to_column.clone(),
+                                    value: value.clone(),
+                                });
+                            }
+                        }
+                        Cardinality::ManyToMany => match map.entry(value) {
+                            Entry::Vacant(v) => {
+                                v.insert(RowSet::One(row));
+                            }
+                            Entry::Occupied(mut o) => {
+                                has_duplicates = true;
+                                o.get_mut().push(row);
+                            }
+                        },
+                    }
+                }
+                ToIndex::RowSets { map, has_duplicates }
+            }
+        };
 
         let (from_index, unmatched_fact_rows) = match &from_table.storage {
             TableStorage::InMemory(_) => {

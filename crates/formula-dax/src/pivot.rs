@@ -1,6 +1,6 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
-use crate::model::{normalize_ident, Cardinality, RelationshipPathDirection, RowSet};
+use crate::model::{normalize_ident, Cardinality, RelationshipPathDirection, RowSet, ToIndex};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DataModel, DaxEngine, Value};
 #[cfg(feature = "pivot-model")]
@@ -455,7 +455,8 @@ struct RelatedHop<'a> {
     relationship_idx: usize,
     from_idx: usize,
     to_table_key: &'a str,
-    to_index: &'a std::collections::HashMap<Value, RowSet>,
+    to_idx: usize,
+    to_index: &'a ToIndex,
     to_table: &'a crate::model::Table,
 }
 
@@ -541,6 +542,7 @@ fn build_group_key_accessors<'a>(
                 relationship_idx: rel_idx,
                 from_idx,
                 to_table_key: rel_info.to_table_key.as_str(),
+                to_idx: rel_info.to_idx,
                 to_index: &rel_info.to_index,
                 to_table: to_table_ref,
             });
@@ -593,20 +595,59 @@ fn fill_group_key(
                         ok = false;
                         break;
                     }
-                    let Some(to_row_set) = hop.to_index.get(&key) else {
-                        ok = false;
-                        break;
-                    };
-                    let to_row = match to_row_set {
-                        RowSet::One(row) => *row,
-                        RowSet::Many(rows) => {
-                            if rows.len() == 1 {
-                                rows[0]
-                            } else {
-                                return Err(DaxError::Eval(format!(
-                                    "pivot related group key is ambiguous: key {key} matches multiple rows in {}",
-                                    hop.to_table.name()
-                                )));
+                    let to_row = match hop.to_index {
+                        ToIndex::RowSets { map, .. } => {
+                            let Some(to_row_set) = map.get(&key) else {
+                                ok = false;
+                                break;
+                            };
+                            match to_row_set {
+                                RowSet::One(row) => *row,
+                                RowSet::Many(rows) => {
+                                    if rows.len() == 1 {
+                                        rows[0]
+                                    } else {
+                                        return Err(DaxError::Eval(format!(
+                                            "pivot related group key is ambiguous: key {key} matches multiple rows in {}",
+                                            hop.to_table.name()
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        ToIndex::KeySet { keys, .. } => {
+                            if !keys.contains(&key) {
+                                ok = false;
+                                break;
+                            }
+                            let rows = hop
+                                .to_table
+                                .filter_eq(hop.to_idx, &key)
+                                .unwrap_or_else(|| {
+                                    let mut out = Vec::new();
+                                    for row in 0..hop.to_table.row_count() {
+                                        let v = hop
+                                            .to_table
+                                            .value_by_idx(row, hop.to_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if v == key {
+                                            out.push(row);
+                                        }
+                                    }
+                                    out
+                                });
+                            match rows.as_slice() {
+                                [] => {
+                                    ok = false;
+                                    break;
+                                }
+                                [row] => *row,
+                                _ => {
+                                    return Err(DaxError::Eval(format!(
+                                        "pivot related group key is ambiguous: key {key} matches multiple rows in {}",
+                                        hop.to_table.name()
+                                    )));
+                                }
                             }
                         }
                     };
@@ -648,11 +689,7 @@ fn requires_many_to_many_grouping(
             continue;
         };
         for hop in hops {
-            if hop
-                .to_index
-                .values()
-                .any(|rows| matches!(rows, RowSet::Many(_)))
-            {
+            if hop.to_index.has_duplicates() {
                 return Ok(true);
             }
         }
@@ -1470,7 +1507,8 @@ enum StarSchemaGroupKeyAccessor<'a> {
     },
     Related {
         fk_key_pos: usize,
-        to_index: &'a HashMap<Value, RowSet>,
+        to_idx: usize,
+        to_index: &'a ToIndex,
         to_table: &'a crate::model::Table,
         to_column_idx: usize,
     },
@@ -1589,6 +1627,7 @@ fn pivot_columnar_star_schema_group_by(
 
         accessors.push(StarSchemaGroupKeyAccessor::Related {
             fk_key_pos: pos,
+            to_idx: rel_info.to_idx,
             to_index: &rel_info.to_index,
             to_table: to_table_ref,
             to_column_idx,
@@ -1767,6 +1806,7 @@ fn pivot_columnar_star_schema_group_by(
                 }
                 StarSchemaGroupKeyAccessor::Related {
                     fk_key_pos,
+                    to_idx,
                     to_index,
                     to_table,
                     to_column_idx,
@@ -1774,22 +1814,53 @@ fn pivot_columnar_star_schema_group_by(
                     let fk = keys.get(*fk_key_pos).cloned().unwrap_or(Value::Blank);
                     if fk.is_blank() {
                         key_buf.push(Value::Blank);
-                    } else if let Some(to_row_set) = to_index.get(&fk) {
-                        let to_row = match to_row_set {
-                            RowSet::One(row) => *row,
-                            RowSet::Many(_) => {
-                                // Many-to-many expansion isn't supported by this star-schema fast
-                                // path; fall back to the generic (slower) implementation.
-                                return Ok(None);
+                    } else {
+                        let to_row = match to_index {
+                            ToIndex::RowSets { map, .. } => match map.get(&fk) {
+                                Some(RowSet::One(row)) => Some(*row),
+                                Some(RowSet::Many(_)) => {
+                                    // Many-to-many expansion isn't supported by this star-schema
+                                    // fast path; fall back to the generic (slower) implementation.
+                                    return Ok(None);
+                                }
+                                None => None,
+                            },
+                            ToIndex::KeySet { keys, .. } => {
+                                if !keys.contains(&fk) {
+                                    None
+                                } else {
+                                    let rows = to_table
+                                        .filter_eq(*to_idx, &fk)
+                                        .unwrap_or_else(|| {
+                                            let mut out = Vec::new();
+                                            for row in 0..to_table.row_count() {
+                                                let v = to_table
+                                                    .value_by_idx(row, *to_idx)
+                                                    .unwrap_or(Value::Blank);
+                                                if v == fk {
+                                                    out.push(row);
+                                                }
+                                            }
+                                            out
+                                        });
+                                    match rows.as_slice() {
+                                        [] => None,
+                                        [row] => Some(*row),
+                                        _ => return Ok(None),
+                                    }
+                                }
                             }
                         };
-                        key_buf.push(
-                            to_table
-                                .value_by_idx(to_row, *to_column_idx)
-                                .unwrap_or(Value::Blank),
-                        );
-                    } else {
-                        key_buf.push(Value::Blank);
+
+                        if let Some(to_row) = to_row {
+                            key_buf.push(
+                                to_table
+                                    .value_by_idx(to_row, *to_column_idx)
+                                    .unwrap_or(Value::Blank),
+                            );
+                        } else {
+                            key_buf.push(Value::Blank);
+                        }
                     }
                 }
             }
@@ -2196,19 +2267,61 @@ fn pivot_row_scan_many_to_many(
         if key.is_blank() {
             return Vec::new();
         }
-        let Some(to_row_set) = hop.to_index.get(&key) else {
-            return Vec::new();
-        };
         let allowed = row_sets.and_then(|sets| sets.get(hop.to_table_key));
         let mut rows: Vec<usize> = Vec::new();
-        to_row_set.for_each_row(|to_row| {
-            if allowed
-                .map(|set| to_row < set.len() && set.get(to_row))
-                .unwrap_or(true)
-            {
-                rows.push(to_row);
+        match hop.to_index {
+            ToIndex::RowSets { map, .. } => {
+                let Some(to_row_set) = map.get(&key) else {
+                    return Vec::new();
+                };
+                to_row_set.for_each_row(|to_row| {
+                    if allowed
+                        .map(|set| to_row < set.len() && set.get(to_row))
+                        .unwrap_or(true)
+                    {
+                        rows.push(to_row);
+                    }
+                });
             }
-        });
+            ToIndex::KeySet { keys, .. } => {
+                if !keys.contains(&key) {
+                    return Vec::new();
+                }
+
+                if let Some(matches) = hop.to_table.filter_eq(hop.to_idx, &key) {
+                    for to_row in matches {
+                        if allowed
+                            .map(|set| to_row < set.len() && set.get(to_row))
+                            .unwrap_or(true)
+                        {
+                            rows.push(to_row);
+                        }
+                    }
+                } else if let Some(set) = allowed {
+                    // Fallback: scan only the allowed rows and compare values.
+                    for to_row in set.iter_ones() {
+                        let v = hop
+                            .to_table
+                            .value_by_idx(to_row, hop.to_idx)
+                            .unwrap_or(Value::Blank);
+                        if v == key {
+                            rows.push(to_row);
+                        }
+                    }
+                } else {
+                    // Fallback: scan the full related table and compare values.
+                    for to_row in 0..hop.to_table.row_count() {
+                        let v = hop
+                            .to_table
+                            .value_by_idx(to_row, hop.to_idx)
+                            .unwrap_or(Value::Blank);
+                        if v == key {
+                            rows.push(to_row);
+                        }
+                    }
+                }
+            }
+        }
         rows.sort_unstable();
         rows.dedup();
         rows

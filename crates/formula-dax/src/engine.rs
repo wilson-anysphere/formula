@@ -12,7 +12,7 @@
 use crate::backend::TableBackend;
 use crate::model::{
     normalize_ident, Cardinality, CrossFilterDirection, DataModel, RelationshipInfo,
-    RelationshipPathDirection, RowSet,
+    RelationshipPathDirection, RowSet, ToIndex,
 };
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
@@ -3299,19 +3299,53 @@ impl DaxEngine {
                 return Ok(Value::Blank);
             }
 
-            let Some(to_row_set) = rel_info.to_index.get(&key) else {
-                return Ok(Value::Blank);
-            };
-            let to_row = match to_row_set {
-                RowSet::One(row) => *row,
-                RowSet::Many(rows) => {
-                    if rows.len() == 1 {
-                        rows[0]
-                    } else {
-                        return Err(DaxError::Eval(format!(
-                            "RELATED is ambiguous: key {key} matches multiple rows in {} (relationship {})",
-                            rel_info.rel.to_table, rel_info.rel.name
-                        )));
+            let to_table = model
+                .table(&rel_info.rel.to_table)
+                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+            let to_row = match &rel_info.to_index {
+                ToIndex::RowSets { map, .. } => {
+                    let Some(to_row_set) = map.get(&key) else {
+                        return Ok(Value::Blank);
+                    };
+                    match to_row_set {
+                        RowSet::One(row) => *row,
+                        RowSet::Many(rows) => {
+                            if rows.len() == 1 {
+                                rows[0]
+                            } else {
+                                return Err(DaxError::Eval(format!(
+                                    "RELATED is ambiguous: key {key} matches multiple rows in {} (relationship {})",
+                                    rel_info.rel.to_table, rel_info.rel.name
+                                )));
+                            }
+                        }
+                    }
+                }
+                ToIndex::KeySet { keys, .. } => {
+                    if !keys.contains(&key) {
+                        return Ok(Value::Blank);
+                    }
+                    let rows = to_table
+                        .filter_eq(rel_info.to_idx, &key)
+                        .unwrap_or_else(|| {
+                            let mut out = Vec::new();
+                            for row in 0..to_table.row_count() {
+                                let v = to_table.value_by_idx(row, rel_info.to_idx).unwrap_or(Value::Blank);
+                                if v == key {
+                                    out.push(row);
+                                }
+                            }
+                            out
+                        });
+                    match rows.as_slice() {
+                        [] => return Ok(Value::Blank),
+                        [row] => *row,
+                        _ => {
+                            return Err(DaxError::Eval(format!(
+                                "RELATED is ambiguous: key {key} matches multiple rows in {} (relationship {})",
+                                rel_info.rel.to_table, rel_info.rel.name
+                            )))
+                        }
                     }
                 }
             };
@@ -3911,20 +3945,54 @@ impl DaxEngine {
                             .relationships()
                             .get(hop.relationship_idx)
                             .expect("valid relationship index");
-                        let Some(to_row_set) = rel_info.to_index.get(&key) else {
-                            return Ok(Vec::new());
-                        };
 
                         let allowed_to = row_sets
                             .get(rel_info.to_table_key.as_str())
                             .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
                         let mut rows: Vec<usize> = Vec::new();
-                        to_row_set.for_each_row(|to_row: usize| {
-                            if to_row < allowed_to.len() && allowed_to.get(to_row) {
-                                rows.push(to_row);
+                        match &rel_info.to_index {
+                            ToIndex::RowSets { map, .. } => {
+                                let Some(to_row_set) = map.get(&key) else {
+                                    return Ok(Vec::new());
+                                };
+                                to_row_set.for_each_row(|to_row: usize| {
+                                    if to_row < allowed_to.len() && allowed_to.get(to_row) {
+                                        rows.push(to_row);
+                                    }
+                                });
                             }
-                        });
+                            ToIndex::KeySet { .. } => {
+                                // Fast path: if the key doesn't exist in the related table, there
+                                // can be no matching rows.
+                                if !rel_info.to_index.contains_key(&key) {
+                                    return Ok(Vec::new());
+                                }
+
+                                let to_table_ref = model
+                                    .table(rel_info.rel.to_table.as_str())
+                                    .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+
+                                if let Some(matches) = to_table_ref.filter_eq(rel_info.to_idx, &key)
+                                {
+                                    for to_row in matches {
+                                        if to_row < allowed_to.len() && allowed_to.get(to_row) {
+                                            rows.push(to_row);
+                                        }
+                                    }
+                                } else {
+                                    // Fallback: scan the allowed row set and compare values.
+                                    for to_row in allowed_to.iter_ones() {
+                                        let v = to_table_ref
+                                            .value_by_idx(to_row, rel_info.to_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if v == key {
+                                            rows.push(to_row);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         rows.sort_unstable();
                         rows.dedup();
                         Ok(rows)
@@ -4337,20 +4405,51 @@ impl DaxEngine {
                             .relationships()
                             .get(hop.relationship_idx)
                             .expect("valid relationship index");
-                        let Some(to_row_set) = rel_info.to_index.get(&key) else {
-                            return Ok(Vec::new());
-                        };
 
                         let allowed_to = row_sets
                             .get(rel_info.to_table_key.as_str())
                             .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
                         let mut rows: Vec<usize> = Vec::new();
-                        to_row_set.for_each_row(|to_row: usize| {
-                            if to_row < allowed_to.len() && allowed_to.get(to_row) {
-                                rows.push(to_row);
+                        match &rel_info.to_index {
+                            ToIndex::RowSets { map, .. } => {
+                                let Some(to_row_set) = map.get(&key) else {
+                                    return Ok(Vec::new());
+                                };
+                                to_row_set.for_each_row(|to_row: usize| {
+                                    if to_row < allowed_to.len() && allowed_to.get(to_row) {
+                                        rows.push(to_row);
+                                    }
+                                });
                             }
-                        });
+                            ToIndex::KeySet { .. } => {
+                                if !rel_info.to_index.contains_key(&key) {
+                                    return Ok(Vec::new());
+                                }
+
+                                let to_table_ref = model
+                                    .table(rel_info.rel.to_table.as_str())
+                                    .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+
+                                if let Some(matches) = to_table_ref.filter_eq(rel_info.to_idx, &key)
+                                {
+                                    for to_row in matches {
+                                        if to_row < allowed_to.len() && allowed_to.get(to_row) {
+                                            rows.push(to_row);
+                                        }
+                                    }
+                                } else {
+                                    for to_row in allowed_to.iter_ones() {
+                                        let v = to_table_ref
+                                            .value_by_idx(to_row, rel_info.to_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if v == key {
+                                            rows.push(to_row);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         rows.sort_unstable();
                         rows.dedup();
                         Ok(rows)
@@ -5201,64 +5300,34 @@ fn propagate_filter(
             // the current filter context.
             //
             // For many-to-many relationships, a key can correspond to multiple `to_table` rows. For
-            // in-memory fact tables, we already have `to_index` materialized, so we can use it to
-            // compute the visible key set. For columnar fact tables, iterating `to_index` can be
-            // expensive (especially when the `to_table` is also large); prefer extracting distinct
-            // visible values directly from the `to_table` backend when possible.
-            let mut allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
-                relationship
-                    .to_index
+            // in-memory fact tables we may have a fully materialized `to_index` (FK -> row set) and
+            // can use it for the visible key set. For large columnar `to_table`s, we may store only
+            // a key set (to avoid allocating per-key row vectors); in that case, extract the
+            // distinct visible values directly from the backend.
+            let mut allowed_keys: Vec<Value> = match (&relationship.to_index, relationship.from_index.as_ref()) {
+                (ToIndex::RowSets { map, .. }, Some(_)) => map
                     .iter()
                     // Fact rows whose FK is BLANK always belong to the relationship-generated blank
                     // member, even if a physical BLANK key exists on the dimension side. Therefore,
                     // do not treat BLANK as a matchable key during propagation.
                     .filter(|(key, _)| !key.is_blank())
                     .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
-                    .collect()
-            } else {
-                let to_table = model
-                    .table(to_table_name)
-                    .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
-
-                let all_visible = to_set.all_true();
-
-                if all_visible {
-                    to_table
-                        .distinct_values_filtered(relationship.to_idx, None)
-                        .unwrap_or_else(|| {
-                            let mut seen = HashSet::new();
-                            let mut out = Vec::new();
-                            for row in 0..to_table.row_count() {
-                                let v = to_table
-                                    .value_by_idx(row, relationship.to_idx)
-                                    .unwrap_or(Value::Blank);
-                                if seen.insert(v.clone()) {
-                                    out.push(v);
-                                }
-                            }
-                            out
-                        })
-                } else {
-                    let physical_rows = to_table.row_count();
-                    let visible_count = to_set
-                        .iter_ones()
-                        .take_while(|&idx| idx < physical_rows)
-                        .count();
-                    if visible_count == 0 {
-                        Vec::new()
-                    } else if to_set.len() == physical_rows {
+                    .collect(),
+                _ => {
+                    let to_table = model
+                        .table(to_table_name)
+                        .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+                    let to_idx = relationship.to_idx;
+                    let all_visible = to_set.all_true();
+                    if all_visible {
                         to_table
-                            .distinct_values_filtered_mask(relationship.to_idx, Some(to_set))
+                            .distinct_values_filtered(to_idx, None)
                             .unwrap_or_else(|| {
                                 let mut seen = HashSet::new();
                                 let mut out = Vec::new();
-                                for row in to_set
-                                    .iter_ones()
-                                    .take_while(|&idx| idx < physical_rows)
-                                {
-                                    let v = to_table
-                                        .value_by_idx(row, relationship.to_idx)
-                                        .unwrap_or(Value::Blank);
+                                for row in 0..to_table.row_count() {
+                                    let v =
+                                        to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
                                     if seen.insert(v.clone()) {
                                         out.push(v);
                                     }
@@ -5266,19 +5335,122 @@ fn propagate_filter(
                                 out
                             })
                     } else {
-                        // Defensive fallback: if the mask includes any out-of-bounds rows (e.g. a
-                        // relationship-generated virtual row), ignore them when scanning.
-                        let mut seen = HashSet::new();
-                        let mut out = Vec::new();
-                        for row in to_set.iter_ones().take_while(|&idx| idx < physical_rows) {
-                            let v = to_table
-                                .value_by_idx(row, relationship.to_idx)
-                                .unwrap_or(Value::Blank);
-                            if seen.insert(v.clone()) {
-                                out.push(v);
+                        let physical_rows = to_table.row_count();
+                        let mut visible_count = to_set.count_ones();
+                        if to_set.len() > physical_rows {
+                            // Exclude any "virtual blank member" rows that live beyond the physical
+                            // table length.
+                            for idx in physical_rows..to_set.len() {
+                                if to_set.get(idx) {
+                                    visible_count = visible_count.saturating_sub(1);
+                                }
                             }
                         }
-                        out
+
+                        if visible_count == 0 {
+                            Vec::new()
+                        } else if visible_count == physical_rows {
+                            // All physical rows are visible (but the relationship's virtual blank
+                            // member may be filtered out). Extract keys from the full physical
+                            // table without materializing row indices.
+                            to_table
+                                .distinct_values_filtered(to_idx, None)
+                                .unwrap_or_else(|| {
+                                    let mut seen = HashSet::new();
+                                    let mut out = Vec::new();
+                                    for row in 0..physical_rows {
+                                        let v = to_table
+                                            .value_by_idx(row, to_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if seen.insert(v.clone()) {
+                                            out.push(v);
+                                        }
+                                    }
+                                    out
+                                })
+                        } else if to_set.len() == physical_rows {
+                            // Prefer backends that can compute distinct values directly from a
+                            // bitmap mask (avoids allocating a potentially huge `Vec<usize>`).
+                            to_table
+                                .distinct_values_filtered_mask(to_idx, Some(to_set))
+                                .unwrap_or_else(|| {
+                                    // Fall back to the generic implementation below.
+                                    let sparse_to_dense_threshold = physical_rows / 64;
+                                    if visible_count > sparse_to_dense_threshold {
+                                        let mut seen = HashSet::new();
+                                        let mut out = Vec::new();
+                                        for row in to_set.iter_ones() {
+                                            let v = to_table
+                                                .value_by_idx(row, to_idx)
+                                                .unwrap_or(Value::Blank);
+                                            if seen.insert(v.clone()) {
+                                                out.push(v);
+                                            }
+                                        }
+                                        out
+                                    } else {
+                                        let visible_rows: Vec<usize> = to_set.iter_ones().collect();
+                                        to_table
+                                            .distinct_values_filtered(
+                                                to_idx,
+                                                Some(visible_rows.as_slice()),
+                                            )
+                                            .unwrap_or_else(|| {
+                                                let mut seen = HashSet::new();
+                                                let mut out = Vec::new();
+                                                for &row in &visible_rows {
+                                                    let v = to_table
+                                                        .value_by_idx(row, to_idx)
+                                                        .unwrap_or(Value::Blank);
+                                                    if seen.insert(v.clone()) {
+                                                        out.push(v);
+                                                    }
+                                                }
+                                                out
+                                            })
+                                    }
+                                })
+                        } else {
+                            // `distinct_values_filtered` takes a row index list. For large row
+                            // sets, that list can be prohibitively expensive (8 bytes/row). Prefer
+                            // scanning the allowed `BitVec` directly once it would be cheaper than
+                            // materializing row indices (same heuristic as
+                            // `UnmatchedFactRowsBuilder`).
+                            let sparse_to_dense_threshold = physical_rows / 64;
+                            if visible_count > sparse_to_dense_threshold {
+                                let mut seen = HashSet::new();
+                                let mut out = Vec::new();
+                                for row in to_set.iter_ones().filter(|&idx| idx < physical_rows) {
+                                    let v = to_table
+                                        .value_by_idx(row, to_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if seen.insert(v.clone()) {
+                                        out.push(v);
+                                    }
+                                }
+                                out
+                            } else {
+                                let visible_rows: Vec<usize> = to_set
+                                    .iter_ones()
+                                    .filter(|&idx| idx < physical_rows)
+                                    .collect();
+                                to_table
+                                    .distinct_values_filtered(to_idx, Some(visible_rows.as_slice()))
+                                    .unwrap_or_else(|| {
+                                        let mut seen = HashSet::new();
+                                        let mut out = Vec::new();
+                                        for &row in &visible_rows {
+                                            let v = to_table
+                                                .value_by_idx(row, to_idx)
+                                                .unwrap_or(Value::Blank);
+                                            if seen.insert(v.clone()) {
+                                                out.push(v);
+                                            }
+                                        }
+                                        out
+                                    })
+                            }
+                        }
                     }
                 }
             };
@@ -5392,62 +5564,79 @@ fn propagate_filter(
 
             let mut next = BitVec::with_len_all_false(to_set.len());
 
-            if let Some(from_index) = relationship.from_index.as_ref() {
+            // Derive distinct *non-blank* FK values from the allowed fact rows.
+            //
+            // Fact-side BLANK foreign keys always belong to the relationship-generated blank member
+            // and must not match a physical BLANK key on the dimension side.
+            let keys: Vec<Value> = if let Some(from_index) = relationship.from_index.as_ref() {
+                let mut out = Vec::new();
                 for (key, rows) in from_index {
-                    // See `Direction::ToMany`: BLANK keys should not match a physical BLANK
-                    // dimension key; they only participate via the virtual blank member.
                     if key.is_blank() {
                         continue;
                     }
-                    if !rows
+                    if rows
                         .iter()
                         .any(|row| *row < from_set.len() && from_set.get(*row))
                     {
-                        continue;
+                        out.push(key.clone());
                     }
-
-                    let Some(to_rows) = relationship.to_index.get(key) else {
-                        continue;
-                    };
-                    to_rows.for_each_row(|to_row| {
-                        if to_row < to_set.len() && to_set.get(to_row) {
-                            next.set(to_row, true);
-                        }
-                    });
                 }
+                out
             } else {
-                // Columnar fact tables: derive distinct FK values from the allowed fact rows.
                 let from_table = model
                     .table(from_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
 
                 let visible_count = from_set.count_ones();
-                if visible_count > 0 {
-                    let keys = from_table
-                        .distinct_values_filtered_mask(relationship.from_idx, Some(from_set))
-                        .unwrap_or_else(|| {
-                            let mut seen = HashSet::new();
-                            let mut out = Vec::new();
-                            for row in from_set.iter_ones() {
-                                let v = from_table
-                                    .value_by_idx(row, relationship.from_idx)
-                                    .unwrap_or(Value::Blank);
-                                if seen.insert(v.clone()) {
-                                    out.push(v);
-                                }
+                if visible_count == 0 {
+                    Vec::new()
+                } else if let Some(keys) = from_table
+                    .distinct_values_filtered_mask(relationship.from_idx, Some(from_set))
+                {
+                    keys.into_iter().filter(|k| !k.is_blank()).collect()
+                } else {
+                    // `distinct_values_filtered` takes a row index list. For large row sets, that
+                    // list can be prohibitively expensive (8 bytes/row). Prefer scanning the
+                    // allowed `BitVec` directly once it would be cheaper than materializing row
+                    // indices (same heuristic as `UnmatchedFactRowsBuilder`).
+                    let sparse_to_dense_threshold = from_table.row_count() / 64;
+                    if visible_count > sparse_to_dense_threshold {
+                        let mut keys: HashSet<Value> = HashSet::new();
+                        for row in from_set.iter_ones() {
+                            let v = from_table
+                                .value_by_idx(row, relationship.from_idx)
+                                .unwrap_or(Value::Blank);
+                            if !v.is_blank() {
+                                keys.insert(v);
                             }
-                            out
-                        });
-
-                    for key in keys {
-                        // Fact rows whose FK is BLANK always belong to the relationship-generated
-                        // blank member, even if a physical BLANK key exists on the dimension side.
-                        // Therefore, do not treat BLANK as a matchable key during propagation.
-                        if key.is_blank() {
-                            continue;
                         }
+                        keys.into_iter().collect()
+                    } else {
+                        let rows: Vec<usize> = from_set.iter_ones().collect();
+                        let keys = from_table
+                            .distinct_values_filtered(relationship.from_idx, Some(rows.as_slice()))
+                            .unwrap_or_else(|| {
+                                let mut seen = HashSet::new();
+                                let mut out = Vec::new();
+                                for &row in &rows {
+                                    let v = from_table
+                                        .value_by_idx(row, relationship.from_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if seen.insert(v.clone()) {
+                                        out.push(v);
+                                    }
+                                }
+                                out
+                            });
+                        keys.into_iter().filter(|k| !k.is_blank()).collect()
+                    }
+                }
+            };
 
-                        let Some(to_rows) = relationship.to_index.get(&key) else {
+            match &relationship.to_index {
+                ToIndex::RowSets { map, .. } => {
+                    for key in &keys {
+                        let Some(to_rows) = map.get(key) else {
                             continue;
                         };
                         to_rows.for_each_row(|to_row| {
@@ -5455,6 +5644,31 @@ fn propagate_filter(
                                 next.set(to_row, true);
                             }
                         });
+                    }
+                }
+                ToIndex::KeySet { .. } => {
+                    let to_table = model
+                        .table(to_table_name)
+                        .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+
+                    if !keys.is_empty() {
+                        if let Some(rows) = to_table.filter_in(relationship.to_idx, &keys) {
+                            for to_row in rows {
+                                if to_row < to_set.len() && to_set.get(to_row) {
+                                    next.set(to_row, true);
+                                }
+                            }
+                        } else {
+                            let key_set: HashSet<Value> = keys.iter().cloned().collect();
+                            for to_row in to_set.iter_ones() {
+                                let v = to_table
+                                    .value_by_idx(to_row, relationship.to_idx)
+                                    .unwrap_or(Value::Blank);
+                                if key_set.contains(&v) {
+                                    next.set(to_row, true);
+                                }
+                            }
+                        }
                     }
                 }
             }
