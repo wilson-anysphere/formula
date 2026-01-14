@@ -238,7 +238,9 @@ export default defineConfig({
       // Formula bar tests use the `.test.ts` suffix and rely on per-file `@vitest-environment`
       // directives (jsdom). Include them explicitly so:
       // - `pnpm -C apps/desktop test` runs formula-bar coverage
-      // - `pnpm -C apps/desktop exec vitest run apps/desktop/src/formula-bar/…` works reliably
+      // - `pnpm -C apps/desktop vitest run apps/desktop/src/formula-bar/…` works reliably
+      //   (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like `apps/desktop/src/...`
+      //   to `src/...` when running via the desktop package script)
       "src/formula-bar/**/*.test.ts",
       // Command palette tests are `.test.ts` but historically ran via `*.vitest.ts` wrapper
       // entrypoints. Include them directly so we don't need wrapper files just to satisfy the
