@@ -1000,13 +1000,13 @@ fn decrypt_standard_with_scheme(
     // but some producers appear to use AES-CBC for the verifier as well. To maximize
     // compatibility, we try the spec ECB verifier first, then fall back to scheme-specific CBC
     // verification for the non-ECB variants.
-    let mut verifier_ok = match verify_password_standard_with_key_and_mode(
+    let mut verifier_ok = match verify_password_standard_with_key_ecb_only(
         &info.header,
         &info.verifier,
         hash_alg,
         key0.as_slice(),
     ) {
-        Ok(_) => true,
+        Ok(()) => true,
         Err(OfficeCryptoError::InvalidPassword) => false,
         Err(other) => return Err(other),
     };
