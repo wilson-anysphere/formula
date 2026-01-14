@@ -322,14 +322,22 @@ function compactAttachmentsForPrompt(attachments, options = {}) {
   if (!Array.isArray(attachments)) return attachments;
   const dropAllData = options.dropAllData === true;
   return attachments.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      // Under structured DLP redaction, treat any non-object attachment entries as
+      // prompt-unsafe (they can contain arbitrary non-heuristic sensitive strings).
+      if (dropAllData) return "[REDACTED]";
+      return item;
+    }
     const type = item.type;
     const reference = item.reference;
     if (dropAllData) {
       // Under structured DLP redaction, attachments may contain arbitrary nested payloads
       // (including raw cell values) that are not reliably detectable by heuristic redaction.
       // Keep only a minimal prompt-safe skeleton.
-      return { type, reference };
+      return {
+        type: typeof type === "string" ? type : String(type ?? ""),
+        reference: typeof reference === "string" ? reference : "[REDACTED]",
+      };
     }
     if (type !== "range" && type !== "table") return item;
     // Drop raw data (can contain copied workbook values).
