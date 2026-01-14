@@ -106,7 +106,6 @@ describe("FormulaBarView argument preview (integration)", () => {
       return "(preview unavailable)";
     });
     view.setArgumentPreviewProvider(provider);
-
     const formula = "=ROUND(1, 2)\n";
     view.textarea.value = formula;
 
@@ -257,6 +256,68 @@ describe("FormulaBarView argument preview (integration)", () => {
     expect(provider).toHaveBeenCalledWith("A1");
 
     host.remove();
+  });
+
+  it("cancels a pending preview evaluation when committing or canceling the edit", () => {
+    // This is a regression guard: the argument preview evaluation is deferred via setTimeout.
+    // Commit/cancel should clear that timer so we don't run async work (and re-render) after editing ends.
+    vi.useFakeTimers();
+    // FormulaBarView coalesces renders via requestAnimationFrame; make it synchronous so the preview
+    // scheduling happens immediately during the input dispatch.
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    try {
+      const runScenario = (action: "commit" | "cancel") => {
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+
+        const previewProvider = vi.fn(() => 123);
+        const onCommit = vi.fn();
+        const onCancel = vi.fn();
+        const view = new FormulaBarView(host, { onCommit, onCancel });
+        view.setActiveCell({ address: "A1", input: "", value: null });
+        view.setArgumentPreviewProvider(previewProvider);
+
+        view.focus({ cursor: "end" });
+        const draft = "=SUM(A1)";
+        const cursor = draft.indexOf("A1") + 1;
+        view.textarea.value = draft;
+        view.textarea.setSelectionRange(cursor, cursor);
+        view.textarea.dispatchEvent(new Event("input"));
+
+        const pending = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+        expect(pending).not.toBeNull();
+        expect(pending?.textContent).toContain("…");
+        expect(previewProvider).not.toHaveBeenCalled();
+
+        if (action === "commit") {
+          view.commitEdit();
+          expect(onCommit).toHaveBeenCalledTimes(1);
+        } else {
+          view.cancelEdit();
+          expect(onCancel).toHaveBeenCalledTimes(1);
+        }
+
+        // If the timer wasn't cleared, this would invoke the provider after leaving edit mode.
+        vi.runAllTimers();
+        expect(previewProvider).not.toHaveBeenCalled();
+
+        host.remove();
+      };
+
+      runScenario("commit");
+      runScenario("cancel");
+    } finally {
+      // Unstub globals first so `useRealTimers()` restores the real requestAnimationFrame impl.
+      // (If we swap the order, unstubbing can reintroduce the fake-timer rAF impl, causing hangs.)
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 
   it("treats escaped brackets inside structured refs as part of the argument expression", async () => {

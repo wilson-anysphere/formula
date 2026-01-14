@@ -2095,6 +2095,10 @@ export class FormulaBarView {
       const end = this.textarea.value.length;
       this.textarea.setSelectionRange(end, end);
     }
+    // Programmatic focus can be invoked while the textarea is already focused (e.g. after a commit/cancel
+    // that doesn't fully blur in all environments). Ensure we still transition into edit mode, mirroring
+    // the textarea focus listener.
+    this.#beginEditFromFocus();
     this.#onInputOrSelection();
   }
 
