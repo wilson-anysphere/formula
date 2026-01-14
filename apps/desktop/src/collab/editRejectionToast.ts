@@ -2,7 +2,7 @@ import { showToast } from "../extensions/ui.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 
 type RejectionReason = "permission" | "encryption" | "unknown";
-type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "unknown";
+type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "chart" | "undoRedo" | "unknown";
 
 // Editing surfaces may call this helper in response to every key press (e.g. typing into a
 // read-only sheet). To avoid spamming users with identical warnings, throttle repeated toasts.
@@ -46,7 +46,8 @@ function inferRejectionReason(rejected: any[]): RejectionReason {
 function inferRejectionKind(rejected: any[]): RejectionKind {
   for (const delta of rejected) {
     const kind = typeof delta?.rejectionKind === "string" ? delta.rejectionKind : null;
-    if (kind === "cell" || kind === "format" || kind === "rangeRun" || kind === "drawing") return kind;
+    if (kind === "cell" || kind === "format" || kind === "rangeRun" || kind === "drawing" || kind === "chart" || kind === "undoRedo")
+      return kind;
   }
 
   // Backwards compatibility: callers may be using a binder that doesn't annotate deltas.
@@ -80,7 +81,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     return rangeToA1({ startRow: first.startRow, startCol: first.col, endRow, endCol: first.col });
   }
 
-  if (kind === "drawing") {
+  if (kind === "drawing" || kind === "chart" || kind === "undoRedo") {
     return null;
   }
 
@@ -137,6 +138,14 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "drawing") {
       return "Read-only: you don't have permission to edit drawings";
+    }
+
+    if (kind === "chart") {
+      return "Read-only: you don't have permission to edit charts";
+    }
+
+    if (kind === "undoRedo") {
+      return "Read-only: you don't have permission to undo/redo";
     }
 
     // Default to a simple "read-only" message for cell edits.

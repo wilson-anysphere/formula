@@ -1621,10 +1621,7 @@ export class SpreadsheetApp {
       if (!handled && isDelete) {
         e.preventDefault();
         if (this.isReadOnly()) {
-          const cell = this.selection.active;
-          showCollabEditRejectedToast([
-            { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-          ]);
+          showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
           handled = true;
         } else {
           const chartId = this.selectedChartId;
@@ -3518,10 +3515,7 @@ export class SpreadsheetApp {
                 const chart = this.getChartRecordById(chartId);
                 const currentAnchor = chart ? chartAnchorToDrawingAnchor(chart.anchor) : null;
                 if (currentAnchor && !anchorsEqual(currentAnchor, obj.anchor)) {
-                  const cell = this.selection.active;
-                  showCollabEditRejectedToast([
-                    { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-                  ]);
+                  showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
                 }
                 return;
               }
@@ -6080,13 +6074,19 @@ export class SpreadsheetApp {
   }
 
   undo(): boolean {
-    if (this.isReadOnly()) return false;
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([{ rejectionKind: "undoRedo", rejectionReason: "permission" }]);
+      return false;
+    }
     if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     return this.applyUndoRedo("undo");
   }
 
   redo(): boolean {
-    if (this.isReadOnly()) return false;
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([{ rejectionKind: "undoRedo", rejectionReason: "permission" }]);
+      return false;
+    }
     if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     return this.applyUndoRedo("redo");
   }
@@ -7575,16 +7575,18 @@ export class SpreadsheetApp {
     const sheetId = this.sheetId;
     const selectedId = this.getSelectedDrawingId();
     if (selectedId == null) return;
+    const canvasChartId = this.getCanvasChartIdForDrawingId(selectedId, sheetId);
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        {
+          rejectionKind: canvasChartId ? "chart" : "drawing",
+          rejectionReason: "permission",
+        },
       ]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
-    const canvasChartId = this.getCanvasChartIdForDrawingId(selectedId, sheetId);
     if (canvasChartId) {
       // When canvas charts are enabled (default), ChartStore charts render as drawing objects with negative ids.
       // They are not part of the DocumentController sheet drawings list, so z-order operations must
@@ -9553,10 +9555,7 @@ export class SpreadsheetApp {
             const chart = this.getChartRecordById(chartId);
             const currentAnchor = chart ? chartAnchorToDrawingAnchor(chart.anchor) : null;
             if (currentAnchor && !anchorsEqual(currentAnchor, obj.anchor)) {
-              const cell = this.selection.active;
-              showCollabEditRejectedToast([
-                { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-              ]);
+              showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
             }
             return;
           }
@@ -11422,10 +11421,7 @@ export class SpreadsheetApp {
     if (drawingId == null) return;
 
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -11535,10 +11531,7 @@ export class SpreadsheetApp {
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -11612,10 +11605,7 @@ export class SpreadsheetApp {
     const chartId = this.selectedChartId;
     if (!chartId) return;
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -16609,10 +16599,7 @@ export class SpreadsheetApp {
       const movedEnough = Math.abs(dx) > 1 || Math.abs(dy) > 1;
       if (movedEnough && !state.readOnlyBlocked) {
         state.readOnlyBlocked = true;
-        const cell = this.selection.active;
-        showCollabEditRejectedToast([
-          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-        ]);
+        showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
         // Defensive: if the session became read-only mid-gesture after we already applied
         // anchor updates, snap back to the start anchor.
         this.chartStore.updateChartAnchor(state.chartId, state.startAnchor as any);
@@ -18245,10 +18232,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       e.stopPropagation();
       if (this.isReadOnly()) {
-        const cell = this.selection.active;
-        showCollabEditRejectedToast([
-          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-        ]);
+        showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
         this.focus();
         return true;
       }
@@ -18287,10 +18271,7 @@ export class SpreadsheetApp {
         return;
       }
       if (this.isReadOnly()) {
-        const cell = this.selection.active;
-        showCollabEditRejectedToast([
-          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-        ]);
+        showCollabEditRejectedToast([{ rejectionKind: "chart", rejectionReason: "permission" }]);
         return;
       }
       this.chartStore.arrangeChart(this.selectedChartId!, direction);
@@ -19324,9 +19305,7 @@ export class SpreadsheetApp {
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     if (this.isReadOnly()) {
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: placeAt.row, col: placeAt.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
 

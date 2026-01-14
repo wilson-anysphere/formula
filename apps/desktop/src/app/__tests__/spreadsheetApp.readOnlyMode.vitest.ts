@@ -236,11 +236,14 @@ describe("SpreadsheetApp read-only collab UX", () => {
     app.openInlineAiEdit();
     expect(inlineEditOverlay?.hidden).toBe(true);
 
+    vi.mocked(showToast).mockClear();
+
     // Read-only users should not be able to undo/redo local edits (which would diverge
     // from the authoritative remote document).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
     expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
     expect(app.undo()).toBe(false);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("undo/redo"), "warning");
 
     // Read-only users can still adjust sheet view state (e.g. Freeze Panes) locally.
     // Collaboration binders are responsible for preventing these view mutations from

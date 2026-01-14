@@ -88,4 +88,28 @@ describe("collab edit rejection toast", () => {
     showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
     expect(document.querySelectorAll('[data-testid="toast"]')).toHaveLength(2);
   });
+
+  it("shows a chart toast for rejected chart edits", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "chart",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("edit charts");
+  });
+
+  it("shows an undo/redo toast for rejected undo/redo actions", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "undoRedo",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("undo/redo");
+  });
 });
