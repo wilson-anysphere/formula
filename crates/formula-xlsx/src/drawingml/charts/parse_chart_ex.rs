@@ -86,6 +86,13 @@ pub fn parse_chart_ex(
         .find(|n| n.is_element() && n.tag_name().name() == "chart");
     let title = chart_node.and_then(|chart| parse_title(chart, &mut diagnostics));
     let legend = chart_node.and_then(|chart| parse_legend(chart, &mut diagnostics));
+    let plot_area_layout = chart_node
+        .and_then(|chart| {
+            chart
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "plotArea")
+        })
+        .and_then(parse_layout_manual);
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
 
     // ChartEx series can appear either under `<cx:*Chart>` wrappers or
@@ -130,7 +137,7 @@ pub fn parse_chart_ex(
         title,
         legend,
         plot_area: PlotAreaModel::Unknown { name: chart_name },
-        plot_area_layout: None,
+        plot_area_layout,
         axes: Vec::new(),
         series,
         style_id: None,
@@ -188,6 +195,11 @@ fn parse_title(
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .map(TextModel::plain);
+    }
+
+    let layout = parse_layout_manual(title_node);
+    if let (Some(layout), Some(text)) = (layout, parsed.as_mut()) {
+        text.layout = Some(layout);
     }
 
     if auto_deleted && parsed.is_none() {
@@ -1154,6 +1166,52 @@ mod tests {
         let legend = model.legend.expect("legend should be parsed");
         let layout = legend.layout.expect("legend should contain layout");
         assert_eq!(layout.x, Some(0.1));
+    }
+
+    #[test]
+    fn parses_manual_layout_for_title() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chart>
+    <cx:title>
+      <cx:layout>
+        <cx:manualLayout>
+          <cx:x val="0.3"/>
+        </cx:manualLayout>
+      </cx:layout>
+      <cx:tx><cx:v>My title</cx:v></cx:tx>
+    </cx:title>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let title = model.title.expect("title should be parsed");
+        assert_eq!(title.rich_text.plain_text(), "My title");
+        assert_eq!(title.layout.as_ref().and_then(|l| l.x), Some(0.3));
+    }
+
+    #[test]
+    fn parses_manual_layout_for_plot_area() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chart>
+    <cx:plotArea>
+      <cx:layout>
+        <cx:manualLayout>
+          <cx:y val="0.4"/>
+        </cx:manualLayout>
+      </cx:layout>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let layout = model.plot_area_layout.expect("plot area layout present");
+        assert_eq!(layout.y, Some(0.4));
     }
 
     #[test]
