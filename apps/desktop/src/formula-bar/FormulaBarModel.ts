@@ -1,4 +1,4 @@
-import { getActiveArgumentContext, getActiveArgumentSpan } from "./highlight/activeArgument.js";
+import { getActiveArgumentFrame, getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
@@ -83,6 +83,12 @@ export class FormulaBarModel {
     | null = null;
   #activeArgumentSpanCache2:
     | { draft: string; cursor: number; argSeparator: string; result: ReturnType<typeof getActiveArgumentSpan> }
+    | null = null;
+  #activeArgumentFrameCache:
+    | { draft: string; cursor: number; argSeparator: string; result: ReturnType<typeof getActiveArgumentFrame> }
+    | null = null;
+  #activeArgumentFrameCache2:
+    | { draft: string; cursor: number; argSeparator: string; result: ReturnType<typeof getActiveArgumentFrame> }
     | null = null;
   #extractFormulaReferencesOptions: ExtractFormulaReferencesOptions | null = null;
   #extractFormulaReferencesOptionsVersion = 0;
@@ -419,8 +425,7 @@ export class FormulaBarModel {
     // formula locale ids to keep caching stable.
     const localeId = normalizeFormulaLocaleId(rawLocaleId) ?? "en-US";
     const argSeparator = inferArgSeparator(localeId);
-    const argSeparatorText = argSeparator.trim();
-    const argSeparatorChar = argSeparatorText.startsWith(";") ? ";" : ",";
+    const argSeparatorChar = argSeparator[0] === ";" ? ";" : ",";
 
     let ctxName: string | null = null;
     let ctxArgIndex: number | null = null;
@@ -430,7 +435,7 @@ export class FormulaBarModel {
       ctxName = ctx.name;
       ctxArgIndex = ctx.argIndex;
     } else {
-      let active = getActiveArgumentContext(this.#draft, this.#cursorStart, { argSeparators: argSeparatorChar });
+      let active = this.#activeArgumentFrame(this.#cursorStart, argSeparatorChar);
       ctxName = active?.fnName ?? null;
       ctxArgIndex = active?.argIndex ?? null;
 
@@ -442,7 +447,7 @@ export class FormulaBarModel {
         let scan = this.#cursorStart - 1;
         while (scan >= 0 && isWhitespaceChar(this.#draft[scan] ?? "")) scan -= 1;
         if (scan >= 0 && this.#draft[scan] === ")") {
-          active = getActiveArgumentContext(this.#draft, scan, { argSeparators: argSeparatorChar });
+          active = this.#activeArgumentFrame(scan, argSeparatorChar);
           ctxName = active?.fnName ?? null;
           ctxArgIndex = active?.argIndex ?? null;
         }
@@ -938,6 +943,41 @@ export class FormulaBarModel {
     this.#engineToolingFormula = null;
   }
 
+  #activeArgumentFrame(cursorIndex: number, argSeparator: string): ReturnType<typeof getActiveArgumentFrame> {
+    const draft = this.#draft;
+    const cursor = Math.max(0, Math.min(cursorIndex, draft.length));
+
+    const c1 = this.#activeArgumentFrameCache;
+    if (c1 && c1.draft === draft && c1.argSeparator === argSeparator) {
+      if (c1.cursor === cursor) return c1.result;
+      const cached = c1.result;
+      if (cached && cursor >= cached.span.start && cursor <= cached.span.end) {
+        c1.cursor = cursor;
+        return cached;
+      }
+    }
+    const c2 = this.#activeArgumentFrameCache2;
+    if (c2 && c2.draft === draft && c2.argSeparator === argSeparator) {
+      if (c2.cursor === cursor) {
+        this.#activeArgumentFrameCache2 = c1;
+        this.#activeArgumentFrameCache = c2;
+        return c2.result;
+      }
+      const cached = c2.result;
+      if (cached && cursor >= cached.span.start && cursor <= cached.span.end) {
+        c2.cursor = cursor;
+        this.#activeArgumentFrameCache2 = c1;
+        this.#activeArgumentFrameCache = c2;
+        return cached;
+      }
+    }
+
+    const result = getActiveArgumentFrame(draft, cursor, { argSeparators: argSeparator });
+    this.#activeArgumentFrameCache2 = c1;
+    this.#activeArgumentFrameCache = { draft, cursor, argSeparator, result };
+    return result;
+  }
+
   activeArgumentSpan(cursorIndex: number = this.#cursorStart): ReturnType<typeof getActiveArgumentSpan> {
     const draft = this.#draft;
     const cursor = Math.max(0, Math.min(cursorIndex, draft.length));
@@ -946,8 +986,8 @@ export class FormulaBarModel {
     const localeId = hasEngineLocaleForDraft
       ? this.#engineToolingLocaleId
       : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
-    const argSeparatorText = inferArgSeparator(localeId).trim();
-    const argSeparator = argSeparatorText.startsWith(";") ? ";" : ",";
+    const argSeparatorText = inferArgSeparator(localeId);
+    const argSeparator = argSeparatorText[0] === ";" ? ";" : ",";
 
     const c1 = this.#activeArgumentSpanCache;
     if (c1 && c1.draft === draft && c1.argSeparator === argSeparator) {
@@ -987,6 +1027,8 @@ export class FormulaBarModel {
   #clearActiveArgumentSpanCache(): void {
     this.#activeArgumentSpanCache = null;
     this.#activeArgumentSpanCache2 = null;
+    this.#activeArgumentFrameCache = null;
+    this.#activeArgumentFrameCache2 = null;
   }
 }
 

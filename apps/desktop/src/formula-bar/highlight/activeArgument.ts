@@ -10,6 +10,18 @@ type ActiveArgumentContext = {
   argIndex: number;
 };
 
+type ActiveArgumentFrame = {
+  fnName: string;
+  argIndex: number;
+  /**
+   * Cursor range (inclusive) for which this argument frame remains active.
+   *
+   * `start` is the raw argument start (immediately after `(` or the separator).
+   * `end` is the index of the next separator / `)` (the first character *after* the argument).
+   */
+  span: { start: number; end: number };
+};
+
 type GetActiveArgumentSpanOptions = {
   /**
    * Argument separator characters to treat as delimiting function arguments.
@@ -539,6 +551,21 @@ export function getActiveArgumentSpan(
     argText: formulaText.slice(start, end),
     span: { start, end },
   };
+}
+
+export function getActiveArgumentFrame(
+  formulaText: string,
+  cursorIndex: number,
+  opts: GetActiveArgumentSpanOptions = {}
+): ActiveArgumentFrame | null {
+  const cursor = Math.max(0, Math.min(cursorIndex, formulaText.length));
+  const isArgSeparator = buildIsArgSeparator(opts.argSeparators);
+  const stack = scanArgumentStack(formulaText, cursor, isArgSeparator);
+  const frame = findInnermostFunctionFrame(stack);
+  if (!frame) return null;
+
+  const end = findArgumentEnd(formulaText, frame.argStart, isArgSeparator);
+  return { fnName: frame.name, argIndex: frame.argIndex, span: { start: frame.argStart, end } };
 }
 
 export function getActiveArgumentContext(
