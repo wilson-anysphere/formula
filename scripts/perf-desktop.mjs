@@ -44,6 +44,9 @@ Notes:
     ~/.config, ~/Library, etc.
   - Pass extra args after "--" to forward them to the underlying runner script.
       pnpm perf:desktop-startup -- --mode warm
+  - To see runner options without building:
+      pnpm perf:desktop-startup -- --help
+      pnpm perf:desktop-memory -- --help
   - For shell startup benchmarking (no apps/desktop/dist required), pass:
       pnpm perf:desktop-startup -- --startup-bench
     or set:

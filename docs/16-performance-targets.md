@@ -133,6 +133,13 @@ pnpm perf:desktop-startup -- --json target/perf-artifacts/desktop-startup.json
 pnpm perf:desktop-memory -- --json target/perf-artifacts/desktop-memory.json
 ```
 
+To see runner options without building (useful for discovering tuning flags):
+
+```bash
+pnpm perf:desktop-startup -- --help
+pnpm perf:desktop-memory -- --help
+```
+
 These scripts are designed to be safe to run locally:
 
 - they use a repo-local HOME directory (`target/perf-home`) so they don't touch your real user config/caches

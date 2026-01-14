@@ -123,6 +123,11 @@ Notes:
   node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
   ```
 
+  To see runner options without building:
+  ```bash
+  pnpm perf:desktop-startup -- --help
+  ```
+
   To save JSON output (samples + summary):
   ```bash
   pnpm perf:desktop-startup -- --json target/perf-artifacts/desktop-startup.json
@@ -150,6 +155,12 @@ To save JSON output (samples + summary):
 
 ```bash
 pnpm perf:desktop-memory -- --json target/perf-artifacts/desktop-memory.json
+```
+
+To see runner options without building:
+
+```bash
+pnpm perf:desktop-memory -- --help
 ```
 
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
