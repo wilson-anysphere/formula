@@ -263,14 +263,14 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
   );
 });
 
-test("validateLatestJson rejects Windows updater .zip archives (expects .msi)", () => {
+test("validateLatestJson rejects Windows .zip updater URLs (even if asset exists)", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -280,7 +280,7 @@ test("validateLatestJson rejects Windows updater .zip archives (expects .msi)", 
     "Formula.AppImage",
     "Formula_arm64.AppImage",
     "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
 
@@ -289,8 +289,7 @@ test("validateLatestJson rejects Windows updater .zip archives (expects .msi)", 
     (err) =>
       err instanceof ActionableError &&
       err.message.includes("windows-x86_64") &&
-      err.message.includes("Expected file extensions") &&
-      err.message.includes(".msi"),
+      err.message.includes(".zip archive"),
   );
 });
 
@@ -613,7 +612,7 @@ test("validateReleaseExpectations allows missing arch token for macos-universal 
       os: "macos",
       arch: "universal",
       installerExts: [".dmg", ".pkg"],
-      updaterPlatformKeys: ["darwin-universal"],
+      updaterPlatformKeys: ["darwin-x86_64", "darwin-aarch64"],
       allowMissingArchInInstallerName: true,
     },
   ];
@@ -621,7 +620,8 @@ test("validateReleaseExpectations allows missing arch token for macos-universal 
   const manifest = {
     version: "0.1.0",
     platforms: {
-      "darwin-universal": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
     },
   };
 

@@ -85,12 +85,12 @@ function filenameFromUrl(maybeUrl) {
  * Note: `latest.json` is an updater manifest, not a "download the installer"
  * manifest. It can be structurally valid (and reference an existing asset) but
  * still be unusable if it points at a non-updater artifact type:
- * - macOS: `.dmg` is an installer; updater typically needs `.app.tar.gz`
- * - Linux: `.deb`/`.rpm` are installers; updater typically needs AppImage
- * - Windows: updater payloads are typically `.msi` (Windows Installer; updater runs this)
+ * - macOS: `.dmg`/`.pkg` are installers; updater needs `.app.tar.gz`
+ * - Linux: `.deb`/`.rpm` are installers; updater needs `.AppImage`
+ * - Windows: updater uses `.msi` (Windows Installer; NSIS `.exe` is a manual installer by default)
  *
  * @param {string} platformKey
- * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
+ * @param {{ allowWindowsExe?: boolean }} [opts]
  * @returns {string[]}
  */
 function expectedUpdaterExtensions(platformKey, opts = {}) {
@@ -117,7 +117,7 @@ function expectedUpdaterExtensions(platformKey, opts = {}) {
  *
  * @param {string} platformKey
  * @param {string} filename
- * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
+ * @param {{ allowWindowsExe?: boolean }} [opts]
  * @returns {string | null}
  */
 function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
@@ -125,11 +125,11 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
   const lowerFilename = filename.toLowerCase();
 
   if (lowerPlatform.includes("darwin")) {
-    if (lowerFilename.endsWith(".dmg")) {
-      return "macOS updater entries must not reference .dmg installers.";
+    if (lowerFilename.endsWith(".dmg") || lowerFilename.endsWith(".pkg")) {
+      return "macOS updater entries must not reference .dmg/.pkg installers.";
     }
-    if (!lowerFilename.endsWith(".app.tar.gz")) {
-      return "macOS updater entries must reference a .app.tar.gz updater archive.";
+    if (!filename.endsWith(".app.tar.gz")) {
+      return "macOS updater entries must reference a .app.tar.gz updater archive (not the installer).";
     }
     return null;
   }
@@ -138,8 +138,8 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".deb") || lowerFilename.endsWith(".rpm")) {
       return "Linux updater entries must not reference .deb/.rpm installers.";
     }
-    if (!lowerFilename.endsWith(".appimage")) {
-      return "Linux updater entries must reference an AppImage updater payload (.AppImage).";
+    if (!filename.endsWith(".AppImage")) {
+      return "Linux updater entries must reference an AppImage updater payload (*.AppImage).";
     }
     return null;
   }
@@ -148,14 +148,12 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".exe") && !opts.allowWindowsExe) {
       return 'Windows updater entries must not reference a raw \".exe\" installer (Formula uses .msi; pass --allow-windows-exe to permit).';
     }
-
-    if (lowerFilename.endsWith(".msi")) {
-      return null;
+    if (lowerFilename.endsWith(".zip")) {
+      return "Windows updater entries must not reference a .zip archive; expected a .msi updater installer.";
     }
-    const allowed = [".msi"];
-    if (opts.allowWindowsExe) allowed.push(".exe");
-    if (!allowed.some((ext) => lowerFilename.endsWith(ext))) {
-      return "Windows updater entries must reference a Windows installer payload (typically .msi).";
+
+    if (!(lowerFilename.endsWith(".msi") || (opts.allowWindowsExe && lowerFilename.endsWith(".exe")))) {
+      return "Windows updater entries must reference a .msi updater installer.";
     }
     return null;
   }
@@ -907,7 +905,7 @@ function isPrimaryBundleOrSig(name, { includeSigs }) {
  * @param {any} manifest
  * @param {string} expectedVersion
  * @param {Map<string, any>} assetsByName
- * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
+ * @param {{ allowWindowsExe?: boolean }} [opts]
  */
 function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) {
   /** @type {string[]} */
@@ -1497,7 +1495,6 @@ async function main() {
       // (We keep the parsed `publicKey` object around for optional per-platform asset verification.)
       verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, updaterPubkeyBase64);
       validateLatestJson(manifest, expectedVersion, assetsByName, {
-        allowWindowsMsi: args.allowWindowsMsi,
         allowWindowsExe: args.allowWindowsExe,
       });
 
