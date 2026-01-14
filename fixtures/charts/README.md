@@ -48,6 +48,7 @@ checked into the repo. For these fixtures we commit a generated placeholder PNG
 - `bubble.png`
 - `radar.png`
 - `stock.png`
+- `surface.png`
 - `doughnut.png`
 - `combo-bar-line.png`
 

@@ -239,6 +239,61 @@ fn write_bubble_chart_fixture(path: &Path) {
     });
 }
 
+fn write_surface_chart_fixture(path: &Path) {
+    if path.exists() {
+        return;
+    }
+
+    // rust_xlsxwriter doesn't currently expose Surface chart generation, so we
+    // generate a standard column chart workbook and patch the chart XML to use
+    // `<c:surface3DChart>`.
+    //
+    // The resulting fixture is still useful for regression-testing parsing of
+    // `surfaceChart` plot area attributes + axis ids.
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+
+    worksheet.write_string(0, 0, "Category").unwrap();
+    worksheet.write_string(0, 1, "Value").unwrap();
+
+    let categories = ["A", "B", "C", "D"];
+    let values = [2.0, 4.0, 3.0, 5.0];
+
+    for (i, (cat, val)) in categories.iter().zip(values).enumerate() {
+        let row = (i + 1) as u32;
+        worksheet.write_string(row, 0, *cat).unwrap();
+        worksheet.write_number(row, 1, val).unwrap();
+    }
+
+    let mut chart = Chart::new(ChartType::Column);
+    chart.title().set_name("Surface Chart");
+    let series = chart.add_series();
+    series
+        .set_categories("Sheet1!$A$2:$A$5")
+        .set_values("Sheet1!$B$2:$B$5");
+    worksheet.insert_chart(1, 3, &chart).unwrap();
+    workbook.save(path).unwrap();
+
+    patch_chart1_xml(path, |xml| {
+        let mut out = xml;
+
+        // Convert `<c:barChart>` to `<c:surface3DChart>` and add a wireframe flag.
+        out = out.replace(
+            "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>",
+            "<c:surface3DChart><c:wireframe val=\"1\"/>",
+        );
+
+        // Surface charts typically reference three axes. Add a third axId while swapping
+        // the closing tag.
+        out = out.replace(
+            "<c:axId val=\"50010002\"/></c:barChart>",
+            "<c:axId val=\"50010002\"/><c:axId val=\"50010003\"/></c:surface3DChart>",
+        );
+
+        out
+    });
+}
+
 /// Generates small chart fixtures under `fixtures/charts/xlsx/`.
 ///
 /// This test is ignored by default because it writes files to the repository.
@@ -264,5 +319,6 @@ fn generate_chart_fixtures() {
     write_chart_fixture(&root.join("radar.xlsx"), ChartType::Radar);
 
     write_bubble_chart_fixture(&root.join("bubble.xlsx"));
+    write_surface_chart_fixture(&root.join("surface.xlsx"));
     write_stock_chart_fixture(&root.join("stock.xlsx"));
 }
