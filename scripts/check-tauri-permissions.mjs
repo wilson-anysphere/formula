@@ -20,6 +20,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { extractPinnedCliVersionsFromWorkflow } from "./ci/check-tauri-cli-version.mjs";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const capabilitiesDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "capabilities");
@@ -55,8 +57,8 @@ function stripAnsi(text) {
 function readPinnedTauriCliVersion() {
   try {
     const workflowText = fs.readFileSync(releaseWorkflowPath, "utf8");
-    const match = workflowText.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
-    return match ? match[1].trim() : null;
+    const versions = extractPinnedCliVersionsFromWorkflow(workflowText);
+    return versions.length > 0 ? versions[0] : null;
   } catch {
     return null;
   }

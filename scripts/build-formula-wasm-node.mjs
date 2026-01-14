@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { stripHashComments, stripYamlBlockScalarBodies } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 
@@ -50,7 +52,8 @@ const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release
 function readPinnedWasmPackVersion() {
   try {
     const text = readFileSync(releaseWorkflowPath, "utf8");
-    const match = text.match(/^[\t ]*WASM_PACK_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
+    const scanText = stripYamlBlockScalarBodies(stripHashComments(text));
+    const match = scanText.match(/^[\t ]*WASM_PACK_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
     return match ? match[1].trim() : null;
   } catch {
     return null;
