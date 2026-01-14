@@ -154,6 +154,17 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as unknown | null) ?? null;
   }
 
+  /**
+   * Best-effort: not all backend builds expose sheet view snapshot commands.
+   * Callers should tolerate failures and treat them as "no persisted view state".
+   */
+  async getSheetViewState(sheetId: string): Promise<unknown | null> {
+    const payload = await this.invoke("get_sheet_view_state", {
+      sheet_id: sheetId,
+    });
+    return (payload as unknown | null) ?? null;
+  }
+
   async setCell(params: {
     sheetId: string;
     row: number;

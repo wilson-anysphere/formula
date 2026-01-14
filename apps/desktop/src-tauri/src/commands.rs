@@ -355,6 +355,11 @@ fn sheet_formatting_payload_for_ipc(sheet_id: &str, raw: Option<&JsonValue>) -> 
     raw.clone()
 }
 
+#[cfg(feature = "desktop")]
+const SHEET_VIEW_METADATA_KEY: &str = "formula_ui_sheet_view";
+#[cfg(feature = "desktop")]
+const SHEET_VIEW_SCHEMA_VERSION: i64 = 1;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SheetRowFormatDelta {
@@ -664,6 +669,32 @@ pub struct ApplySheetFormattingDeltasRequest {
     /// Cell formatting deltas; `format: null` clears the override for that cell.
     #[serde(default)]
     pub cell_formats: Option<LimitedSheetCellFormatDeltas>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetColWidthDelta {
+    pub col: i64,
+    pub width: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetRowHeightDelta {
+    pub row: i64,
+    pub height: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplySheetViewDeltasRequest {
+    pub sheet_id: String,
+    /// Column width deltas; `width: null` clears the override for that col.
+    #[serde(default)]
+    pub col_widths: Option<Vec<SheetColWidthDelta>>,
+    /// Row height deltas; `height: null` clears the override for that row.
+    #[serde(default)]
+    pub row_heights: Option<Vec<SheetRowHeightDelta>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -3340,6 +3371,33 @@ pub fn get_sheet_formatting(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub fn get_sheet_view_state(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<JsonValue, String> {
+    let state = state.inner().lock().unwrap();
+    let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
+    let Some(storage) = state.persistent_storage() else {
+        return Err(app_error(AppStateError::Persistence(
+            "workbook is not backed by persistent storage".to_string(),
+        )));
+    };
+
+    let meta = storage
+        .get_sheet_meta(sheet_uuid)
+        .map_err(|e| e.to_string())?;
+    let Some(metadata) = meta.metadata else {
+        return Ok(json!({ "schemaVersion": SHEET_VIEW_SCHEMA_VERSION }));
+    };
+
+    Ok(metadata
+        .get(SHEET_VIEW_METADATA_KEY)
+        .cloned()
+        .unwrap_or_else(|| json!({ "schemaVersion": SHEET_VIEW_SCHEMA_VERSION })))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub fn apply_sheet_formatting_deltas(
     payload: ApplySheetFormattingDeltasRequest,
     state: State<'_, SharedAppState>,
@@ -3681,6 +3739,207 @@ pub fn apply_sheet_formatting_deltas(
     state.mark_dirty();
     let workbook = state.get_workbook_mut().map_err(app_error)?;
     workbook.origin_xlsx_bytes = None;
+
+    Ok(())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn apply_sheet_view_deltas(
+    payload: ApplySheetViewDeltasRequest,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    #[derive(Clone, Debug, Default)]
+    struct ViewState {
+        col_widths: BTreeMap<i64, f64>,
+        row_heights: BTreeMap<i64, f64>,
+    }
+
+    fn parse_non_negative_i64(raw: Option<&JsonValue>) -> Option<i64> {
+        let v = raw?;
+        let n = v
+            .as_i64()
+            .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))?;
+        (n >= 0).then_some(n)
+    }
+
+    fn parse_positive_f64(raw: Option<&JsonValue>) -> Option<f64> {
+        let v = raw?;
+        let n = v.as_f64().or_else(|| v.as_i64().map(|i| i as f64))?;
+        (n.is_finite() && n > 0.0).then_some(n)
+    }
+
+    fn parse_axis_map(
+        raw: Option<&JsonValue>,
+        index_keys: &[&str],
+        size_keys: &[&str],
+    ) -> BTreeMap<i64, f64> {
+        let mut out = BTreeMap::new();
+        let Some(raw) = raw else {
+            return out;
+        };
+
+        // Preferred shape: `{ "0": 42, "1": 100 }`.
+        if let Some(obj) = raw.as_object() {
+            for (key, value) in obj {
+                let idx = key.parse::<i64>().ok().filter(|n| *n >= 0);
+                let Some(idx) = idx else {
+                    continue;
+                };
+                let Some(size) = parse_positive_f64(Some(value)) else {
+                    continue;
+                };
+                out.insert(idx, size);
+            }
+            return out;
+        }
+
+        // Legacy / alternate shapes: arrays of tuples or objects.
+        if let Some(arr) = raw.as_array() {
+            for entry in arr {
+                if let Some(tuple) = entry.as_array() {
+                    if tuple.len() < 2 {
+                        continue;
+                    }
+                    let idx = parse_non_negative_i64(tuple.get(0));
+                    let size = parse_positive_f64(tuple.get(1));
+                    if let (Some(idx), Some(size)) = (idx, size) {
+                        out.insert(idx, size);
+                    }
+                    continue;
+                }
+
+                let Some(obj) = entry.as_object() else {
+                    continue;
+                };
+
+                let mut idx = None;
+                for key in index_keys {
+                    idx = idx.or_else(|| parse_non_negative_i64(obj.get(*key)));
+                }
+                let Some(idx) = idx else {
+                    continue;
+                };
+
+                let mut size = None;
+                for key in size_keys {
+                    size = size.or_else(|| parse_positive_f64(obj.get(*key)));
+                }
+                let Some(size) = size else {
+                    continue;
+                };
+                out.insert(idx, size);
+            }
+        }
+
+        out
+    }
+
+    fn parse_view_state(raw: Option<&JsonValue>) -> ViewState {
+        let mut out = ViewState::default();
+        let Some(raw) = raw else {
+            return out;
+        };
+        let Some(obj) = raw.as_object() else {
+            return out;
+        };
+
+        out.col_widths = parse_axis_map(
+            obj.get("colWidths"),
+            &["col", "index"],
+            &["width", "size"],
+        );
+        out.row_heights = parse_axis_map(
+            obj.get("rowHeights"),
+            &["row", "index"],
+            &["height", "size"],
+        );
+        out
+    }
+
+    fn serialize_axis_map(map: BTreeMap<i64, f64>) -> JsonValue {
+        let mut out = serde_json::Map::new();
+        for (idx, size) in map {
+            if idx < 0 || !size.is_finite() || size <= 0.0 {
+                continue;
+            }
+            out.insert(idx.to_string(), json!(size));
+        }
+        JsonValue::Object(out)
+    }
+
+    fn serialize_view_state(state: ViewState) -> JsonValue {
+        let mut out = serde_json::Map::new();
+        out.insert("schemaVersion".to_string(), json!(SHEET_VIEW_SCHEMA_VERSION));
+        if !state.col_widths.is_empty() {
+            out.insert("colWidths".to_string(), serialize_axis_map(state.col_widths));
+        }
+        if !state.row_heights.is_empty() {
+            out.insert("rowHeights".to_string(), serialize_axis_map(state.row_heights));
+        }
+        JsonValue::Object(out)
+    }
+
+    let mut state = state.inner().lock().unwrap();
+    let sheet_uuid = state.persistent_sheet_uuid(&payload.sheet_id).map_err(app_error)?;
+    let Some(storage) = state.persistent_storage() else {
+        return Err(app_error(AppStateError::Persistence(
+            "workbook is not backed by persistent storage".to_string(),
+        )));
+    };
+
+    let meta = storage
+        .get_sheet_meta(sheet_uuid)
+        .map_err(|e| e.to_string())?;
+    let mut metadata_root = match meta.metadata {
+        Some(JsonValue::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+
+    let mut view_state = parse_view_state(metadata_root.get(SHEET_VIEW_METADATA_KEY));
+
+    if let Some(deltas) = payload.col_widths {
+        for delta in deltas {
+            if delta.col < 0 {
+                continue;
+            }
+            match delta.width {
+                Some(width) if width.is_finite() && width > 0.0 => {
+                    view_state.col_widths.insert(delta.col, width);
+                }
+                _ => {
+                    view_state.col_widths.remove(&delta.col);
+                }
+            }
+        }
+    }
+
+    if let Some(deltas) = payload.row_heights {
+        for delta in deltas {
+            if delta.row < 0 {
+                continue;
+            }
+            match delta.height {
+                Some(height) if height.is_finite() && height > 0.0 => {
+                    view_state.row_heights.insert(delta.row, height);
+                }
+                _ => {
+                    view_state.row_heights.remove(&delta.row);
+                }
+            }
+        }
+    }
+
+    metadata_root.insert(
+        SHEET_VIEW_METADATA_KEY.to_string(),
+        serialize_view_state(view_state),
+    );
+    storage
+        .set_sheet_metadata(sheet_uuid, Some(JsonValue::Object(metadata_root)))
+        .map_err(|e| e.to_string())?;
+
+    // View state changes should contribute to the "dirty" close/save flow.
+    state.mark_dirty();
 
     Ok(())
 }

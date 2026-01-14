@@ -11,6 +11,14 @@ export type EngineSheetJson = {
    */
   cells: Record<string, EngineCellScalar>;
   /**
+   * Optional UI sheet view metadata (DocumentController base units, zoom=1).
+   *
+   * These keys are forwarded through the engine hydration path so functions like
+   * `CELL("width")` can consult worksheet metadata once engine-side wiring is in place.
+   */
+  colWidths?: Record<string, number>;
+  rowHeights?: Record<string, number>;
+  /**
    * Optional logical worksheet dimensions (row count).
    *
    * When set, this controls how whole-column/row references like `A:A` / `1:1`
@@ -234,7 +242,29 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
       }
     }
 
-    sheets[sheetId] = { cells };
+    const view = typeof doc?.getSheetView === "function" ? doc.getSheetView(sheetId) : sheet?.view;
+
+    const sanitizeAxisMap = (raw: unknown): Record<string, number> | undefined => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+      const out: Record<string, number> = {};
+      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const size = Number(value);
+        if (!Number.isFinite(size) || size <= 0) continue;
+        out[String(idx)] = size;
+      }
+      return Object.keys(out).length > 0 ? out : undefined;
+    };
+
+    const colWidths = sanitizeAxisMap(view?.colWidths);
+    const rowHeights = sanitizeAxisMap(view?.rowHeights);
+
+    sheets[sheetId] = {
+      cells,
+      ...(colWidths ? { colWidths } : {}),
+      ...(rowHeights ? { rowHeights } : {}),
+    };
   }
 
   return { sheets };

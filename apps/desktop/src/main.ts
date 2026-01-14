@@ -9264,6 +9264,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     rowFormats?: unknown;
     colFormats?: unknown;
     formatRunsByCol?: unknown;
+    colWidths?: unknown;
+    rowHeights?: unknown;
   }> = [];
   const truncations: WorkbookLoadTruncation[] = [];
 
@@ -9276,6 +9278,19 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
         // Best-effort: treat formatting load failures as "no persisted formatting".
         console.warn(`[formula][desktop] Failed to load formatting for sheet ${sheet.id}:`, err);
         return { sheetId: sheet.id, formatting: null };
+      }
+    }),
+  );
+
+  const viewStateBySheetIdPromise: Promise<Array<{ sheetId: string; view: unknown | null }>> = Promise.all(
+    sheets.map(async (sheet) => {
+      try {
+        const view = (await tauriBackend.getSheetViewState(sheet.id)) as unknown | null;
+        return { sheetId: sheet.id, view };
+      } catch (err) {
+        // Best-effort: treat view state load failures as "no persisted view state".
+        console.warn(`[formula][desktop] Failed to load view state for sheet ${sheet.id}:`, err);
+        return { sheetId: sheet.id, view: null };
       }
     }),
   );
@@ -9390,11 +9405,26 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     formattingBySheetId.set(sheetId, formatting);
   }
 
+  const viewStateBySheetId = new Map<string, unknown | null>();
+  for (const { sheetId, view } of await viewStateBySheetIdPromise) {
+    viewStateBySheetId.set(sheetId, view);
+  }
+
   for (const sheet of snapshotSheets) {
     const formatting = formattingBySheetId.get(sheet.id) ?? null;
     const clampCellFormatsTo = clampCellFormatBoundsBySheetId.get(sheet.id) ?? null;
     const merged = mergeFormattingIntoSnapshot({ cells: sheet.cells, formatting, clampCellFormatsTo });
     Object.assign(sheet, merged);
+
+    const view = viewStateBySheetId.get(sheet.id) ?? null;
+    const colWidths = (view as any)?.colWidths;
+    if (colWidths && typeof colWidths === "object") {
+      sheet.colWidths = colWidths;
+    }
+    const rowHeights = (view as any)?.rowHeights;
+    if (rowHeights && typeof rowHeights === "object") {
+      sheet.rowHeights = rowHeights;
+    }
   }
 
   const importedChartObjectsRaw = await importedChartObjectsPromise;

@@ -281,6 +281,67 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("syncs sheet view deltas (colWidths/rowHeights) via apply_sheet_view_deltas and restores via applyState", async () => {
+    const document = createMaterializedDocument();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setColWidth("Sheet1", 1, 120);
+    document.setRowHeight("Sheet1", 3, 44);
+
+    await flushMicrotasks();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("apply_sheet_view_deltas", {
+      payload: {
+        sheetId: "Sheet1",
+        colWidths: [{ col: 1, width: 120 }],
+        rowHeights: [{ row: 3, height: 44 }],
+      },
+    });
+
+    const payload = invoke.mock.calls[0]?.[1]?.payload as any;
+    const persistedColWidths: Record<string, number> = {};
+    for (const d of payload.colWidths ?? []) {
+      if (typeof d?.col === "number" && typeof d?.width === "number") {
+        persistedColWidths[String(d.col)] = d.width;
+      }
+    }
+    const persistedRowHeights: Record<string, number> = {};
+    for (const d of payload.rowHeights ?? []) {
+      if (typeof d?.row === "number" && typeof d?.height === "number") {
+        persistedRowHeights[String(d.row)] = d.height;
+      }
+    }
+
+    const snapshot = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        sheets: [
+          {
+            id: "Sheet1",
+            name: "Sheet1",
+            visibility: "visible",
+            frozenRows: 0,
+            frozenCols: 0,
+            cells: [],
+            colWidths: persistedColWidths,
+            rowHeights: persistedRowHeights,
+          },
+        ],
+      }),
+    );
+
+    const restored = new DocumentController();
+    restored.applyState(snapshot);
+    expect(restored.getSheetView("Sheet1")).toMatchObject({
+      colWidths: { "1": 120 },
+      rowHeights: { "3": 44 },
+    });
+
+    sync.stop();
+  });
+
   it("combined value+style delta triggers both set_range and apply_sheet_formatting_deltas", async () => {
     const document = new DocumentController();
     const sync = startWorkbookSync({ document: document as any });

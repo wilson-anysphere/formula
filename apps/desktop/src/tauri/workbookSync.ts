@@ -46,11 +46,25 @@ type CellDelta = {
   after: CellState;
 };
 
+type SheetViewState = {
+  frozenRows?: number;
+  frozenCols?: number;
+  colWidths?: Record<string, number>;
+  rowHeights?: Record<string, number>;
+};
+
+type SheetViewDelta = {
+  sheetId: string;
+  before: SheetViewState;
+  after: SheetViewState;
+};
+
 type DocumentControllerLike = {
   on(
     event: "change",
     listener: (payload: {
       deltas: CellDelta[];
+      sheetViewDeltas?: SheetViewDelta[];
       rowStyleDeltas?: Array<{ sheetId: string; row: number; beforeStyleId: number; afterStyleId: number }>;
       colStyleDeltas?: Array<{ sheetId: string; col: number; beforeStyleId: number; afterStyleId: number }>;
       sheetStyleDeltas?: Array<{ sheetId: string; beforeStyleId: number; afterStyleId: number }>;
@@ -228,6 +242,14 @@ function rangeRunKey(sheetId: string, col: number): string {
   return `${sheetId}:rangeRun:${col}`;
 }
 
+function colWidthKey(sheetId: string, col: number): string {
+  return `${sheetId}:colWidth:${col}`;
+}
+
+function rowHeightKey(sheetId: string, row: number): string {
+  return `${sheetId}:rowHeight:${row}`;
+}
+
 function styleIdToFormat(document: DocumentControllerLike, styleId: unknown): any | null {
   const id = typeof styleId === "number" ? styleId : 0;
   if (!Number.isInteger(id) || id === 0) return null;
@@ -273,6 +295,21 @@ function sortRangeRunDeltas(a: RangeRunDelta, b: RangeRunDelta): number {
   if (a.sheetId > b.sheetId) return 1;
   if (a.col !== b.col) return a.col - b.col;
   return a.startRow - b.startRow;
+}
+
+type ColWidthDelta = { sheetId: string; col: number; width: number | null };
+type RowHeightDelta = { sheetId: string; row: number; height: number | null };
+
+function sortColWidthDeltas(a: ColWidthDelta, b: ColWidthDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  return a.col - b.col;
+}
+
+function sortRowHeightDeltas(a: RowHeightDelta, b: RowHeightDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  return a.row - b.row;
 }
 
 function isFullRectangle(edits: PendingEdit[]): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
@@ -569,6 +606,53 @@ async function sendFormattingViaTauri(
   }
 }
 
+async function sendSheetViewViaTauri(
+  invoke: TauriInvoke,
+  deltas: {
+    colWidths: ColWidthDelta[];
+    rowHeights: RowHeightDelta[];
+  },
+): Promise<void> {
+  if (deltas.colWidths.length === 0 && deltas.rowHeights.length === 0) return;
+
+  type SheetPayload = {
+    sheetId: string;
+    colWidths?: Array<{ col: number; width: number | null }>;
+    rowHeights?: Array<{ row: number; height: number | null }>;
+  };
+
+  const bySheet = new Map<string, SheetPayload>();
+  const ensure = (sheetId: string): SheetPayload => {
+    let payload = bySheet.get(sheetId);
+    if (!payload) {
+      payload = { sheetId };
+      bySheet.set(sheetId, payload);
+    }
+    return payload;
+  };
+
+  for (const d of deltas.colWidths) {
+    const p = ensure(d.sheetId);
+    if (!p.colWidths) p.colWidths = [];
+    p.colWidths.push({ col: d.col, width: d.width });
+  }
+  for (const d of deltas.rowHeights) {
+    const p = ensure(d.sheetId);
+    if (!p.rowHeights) p.rowHeights = [];
+    p.rowHeights.push({ row: d.row, height: d.height });
+  }
+
+  const sheetIds = Array.from(bySheet.keys()).sort();
+  for (const sheetId of sheetIds) {
+    const payload = bySheet.get(sheetId);
+    if (!payload) continue;
+    payload.colWidths?.sort((a, b) => a.col - b.col);
+    payload.rowHeights?.sort((a, b) => a.row - b.row);
+
+    await invoke("apply_sheet_view_deltas", { payload });
+  }
+}
+
 export function startWorkbookSync(args: {
   document: DocumentControllerLike;
   // Reserved for future engine-in-worker integration (e.g. skipping backend recalc).
@@ -593,6 +677,8 @@ export function startWorkbookSync(args: {
   const pendingColStyles = new Map<string, ColStyleDelta>();
   const pendingSheetStyles = new Map<string, SheetStyleDelta>();
   const pendingRangeRuns = new Map<string, RangeRunDelta>();
+  const pendingColWidths = new Map<string, ColWidthDelta>();
+  const pendingRowHeights = new Map<string, RowHeightDelta>();
 
   let sheetMirror: SheetSnapshot | null = captureSheetSnapshot(args.document);
 
@@ -601,7 +687,9 @@ export function startWorkbookSync(args: {
   let flushQueued = false;
   let flushPromise: Promise<void> | null = null;
 
-  const stopListening = args.document.on("change", ({ deltas, source, sheetMetaDeltas, sheetOrderDelta, rowStyleDeltas, colStyleDeltas, sheetStyleDeltas, rangeRunDeltas }) => {
+  const stopListening = args.document.on(
+    "change",
+    ({ deltas, source, sheetMetaDeltas, sheetOrderDelta, sheetViewDeltas, rowStyleDeltas, colStyleDeltas, sheetStyleDeltas, rangeRunDeltas }) => {
     if (stopped) return;
     const hasSheetMetaDeltas = Array.isArray(sheetMetaDeltas) && sheetMetaDeltas.length > 0;
     const hasSheetOrderDelta = Boolean(sheetOrderDelta);
@@ -623,6 +711,8 @@ export function startWorkbookSync(args: {
       pendingColStyles.clear();
       pendingSheetStyles.clear();
       pendingRangeRuns.clear();
+      pendingColWidths.clear();
+      pendingRowHeights.clear();
       queueMicrotask(() => {
         if (stopped) return;
         const snap = captureSheetSnapshot(args.document);
@@ -716,6 +806,55 @@ export function startWorkbookSync(args: {
           }
           didEnqueue = true;
         }
+      }
+    }
+
+    if (Array.isArray(sheetViewDeltas) && sheetViewDeltas.length > 0) {
+      const getAxisValue = (raw: unknown): number | null => {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) return null;
+        return n;
+      };
+
+      const diffAxis = (
+        sheetId: string,
+        before: Record<string, number> | undefined,
+        after: Record<string, number> | undefined,
+        enqueue: (index: number, value: number | null) => void,
+      ): void => {
+        const beforeKeys = before ? Object.keys(before) : [];
+        const afterKeys = after ? Object.keys(after) : [];
+        const keys = new Set([...beforeKeys, ...afterKeys]);
+        for (const key of keys) {
+          const idx = Number(key);
+          if (!Number.isInteger(idx) || idx < 0) continue;
+          const beforeValue = getAxisValue(before?.[key]);
+          const afterValue = getAxisValue(after?.[key]);
+          if (beforeValue == null && afterValue == null) continue;
+          if (beforeValue != null && afterValue != null && Math.abs(beforeValue - afterValue) <= 1e-6) continue;
+          enqueue(idx, afterValue);
+        }
+      };
+
+      for (const d of sheetViewDeltas) {
+        if (!d || typeof d !== "object") continue;
+        const sheetId = String((d as any).sheetId ?? "").trim();
+        if (!sheetId) continue;
+        if (deletedSheets.has(sheetId)) continue;
+
+        const before = ((d as any).before ?? {}) as SheetViewState;
+        const after = ((d as any).after ?? {}) as SheetViewState;
+
+        diffAxis(sheetId, before.colWidths, after.colWidths, (col, width) => {
+          const key = colWidthKey(sheetId, col);
+          pendingColWidths.set(key, { sheetId, col, width });
+          didEnqueue = true;
+        });
+        diffAxis(sheetId, before.rowHeights, after.rowHeights, (row, height) => {
+          const key = rowHeightKey(sheetId, row);
+          pendingRowHeights.set(key, { sheetId, row, height });
+          didEnqueue = true;
+        });
       }
     }
 
@@ -856,7 +995,9 @@ export function startWorkbookSync(args: {
       pendingSheetStyles.size > 0 ||
       pendingRangeRuns.size > 0;
 
-    if (pendingCellEdits.size === 0 && pendingSheetActions.length === 0 && !hasFormatting) {
+    const hasSheetView = pendingColWidths.size > 0 || pendingRowHeights.size > 0;
+
+    if (pendingCellEdits.size === 0 && pendingSheetActions.length === 0 && !hasFormatting && !hasSheetView) {
       return;
     }
 
@@ -868,7 +1009,9 @@ export function startWorkbookSync(args: {
         pendingRowStyles.size > 0 ||
         pendingColStyles.size > 0 ||
         pendingSheetStyles.size > 0 ||
-        pendingRangeRuns.size > 0
+        pendingRangeRuns.size > 0 ||
+        pendingColWidths.size > 0 ||
+        pendingRowHeights.size > 0
       ) {
         const sheetActions = pendingSheetActions.splice(0, pendingSheetActions.length);
         const cellBatch = Array.from(pendingCellEdits.values());
@@ -886,6 +1029,13 @@ export function startWorkbookSync(args: {
         pendingColStyles.clear();
         pendingSheetStyles.clear();
         pendingRangeRuns.clear();
+
+        const viewBatch = {
+          colWidths: Array.from(pendingColWidths.values()).sort(sortColWidthDeltas),
+          rowHeights: Array.from(pendingRowHeights.values()).sort(sortRowHeightDeltas),
+        };
+        pendingColWidths.clear();
+        pendingRowHeights.clear();
 
         // Apply sheet add/delete/rename/reorder deltas *before* sending cell edits so the backend
         // has the correct sheet structure for set_cell/set_range (especially for undo/redo of sheet deletes).
@@ -1037,10 +1187,15 @@ export function startWorkbookSync(args: {
           sheetStyleDeltas: filterSheet(formatBatch.sheetStyleDeltas),
           rangeRunDeltas: filterSheet(formatBatch.rangeRunDeltas),
         };
+        const filteredViewBatch = {
+          colWidths: filterSheet(viewBatch.colWidths),
+          rowHeights: filterSheet(viewBatch.rowHeights),
+        };
 
         const updates = await sendEditsViaTauri(invokeFn, filteredCellBatch);
         applyBackendUpdates(args.document, updates);
         await sendFormattingViaTauri(invokeFn, filteredFormatBatch);
+        await sendSheetViewViaTauri(invokeFn, filteredViewBatch);
       }
 
       // If the user undoes back to the last-saved state, the DocumentController becomes clean
@@ -1067,7 +1222,8 @@ export function startWorkbookSync(args: {
             pendingColStyles.size > 0 ||
             pendingSheetStyles.size > 0 ||
             pendingRangeRuns.size > 0;
-          if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || flushQueued) return;
+          const hasPendingSheetView = pendingColWidths.size > 0 || pendingRowHeights.size > 0;
+          if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || hasPendingSheetView || flushQueued) return;
           await invokeFn("mark_saved", {});
         } catch {
           // Graceful degradation: older backends may not implement this command.
@@ -1090,7 +1246,8 @@ export function startWorkbookSync(args: {
           pendingColStyles.size > 0 ||
           pendingSheetStyles.size > 0 ||
           pendingRangeRuns.size > 0;
-        if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || flushQueued) {
+        const hasPendingSheetView = pendingColWidths.size > 0 || pendingRowHeights.size > 0;
+        if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || hasPendingSheetView || flushQueued) {
           flushQueued = false;
           scheduleFlush();
         }
@@ -1116,6 +1273,8 @@ export function startWorkbookSync(args: {
       pendingColStyles.clear();
       pendingSheetStyles.clear();
       pendingRangeRuns.clear();
+      pendingColWidths.clear();
+      pendingRowHeights.clear();
       stopListening();
     },
     async markSaved() {
