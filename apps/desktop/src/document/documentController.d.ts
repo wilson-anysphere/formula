@@ -20,10 +20,13 @@ export class DocumentController {
   getSheetView(sheetId: string): {
     frozenRows: number;
     frozenCols: number;
+    backgroundImageId?: string | null;
     colWidths?: Record<string, number>;
     rowHeights?: Record<string, number>;
     mergedRanges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
   };
+  getSheetBackgroundImageId(sheetId: string): string | null;
+  setSheetBackgroundImageId(sheetId: string, imageId: string | null, options?: unknown): void;
   setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
   setMergedRanges(
     sheetId: string,
