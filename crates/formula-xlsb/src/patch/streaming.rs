@@ -5,6 +5,8 @@ use crate::parser::{biff12, CellValue, Error};
 
 use super::{Biff12Writer, CellEdit};
 
+const READ_PAYLOAD_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
+
 #[derive(Debug)]
 struct RawRecordHeader {
     id: u32,
@@ -352,11 +354,13 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     continue;
                 };
 
-                let mut payload = vec![0u8; len];
-                payload[0..prefix.len()].copy_from_slice(&prefix);
-                input
-                    .read_exact(&mut payload[prefix.len()..])
-                    .map_err(super::map_io_error)?;
+                let mut payload = Vec::with_capacity(len.min(READ_PAYLOAD_CHUNK_BYTES));
+                payload.extend_from_slice(&prefix);
+                read_exact_into_vec(
+                    &mut input,
+                    &mut payload,
+                    len.saturating_sub(prefix.len()),
+                )?;
 
                 applied[edit_idx] = true;
                 let edit = &edits[edit_idx];
@@ -806,9 +810,26 @@ fn write_raw_header<W: Write>(
 }
 
 fn read_payload<R: Read>(r: &mut R, len: usize) -> Result<Vec<u8>, Error> {
-    let mut payload = vec![0u8; len];
-    r.read_exact(&mut payload).map_err(super::map_io_error)?;
+    // Record lengths are attacker-controlled. Avoid allocating the full payload up-front; instead
+    // grow the buffer as bytes are successfully read (important when the underlying stream is
+    // truncated or size-limited).
+    let mut payload = Vec::with_capacity(len.min(READ_PAYLOAD_CHUNK_BYTES));
+    read_exact_into_vec(r, &mut payload, len)?;
     Ok(payload)
+}
+
+fn read_exact_into_vec<R: Read>(r: &mut R, out: &mut Vec<u8>, mut len: usize) -> Result<(), Error> {
+    while len > 0 {
+        let chunk_len = READ_PAYLOAD_CHUNK_BYTES.min(len);
+        let start = out.len();
+        out.resize(start + chunk_len, 0);
+        if let Err(err) = r.read_exact(&mut out[start..]) {
+            out.truncate(start);
+            return Err(super::map_io_error(err));
+        }
+        len = len.saturating_sub(chunk_len);
+    }
+    Ok(())
 }
 
 fn copy_exact<R: Read, W: Write>(
