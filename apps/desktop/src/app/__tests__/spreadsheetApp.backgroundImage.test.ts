@@ -330,6 +330,43 @@ describe("SpreadsheetApp worksheet background images", () => {
     }
   });
 
+  it("trims worksheet background image ids when resolving background patterns", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
+      const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      createPatternSpy.mockClear();
+      createdPatterns = [];
+      patternFillRects = [];
+
+      const doc = app.getDocument();
+      doc.setImage(imageEntry.id, { bytes: imageEntry.bytes, mimeType: imageEntry.mimeType });
+      // Simulate a sheet view update path that sets the background image id with incidental whitespace.
+      doc.setSheetBackgroundImageId(app.getCurrentSheetId(), `  ${imageEntry.id}  `);
+      await app.whenIdle();
+
+      expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageEntry.id);
+      expect(createPatternSpy).toHaveBeenCalled();
+      expect(patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base")).length).toBeGreaterThan(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("fills the shared grid background layer with a repeated background pattern when the active sheet has a background image", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
