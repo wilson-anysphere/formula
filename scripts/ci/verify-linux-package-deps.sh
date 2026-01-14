@@ -286,6 +286,10 @@ for deb in "${debs[@]}"; do
   assert_contains_any "$depends" "$deb" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$depends" "$deb" "librsvg2 (icons)" "librsvg2"
   assert_contains_any "$depends" "$deb" "OpenSSL (libssl)" "libssl"
+  # We ship a shared-mime-info definition for Parquet so `*.parquet` maps to
+  # application/vnd.apache.parquet (many distros don't include this by default).
+  # Require shared-mime-info so install triggers can run update-mime-database.
+  assert_contains_any "$depends" "$deb" "shared-mime-info (MIME database)" "shared-mime-info"
 
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (deb) $(basename "$deb")"
@@ -325,6 +329,9 @@ for rpm_path in "${rpms[@]}"; do
     "libappindicator3-1"
   assert_contains_any "$requires" "$rpm_path" "librsvg package (icons)" "librsvg2" "librsvg-2-2"
   assert_contains_any "$requires" "$rpm_path" "OpenSSL package" "openssl-libs" "libopenssl3"
+  # Ensure update-mime-database is available so packaged MIME definitions (e.g. Parquet)
+  # are registered on install.
+  assert_contains_any "$requires" "$rpm_path" "shared-mime-info (MIME database)" "shared-mime-info"
 
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
