@@ -13,7 +13,6 @@
 #[cfg(test)]
 use chrono::NaiveDate;
 use formula_columnar::{ColumnarTable, Value as ColumnarValue};
-use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -49,15 +48,7 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
 }
 
 fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
-    // Keep behavior consistent with `PivotFieldRef`'s serde `Deserialize` implementation:
-    // DAX-looking strings become structured refs; everything else stays a cache field name.
-    if let Some(measure) = parse_dax_measure_ref(&raw) {
-        return PivotFieldRef::DataModelMeasure(measure);
-    }
-    if let Some((table, column)) = parse_dax_column_ref(&raw) {
-        return PivotFieldRef::DataModelColumn { table, column };
-    }
-    PivotFieldRef::CacheFieldName(raw)
+    PivotFieldRef::from_unstructured_owned(raw)
 }
 
 mod apply;

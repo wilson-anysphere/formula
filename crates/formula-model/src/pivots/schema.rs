@@ -87,6 +87,20 @@ impl PivotFieldRef {
     pub fn from_untyped(raw: &str) -> Self {
         Self::from_unstructured(raw)
     }
+
+    /// Owned-string variant of [`Self::from_unstructured`].
+    ///
+    /// This is useful when the caller already has an owned `String` and wants to avoid
+    /// an extra allocation in the common `CacheFieldName` case.
+    pub fn from_unstructured_owned(raw: String) -> Self {
+        if let Some(measure) = parse_dax_measure_ref(&raw) {
+            return PivotFieldRef::DataModelMeasure(measure);
+        }
+        if let Some((table, column)) = parse_dax_column_ref(&raw) {
+            return PivotFieldRef::DataModelColumn { table, column };
+        }
+        PivotFieldRef::CacheFieldName(raw)
+    }
 }
 
 impl fmt::Display for PivotFieldRef {
@@ -625,6 +639,10 @@ mod tests {
             ),
         ] {
             assert_eq!(PivotFieldRef::from_unstructured(raw), expected);
+            assert_eq!(
+                PivotFieldRef::from_unstructured_owned(raw.to_string()),
+                expected
+            );
 
             // Ensure the helper stays in sync with the serde string behavior.
             let decoded: PivotFieldRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
