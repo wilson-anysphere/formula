@@ -191,11 +191,14 @@ export function AddStepMenu(props: {
             id: "unpivot",
             label: t("queryEditor.addStep.op.unpivot"),
             create: () => {
+              // Prefer unpivoting a "value" column (2nd col) while leaving the first
+              // column as an identifier, mirroring typical Power Query usage.
+              const unpivotColumn = columnNames.length > 1 ? secondColumnName : firstColumnName;
               const nameColumn = uniqueName("Attribute", usedColumnNames);
               const used = new Set(usedColumnNames);
               used.add(nameColumn);
               const valueColumn = uniqueName("Value", used);
-              return { type: "unpivot", columns: [firstColumnName], nameColumn, valueColumn };
+              return { type: "unpivot", columns: [unpivotColumn], nameColumn, valueColumn };
             },
           }),
           schemaItem({

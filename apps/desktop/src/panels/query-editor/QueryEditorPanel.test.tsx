@@ -16,6 +16,13 @@ async function flushMicrotasks(count = 8): Promise<void> {
   for (let i = 0; i < count; i++) await Promise.resolve();
 }
 
+function setTextInputValue(input: HTMLInputElement, value: string): void {
+  const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!nativeSetter) throw new Error("Missing HTMLInputElement.value setter");
+  nativeSetter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function baseQuery(steps: QueryStep[]): Query {
   return { id: "q1", name: "Query 1", source: { type: "range", range: { values: [] } }, steps };
 }
@@ -79,8 +86,7 @@ describe("QueryEditorPanel", () => {
     expect(input).toBeTruthy();
 
     await act(async () => {
-      input.value = "hello";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "hello");
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
 

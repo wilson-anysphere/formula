@@ -16,6 +16,17 @@ async function flushMicrotasks(count = 5): Promise<void> {
   for (let i = 0; i < count; i++) await Promise.resolve();
 }
 
+function setTextInputValue(input: HTMLInputElement, value: string): void {
+  // React tracks input values by patching the element's `value` property. When we
+  // assign to `input.value` directly, React may treat the subsequent `input`
+  // event as a no-op because the tracker has already been updated. Calling the
+  // native setter keeps React's tracker "stale" until the event fires.
+  const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!nativeSetter) throw new Error("Missing HTMLInputElement.value setter");
+  nativeSetter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function baseQuery(): Query {
   return { id: "q1", name: "Query 1", source: { type: "range", range: { values: [] } }, steps: [] };
 }
@@ -165,7 +176,7 @@ describe("AddStepMenu", () => {
 
     expect(onAddStep).toHaveBeenCalledWith({
       type: "unpivot",
-      columns: ["Region"],
+      columns: ["Sales"],
       nameColumn: "Attribute",
       valueColumn: "Value",
     });
@@ -185,7 +196,7 @@ describe("AddStepMenu", () => {
         {
           id: "s1",
           name: "Unpivoted",
-          operation: { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+          operation: { type: "unpivot", columns: ["Sales"], nameColumn: "Attribute", valueColumn: "Value" },
         },
       ],
     };
@@ -205,7 +216,7 @@ describe("AddStepMenu", () => {
 
     expect(onAddStep).toHaveBeenCalledWith({
       type: "unpivot",
-      columns: ["Region"],
+      columns: ["Sales"],
       nameColumn: "Attribute 1",
       valueColumn: "Value 1",
     });
@@ -462,15 +473,13 @@ describe("AddStepMenu", () => {
     const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
 
     await act(async () => {
-      input.value = "   ";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "   ");
     });
     expect(suggestButton.disabled).toBe(true);
     expect(onAiSuggest).not.toHaveBeenCalled();
 
     await act(async () => {
-      input.value = "filter to non-null";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "filter to non-null");
     });
 
     expect(suggestButton.disabled).toBe(false);
@@ -514,8 +523,7 @@ describe("AddStepMenu", () => {
     const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
 
     await act(async () => {
-      input.value = "filter";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "filter");
     });
     await act(async () => {
       suggestButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -525,8 +533,7 @@ describe("AddStepMenu", () => {
     expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(1);
 
     await act(async () => {
-      input.value = "filter again";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "filter again");
     });
 
     expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(0);
@@ -561,8 +568,7 @@ describe("AddStepMenu", () => {
     const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
 
     await act(async () => {
-      input.value = "   hello  ";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "   hello  ");
     });
 
     await act(async () => {
@@ -590,8 +596,7 @@ describe("AddStepMenu", () => {
     const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
 
     await act(async () => {
-      input.value = "do something";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "do something");
     });
 
     await act(async () => {
@@ -627,8 +632,7 @@ describe("AddStepMenu", () => {
     const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
 
     await act(async () => {
-      input.value = "filter to non-null";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "filter to non-null");
     });
 
     await act(async () => {
@@ -640,8 +644,7 @@ describe("AddStepMenu", () => {
 
     // Change intent while the request is in flight.
     await act(async () => {
-      input.value = "something else";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      setTextInputValue(input, "something else");
       await flushMicrotasks(5);
     });
 
