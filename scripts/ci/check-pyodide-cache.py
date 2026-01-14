@@ -131,9 +131,20 @@ def check_job(
                     f"- Pyodide cache key (line {ln}) is missing version reference (expected steps.pyodide.outputs.version or {pyodide_version})"
                 )
 
-    # Ensure we cache the expected directory.
-    if "apps/desktop/public/pyodide/" not in text:
-        errors.append("- Pyodide cache config is missing apps/desktop/public/pyodide/ path")
+    # Ensure we cache the expected directory (versioned `full/` bundle).
+    #
+    # This keeps caches consistent across workflows (same inputs -> same directory) and
+    # avoids accidentally caching the entire `apps/desktop/public/pyodide/` tree, which
+    # can grow over time as versions are bumped.
+    expected_dirs = [
+        "apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full",
+        f"apps/desktop/public/pyodide/v{pyodide_version}/full",
+    ]
+    if not any(d in text for d in expected_dirs):
+        errors.append(
+            "- Pyodide cache config is missing the expected versioned `full/` directory "
+            f"({expected_dirs[0]})"
+        )
 
     if errors:
         header = f"{workflow.as_posix()} job `{job_id}` runs a desktop build but is missing required Pyodide caching:"
