@@ -10446,6 +10446,9 @@ export class SpreadsheetApp {
    * currently implement outline-based hidden rows/cols.
    */
   setRowsFilteredHidden(rows: number[] | null | undefined, hidden: boolean): void {
+    // Filtering toggles outline hidden state and can shift the rendered viewport/selection.
+    // Do not apply it while any cell/formula edit is active, including split-view secondary editors.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.gridMode !== "legacy") {
       showToast("Filter is not supported in shared grid mode yet.", "info");
       // Preserve keyboard workflows even when the action is unsupported.
@@ -10490,6 +10493,9 @@ export class SpreadsheetApp {
    * entries (so grouping metadata is preserved).
    */
   clearFilteredHiddenRowsInRange(startRow: number, endRow: number): void {
+    // Do not mutate outline hidden state while editing text (cell editor / formula bar / inline edit),
+    // including split-view secondary editors.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.gridMode !== "legacy") {
       showToast("Filter is not supported in shared grid mode yet.", "info");
       this.focus();
@@ -10530,6 +10536,9 @@ export class SpreadsheetApp {
    * `restoreDocumentState()` calls (workbook open / version restore).
    */
   clearAllFilteredHiddenRows(): void {
+    // Do not mutate outline hidden state while editing text (cell editor / formula bar / inline edit),
+    // including split-view secondary editors.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.gridMode !== "legacy") {
       showToast("Filter is not supported in shared grid mode yet.", "info");
       this.focus();
