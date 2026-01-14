@@ -1240,6 +1240,9 @@ Notes:
   - Age pruning is conservative: newly-arriving records are not deleted in the same op-log transaction they are added,
     so late-arriving/offline records can still be ingested and compared before cleanup.
   - Age pruning is incremental: very large logs may take multiple passes to fully prune.
+  - Age pruning is additionally conservative relative to the local op log queue: records are only pruned when they are older
+    than both the age cutoff and the oldest local op record (queue head), which avoids pruning history that may still be needed
+    to compare against long-offline local ops.
 - Implementation: [`packages/collab/conflicts/src/formula-conflict-monitor.js`](../packages/collab/conflicts/src/formula-conflict-monitor.js)
 - Conflict monitors support an `ignoredOrigins` option to ignore bulk “time travel” transactions such as version restores
   (`"versioning-restore"`) and branch apply operations (`"branching-apply"`). `createCollabSession` wires this by default.

@@ -260,13 +260,15 @@ test("CellStructuralConflictMonitor still detects recent conflicts when age prun
   docB.destroy();
 });
 
-test("CellStructuralConflictMonitor prunes old local op records by age when enabled", () => {
+test("CellStructuralConflictMonitor age pruning is conservative relative to the local op queue head", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
   const ops = doc.getMap("cellStructuralOps");
 
   const now = Date.now();
   const localId = "op-local-old";
+  const remoteNewerId = "op-remote-newer";
+  const remoteOlderId = "op-remote-older";
 
   doc.transact(() => {
     ops.set(localId, {
@@ -274,6 +276,27 @@ test("CellStructuralConflictMonitor prunes old local op records by age when enab
       kind: "edit",
       userId: "local",
       createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+    // This record is old enough to exceed the age cutoff, but newer than our
+    // oldest local op record. It must be retained to allow comparisons against
+    // our (very) old local op.
+    ops.set(remoteNewerId, {
+      id: remoteNewerId,
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 30_000,
+      beforeState: [],
+      afterState: [],
+    });
+    // This record is older than both the age cutoff and the local queue head,
+    // so it is safe to prune.
+    ops.set(remoteOlderId, {
+      id: remoteOlderId,
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 120_000,
       beforeState: [],
       afterState: [],
     });
@@ -287,7 +310,9 @@ test("CellStructuralConflictMonitor prunes old local op records by age when enab
     maxOpRecordAgeMs: 1_000,
   });
 
-  assert.equal(ops.has(localId), false);
+  assert.equal(ops.has(remoteOlderId), false);
+  assert.equal(ops.has(remoteNewerId), true);
+  assert.equal(ops.has(localId), true);
 
   monitor.dispose();
   doc.destroy();

@@ -59,6 +59,12 @@ export class CellStructuralConflictMonitor {
    *   records older than `Date.now() - maxOpRecordAgeMs` may be deleted by any
    *   client (best-effort).
    *
+   *   Pruning is additionally conservative relative to the local op log queue:
+   *   records are only pruned when they are older than both the age cutoff and
+   *   the oldest local op record (queue head). This avoids deleting records that
+   *   may still be needed to compare against local ops that are in-flight (e.g.
+   *   long offline periods).
+   *
    *   Pruning is conservative: records are not deleted in the same op-log
    *   transaction they are added, so late-arriving/offline records have a chance
    *   to be ingested by other clients before being removed.
@@ -447,7 +453,13 @@ export class CellStructuralConflictMonitor {
     if (!opts.force && now - this._lastAgePruneAt < minIntervalMs) return;
     this._lastAgePruneAt = now;
 
-    const cutoff = now - ageMs;
+    const ageCutoff = now - ageMs;
+    const localQueueHeadCreatedAt = this._getLocalOpQueueHeadCreatedAt();
+    // Conservative policy: only prune entries that are older than the age cutoff
+    // *and* older than our oldest local op record. This avoids deleting records
+    // that might still be needed to compare against local operations that have
+    // not yet been fully observed by other clients (best-effort).
+    const cutoff = Math.min(ageCutoff, localQueueHeadCreatedAt);
   
     /** @type {string[]} */
     const toDelete = [];
@@ -491,6 +503,31 @@ export class CellStructuralConflictMonitor {
     }
   }
 
+  _getLocalOpQueueHeadCreatedAt() {
+    // Fast path: local queue already initialized and sorted.
+    if (this._localOpQueueInitialized) {
+      if (this._localOpQueue.length === 0) return Infinity;
+      for (const entry of this._localOpQueue) {
+        const t = Number(entry?.createdAt);
+        if (Number.isFinite(t) && t > 0) return t;
+      }
+      // Local queue is initialized but contains no valid timestamps.
+      return Infinity;
+    }
+
+    // Slow path (startup): scan existing op log for the oldest local record.
+    let min = Infinity;
+    for (const rawId of this._ops.keys()) {
+      const record = this._ops.get(rawId);
+      if (!record || typeof record !== "object") continue;
+      if (record.userId !== this.localUserId) continue;
+      const createdAt = Number(record.createdAt);
+      if (!Number.isFinite(createdAt) || createdAt <= 0) continue;
+      if (createdAt < min) min = createdAt;
+    }
+    return min;
+  }
+
   /**
    * If the current op-log transaction added records that are already past the
    * age cutoff, schedule a deferred prune so the records don't stick around
@@ -507,7 +544,9 @@ export class CellStructuralConflictMonitor {
     if (!addedIds || addedIds.size === 0) return;
 
     const now = Date.now();
-    const cutoff = now - ageMs;
+    const ageCutoff = now - ageMs;
+    const localQueueHeadCreatedAt = this._getLocalOpQueueHeadCreatedAt();
+    const cutoff = Math.min(ageCutoff, localQueueHeadCreatedAt);
 
     let hasExpiredAdded = false;
     for (const id of addedIds) {

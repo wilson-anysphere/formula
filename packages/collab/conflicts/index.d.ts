@@ -154,6 +154,12 @@ export class CellStructuralConflictMonitor {
      * `cellStructuralOps` log. When set, records older than `Date.now() - maxOpRecordAgeMs`
      * may be deleted by any client (best-effort).
      *
+     * Pruning is additionally conservative relative to the local op log queue:
+     * records are only pruned when they are older than both the age cutoff and
+     * the oldest local op record (queue head). This avoids deleting records that
+     * may still be needed to compare against local ops that are in-flight (e.g.
+     * long offline periods).
+     *
      * Pruning is conservative: records are not deleted in the same op-log transaction
      * they are added, so late-arriving/offline records have a chance to be ingested
      * by other clients before being removed.
