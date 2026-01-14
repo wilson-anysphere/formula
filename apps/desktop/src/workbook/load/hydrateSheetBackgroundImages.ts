@@ -42,48 +42,24 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
 }): Promise<void> {
   const { app, workbookSheetStore, backend } = opts;
 
-  // Always clear any stale sheet background mappings for the current workbook.
-  // Background images are sourced from the opened XLSX package; if the new workbook does not
-  // specify any, we must not keep prior background ids around.
-  try {
-    for (const sheet of workbookSheetStore.listAll()) {
-      app.setSheetBackgroundImageId(sheet.id, null);
-    }
-  } catch {
-    // ignore
-  }
-
   let imported: ImportedSheetBackgroundImageInfo[] = [];
   try {
     imported = (await backend.listImportedSheetBackgroundImages()) ?? [];
   } catch {
-    return;
-  }
-
-  if (!Array.isArray(imported) || imported.length === 0) {
-    return;
+    imported = [];
   }
 
   const docAny = app.getDocument() as any;
-  const supportsBatch =
-    typeof docAny?.beginBatch === "function" &&
-    typeof docAny?.endBatch === "function" &&
-    typeof docAny?.cancelBatch === "function" &&
-    typeof docAny?.setImage === "function";
 
-  const loadedImageIds = new Set<string>();
+  const supportsExternalImages = typeof docAny?.applyExternalImageDeltas === "function";
+  const supportsExternalViews = typeof docAny?.applyExternalSheetViewDeltas === "function";
 
-  let batchStarted = false;
-  if (supportsBatch) {
-    try {
-      docAny.beginBatch({ label: "Load worksheet background images" });
-      batchStarted = true;
-    } catch {
-      // Fall through to non-batched path below.
-    }
-  }
+  /** @type {Map<string, string>} */
+  const backgroundImageIdBySheetId = new Map();
+  /** @type {Map<string, { bytes: Uint8Array, mimeType?: string }>} */
+  const imagesById = new Map();
 
-  try {
+  if (Array.isArray(imported)) {
     for (const entry of imported) {
       const sheetName = typeof (entry as any)?.sheet_name === "string" ? String((entry as any).sheet_name).trim() : "";
       if (!sheetName) continue;
@@ -102,35 +78,83 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
           ? String((entry as any).mime_type).trim()
           : undefined;
 
-      if (!loadedImageIds.has(imageId)) {
-        loadedImageIds.add(imageId);
+      if (!imagesById.has(imageId)) {
         try {
-          const bytes = decodeBase64ToBytes(bytesBase64);
-          if (typeof docAny?.setImage === "function") {
-            docAny.setImage(imageId, { bytes, ...(mimeType ? { mimeType } : {}) });
-          }
+          imagesById.set(imageId, { bytes: decodeBase64ToBytes(bytesBase64), ...(mimeType ? { mimeType } : {}) });
         } catch {
           // Skip corrupt/un-decodable image bytes.
           continue;
         }
       }
 
+      backgroundImageIdBySheetId.set(sheetId, imageId);
+    }
+  }
+
+  // 1) Apply image bytes into the document image store (non-undoable) so loading a workbook does
+  // not create undo history. (The file contents are the baseline state.)
+  if (supportsExternalImages && imagesById.size > 0) {
+    /** @type {any[]} */
+    const imageDeltas: any[] = [];
+    for (const [imageId, entry] of imagesById.entries()) {
+      const before = typeof docAny.getImage === "function" ? docAny.getImage(imageId) : null;
+      imageDeltas.push({ imageId, before, after: { bytes: entry.bytes, ...(entry.mimeType ? { mimeType: entry.mimeType } : {}) } });
+    }
+    try {
+      docAny.applyExternalImageDeltas(imageDeltas, { source: "backend", markDirty: false });
+    } catch {
+      // ignore
+    }
+  } else if (typeof docAny?.setImage === "function") {
+    // Fallback for older DocumentController builds.
+    for (const [imageId, entry] of imagesById.entries()) {
+      try {
+        docAny.setImage(imageId, { bytes: entry.bytes, ...(entry.mimeType ? { mimeType: entry.mimeType } : {}) });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // 2) Apply sheet view background ids (also non-undoable during workbook load).
+  const sheets = (() => {
+    try {
+      return workbookSheetStore.listAll();
+    } catch {
+      return [];
+    }
+  })();
+
+  if (supportsExternalViews && Array.isArray(sheets) && sheets.length > 0) {
+    /** @type {any[]} */
+    const viewDeltas: any[] = [];
+    for (const sheet of sheets) {
+      const sheetId = typeof (sheet as any)?.id === "string" ? String((sheet as any).id).trim() : "";
+      if (!sheetId) continue;
+      const before = docAny.getSheetView(sheetId);
+      const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
+      const current = typeof before?.backgroundImageId === "string" && before.backgroundImageId.trim() !== "" ? before.backgroundImageId : null;
+      if (current === desired) continue;
+      const after = { ...(before ?? {}) };
+      if (desired) after.backgroundImageId = desired;
+      else delete after.backgroundImageId;
+      viewDeltas.push({ sheetId, before, after });
+    }
+
+    if (viewDeltas.length > 0) {
+      try {
+        docAny.applyExternalSheetViewDeltas(viewDeltas, { source: "backend", markDirty: false });
+      } catch {
+        // ignore
+      }
+    }
+  } else {
+    // Fallback: best-effort set via the app helper (older builds).
+    for (const [sheetId, imageId] of backgroundImageIdBySheetId.entries()) {
       try {
         app.setSheetBackgroundImageId(sheetId, imageId);
       } catch {
-        // Ignore per-sheet failures; continue to other sheets.
-      }
-    }
-  } finally {
-    if (batchStarted && typeof docAny?.endBatch === "function") {
-      try {
-        docAny.endBatch();
-      } catch {
-        try {
-          docAny.cancelBatch();
-        } catch {
-          // ignore
-        }
+        // ignore
       }
     }
   }
