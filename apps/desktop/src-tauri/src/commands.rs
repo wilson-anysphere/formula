@@ -4544,6 +4544,56 @@ pub fn get_sheet_view_state(
         .unwrap_or_else(|| json!({ "schemaVersion": SHEET_VIEW_SCHEMA_VERSION })))
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_sheet_imported_col_properties(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<JsonValue, String> {
+    let state = state.inner().lock().unwrap();
+    let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
+    let Some(storage) = state.persistent_storage() else {
+        return Err(app_error(AppStateError::Persistence(
+            "workbook is not backed by persistent storage".to_string(),
+        )));
+    };
+
+    let sheet = match storage
+        .get_sheet_model_worksheet(sheet_uuid)
+        .map_err(|e| e.to_string())?
+    {
+        Some(sheet) => sheet,
+        None => {
+            return Ok(json!({
+                "schemaVersion": 1,
+                "colProperties": {}
+            }))
+        }
+    };
+
+    let mut props_out = serde_json::Map::new();
+    for (col, props) in sheet.col_properties.iter() {
+        let mut entry = serde_json::Map::new();
+        if let Some(width) = props.width {
+            if width.is_finite() && width > 0.0 {
+                entry.insert("width".to_string(), json!(width));
+            }
+        }
+        if props.hidden {
+            entry.insert("hidden".to_string(), json!(true));
+        }
+        if entry.is_empty() {
+            continue;
+        }
+        props_out.insert(col.to_string(), JsonValue::Object(entry));
+    }
+
+    Ok(json!({
+        "schemaVersion": 1,
+        "colProperties": props_out
+    }))
+}
+
 #[cfg(any(feature = "desktop", test))]
 pub(crate) fn apply_sheet_formatting_deltas_inner(
     state: &mut AppState,

@@ -1921,6 +1921,7 @@ fn main() {
             commands::get_sheet_used_range,
             commands::get_sheet_formatting,
             commands::get_sheet_view_state,
+            commands::get_sheet_imported_col_properties,
             commands::set_range,
             commands::apply_sheet_formatting_deltas,
             commands::apply_sheet_view_deltas,

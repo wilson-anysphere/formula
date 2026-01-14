@@ -172,6 +172,22 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as unknown | null) ?? null;
   }
 
+  /**
+   * Desktop-only: fetch worksheet column properties imported from the source workbook model.
+   *
+   * This is distinct from persisted UI sheet view state (`formula_ui_sheet_view`): it reflects
+   * the workbook's native OOXML `<cols>` metadata (`col/@width` + `col/@hidden`).
+   *
+   * Best-effort: not all backend builds expose this command. Callers should tolerate failures
+   * and treat them as "no imported column metadata".
+   */
+  async getSheetImportedColProperties(sheetId: string): Promise<unknown | null> {
+    const payload = await this.invoke("get_sheet_imported_col_properties", {
+      sheet_id: sheetId,
+    });
+    return (payload as unknown | null) ?? null;
+  }
+
   async setCell(params: {
     sheetId: string;
     row: number;

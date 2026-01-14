@@ -223,6 +223,7 @@ import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCel
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
 import { buildImportedDrawingLayerSnapshotAdditions } from "./workbook/load/hydrateImportedDrawings.js";
 import { hydrateSheetBackgroundImagesFromBackend } from "./workbook/load/hydrateSheetBackgroundImages.js";
+import { docColWidthsFromImportedColProperties, hiddenColsFromImportedColProperties } from "./workbook/load/importedColProperties.js";
 import {
   mergeFormattingIntoSnapshot,
   type CellFormatClampBounds,
@@ -10334,6 +10335,19 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     }),
   );
 
+  const importedColPropertiesBySheetIdPromise: Promise<Array<{ sheetId: string; colProperties: unknown | null }>> = Promise.all(
+    sheets.map(async (sheet) => {
+      try {
+        const colProperties = (await (tauriBackend as any).getSheetImportedColProperties?.(sheet.id)) as unknown | null;
+        return { sheetId: sheet.id, colProperties };
+      } catch (err) {
+        // Best-effort: treat import metadata failures as "no imported column metadata".
+        console.warn(`[formula][desktop] Failed to load imported column properties for sheet ${sheet.id}:`, err);
+        return { sheetId: sheet.id, colProperties: null };
+      }
+    }),
+  );
+
   const embeddedCellImagesPromise = tauriBackend
     .listImportedEmbeddedCellImages()
     .catch((err) => {
@@ -10449,6 +10463,15 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     viewStateBySheetId.set(sheetId, view);
   }
 
+  const importedColPropertiesBySheetId = new Map<string, unknown | null>();
+  for (const { sheetId, colProperties } of await importedColPropertiesBySheetIdPromise) {
+    importedColPropertiesBySheetId.set(sheetId, colProperties);
+  }
+
+  // Track user-hidden columns imported from the source workbook so we can seed the UI's outline
+  // hidden state ahead of the first render.
+  const importedHiddenColsBySheetId = new Map<string, number[]>();
+
   for (const sheet of snapshotSheets) {
     const formatting = formattingBySheetId.get(sheet.id) ?? null;
     const clampCellFormatsTo = clampCellFormatBoundsBySheetId.get(sheet.id) ?? null;
@@ -10456,14 +10479,27 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     Object.assign(sheet, merged);
 
     const view = viewStateBySheetId.get(sheet.id) ?? null;
-    const colWidths = (view as any)?.colWidths;
-    if (colWidths && typeof colWidths === "object") {
-      sheet.colWidths = colWidths;
+    const persistedColWidths = (view as any)?.colWidths;
+    const hasPersistedColWidths = Array.isArray(persistedColWidths)
+      ? persistedColWidths.length > 0
+      : persistedColWidths && typeof persistedColWidths === "object"
+        ? Object.keys(persistedColWidths).length > 0
+        : false;
+    if (hasPersistedColWidths) {
+      sheet.colWidths = persistedColWidths;
+    } else {
+      const importedColProperties = importedColPropertiesBySheetId.get(sheet.id) ?? null;
+      const fallback = docColWidthsFromImportedColProperties(importedColProperties);
+      if (fallback) sheet.colWidths = fallback;
     }
     const rowHeights = (view as any)?.rowHeights;
     if (rowHeights && typeof rowHeights === "object") {
       sheet.rowHeights = rowHeights;
     }
+
+    const importedColProperties = importedColPropertiesBySheetId.get(sheet.id) ?? null;
+    const hiddenCols = hiddenColsFromImportedColProperties(importedColProperties);
+    if (hiddenCols.length > 0) importedHiddenColsBySheetId.set(sheet.id, hiddenCols);
   }
 
   const importedChartObjectsRaw = await importedChartObjectsPromise;
@@ -10639,7 +10675,68 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // observes the correct path without needing an extra recalculation pass.
   const workbookFileMetadata = getWorkbookFileMetadataFromWorkbookInfo(info);
   await app.setWorkbookFileMetadata(workbookFileMetadata.directory, workbookFileMetadata.filename, { syncEngine: false });
+
+  // Seed per-sheet hidden columns from the imported workbook model before restoring the
+  // DocumentController snapshot. SpreadsheetApp's row/col visibility is tracked in a local
+  // per-sheet outline map; if we don't seed it here, hidden columns can momentarily render
+  // as visible until the user interacts with the grid.
+  if (importedHiddenColsBySheetId.size > 0) {
+    try {
+      // Clear any outline state from a previously-opened workbook. Sheet ids are often derived
+      // from sheet names (e.g. "Sheet1"), so they can collide across workbook boundaries.
+      const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown> | undefined;
+      if (outlinesBySheet && typeof outlinesBySheet.clear === "function") outlinesBySheet.clear();
+
+      const getOutlineForSheet = (app as any).getOutlineForSheet as ((sheetId: string) => any) | undefined;
+      if (typeof getOutlineForSheet === "function") {
+        for (const [sheetId, cols] of importedHiddenColsBySheetId) {
+          const outline = getOutlineForSheet.call(app, sheetId);
+          if (!outline) continue;
+          const axis = outline?.cols;
+          const entryMut = axis?.entryMut;
+          if (typeof entryMut !== "function") continue;
+          for (const col of cols) {
+            const idx = Number(col);
+            if (!Number.isInteger(idx) || idx < 0) continue;
+            const entry = entryMut.call(axis, idx + 1);
+            if (entry?.hidden) entry.hidden.user = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[formula][desktop] Failed to seed imported hidden columns:", err);
+    }
+  }
   await app.restoreDocumentState(snapshot);
+
+  // Best-effort: propagate imported hidden-column flags into the WASM engine metadata so
+  // Excel-compatible worksheet functions (e.g. `CELL("width")`) can observe them once the
+  // engine-side semantics are implemented.
+  if (importedHiddenColsBySheetId.size > 0) {
+    try {
+      const wasmEngine = (app as any).wasmEngine as any;
+      if (wasmEngine && typeof wasmEngine.setColHidden === "function") {
+        for (const [sheetId, cols] of importedHiddenColsBySheetId) {
+          const meta = typeof doc.getSheetMeta === "function" ? doc.getSheetMeta(sheetId) : null;
+          const sheetName = typeof meta?.name === "string" && meta.name.trim() ? meta.name.trim() : sheetId;
+          for (const col of cols) {
+            const idx = Number(col);
+            if (!Number.isInteger(idx) || idx < 0) continue;
+            await wasmEngine.setColHidden(idx, true, sheetName);
+          }
+        }
+
+        // If the engine produces value-change deltas (e.g. volatile `CELL("width")`), apply them
+        // to keep computed-value caches coherent.
+        if (typeof wasmEngine.recalculate === "function" && typeof (app as any).applyComputedChanges === "function") {
+          const changes = await wasmEngine.recalculate();
+          await (app as any).applyComputedChanges(changes);
+        }
+      }
+    } catch (err) {
+      console.warn("[formula][desktop] Failed to sync imported hidden columns into WASM engine:", err);
+    }
+  }
 
   // Hydrate worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
   // Best-effort: failures should never prevent the workbook from loading.

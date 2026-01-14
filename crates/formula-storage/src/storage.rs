@@ -1232,6 +1232,27 @@ impl Storage {
         row.ok_or(StorageError::SheetNotFound(sheet_id))
     }
 
+    pub fn get_sheet_model_worksheet(
+        &self,
+        sheet_id: Uuid,
+    ) -> Result<Option<formula_model::Worksheet>> {
+        let conn = lock_unpoisoned(&self.conn);
+        let raw_row: Option<Option<String>> = conn
+            .query_row(
+                "SELECT model_sheet_json FROM sheets WHERE id = ?1",
+                params![sheet_id.to_string()],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?;
+        let Some(raw_row) = raw_row else {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        };
+        let Some(raw) = raw_row else {
+            return Ok(None);
+        };
+        Ok(serde_json::from_str::<formula_model::Worksheet>(&raw).ok())
+    }
+
     /// Replace the `sheets.metadata` JSON payload for the given sheet.
     ///
     /// This is intended for application-specific per-sheet state that should be persisted alongside

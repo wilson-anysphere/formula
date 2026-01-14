@@ -4722,7 +4722,7 @@ impl WasmWorkbook {
 
     /// Set whether a column is user-hidden.
     ///
-    /// - `col` is 0-based (A=0)
+    /// `col` is 0-based (A=0).
     #[wasm_bindgen(js_name = "setColHidden")]
     pub fn set_col_hidden(
         &mut self,
@@ -4730,16 +4730,13 @@ impl WasmWorkbook {
         col: u32,
         hidden: bool,
     ) -> Result<(), JsValue> {
-        if col >= EXCEL_MAX_COLS {
-            return Err(js_err(format!("col out of Excel bounds: {col}")));
-        }
         let sheet_name = sheet_name.trim();
         let sheet_name = if sheet_name.is_empty() {
             DEFAULT_SHEET
         } else {
             sheet_name
         };
-
+ 
         // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
         self.inner.with_manual_calc_mode(|this| {
             let sheet = this.ensure_sheet(sheet_name);
