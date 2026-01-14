@@ -47,3 +47,22 @@ fn decrypts_agile_and_standard_large_fixtures() {
         );
     }
 }
+
+#[test]
+fn decrypts_standard_4_2_fixture() {
+    let plaintext_path = fixture_path_buf("plaintext.xlsx");
+    let plaintext = std::fs::read(plaintext_path).expect("read plaintext.xlsx fixture bytes");
+
+    let decrypted = decrypt_fixture("standard-4.2.xlsx");
+    assert_eq!(
+        decrypted, plaintext,
+        "decrypted bytes must match plaintext.xlsx for standard-4.2.xlsx"
+    );
+
+    // Additional sanity: the decrypted bytes should be a valid OPC/ZIP workbook package.
+    let pkg = XlsxPackage::from_bytes(&decrypted).expect("open decrypted package as XLSX");
+    assert!(
+        pkg.part_names().any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+        "decrypted package missing xl/workbook.xml"
+    );
+}

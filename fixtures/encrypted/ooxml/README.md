@@ -9,7 +9,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
 ## Passwords
 
-- `agile.xlsx` / `standard.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
+- `agile.xlsx` / `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
@@ -25,13 +25,16 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 3 / Minor 2**
   - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
   - Decrypts to `plaintext.xlsx` with password `password`
+- `standard-4.2.xlsx` – Standard encrypted OOXML (Apache POI output).
+  - `EncryptionInfo` header version **Major 4 / Minor 2**
+  - Decrypts to `plaintext.xlsx` with password `password`
 - `standard-rc4.xlsx` – Standard encrypted OOXML (RC4 CryptoAPI).
   - `EncryptionInfo` header version **Major 3 / Minor 2**
   - `EncryptionHeader.algId` = `CALG_RC4` (`0x00006801`)
   - Decrypts to `plaintext.xlsx` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
-  - `EncryptionInfo` header version **Major 4 / Minor 4**
-  - Decrypts to `plaintext.xlsx` with password `""`
+   - `EncryptionInfo` header version **Major 4 / Minor 4**
+   - Decrypts to `plaintext.xlsx` with password `""`
 - `agile-unicode.xlsx` – Agile encrypted OOXML with a Unicode open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
@@ -146,6 +149,8 @@ The committed fixture binaries were generated using a mix of tooling:
 - `agile-large.xlsx` was generated using the Rust
   [`ms-offcrypto-writer`](https://crates.io/crates/ms-offcrypto-writer) crate (with a deterministic
   RNG seed) so it includes `dataIntegrity` and is compatible with our strict Agile decryptor.
+- `standard-4.2.xlsx` was generated using **Apache POI 5.2.5** via
+  `tools/encrypted-ooxml-fixtures/generate.sh standard`.
 
 Implementation detail: `msoffcrypto-tool` includes a minimal OLE writer that does not correctly
 handle an `EncryptedPackage` stream **≤ 4096 bytes**. Since `plaintext.xlsx` is tiny, the ciphertext
@@ -154,7 +159,7 @@ ciphertext). The embedded unencrypted size prefix still points at the original p
 decrypting produces identical bytes.
 
 Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI
-5.2.5), but was not used to generate the committed fixture bytes above.
+5.2.5) and is used to generate `standard-4.2.xlsx`.
 
 `standard-rc4.xlsx` was generated using the in-repo Rust example
 `crates/formula-io/examples/generate_standard_rc4_ooxml_fixture.rs` (deterministic output):
