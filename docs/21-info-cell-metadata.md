@@ -111,6 +111,26 @@ Other Excel-valid `CELL()` keys that are not listed above are currently **unsupp
 
 ### Metadata-backed keys (Excel-compatible behavior)
 
+#### `CELL("address")`
+
+`CELL("address")` returns an **absolute** A1 reference like `"$C$5"`.
+
+When the returned address needs a sheet prefix, the engine emits:
+
+```text
+sheet!$A$1
+```
+
+Behavior:
+
+- If the reference is on the **current sheet**, the result is just `"$A$1"` (no `sheet!` prefix).
+- If the reference is on a **different sheet**, the engine prefixes the address with that sheet’s **display name**
+  (tab name), as configured via `setSheetDisplayName` (or `renameSheet`).
+- The sheet prefix is quoted using Excel formula rules when required (spaces, punctuation, reserved names like
+  `TRUE`/`FALSE`, names that look like cell refs, etc). Apostrophes are escaped by doubling:
+  - `'Other Sheet'!$A$1`
+  - `'O''Brien'!$A$1`
+
 #### `CELL("filename")`
 
 Excel format:
