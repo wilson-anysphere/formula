@@ -5226,6 +5226,28 @@ test("Pattern suggestions preserve the typed suffix when cursor is mid-string", 
   );
 });
 
+test("Pattern numeric suggestions do not delete trailing whitespace (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  // Pretend the column above is a stable numeric sequence (10, 11) so the pattern
+  // suggester would normally propose 12. If the user typed a trailing space, we
+  // must not emit a suggestion that would require deleting it.
+  const currentInput = "1 ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Current cell is A3 (0-based row 2) so A2/A1 are "above".
+    cellRef: { row: 2, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 10, A2: 11 }),
+  });
+
+  assert.equal(
+    suggestions.length,
+    0,
+    `Expected no suggestions (pure insertion), got: ${suggestions.map((s) => JSON.stringify(s.text)).join(", ")}`
+  );
+});
+
 test("getSuggestions is crash-proof for non-string currentInput", async () => {
   const engine = new TabCompletionEngine();
 

@@ -282,20 +282,22 @@ export class TabCompletionEngine {
         currentInput: input,
         cursorPosition: cursor,
       });
-      return candidates.map((c) => {
-        // Preserve the user-typed prefix exactly so value suggestions remain representable
-        // as pure insertions at the caret (formula bar ghost text). This also means
-        // we can still suggest a match even when the source cell has different casing
-        // (e.g. "Apple" in the grid while the user types "ap").
-        const completed = completeIdentifier(c.text, prefix);
-        const text = `${completed}${suffix}`;
-        return {
-          text,
-          displayText: text,
-          type: "value",
-          confidence: c.confidence,
-        };
-      });
+      return candidates
+        .filter((c) => typeof c?.text === "string" && c.text.length > prefix.length && startsWithIgnoreCase(c.text, prefix))
+        .map((c) => {
+          // Preserve the user-typed prefix exactly so value suggestions remain representable
+          // as pure insertions at the caret (formula bar ghost text). This also means
+          // we can still suggest a match even when the source cell has different casing
+          // (e.g. "Apple" in the grid while the user types "ap").
+          const completed = completeIdentifier(c.text, prefix);
+          const text = `${completed}${suffix}`;
+          return {
+            text,
+            displayText: text,
+            type: "value",
+            confidence: c.confidence,
+          };
+        });
     } catch {
       return [];
     }
