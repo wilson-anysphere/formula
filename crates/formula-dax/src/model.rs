@@ -888,8 +888,17 @@ impl DataModel {
         for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
             let rel = &rel_info.rel;
             if rel.to_table == table {
+                let to_idx = self
+                    .tables
+                    .get(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
+                    .column_idx(&rel.to_column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.to_string(),
+                        column: rel.to_column.clone(),
+                    })?;
                 let key = full_row
-                    .get(rel_info.to_idx)
+                    .get(to_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
                 let key_existed = rel_info.to_index.contains_key(&key);

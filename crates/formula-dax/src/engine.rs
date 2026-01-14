@@ -4040,8 +4040,14 @@ impl DaxEngine {
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
+                        let to_idx = to_table_ref.column_idx(&rel.rel.to_column).ok_or_else(|| {
+                            DaxError::UnknownColumn {
+                                table: current_table.to_string(),
+                                column: rel.rel.to_column.clone(),
+                            }
+                        })?;
                         let key = to_table_ref
-                            .value_by_idx(current_row, rel.to_idx)
+                            .value_by_idx(current_row, to_idx)
                             .unwrap_or(Value::Blank);
 
                         let sets = resolve_row_sets(model, filter)?;
@@ -4137,13 +4143,19 @@ impl DaxEngine {
                         let to_table_ref = model
                             .table(&rel_info.rel.to_table)
                             .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+                        let to_idx = to_table_ref
+                            .column_idx(&rel_info.rel.to_column)
+                            .ok_or_else(|| DaxError::UnknownColumn {
+                                table: rel_info.rel.to_table.clone(),
+                                column: rel_info.rel.to_column.clone(),
+                            })?;
 
                         let mut key_set: HashSet<Value> = HashSet::new();
                         let mut keys: Vec<Value> = Vec::new();
                         let mut include_blank = false;
                         for &to_row in &current_rows {
                             let key = to_table_ref
-                                .value_by_idx(to_row, rel_info.to_idx)
+                                .value_by_idx(to_row, to_idx)
                                 .unwrap_or(Value::Blank);
                             if key.is_blank() {
                                 include_blank = true;
@@ -4706,29 +4718,38 @@ fn propagate_filter(
             // compute the visible key set. For columnar fact tables, iterating `to_index` can be
             // expensive (especially when the `to_table` is also large); prefer extracting distinct
             // visible values directly from the `to_table` backend when possible.
-            let allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
+            let mut allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
                 relationship
                     .to_index
                     .iter()
+                    // Fact rows whose FK is BLANK always belong to the relationship-generated
+                    // blank member, even if a physical BLANK key exists on the dimension side.
+                    // Therefore, do not treat BLANK as a matchable key during propagation.
+                    .filter(|(key, _)| !key.is_blank())
                     .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
                     .collect()
             } else {
                 let to_table = model
                     .table(to_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+                let to_idx =
+                    to_table
+                        .column_idx(&relationship.rel.to_column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: to_table_name.to_string(),
+                            column: relationship.rel.to_column.clone(),
+                        })?;
 
                 let all_visible = to_set.all_true();
 
                 if all_visible {
                     to_table
-                        .distinct_values_filtered(relationship.to_idx, None)
+                        .distinct_values_filtered(to_idx, None)
                         .unwrap_or_else(|| {
                             let mut seen = HashSet::new();
                             let mut out = Vec::new();
                             for row in 0..to_table.row_count() {
-                                let v = to_table
-                                    .value_by_idx(row, relationship.to_idx)
-                                    .unwrap_or(Value::Blank);
+                                let v = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
                                 if seen.insert(v.clone()) {
                                     out.push(v);
                                 }
@@ -4742,17 +4763,13 @@ fn propagate_filter(
                         Vec::new()
                     } else {
                         to_table
-                            .distinct_values_filtered(
-                                relationship.to_idx,
-                                Some(visible_rows.as_slice()),
-                            )
+                            .distinct_values_filtered(to_idx, Some(visible_rows.as_slice()))
                             .unwrap_or_else(|| {
                                 let mut seen = HashSet::new();
                                 let mut out = Vec::new();
                                 for &row in &visible_rows {
-                                    let v = to_table
-                                        .value_by_idx(row, relationship.to_idx)
-                                        .unwrap_or(Value::Blank);
+                                    let v =
+                                        to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
                                     if seen.insert(v.clone()) {
                                         out.push(v);
                                     }
@@ -4762,6 +4779,7 @@ fn propagate_filter(
                     }
                 }
             };
+            allowed_keys.retain(|v| !v.is_blank());
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
