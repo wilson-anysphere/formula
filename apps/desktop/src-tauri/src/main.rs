@@ -1745,42 +1745,63 @@ fn main() {
       return;
     }
 
-    started = true;
-    const invokeCall = (cmd) => invoke.call(invokeOwner, cmd);
+     started = true;
+     const invokeCall = (cmd) => invoke.call(invokeOwner, cmd);
+     const invokeWithTimeout = async (cmd, timeoutMs) => {
+       const withTimeout = (fn, ms) =>
+         new Promise((resolve, reject) => {
+           let done = false;
+           let timer = null;
+           const finish = (ok, value) => {
+             if (done) return;
+             done = true;
+             if (timer) clearTimeout(timer);
+             if (ok) resolve(value);
+             else reject(value);
+           };
+           timer = setTimeout(() => finish(false, new Error("timeout")), Math.max(0, ms));
+           let promise;
+           try {
+             promise = fn();
+           } catch (e) {
+             finish(false, e);
+             return;
+           }
+           Promise.resolve(promise).then(
+             (value) => finish(true, value),
+             (err) => finish(false, err),
+           );
+         });
+ 
+       try {
+         await withTimeout(() => invokeCall(cmd), timeoutMs);
+         return true;
+       } catch {
+         return false;
+       }
+     };
+ 
+     // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
+     // and (in the real app) allows the host to re-emit cached startup timing events once the
+     // frontend has installed listeners.
+     // Best-effort: the bridge can exist but still be in a transient bad state where `invoke(...)`
+     // never resolves. Use a short timeout so the benchmark script doesn't hang until the Rust
+     // watchdog fires.
+     await invokeWithTimeout("report_startup_webview_loaded", 500);
+ 
+     // Approximate "time to interactive": a microtask + first frame later.
+     await Promise.resolve();
+     await raf();
 
-    // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
-    // and (in the real app) allows the host to re-emit cached startup timing events once the
-    // frontend has installed listeners.
-    try {
-      await invokeCall("report_startup_webview_loaded");
-    } catch {
-      // Best-effort: if the bridge is in a transient bad state, keep going. We'll still attempt to
-      // record TTI (required for printing the `[startup] ...` line) below.
-    }
-
-    // Approximate "time to interactive": a microtask + first frame later.
-    await Promise.resolve();
-    await raf();
-
-    // Record a "first render" mark after the first frame. This is best-effort (and in `--startup-bench`
-    // mode we use it as a proxy for "the minimal document has painted at least once").
-    try {
-      await invokeCall("report_startup_first_render");
-    } catch {
-      // Best-effort: this mark is optional for the shell benchmark.
-    }
-
-    let ttiOk = false;
-    try {
-      await invokeCall("report_startup_tti");
-      ttiOk = true;
-    } catch {
-      ttiOk = false;
-    }
-
-    // `report_startup_tti` is required for the `[startup] ...` log line. If it fails (e.g. due to a
-    // transient IPC issue), retry until the deadline so the benchmark harness doesn't hang.
-    if (!ttiOk) {
+     // Record a "first render" mark after the first frame. This is best-effort (and in `--startup-bench`
+     // mode we use it as a proxy for "the minimal document has painted at least once").
+     await invokeWithTimeout("report_startup_first_render", 500);
+ 
+     const ttiOk = await invokeWithTimeout("report_startup_tti", 500);
+ 
+     // `report_startup_tti` is required for the `[startup] ...` log line. If it fails (e.g. due to a
+     // transient IPC issue), retry until the deadline so the benchmark harness doesn't hang.
+     if (!ttiOk) {
       started = false;
       if (Date.now() > deadline) return;
       setTimeout(tick, 50);
@@ -1795,11 +1816,15 @@ fn main() {
       } catch {}
     }, 25);
   };
-
-  tick().catch(() => {});
-})();
-"#,
-                    )
+ 
+   tick().catch(() => {
+     started = false;
+     if (Date.now() > deadline) return;
+     setTimeout(tick, 50);
+   });
+ })();
+ "#,
+                     )
                     .unwrap_or_else(|err| {
                         eprintln!("[formula][startup-bench] failed to eval script: {err}");
                         std::process::exit(2);
