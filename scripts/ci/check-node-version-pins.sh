@@ -147,15 +147,52 @@ require_env_pin_usage() {
   local validated_any=0
 
   # Fail fast if a workflow uses node-version-file (that would bypass the explicit env pin).
-  set +e
+  # Ignore matches inside YAML block scalars (e.g. `run: |` bodies) so arbitrary script content
+  # can't satisfy or fail this guardrail.
   local file_pins
-  file_pins="$(git grep -n "node-version-file:" -- "$file" 2>/dev/null)"
-  local file_pin_status=$?
-  set -e
-  if [ "$file_pin_status" -eq 2 ]; then
-    echo "git grep failed while scanning ${file} for node-version-file pins" >&2
-    exit 2
-  fi
+  file_pins="$(
+    awk '
+      function indent(s) {
+        match(s, /^[ ]*/);
+        return RLENGTH;
+      }
+
+      BEGIN {
+        in_block = 0;
+        block_indent = 0;
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      }
+
+      {
+        raw = $0;
+        sub(/\r$/, "", raw);
+        ind = indent(raw);
+
+        if (in_block) {
+          if (raw ~ /^[[:space:]]*$/) next;
+          if (ind > block_indent) next;
+          in_block = 0;
+        }
+
+        line = raw;
+        sub(/#.*/, "", line);
+        is_block = (line ~ block_re);
+
+        # Ignore single-line run steps (inline shell snippets).
+        if (!is_block && line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) next;
+
+        if (line ~ /node-version-file:/) {
+          printf "%s:%d:%s\n", FILENAME, NR, raw;
+        }
+
+        if (is_block) {
+          in_block = 1;
+          block_indent = ind;
+        }
+      }
+    ' "$file"
+  )"
+
   if [ -n "$file_pins" ]; then
     echo "Node workflow pin check failed: ${file} uses node-version-file (unsupported in this repo)." >&2
     echo "Use: node-version: \${{ env.NODE_VERSION }} (and keep NODE_VERSION in sync across workflows)." >&2
@@ -166,16 +203,52 @@ require_env_pin_usage() {
 
   # We expect workflows to reference the pinned Node major via env.NODE_VERSION.
   # (This makes it harder to accidentally update one job but not the others.)
-  set +e
+  #
+  # Ignore matches inside YAML block scalars (e.g. `run: |` script bodies) and inline
+  # `run:` steps so script content can't satisfy or fail this guardrail.
   local matches
-  matches="$(git grep -n "node-version:" -- "$file" 2>/dev/null)"
-  local status=$?
-  set -e
+  matches="$(
+    awk '
+      function indent(s) {
+        match(s, /^[ ]*/);
+        return RLENGTH;
+      }
 
-  if [ "$status" -eq 2 ]; then
-    echo "git grep failed while scanning ${file}" >&2
-    exit 2
-  fi
+      BEGIN {
+        in_block = 0;
+        block_indent = 0;
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      }
+
+      {
+        raw = $0;
+        sub(/\r$/, "", raw);
+        ind = indent(raw);
+
+        if (in_block) {
+          if (raw ~ /^[[:space:]]*$/) next;
+          if (ind > block_indent) next;
+          in_block = 0;
+        }
+
+        line = raw;
+        sub(/#.*/, "", line);
+        is_block = (line ~ block_re);
+
+        # Ignore single-line run steps (inline shell snippets).
+        if (!is_block && line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) next;
+
+        if (line ~ /node-version:/) {
+          printf "%s:%d:%s\n", FILENAME, NR, raw;
+        }
+
+        if (is_block) {
+          in_block = 1;
+          block_indent = ind;
+        }
+      }
+    ' "$file"
+  )"
 
   if [ -z "$matches" ]; then
     echo "Node workflow pin check failed: no node-version pins found in ${file}." >&2
