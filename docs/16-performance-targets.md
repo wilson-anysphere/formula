@@ -339,7 +339,7 @@ below uses action version tags for readability.
 
 Note: multiple workflows publish benchmark history to `gh-pages` (via `benchmark-action`), so we
 serialize publishes with a shared job-level concurrency group (`benchmark-gh-pages-publish`) to avoid
-push races.
+push races. CI enforces this via `scripts/ci/check-benchmark-gh-pages-concurrency.sh`.
 
 In addition to the main Linux perf gates, the repo also runs a scheduled **cross-platform** desktop
 startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON artifacts:
