@@ -999,6 +999,20 @@ describe("Ribbon command wiring coverage", () => {
       [],
     );
 
+    const implementedDuplicates = implementedCommandIds.filter((id, index) => implementedCommandIds.indexOf(id) !== index).sort();
+    expect(
+      implementedDuplicates,
+      `implementedCommandIds must not contain duplicates:\n${implementedDuplicates.map((id) => `- ${id}`).join("\n")}`,
+    ).toEqual([]);
+
+    const knownUnimplementedDuplicates = knownUnimplementedCommandIds
+      .filter((id, index) => knownUnimplementedCommandIds.indexOf(id) !== index)
+      .sort();
+    expect(
+      knownUnimplementedDuplicates,
+      `knownUnimplementedCommandIds must not contain duplicates:\n${knownUnimplementedDuplicates.map((id) => `- ${id}`).join("\n")}`,
+    ).toEqual([]);
+
     const unknown = schemaCommandIds.filter((id) => !implemented.has(id) && !knownUnimplemented.has(id));
     expect(
       unknown,
