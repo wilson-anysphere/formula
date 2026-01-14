@@ -46,7 +46,16 @@ Options:
   --token          GitHub token. Defaults to $GITHUB_TOKEN / $GH_TOKEN (if set).
   --local-bundles  Also run any platform-specific local bundle validators (if present).
 
-Expectations (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
+Verifier options (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
+  --dry-run                Validate manifest/assets only (skip bundle hashing)
+  --verify-assets          Download updater assets referenced in latest.json and verify their signatures (slow)
+  --out <path>             Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)
+  --all-assets             Hash all release assets (still excludes .sig by default)
+  --include-sigs           Include .sig assets in SHA256SUMS (use with --all-assets to match CI)
+  --allow-windows-msi      Allow raw .msi in latest.json Windows entries (defaults to disallowed)
+  --allow-windows-exe      Allow raw .exe in latest.json Windows entries (defaults to disallowed)
+
+Expectations (also forwarded; optional):
   --expectations <file>     Load expected targets from a JSON config file
   --expect-windows-x64
   --expect-windows-arm64
@@ -66,7 +75,7 @@ Expectations (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {Record<string, string | boolean>} */
+  /** @type {Record<string, unknown>} */
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -76,6 +85,39 @@ function parseArgs(argv) {
     }
     if (arg === "--local-bundles") {
       out.localBundles = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      out.dryRun = true;
+      continue;
+    }
+    if (arg === "--verify-assets") {
+      out.verifyAssets = true;
+      continue;
+    }
+    if (arg === "--all-assets") {
+      out.allAssets = true;
+      continue;
+    }
+    if (arg === "--include-sigs") {
+      out.includeSigs = true;
+      continue;
+    }
+    if (arg === "--allow-windows-msi") {
+      out.allowWindowsMsi = true;
+      continue;
+    }
+    if (arg === "--allow-windows-exe") {
+      out.allowWindowsExe = true;
+      continue;
+    }
+    if (arg === "--out" || arg.startsWith("--out=")) {
+      const value = arg === "--out" ? argv[i + 1] : arg.slice("--out=".length);
+      if (!value || value.startsWith("-")) {
+        die(`Missing value for --out.\n\nRun with --help for usage.`);
+      }
+      out.out = value;
+      if (arg === "--out") i++;
       continue;
     }
     if (arg === "--expectations" || arg.startsWith("--expectations=")) {
@@ -560,6 +602,13 @@ async function main() {
         tag,
         "--repo",
         repo,
+        ...(args.dryRun === true ? ["--dry-run"] : []),
+        ...(args.verifyAssets === true ? ["--verify-assets"] : []),
+        ...(typeof args.out === "string" && args.out.trim().length > 0 ? ["--out", args.out.trim()] : []),
+        ...(args.allAssets === true ? ["--all-assets"] : []),
+        ...(args.includeSigs === true ? ["--include-sigs"] : []),
+        ...(args.allowWindowsMsi === true ? ["--allow-windows-msi"] : []),
+        ...(args.allowWindowsExe === true ? ["--allow-windows-exe"] : []),
         ...(typeof args.expectations === "string" && args.expectations.trim().length > 0
           ? ["--expectations", args.expectations.trim()]
           : []),

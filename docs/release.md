@@ -1137,6 +1137,12 @@ To run the repo’s release sanity checks (version check, updater config validat
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name
 ```
 
+If you want a faster check that **does not** download/hash all release bundles (still validates `latest.json` + signatures + asset presence), add `--dry-run`:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --dry-run
+```
+
 If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
 
 ```bash
