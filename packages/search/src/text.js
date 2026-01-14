@@ -97,7 +97,9 @@ export function formatCellValue(value) {
 export function getValueText(cell, valueMode = "display") {
   if (!cell) return "";
   if (valueMode === "raw") return formatCellValue(cell.value);
-  if (cell.display != null) return String(cell.display);
+  // Some adapters provide a formatted `display` field. Keep this resilient if
+  // the display value is non-scalar (avoid `[object Object]`).
+  if (cell.display != null) return formatCellValue(cell.display);
   return formatCellValue(cell.value);
 }
 

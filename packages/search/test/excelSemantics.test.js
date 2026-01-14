@@ -121,3 +121,14 @@ test("unknown typed values stringify stably (no [object Object])", () => {
   assert.notEqual(text, "[object Object]");
   assert.match(text, /\{\"t\":\"image\"/);
 });
+
+test("valueMode: display formats non-scalar display values (no [object Object])", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+
+  // Some backends may store rich display values; ensure we still search using their text.
+  sheet.setCell(0, 0, { value: 1, display: { text: "One", runs: [{ start: 0, end: 3, style: { bold: true } }] } });
+
+  const matches = await findAll(wb, "One", { scope: "sheet", currentSheetName: "Sheet1", matchEntireCell: true });
+  assert.deepEqual(matches.map((m) => m.address), ["Sheet1!A1"]);
+});
