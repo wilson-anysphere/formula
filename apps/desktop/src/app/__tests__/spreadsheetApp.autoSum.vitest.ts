@@ -175,6 +175,39 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
     }
   });
 
+  it("does not resurrect a deleted sheet when computeCellValue is called with a stale sheet id", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    try {
+      const doc = app.getDocument();
+
+      // Ensure the default sheet exists and create a second sheet we can delete.
+      doc.getCell("Sheet1", { row: 0, col: 0 });
+      doc.addSheet({ sheetId: "Sheet2", name: "Sheet2", insertAfterId: "Sheet1" });
+      expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+      doc.deleteSheet("Sheet2");
+      expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+      // Calling into formula evaluation helpers with a stale sheet id should be a no-op,
+      // and must not recreate the deleted sheet.
+      const memo = new Map();
+      const stack = new Map();
+      const value = (app as any).computeCellValue("Sheet2", { row: 0, col: 0 }, memo, stack, { useEngineCache: false });
+      expect(value).toBe(null);
+      expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    } finally {
+      app.destroy();
+      root.remove();
+    }
+  });
+
   it.each([
     { localeId: "de-DE", expectedFn: "SUMME" },
     { localeId: "fr-FR", expectedFn: "SOMME" },

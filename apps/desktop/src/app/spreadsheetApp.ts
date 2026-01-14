@@ -26858,6 +26858,14 @@ export class SpreadsheetApp {
     options: { useEngineCache: boolean },
     flags?: { sawFormula: boolean }
   ): SpreadsheetValue {
+    // Defensive: SpreadsheetApp can briefly call into formula evaluation helpers while UI state
+    // holds a stale sheet id (e.g. during sheet deletion/undo/applyState windows). Avoid
+    // resurrecting deleted sheets via `DocumentController.getCell()` lazy sheet materialization.
+    if (this.isSheetKnownMissing(sheetId)) return null;
+
+    const docAny: any = this.document as any;
+    const canPeekCell = typeof docAny.peekCell === "function";
+
     if (options.useEngineCache) {
       const sheetCache = this.getComputedValuesByCoordForSheet(sheetId);
       if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
@@ -26867,7 +26875,10 @@ export class SpreadsheetApp {
         if (cached !== undefined) {
           // `computedValuesByCoord` is an engine-facing cache and can lag behind direct value edits.
           // Only trust it for formula cells; for plain values read from the DocumentController.
-          const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+          const state = (canPeekCell ? docAny.peekCell(sheetId, cell) : this.document.getCell(sheetId, cell)) as {
+            value: unknown;
+            formula: string | null;
+          };
           if (state?.formula == null) {
             if (state?.value != null) {
               if (isRichTextValue(state.value)) return state.value.text;
@@ -26891,7 +26902,10 @@ export class SpreadsheetApp {
       }
     }
 
-    const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    const state = (canPeekCell ? docAny.peekCell(sheetId, cell) : this.document.getCell(sheetId, cell)) as {
+      value: unknown;
+      formula: string | null;
+    };
     if (flags && state?.formula != null) flags.sawFormula = true;
 
     // Fast path: plain values do not participate in reference cycles and do not need to
@@ -27234,7 +27248,6 @@ export class SpreadsheetApp {
       return `${prefix}${a1}`;
     };
 
-    const docAny = this.document as any;
     const sheetsMap: unknown = docAny?.model?.sheets;
     const sheetMetaMap: unknown = docAny?.sheetMeta;
 
