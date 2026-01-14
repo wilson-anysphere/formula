@@ -242,11 +242,17 @@ def _redact_suspicious_strings_in_obj(obj: Any, *, privacy_mode: str) -> Any:
 
 
 def _redact_error_details_in_obj(obj: Any, *, privacy_mode: str) -> Any:
-    """Recursively redact free-form error `detail` strings in privacy mode.
+    """Recursively redact free-form string fields inside error values in privacy mode.
 
-    The formula engine (and some adapters) may include an additional `detail` field for error values
-    (t="e") containing arbitrary text (often derived from exception strings). In privacy mode we
-    hash these to avoid leaking filenames, local paths, or internal identifiers in CI artifacts.
+    The formula engine (and some adapters) may include extra string fields for error values
+    (t="e") such as:
+    - `detail`: exception-derived text
+    - `path`: filesystem paths
+    - `message`: adapter-specific diagnostics
+
+    In privacy mode, hash all error-value string fields *except* `v` (the canonical Excel error
+    code, e.g. `#VALUE!`) to avoid leaking filenames, local paths, or internal identifiers in CI
+    artifacts.
     """
 
     if privacy_mode != _PRIVACY_PRIVATE:
@@ -255,7 +261,13 @@ def _redact_error_details_in_obj(obj: Any, *, privacy_mode: str) -> Any:
         out: dict[str, Any] = {}
         is_error_value = obj.get("t") == "e"
         for k, v in obj.items():
-            if is_error_value and k == "detail" and isinstance(v, str) and v:
+            if (
+                is_error_value
+                and isinstance(k, str)
+                and k not in ("t", "v")
+                and isinstance(v, str)
+                and v
+            ):
                 out[k] = v if v.startswith("sha256=") else f"sha256={_sha256_text(v)}"
             else:
                 out[k] = _redact_error_details_in_obj(v, privacy_mode=privacy_mode)
