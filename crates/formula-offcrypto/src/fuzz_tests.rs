@@ -80,6 +80,7 @@ proptest! {
 
     #[test]
     fn decrypt_encrypted_package_agile_is_panic_free_and_rejects_garbage_ciphertext(
+        len_matches in any::<bool>(),
         declared_len in any::<u64>(),
         mut ciphertext in prop::collection::vec(any::<u8>(), 0..=MAX_INPUT_LEN),
     ) {
@@ -88,11 +89,17 @@ proptest! {
         let new_len = ciphertext.len() - (ciphertext.len() % AES_BLOCK_SIZE);
         ciphertext.truncate(new_len);
 
-        // Ensure `declared_len <= ciphertext.len()` so the EncryptedPackage framing checks pass.
-        let declared_len = if ciphertext.is_empty() {
-            0u64
+        let declared_len = if len_matches {
+            // Ensure `declared_len <= ciphertext.len()` so the EncryptedPackage framing checks pass
+            // and we reach password verification.
+            if ciphertext.is_empty() {
+                0u64
+            } else {
+                declared_len % (ciphertext.len() as u64 + 1)
+            }
         } else {
-            declared_len % (ciphertext.len() as u64 + 1)
+            // Ensure `declared_len > ciphertext.len()` so we exercise the size mismatch path.
+            ciphertext.len() as u64 + 1
         };
 
         let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
@@ -100,7 +107,8 @@ proptest! {
         encrypted_package.extend_from_slice(&ciphertext);
 
         let mut options = DecryptOptions::default();
-        options.limits.max_output_size = Some(MAX_INPUT_LEN as u64);
+        // Allow `ciphertext.len() + 1` to reach the mismatch path while still bounding allocations.
+        options.limits.max_output_size = Some(MAX_INPUT_LEN as u64 + 1);
 
         let info = parseable_agile_encryption_info();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
