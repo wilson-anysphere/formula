@@ -27,7 +27,8 @@ fn image_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // IMAGE(source, [alt_text], [sizing], [height], [width])
     //
     // The core engine does not fetch or decode images; we return a deterministic rich-value
-    // placeholder that preserves a stable display string.
+    // record that preserves a stable display string and exposes standard fields (Excel-compatible
+    // rich value behavior).
     let source = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
@@ -90,7 +91,22 @@ fn image_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    let display = alt_text.unwrap_or_else(|| source.clone());
-    Value::Record(RecordValue::new(display))
-}
+    let display_field = if alt_text.is_some() { "alt_text" } else { "source" };
+    let display = alt_text.clone().unwrap_or_else(|| source.clone());
+    let alt_value = alt_text.map(Value::Text).unwrap_or(Value::Blank);
 
+    // Match Excel: `IMAGE` behaves like a rich value with field access.
+    let mut record = RecordValue::with_fields_iter(
+        display,
+        [
+            ("source", Value::Text(source)),
+            ("alt_text", alt_value),
+            ("sizing", Value::Number(sizing as f64)),
+            ("height", height.map(Value::Number).unwrap_or(Value::Blank)),
+            ("width", width.map(Value::Number).unwrap_or(Value::Blank)),
+        ],
+    );
+    record.display_field = Some(display_field.to_string());
+
+    Value::Record(record)
+}
