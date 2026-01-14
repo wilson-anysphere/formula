@@ -92,6 +92,15 @@ Build a spreadsheet that achieves **100% Excel compatibility** while introducing
 
 This machine runs **~200 concurrent agents**. Memory is the constraint.
 
+### Local-only agent files (`scratchpad.md`, `handoff.md`)
+
+Some agent harnesses create `scratchpad.md` (working notes) and `handoff.md` (planner handoff) in
+the repo root. These files are **gitignored** and should **never** be committed.
+
+If they become hard to read because diff/patch text was pasted into them, clean them up locally by
+converting any accidental literal backslash-`n` fragments back into real newlines / normal Markdown
+formatting. (See `docs/99-agent-development-guide.md` for a repair one-liner.)
+
 ```
 Total RAM:     1,500 GB
 Per-agent:        ~7 GB soft target
