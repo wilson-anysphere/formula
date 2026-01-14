@@ -381,7 +381,9 @@ describe("startupMetrics", () => {
       }, 5);
 
       // Advance time enough for the retry loop to observe the injected globals.
-      vi.advanceTimersByTime(10);
+      // Use the async timer helper so promises scheduled by the retry loop get a chance to
+      // resume and schedule follow-up timers within the same advancement window.
+      await vi.advanceTimersByTimeAsync(10);
       await new Promise<void>((resolve) => queueMicrotask(resolve));
       await new Promise<void>((resolve) => queueMicrotask(resolve));
 

@@ -6179,96 +6179,96 @@ export class SpreadsheetApp {
       accepted,
       MAX_CONCURRENT_DECODES,
       async (file, i): Promise<PreparedPictureResult> => {
-      const bytes = await readFileBytes(file);
-      if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
-        throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
-      }
-
-      // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
-      const dims = readPngDimensions(bytes);
-      if (dims) {
-        const MAX_DIMENSION = 10_000;
-        const MAX_PIXELS = 50_000_000;
-        if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
-          return {
-            kind: "skippedDimensions",
-            name: typeof file?.name === "string" ? file.name : "",
-            width: dims.width,
-            height: dims.height,
-          };
+        const bytes = await readFileBytes(file);
+        if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+          throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
         }
-      }
 
-      const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
-      const ext = (() => {
-        const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
-        return raw && raw !== file.name ? raw : null;
-      })();
-      const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
-
-      const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
-
-      const decoded = await (async (): Promise<{ width: number; height: number } | null> => {
-        if (typeof createImageBitmap === "function") {
-          try {
-            const bitmap = await this.drawingOverlay.preloadImage(imageEntry);
-            const width = Number((bitmap as any)?.width);
-            const height = Number((bitmap as any)?.height);
-            if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-              return { width, height };
-            }
-          } catch {
-            // ignore
+        // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
+        const dims = readPngDimensions(bytes);
+        if (dims) {
+          const MAX_DIMENSION = 10_000;
+          const MAX_PIXELS = 50_000_000;
+          if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+            return {
+              kind: "skippedDimensions",
+              name: typeof file?.name === "string" ? file.name : "",
+              width: dims.width,
+              height: dims.height,
+            };
           }
         }
-        return decodeImagePixelSizeViaImage(file);
-      })();
 
-      const fallback = { width: 320, height: 240 };
-      const rawW = decoded?.width ?? fallback.width;
-      const rawH = decoded?.height ?? fallback.height;
-      const widthPx = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : fallback.width;
-      const heightPx = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : fallback.height;
+        const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
+        const ext = (() => {
+          const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
+          return raw && raw !== file.name ? raw : null;
+        })();
+        const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
 
-      const maxScale = Math.min(maxW / widthPx, maxH / heightPx);
-      // Ensure extremely small images (e.g. 1x1 PNGs used in tests) are still usable for
-      // pointer interactions by enforcing a conservative minimum on-screen size.
-      const MIN_SCREEN_PX = 64;
-      const minScale = Math.max(MIN_SCREEN_PX / widthPx, MIN_SCREEN_PX / heightPx);
-      const scale = maxScale < 1 ? maxScale : minScale > 1 ? Math.min(minScale, maxScale) : 1;
-      const targetScreenW = Math.max(1, widthPx * scale);
-      const targetScreenH = Math.max(1, heightPx * scale);
+        const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
 
-      // Store anchors in base (unzoomed) EMUs so render-time zoom scaling produces the desired
-      // on-screen size.
-      const targetBaseW = targetScreenW / zoom;
-      const targetBaseH = targetScreenH / zoom;
+        const decoded = await (async (): Promise<{ width: number; height: number } | null> => {
+          if (typeof createImageBitmap === "function") {
+            try {
+              const bitmap = await this.drawingOverlay.preloadImage(imageEntry);
+              const width = Number((bitmap as any)?.width);
+              const height = Number((bitmap as any)?.height);
+              if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+                return { width, height };
+              }
+            } catch {
+              // ignore
+            }
+          }
+          return decodeImagePixelSizeViaImage(file);
+        })();
 
-      const offsetScreenPx = 16 * i;
-      const offsetBasePx = offsetScreenPx / zoom;
+        const fallback = { width: 320, height: 240 };
+        const rawW = decoded?.width ?? fallback.width;
+        const rawH = decoded?.height ?? fallback.height;
+        const widthPx = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : fallback.width;
+        const heightPx = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : fallback.height;
 
-      const anchor: DrawingAnchor = {
-        type: "oneCell",
-        from: {
-          cell: anchorCell,
-          offset: { xEmu: pxToEmu(offsetBasePx), yEmu: pxToEmu(offsetBasePx) },
-        },
-        size: { cx: pxToEmu(targetBaseW), cy: pxToEmu(targetBaseH) },
-      };
+        const maxScale = Math.min(maxW / widthPx, maxH / heightPx);
+        // Ensure extremely small images (e.g. 1x1 PNGs used in tests) are still usable for
+        // pointer interactions by enforcing a conservative minimum on-screen size.
+        const MIN_SCREEN_PX = 64;
+        const minScale = Math.max(MIN_SCREEN_PX / widthPx, MIN_SCREEN_PX / heightPx);
+        const scale = maxScale < 1 ? maxScale : minScale > 1 ? Math.min(minScale, maxScale) : 1;
+        const targetScreenW = Math.max(1, widthPx * scale);
+        const targetScreenH = Math.max(1, heightPx * scale);
 
-      const drawingId = drawingIds[i] ?? createDrawingObjectId();
-      const drawing: DrawingObject = {
-        id: drawingId,
-        kind: { type: "image", imageId },
-        anchor,
-        // zOrder is assigned at commit time based on the latest sheet drawings list (so we
-        // don't clobber remote drawing inserts that may happen while decoding files).
-        zOrder: 0,
-        size: anchor.size,
-      };
+        // Store anchors in base (unzoomed) EMUs so render-time zoom scaling produces the desired
+        // on-screen size.
+        const targetBaseW = targetScreenW / zoom;
+        const targetBaseH = targetScreenH / zoom;
 
-      return { kind: "ok", imageEntry, drawing };
-    },
+        const offsetScreenPx = 16 * i;
+        const offsetBasePx = offsetScreenPx / zoom;
+
+        const anchor: DrawingAnchor = {
+          type: "oneCell",
+          from: {
+            cell: anchorCell,
+            offset: { xEmu: pxToEmu(offsetBasePx), yEmu: pxToEmu(offsetBasePx) },
+          },
+          size: { cx: pxToEmu(targetBaseW), cy: pxToEmu(targetBaseH) },
+        };
+
+        const drawingId = drawingIds[i] ?? createDrawingObjectId();
+        const drawing: DrawingObject = {
+          id: drawingId,
+          kind: { type: "image", imageId },
+          anchor,
+          // zOrder is assigned at commit time based on the latest sheet drawings list (so we
+          // don't clobber remote drawing inserts that may happen while decoding files).
+          zOrder: 0,
+          size: anchor.size,
+        };
+
+        return { kind: "ok", imageEntry, drawing };
+      },
     );
 
     const prepared: Array<{ imageEntry: ImageEntry; drawing: DrawingObject }> = [];
@@ -6447,6 +6447,8 @@ export class SpreadsheetApp {
 
     let nextOrder = ordered;
     if (direction === "forward") {
+      // Excel-style semantics: move the drawing forward one step in the render stack.
+      // `ordered` is back-to-front (ascending); swapping with the next item moves it forward.
       if (index >= ordered.length - 1) return;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;

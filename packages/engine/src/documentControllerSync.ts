@@ -391,7 +391,9 @@ export async function engineHydrateFromDocument(
         const widthPx = Number(rawWidth);
         if (!Number.isFinite(widthPx) || widthPx <= 0) continue;
         const widthChars = docColWidthPxToExcelChars(widthPx);
-        await setColWidthChars(engineSheetId, col, widthChars);
+        // `setColWidthChars` may be a class method that expects a `this` binding; invoke via
+        // `.call(engine, ...)` to preserve context for implementations that use `this.*`.
+        await setColWidthChars.call(engine as any, engineSheetId, col, widthChars);
       }
     }
   }
@@ -771,7 +773,9 @@ export async function engineApplyDocumentChange(
 
         didApplyAnyColWidths = true;
         const widthChars = after == null ? null : docColWidthPxToExcelChars(after);
-        await setColWidthChars(sheet, col, widthChars);
+        // `setColWidthChars` may be a class method that expects a `this` binding; invoke via
+        // `.call(engine, ...)` to preserve context for implementations that use `this.*`.
+        await setColWidthChars.call(engine as any, sheet, col, widthChars);
       }
     }
   }
