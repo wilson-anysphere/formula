@@ -134,4 +134,17 @@ describe("DrawingSpatialIndex", () => {
     expect(sortSpy).not.toHaveBeenCalled();
     sortSpy.mockRestore();
   });
+
+  it("clear releases hit-test scratch references", () => {
+    const objects: DrawingObject[] = [absObject({ id: 1, zOrder: 0, x: 0, y: 0, w: 100, h: 100 })];
+    const index = new DrawingSpatialIndex({ tileSizePx: 512 });
+    index.rebuild(objects, geom, 1);
+
+    const hit = index.hitTest({ x: 50, y: 50 }, { scrollX: 0, scrollY: 0 });
+    expect(hit?.id).toBe(1);
+    expect(((index as any).hitTestCandidatesScratch as unknown[]).length).toBeGreaterThan(0);
+
+    index.clear();
+    expect(((index as any).hitTestCandidatesScratch as unknown[]).length).toBe(0);
+  });
 });

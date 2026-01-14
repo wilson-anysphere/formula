@@ -222,6 +222,8 @@ export class DrawingSpatialIndex {
     this.pointersScratch.length = 0;
     this.seenGenerationById.clear();
     this.seenGeneration = 1;
+    // Release any scratch object references from the last hit-test query.
+    this.hitTestCandidatesScratch.length = 0;
   }
 
   /**
