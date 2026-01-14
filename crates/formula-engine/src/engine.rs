@@ -8469,6 +8469,13 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// from multiple threads. Implementations should be thread-safe and keep lookups fast (e.g. by
 /// caching results internally or minimizing lock contention).
 ///
+/// # Volatility / invalidation
+///
+/// Formulas that reference external workbooks are treated as **volatile**: they are reevaluated on
+/// every [`Engine::recalculate`] pass. The engine does not currently track fine-grained dependency
+/// edges from formula cells to individual external cells, so hosts should call `recalculate()` when
+/// external values may have changed.
+///
 /// Note: Excel treats sheet names case-insensitively. The engine preserves the formula's casing in
 /// the sheet key for single-sheet external references, so providers that want Excel-compatible
 /// behavior should generally match sheet keys case-insensitively.

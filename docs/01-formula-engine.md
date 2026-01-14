@@ -259,6 +259,9 @@ canonicalization would appear as:
 * **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
   reevaluated on every `Engine::recalculate()` pass). There is not yet a fine-grained “external link
   invalidation” mechanism—hosts should call `recalculate()` when external values may have changed.
+  * Note: external references are not currently represented as nodes/edges in the internal
+    dependency graph, so the engine cannot automatically determine which formulas are affected by a
+    particular external cell changing.
 * **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
