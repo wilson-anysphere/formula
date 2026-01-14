@@ -1,8 +1,9 @@
 # Password-protected OOXML workbooks (MS-OFFCRYPTO)
 
-Excel “Encrypt with Password” for `.xlsx` / `.xlsm` files is **not** ZIP-level encryption. Instead,
-Excel wraps the real OOXML ZIP package inside an **OLE Compound File Binary Format (CFB)** container
-and stores the encryption metadata + ciphertext in two well-known streams.
+Excel “Encrypt with Password” for `.xlsx` / `.xlsm` / `.xlsb` (and OOXML templates/add-ins like
+`.xltx` / `.xltm` / `.xlam`) is **not** ZIP-level encryption. Instead, Excel wraps the real OOXML ZIP
+package inside an **OLE Compound File Binary Format (CFB)** container and stores the encryption
+metadata + ciphertext in two well-known streams.
 
 This document explains what those files look like on disk and how to debug user reports about
 “password-protected workbooks”.
@@ -20,8 +21,8 @@ Relevant specs:
 
 ## What encrypted OOXML files look like
 
-An encrypted `.xlsx` / `.xlsm` is an **OLE/CFB** file (magic bytes `D0 CF 11 E0 A1 B1 1A E1`), not a
-ZIP file (magic bytes `PK`).
+An encrypted `.xlsx` / `.xlsm` / `.xlsb` is an **OLE/CFB** file (magic bytes
+`D0 CF 11 E0 A1 B1 1A E1`), not a ZIP file (magic bytes `PK`).
 
 Inside the CFB container, Excel stores:
 
@@ -32,6 +33,9 @@ Notes:
 
 - `EncryptedPackage` begins with an **8-byte little-endian length prefix** (the plaintext package
   size), followed by block-aligned ciphertext.
+- After decrypting `EncryptedPackage`, the plaintext is a normal OOXML ZIP/OPC package:
+  - `.xlsx` / `.xlsm` → ZIP containing `xl/workbook.xml`
+  - `.xlsb` → ZIP containing `xl/workbook.bin`
 - The file extension is still usually `.xlsx`, so callers that assume “xlsx == zip” will surface
   confusing errors like “invalid zip header”.
 
@@ -207,3 +211,10 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- pat
 This prints a string like `Agile (4.4) flags=0x...` or `Standard (3.2) flags=0x...` (but the Standard
 major version can vary: `2.2`/`3.2`/`4.2`), which is often enough to route a bug report to the right
 implementation path.
+
+When collecting a bug report, include:
+
+- output of `ooxml-encryption-info` (scheme + version)
+- file extension (`.xlsx`/`.xlsm`/`.xlsb`) and whether it opens in Excel
+- the exact `formula-io` error variant + message (`PasswordRequired` vs `InvalidPassword` vs
+  `UnsupportedOoxmlEncryption`)
