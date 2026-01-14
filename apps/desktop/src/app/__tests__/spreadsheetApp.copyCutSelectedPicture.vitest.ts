@@ -29,6 +29,44 @@ function createPngHeaderBytes(width = 1, height = 1): Uint8Array {
   return bytes;
 }
 
+function createJpegHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure: SOI + APP0 (dummy) + SOF0 with width/height.
+  // This is not a complete/valid JPEG, but it includes enough header structure for our
+  // dimension guard to extract the advertised size.
+  const bytes = new Uint8Array(33);
+  let o = 0;
+  // SOI
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xd8;
+  // APP0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xe0;
+  // APP0 length: 16 bytes (includes these 2 length bytes) + 14 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x10;
+  o += 14;
+  // SOF0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xc0;
+  // SOF0 length: 11 bytes (includes these 2 length bytes) = 9 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x0b;
+  // Precision
+  bytes[o++] = 0x08;
+  // Height (big-endian)
+  bytes[o++] = (height >> 8) & 0xff;
+  bytes[o++] = height & 0xff;
+  // Width (big-endian)
+  bytes[o++] = (width >> 8) & 0xff;
+  bytes[o++] = width & 0xff;
+  // Components (1) + component spec (3 bytes)
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x11;
+  bytes[o++] = 0x00;
+  return bytes;
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -413,6 +451,53 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
     expect(createImageBitmapMock).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("does not attempt to transcode/copy pictures whose dimensions exceed limits", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    root.focus();
+
+    const write = vi.fn(async () => {});
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const createImageBitmapMock = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+    // Prevent incidental overlay decodes; assertions below are scoped to the copy path.
+    vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
+
+    const sheetId = app.getCurrentSheetId();
+    const imageId = "img-oversized-dims";
+    const jpegBytes = createJpegHeaderBytes(10_001, 1);
+    (app as any).drawingImages.set({ id: imageId, bytes: jpegBytes, mimeType: "image/jpeg" });
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    (app as any).selectedDrawingId = drawing.id;
+
+    await app.whenIdle();
+    createImageBitmapMock.mockClear();
+
+    app.copy();
+    await app.whenIdle();
+
+    expect(write).not.toHaveBeenCalled();
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+    expect(app.getDocument().getSheetDrawings(sheetId)).toHaveLength(1);
 
     app.destroy();
     root.remove();

@@ -23484,13 +23484,27 @@ export class SpreadsheetApp {
   }
 
   private async transcodeImageEntryToPng(entry: ImageEntry): Promise<Uint8Array | null> {
-    if (entry.mimeType === "image/png") return entry.bytes;
+    const bytes = entry.bytes;
+
+    // Guard against decompression bombs: small compressed bytes can still decode into huge bitmaps.
+    // Reject images that advertise extreme dimensions before attempting any decode or canvas allocation.
+    const dims = readImageDimensions(bytes);
+    if (dims) {
+      if (
+        dims.width > MAX_PNG_DIMENSION ||
+        dims.height > MAX_PNG_DIMENSION ||
+        dims.width * dims.height > MAX_PNG_PIXELS
+      ) {
+        return null;
+      }
+    }
+
+    if (entry.mimeType === "image/png") return bytes;
     // Some legacy sources may not populate `mimeType` correctly. If the bytes already look like a
     // PNG, avoid an unnecessary decode+re-encode step (and avoid calling `createImageBitmap`).
     //
     // Prefer a lightweight signature check so even minimally valid PNG payloads (e.g. tests that
     // only include header bytes) bypass decode work.
-    const bytes = entry.bytes;
     if (
       bytes.byteLength >= 8 &&
       bytes[0] === 0x89 &&
