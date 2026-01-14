@@ -72,6 +72,9 @@ function sampleIterable<T>(iterable: Iterable<T>, maxItems: number): T[] {
 function richValueJsonReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function" || typeof value === "symbol") return String(value);
+  if (typeof value === "string" && value.length > DEFAULT_READ_RANGE_MAX_CELL_CHARS) {
+    return truncateCellString(value, DEFAULT_READ_RANGE_MAX_CELL_CHARS);
+  }
 
   if (Array.isArray(value) && value.length > DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS) {
     const sample = value.slice(0, DEFAULT_RICH_VALUE_SAMPLE_ITEMS);
