@@ -1737,7 +1737,7 @@ impl PivotEngine {
             }
             Layout::Outline | Layout::Tabular => {
                 for f in &cfg.row_fields {
-                    row.push(PivotValue::Text(f.source_field.to_string()));
+                    row.push(PivotValue::Text(f.source_field.display_string()));
                 }
             }
         }
@@ -3527,6 +3527,52 @@ mod tests {
             PivotFieldRef::DataModelMeasure("Total Sales".to_string())
         );
         assert_eq!(cfg.filter_fields[0].source_field, cache_field("Region"));
+    }
+
+    #[test]
+    fn pivot_header_renders_data_model_columns_using_display_string() {
+        let data = vec![
+            pv_row(&["Sales Table[Region]".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: PivotFieldRef::DataModelColumn {
+                    table: "Sales Table".to_string(),
+                    column: "Region".to_string(),
+                },
+                sort_order: SortOrder::default(),
+                manual_sort: None,
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data[0][0],
+            PivotValue::Text("Sales Table[Region]".to_string())
+        );
     }
 
     #[test]
