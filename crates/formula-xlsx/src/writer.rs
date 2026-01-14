@@ -447,6 +447,14 @@ mod trim_float_tests {
     use super::trim_float;
 
     #[test]
+    fn formats_f32_round_trip_values_without_float_noise() {
+        // Some model fields are stored as `f32` but serialized via `f64`. Ensure we keep common
+        // Excel defaults human-friendly.
+        assert_eq!(trim_float(8.43_f32 as f64), "8.43");
+        assert_eq!(trim_float(15.0_f32 as f64), "15");
+    }
+
+    #[test]
     fn negative_zero_is_serialized_as_zero() {
         assert_eq!(trim_float(-0.0), "0");
         assert_eq!(trim_float(0.0), "0");
