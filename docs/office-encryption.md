@@ -297,6 +297,9 @@ Repo fixtures:
 - OOXML encrypted fixtures live in `fixtures/encrypted/ooxml/` (see that directory’s README).
 - BIFF8 `.xls` encrypted fixtures for `FILEPASS` live under `crates/formula-xls/tests/fixtures/`.
 
+Note: the Apache POI-based generator under `tools/encrypted-ooxml-fixtures/` can emit Standard
+encryption with an `EncryptionInfo` version of `4.2` (still Standard/CryptoAPI; `versionMinor == 2`).
+
 ### Inspecting the scheme quickly
 To identify the scheme without full parsing:
 
