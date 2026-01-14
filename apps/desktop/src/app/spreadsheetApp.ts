@@ -19811,12 +19811,44 @@ export class SpreadsheetApp {
     // "unknown" just because the DocumentController hasn't created the sheet yet.
     if (this.sheetNameResolver?.getSheetNameById(trimmed)) return trimmed;
 
+    const normalizeSheetNameForCaseInsensitiveCompare = (value: string): string => {
+      // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+      // Match the semantics we use elsewhere (`@formula/workbook-backend`).
+      try {
+        return String(value ?? "").normalize("NFKC").toUpperCase();
+      } catch {
+        return String(value ?? "").toUpperCase();
+      }
+    };
+
+    // Prefer matching by DocumentController sheet display names (sheet meta) before falling
+    // back to stable ids. This supports workflows/tests that rename sheets via
+    // `DocumentController.renameSheet` without wiring a `sheetNameResolver`.
+    const needleNameCi = normalizeSheetNameForCaseInsensitiveCompare(trimmed);
+    const sheetMeta: unknown = (this.document as any)?.sheetMeta;
+    const sheetMetaMap: Map<string, any> | null = sheetMeta instanceof Map ? (sheetMeta as Map<string, any>) : null;
+    if (sheetMetaMap) {
+      for (const id of sheetMetaMap.keys()) {
+        const key = typeof id === "string" ? id : String(id ?? "");
+        if (!key) continue;
+        const meta = sheetMetaMap.get(key) ?? null;
+        const displayName = typeof meta?.name === "string" ? meta.name.trim() : key;
+        if (normalizeSheetNameForCaseInsensitiveCompare(displayName) === needleNameCi) return key;
+      }
+    }
+
     // Fallback to sheet ids to keep legacy formulas (and test fixtures) working.
     // Avoid allocating a fresh array via `getSheetIds()` in hot paths (formula evaluation).
     const sheets: Map<string, unknown> | undefined = (this.document as any)?.model?.sheets;
     if (sheets && typeof sheets.keys === "function") {
       if (sheets.has(trimmed)) return trimmed;
+      if (sheetMetaMap?.has(trimmed)) return trimmed;
       const lower = trimmed.toLowerCase();
+      if (sheetMetaMap) {
+        for (const id of sheetMetaMap.keys()) {
+          if (typeof id === "string" && id.toLowerCase() === lower) return id;
+        }
+      }
       for (const id of sheets.keys()) {
         if (typeof id === "string" && id.toLowerCase() === lower) return id;
       }

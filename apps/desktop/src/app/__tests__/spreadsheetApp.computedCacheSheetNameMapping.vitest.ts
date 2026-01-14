@@ -147,5 +147,34 @@ describe("SpreadsheetApp computed-value cache sheet name mapping", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("resolves DocumentController sheet meta display names even when sheetNameResolver is absent", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+
+    // Rename the sheet so its stable id no longer matches the display name.
+    // No `sheetNameResolver` is provided, so resolution must fall back to DocumentController sheet meta.
+    doc.renameSheet("Sheet1", "Budget");
+
+    await app.whenIdle();
+
+    (app as any).applyComputedChanges([{ sheet: "Budget", address: "A1", value: 123 }]);
+
+    const computedValuesByCoord = (app as any).computedValuesByCoord as Map<string, Map<number, unknown>>;
+    expect(computedValuesByCoord.get("Sheet1")?.get(0)).toBe(123);
+    expect(computedValuesByCoord.has("Budget")).toBe(false);
+
+    (app as any).invalidateComputedValues([{ sheet: "Budget", address: "A1" }]);
+    expect(computedValuesByCoord.get("Sheet1")?.has(0)).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
+});
