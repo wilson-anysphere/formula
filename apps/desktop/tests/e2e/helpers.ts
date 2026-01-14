@@ -179,6 +179,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
         attempt === 0 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
+          message.includes("interrupted by another navigation") ||
           message.includes("frame was detached"))
       ) {
         await page.waitForLoadState("domcontentloaded");

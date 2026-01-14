@@ -6086,6 +6086,8 @@ export class SpreadsheetApp {
 
     const MAX_CONCURRENT_DECODES = 4;
 
+    const existingObjects = this.listDrawingObjectsForSheet(sheetId);
+
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
     const existingObjects = this.listDrawingObjectsForSheet(sheetId);
     const usedDrawingIds = new Set<number>();
@@ -6159,7 +6161,12 @@ export class SpreadsheetApp {
       const widthPx = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : fallback.width;
       const heightPx = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : fallback.height;
 
-      const scale = Math.min(1, maxW / widthPx, maxH / heightPx);
+      const maxScale = Math.min(maxW / widthPx, maxH / heightPx);
+      // Ensure extremely small images (e.g. 1x1 PNGs used in tests) are still usable for
+      // pointer interactions by enforcing a conservative minimum on-screen size.
+      const MIN_SCREEN_PX = 64;
+      const minScale = Math.max(MIN_SCREEN_PX / widthPx, MIN_SCREEN_PX / heightPx);
+      const scale = maxScale < 1 ? maxScale : minScale > 1 ? Math.min(minScale, maxScale) : 1;
       const targetScreenW = Math.max(1, widthPx * scale);
       const targetScreenH = Math.max(1, heightPx * scale);
 
