@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model,
-    open_workbook_model_with_password, open_workbook_with_password, Error, WorkbookEncryptionKind,
+    open_workbook_model_with_password, open_workbook_with_password, Error, WorkbookEncryption,
 };
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -69,10 +69,14 @@ fn detects_encrypted_ooxml_xlsx_container() {
             let path = tmp.path().join(filename);
             std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-            let info = detect_workbook_encryption(&path)
-                .expect("detect encryption")
-                .expect("expected encrypted workbook to be detected");
-            assert_eq!(info.kind, WorkbookEncryptionKind::OoxmlOleEncryptedPackage);
+            let encryption = detect_workbook_encryption(&path).expect("detect encryption");
+            assert!(
+                matches!(
+                    encryption,
+                    WorkbookEncryption::OoxmlEncryptedPackage { scheme: None }
+                ),
+                "expected OOXML EncryptedPackage, got {encryption:?}"
+            );
 
             let err =
                 detect_workbook_format(&path).expect_err("expected encrypted workbook to error");

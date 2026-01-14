@@ -180,21 +180,44 @@ pub enum WorkbookFormat {
 }
 
 /// Best-effort workbook encryption classification.
+///
+/// This is intended for UI preflight (e.g. prompting for a password) and corpus tooling. It does
+/// not attempt to decrypt or open the workbook.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum WorkbookEncryptionKind {
-    /// An Office-encrypted OOXML package stored in an OLE container via the `EncryptionInfo` +
+pub enum WorkbookEncryption {
+    /// Workbook does not appear to be encrypted / password-protected.
+    None,
+    /// Office-encrypted OOXML package stored in an OLE compound file via the `EncryptionInfo` +
     /// `EncryptedPackage` streams (e.g. a password-protected `.xlsx`).
-    OoxmlOleEncryptedPackage,
-    /// A legacy BIFF workbook stream containing a `FILEPASS` record (open password).
-    XlsFilepass,
-    /// An OLE compound file that appears to be encrypted, but doesn't match the known workbook
-    /// encryption patterns.
-    UnknownOleEncrypted,
+    OoxmlEncryptedPackage {
+        /// Optional scheme details (e.g. Standard vs Agile) once `EncryptionInfo` parsing is
+        /// implemented for this helper.
+        scheme: Option<OoxmlEncryptedPackageScheme>,
+    },
+    /// Legacy BIFF `.xls` workbook encryption indicated by a `FILEPASS` record in the workbook
+    /// stream.
+    LegacyXlsFilePass {
+        /// Optional scheme details once `FILEPASS` parsing is implemented for this helper.
+        scheme: Option<LegacyXlsFilePassScheme>,
+    },
 }
 
+/// OOXML `EncryptedPackage` encryption scheme (from `EncryptionInfo`).
+///
+/// This is currently a placeholder until `EncryptionInfo` parsing is implemented for
+/// [`detect_workbook_encryption`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct WorkbookEncryptionInfo {
-    pub kind: WorkbookEncryptionKind,
+pub enum OoxmlEncryptedPackageScheme {
+    Unknown,
+}
+
+/// Legacy `.xls` `FILEPASS` encryption scheme.
+///
+/// This is currently a placeholder until `FILEPASS` parsing is implemented for
+/// [`detect_workbook_encryption`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum LegacyXlsFilePassScheme {
+    Unknown,
 }
 
 /// Options controlling workbook open behavior.
@@ -561,15 +584,13 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     Ok(WorkbookFormat::Unknown)
 }
 
-/// Detect whether a workbook is password-protected/encrypted.
+/// Detect whether a workbook is password-protected/encrypted without attempting to open it.
 ///
 /// This is best-effort and conservative:
-/// - Returns `Ok(Some(..))` only when encryption markers are found.
-/// - Returns `Ok(None)` for non-OLE files, OLE files without encryption markers, and malformed OLE
-///   containers that can't be parsed.
-pub fn detect_workbook_encryption(
-    path: impl AsRef<Path>,
-) -> Result<Option<WorkbookEncryptionInfo>, Error> {
+/// - Returns [`WorkbookEncryption::None`] for non-OLE files, OLE files without encryption markers,
+///   and malformed OLE containers that can't be parsed.
+/// - Does **not** return [`Error::EncryptedWorkbook`] just because encryption is present.
+pub fn detect_workbook_encryption(path: impl AsRef<Path>) -> Result<WorkbookEncryption, Error> {
     let path = path.as_ref();
 
     let mut file = std::fs::File::open(path).map_err(|source| Error::DetectIo {
@@ -585,7 +606,7 @@ pub fn detect_workbook_encryption(
     let header = &header[..n];
 
     if header.len() < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
-        return Ok(None);
+        return Ok(WorkbookEncryption::None);
     }
 
     file.rewind().map_err(|source| Error::DetectIo {
@@ -595,28 +616,23 @@ pub fn detect_workbook_encryption(
 
     let Ok(mut ole) = cfb::CompoundFile::open(file) else {
         // Malformed OLE container; we can't reliably sniff streams.
-        return Ok(None);
+        return Ok(WorkbookEncryption::None);
     };
 
+    // Office-encrypted OOXML workbooks are stored in an OLE container with both of these streams.
+    // Be a little permissive and treat the presence of either stream as a signal that the workbook
+    // is in the OOXML `EncryptedPackage` framing.
     let has_encryption_info = stream_exists(&mut ole, "EncryptionInfo");
     let has_encrypted_package = stream_exists(&mut ole, "EncryptedPackage");
-
     if has_encryption_info || has_encrypted_package {
-        let kind = if has_encryption_info && has_encrypted_package {
-            WorkbookEncryptionKind::OoxmlOleEncryptedPackage
-        } else {
-            WorkbookEncryptionKind::UnknownOleEncrypted
-        };
-        return Ok(Some(WorkbookEncryptionInfo { kind }));
+        return Ok(WorkbookEncryption::OoxmlEncryptedPackage { scheme: None });
     }
 
     if ole_workbook_has_biff_filepass_record(&mut ole) {
-        return Ok(Some(WorkbookEncryptionInfo {
-            kind: WorkbookEncryptionKind::XlsFilepass,
-        }));
+        return Ok(WorkbookEncryption::LegacyXlsFilePass { scheme: None });
     }
 
-    Ok(None)
+    Ok(WorkbookEncryption::None)
 }
 
 /// Inspect a workbook on disk and, when it is an OLE-encrypted OOXML container, return a
@@ -1236,8 +1252,8 @@ pub fn open_workbook_model_with_password(
     // the password-capable API likely want to prompt the user for a password rather than being told
     // to remove encryption.
     let Some(password) = password else {
-        if let Ok(Some(info)) = detect_workbook_encryption(path) {
-            if info.kind == WorkbookEncryptionKind::XlsFilepass {
+        if let Ok(encryption) = detect_workbook_encryption(path) {
+            if matches!(encryption, WorkbookEncryption::LegacyXlsFilePass { .. }) {
                 return Err(Error::PasswordRequired {
                     path: path.to_path_buf(),
                 });

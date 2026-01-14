@@ -3,7 +3,7 @@ use std::io::{Cursor, Read, Write};
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model, Error,
     open_workbook_model_with_options, open_workbook_with_options, OpenOptions, Workbook,
-    WorkbookEncryptionKind,
+    WorkbookEncryption,
 };
 
 use formula_model::{CellRef, CellValue};
@@ -56,10 +56,14 @@ fn errors_on_encrypted_xls_filepass() {
         let path = tmp.path().join(filename);
         std::fs::write(&path, &bytes).expect("write encrypted xls fixture");
 
-        let info = detect_workbook_encryption(&path)
-            .expect("detect encryption")
-            .expect("expected encrypted workbook to be detected");
-        assert_eq!(info.kind, WorkbookEncryptionKind::XlsFilepass);
+        let encryption = detect_workbook_encryption(&path).expect("detect encryption");
+        assert!(
+            matches!(
+                encryption,
+                WorkbookEncryption::LegacyXlsFilePass { scheme: None }
+            ),
+            "expected LegacyXlsFilePass, got {encryption:?}"
+        );
 
         let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
         assert!(
