@@ -408,6 +408,14 @@ mod tests {
     }
 
     #[test]
+    fn cell_to_string_normalizes_negative_zero() {
+        assert_eq!(
+            cell_to_string(&CellValue::Number(-0.0), ValueLocaleConfig::en_us()),
+            "0"
+        );
+    }
+
+    #[test]
     fn cell_to_string_formats_booleans_as_excel_true_false() {
         assert_eq!(
             cell_to_string(&CellValue::Bool(true), ValueLocaleConfig::en_us()),
