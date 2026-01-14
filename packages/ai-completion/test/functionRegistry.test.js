@@ -105,6 +105,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("OCT2DEC", 0), "Expected OCT2DEC octal_number to be a range");
   assert.ok(registry.getFunction("BIN2HEX")?.args?.[1]?.optional, "Expected BIN2HEX places to be optional");
   assert.ok(registry.isRangeArg("ARABIC", 0), "Expected ARABIC text to be a range");
+  assert.ok(registry.isRangeArg("ROMAN", 0), "Expected ROMAN number to be a range");
+  assert.ok(registry.getFunction("ROMAN")?.args?.[1]?.optional, "Expected ROMAN form to be optional");
   assert.ok(registry.isRangeArg("ASC", 0), "Expected ASC text to be a range");
   assert.ok(registry.isRangeArg("PHONETIC", 0), "Expected PHONETIC reference to be a range");
   assert.equal(registry.getArgType("COMPLEX", 2), "string", "Expected COMPLEX suffix to be string-like");

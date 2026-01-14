@@ -2481,6 +2481,14 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ROMAN",
+    description: "Converts an Arabic numeral to Roman as text.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "form", type: "number", optional: true },
+    ],
+  },
+  {
     name: "CONVERT",
     description: "Converts a number from one measurement system to another.",
     args: [
