@@ -741,14 +741,29 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
         include_str!("../src/locale/data/de-DE.errors.tsv"),
         /*require_sorted*/ true,
     );
+    assert_error_preferred(&de_de.entries, "#CALC!", "#KALK!");
+    assert_error_preferred(&de_de.entries, "#GETTING_DATA", "#DATEN_ABRUFEN");
     assert_error_alias(&de_de.entries, "#N/A", "#NV");
     assert_error_alias(&de_de.entries, "#N/A", "#N/A!");
     assert_error_preferred(&de_de.entries, "#N/A", "#NV");
+    assert_error_preferred(&de_de.entries, "#NUM!", "#ZAHL!");
+    assert_error_preferred(&de_de.entries, "#REF!", "#BEZUG!");
+    assert_error_preferred(&de_de.entries, "#SPILL!", "#ÜBERLAUF!");
+    assert_error_preferred(&de_de.entries, "#VALUE!", "#WERT!");
 
     let de_de_locale = get_locale("de-DE").expect("expected de-DE locale to be registered");
+    assert_eq!(de_de_locale.localized_error_literal("#CALC!"), Some("#KALK!"));
+    assert_eq!(
+        de_de_locale.localized_error_literal("#GETTING_DATA"),
+        Some("#DATEN_ABRUFEN")
+    );
     assert_eq!(de_de_locale.localized_error_literal("#N/A"), Some("#NV"));
     assert_eq!(de_de_locale.canonical_error_literal("#NV"), Some("#N/A"));
     assert_eq!(de_de_locale.canonical_error_literal("#N/A!"), Some("#N/A"));
+    assert_eq!(de_de_locale.localized_error_literal("#NUM!"), Some("#ZAHL!"));
+    assert_eq!(de_de_locale.localized_error_literal("#REF!"), Some("#BEZUG!"));
+    assert_eq!(de_de_locale.localized_error_literal("#SPILL!"), Some("#ÜBERLAUF!"));
+    assert_eq!(de_de_locale.localized_error_literal("#VALUE!"), Some("#WERT!"));
 
     let fr_fr = parse_error_tsv(
         "fr-FR",
@@ -760,10 +775,40 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_alias(&fr_fr.entries, "#NULL!", "#NULL!");
     assert_error_alias(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
     assert_error_alias(&fr_fr.entries, "#SPILL!", "#DEVERSEMENT!");
+    assert_error_preferred(&fr_fr.entries, "#BLOCKED!", "#BLOQUE!");
+    assert_error_preferred(&fr_fr.entries, "#CALC!", "#CALCUL!");
+    assert_error_preferred(&fr_fr.entries, "#CONNECT!", "#CONNEXION!");
+    assert_error_preferred(&fr_fr.entries, "#FIELD!", "#CHAMP!");
+    assert_error_preferred(&fr_fr.entries, "#GETTING_DATA", "#OBTENTION_DONNEES");
+    assert_error_preferred(&fr_fr.entries, "#NAME?", "#NOM?");
     assert_error_preferred(&fr_fr.entries, "#NULL!", "#NUL!");
     assert_error_preferred(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
+    assert_error_preferred(&fr_fr.entries, "#NUM!", "#NOMBRE!");
+    assert_error_preferred(&fr_fr.entries, "#UNKNOWN!", "#INCONNU!");
+    assert_error_preferred(&fr_fr.entries, "#VALUE!", "#VALEUR!");
 
     let fr_fr_locale = get_locale("fr-FR").expect("expected fr-FR locale to be registered");
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#BLOCKED!"),
+        Some("#BLOQUE!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#CALC!"),
+        Some("#CALCUL!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#CONNECT!"),
+        Some("#CONNEXION!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#FIELD!"),
+        Some("#CHAMP!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#GETTING_DATA"),
+        Some("#OBTENTION_DONNEES")
+    );
+    assert_eq!(fr_fr_locale.localized_error_literal("#NAME?"), Some("#NOM?"));
     assert_eq!(
         fr_fr_locale.localized_error_literal("#NULL!"),
         Some("#NUL!")
@@ -783,6 +828,18 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_eq!(
         fr_fr_locale.canonical_error_literal("#DEVERSEMENT!"),
         Some("#SPILL!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#NUM!"),
+        Some("#NOMBRE!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#UNKNOWN!"),
+        Some("#INCONNU!")
+    );
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#VALUE!"),
+        Some("#VALEUR!")
     );
 
     let es_es = parse_error_tsv(
