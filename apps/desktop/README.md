@@ -282,9 +282,10 @@ Packaged desktop builds download Pyodide assets **on-demand** into an app-data
 cache and serve them to the WebView via the `pyodide://` protocol (COOP/COEP
 friendly). This keeps installers small while preserving Python functionality.
 
-In **Vite dev** (`pnpm -C apps/desktop dev`), we download the required Pyodide files into
-`apps/desktop/public/pyodide/` via `scripts/ensure-pyodide-assets.mjs` so the dev server can
-serve them from the same origin at `/pyodide/v0.25.1/full/`.
+When running the frontend outside the desktop shell (e.g. in a browser via the
+Vite dev/preview servers), Pyodide defaults to loading from the official CDN.
+The CDN provides COEP/CORP-friendly headers so this still works in a
+cross-origin isolated context.
 
 In **packaged/production desktop builds**, Pyodide assets are **not embedded** in `dist/` by
 default to keep installer size down. The first time the user runs a Pyodide-backed feature, the
@@ -295,9 +296,11 @@ Security note: in packaged desktop builds, `__pyodideIndexURL` overrides are ign
 point at a local origin (`pyodide://...` or `/pyodide/...`). This avoids loading an arbitrary Python
 runtime from the network.
 
-If you need to bundle Pyodide into `dist/` (for offline development/CI/preview), set
-`FORMULA_BUNDLE_PYODIDE_ASSETS=1` when running `pnpm -C apps/desktop build` (this runs
-`scripts/ensure-pyodide-assets.mjs` and copies the assets into `dist/`).
+If you need to self-host/bundle Pyodide under `/pyodide/v0.25.1/full/` (for
+offline development/CI/preview), set `FORMULA_BUNDLE_PYODIDE_ASSETS=1` when
+running `pnpm -C apps/desktop dev` or `pnpm -C apps/desktop build` (this runs
+`scripts/ensure-pyodide-assets.mjs`, populating `apps/desktop/public/pyodide/`
+which Vite then serves/copies into `dist/`).
 
 ## Content Security Policy (Tauri)
 
