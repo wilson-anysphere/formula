@@ -79,5 +79,38 @@ describe("WorkbookImageManager", () => {
     manager.dispose();
     vi.useRealTimers();
   });
-});
 
+  it("cancels any scheduled GC timers on dispose", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const store = new InMemoryImageStore();
+    const entry: ImageEntry = { id: "img3", bytes: new Uint8Array([4, 4, 4]), mimeType: "image/png" };
+    store.set(entry);
+
+    const persistence = { delete: vi.fn().mockResolvedValue(undefined) };
+    const bitmapCache = { invalidate: vi.fn() };
+    const manager = new WorkbookImageManager({
+      images: store,
+      persistence,
+      bitmapCache,
+      gcGracePeriodMs: 1_000,
+    });
+
+    manager.setSheetDrawings("Sheet1", [createImageObject(1, "img3")]);
+    // Drop the last reference, scheduling a timer-based GC.
+    manager.setSheetDrawings("Sheet1", []);
+
+    manager.dispose();
+
+    // Advance time beyond the grace period; the timer should have been cleared.
+    vi.setSystemTime(2_000);
+    await vi.runAllTimersAsync();
+
+    expect(store.get("img3")).toBeDefined();
+    expect(persistence.delete).not.toHaveBeenCalled();
+    expect(bitmapCache.invalidate).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+});

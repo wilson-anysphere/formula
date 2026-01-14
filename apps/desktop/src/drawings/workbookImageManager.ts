@@ -47,6 +47,7 @@ export class WorkbookImageManager {
   private readonly gcCandidates = new Map<string, GcCandidate>();
   private gcTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly gcGracePeriodMs: number;
+  private disposed = false;
 
   constructor(private readonly opts: WorkbookImageManagerOptions) {
     this.gcGracePeriodMs =
@@ -62,6 +63,7 @@ export class WorkbookImageManager {
     drawingsBySheetId: Map<string, DrawingObject[]>,
     opts?: { externalImageIds?: Iterable<string> },
   ): void {
+    if (this.disposed) return;
     this.drawingsBySheetId.clear();
     for (const [sheetId, objects] of drawingsBySheetId.entries()) {
       const id = String(sheetId ?? "");
@@ -85,6 +87,7 @@ export class WorkbookImageManager {
    * Set additional non-drawing references (e.g. sheet background images) that should prevent image GC.
    */
   setExternalImageIds(ids: Iterable<string>): void {
+    if (this.disposed) return;
     this.externalImageRefCount.clear();
     for (const raw of ids) {
       const id = String(raw ?? "");
@@ -95,6 +98,7 @@ export class WorkbookImageManager {
   }
 
   setSheetDrawings(sheetId: string, objects: DrawingObject[]): void {
+    if (this.disposed) return;
     const id = String(sheetId ?? "");
     if (!id) return;
     this.drawingsBySheetId.set(id, Array.isArray(objects) ? objects : []);
@@ -102,6 +106,7 @@ export class WorkbookImageManager {
   }
 
   deleteSheet(sheetId: string): void {
+    if (this.disposed) return;
     const id = String(sheetId ?? "");
     if (!id) return;
     if (!this.drawingsBySheetId.has(id)) return;
@@ -116,6 +121,7 @@ export class WorkbookImageManager {
    * cell grid operations, and simplicity helps correctness.
    */
   recomputeImageRefCounts(): void {
+    if (this.disposed) return;
     const next = new Map<string, number>();
 
     for (const [imageId, count] of this.externalImageRefCount.entries()) {
@@ -158,6 +164,7 @@ export class WorkbookImageManager {
   }
 
   private queueGc(imageId: string): void {
+    if (this.disposed) return;
     const id = String(imageId ?? "");
     if (!id) return;
 
@@ -166,6 +173,7 @@ export class WorkbookImageManager {
   }
 
   private rescheduleGcTimer(): void {
+    if (this.disposed) return;
     if (this.gcTimer) {
       clearTimeout(this.gcTimer);
       this.gcTimer = null;
@@ -188,6 +196,7 @@ export class WorkbookImageManager {
   }
 
   async runGcNow(opts: { force?: boolean } = {}): Promise<void> {
+    if (this.disposed) return;
     const force = Boolean(opts.force);
     const now = Date.now();
     const toDelete: string[] = [];
@@ -205,6 +214,7 @@ export class WorkbookImageManager {
     }
 
     for (const imageId of toDelete) {
+      if (this.disposed) break;
       // Delete from in-memory store.
       this.opts.images.delete(imageId);
       // Drop decoded bitmap cache entry (if present).
@@ -227,6 +237,7 @@ export class WorkbookImageManager {
    * Store image bytes in the in-memory store and (optionally) persist them.
    */
   async putImage(entry: ImageEntry): Promise<void> {
+    if (this.disposed) return;
     this.opts.images.set(entry);
     if (this.opts.persistence?.set) {
       await this.opts.persistence.set(entry);
@@ -234,6 +245,8 @@ export class WorkbookImageManager {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     if (this.gcTimer) {
       clearTimeout(this.gcTimer);
       this.gcTimer = null;
