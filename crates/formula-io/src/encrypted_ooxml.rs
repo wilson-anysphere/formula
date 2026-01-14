@@ -1085,6 +1085,114 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn detects_cbc_per_segment_standard_encryptedpackage_via_pk_probe() {
+        use aes::{Aes128, Aes192, Aes256};
+        use cbc::cipher::block_padding::NoPadding;
+        use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+        use std::io::Read as _;
+
+        fn encrypt_aes_cbc_no_padding(key: &[u8], iv: &[u8; 16], buf: &mut [u8]) {
+            // Caller ensures `buf.len()` is a multiple of 16.
+            match key.len() {
+                16 => {
+                    cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
+                        .unwrap()
+                        .encrypt_padded_mut::<NoPadding>(buf, buf.len())
+                        .unwrap();
+                }
+                24 => {
+                    cbc::Encryptor::<Aes192>::new_from_slices(key, iv)
+                        .unwrap()
+                        .encrypt_padded_mut::<NoPadding>(buf, buf.len())
+                        .unwrap();
+                }
+                32 => {
+                    cbc::Encryptor::<Aes256>::new_from_slices(key, iv)
+                        .unwrap()
+                        .encrypt_padded_mut::<NoPadding>(buf, buf.len())
+                        .unwrap();
+                }
+                other => panic!("unexpected key length {other}"),
+            }
+        }
+
+        fn derive_standard_segment_iv_sha1(salt: &[u8], segment_index: u32) -> [u8; 16] {
+            use sha1::{Digest as _, Sha1};
+            let mut hasher = Sha1::new();
+            hasher.update(salt);
+            hasher.update(segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            let mut iv = [0u8; 16];
+            iv.copy_from_slice(&digest[..16]);
+            iv
+        }
+
+        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/encrypted/ooxml");
+
+        // Reuse the real Standard EncryptionInfo from `standard.xlsx` so password verification
+        // and key derivation are realistic.
+        let standard_path = fixture_dir.join("standard.xlsx");
+        let file = std::fs::File::open(&standard_path).expect("open standard.xlsx fixture");
+        let mut ole = cfb::CompoundFile::open(file).expect("parse OLE");
+
+        let mut encryption_info = Vec::new();
+        ole.open_stream("EncryptionInfo")
+            .or_else(|_| ole.open_stream("/EncryptionInfo"))
+            .expect("open EncryptionInfo")
+            .read_to_end(&mut encryption_info)
+            .expect("read EncryptionInfo");
+
+        let info = crate::offcrypto::parse_encryption_info_standard(&encryption_info)
+            .expect("parse Standard EncryptionInfo");
+
+        let password = "password";
+        let key = crate::offcrypto::standard::derive_file_key_standard(&info, password)
+            .expect("derive Standard key");
+        let ok = crate::offcrypto::standard::verify_password_standard_with_key(&info, &key)
+            .expect("verify password");
+        assert!(ok, "expected password verification to succeed");
+
+        let plaintext = std::fs::read(fixture_dir.join("plaintext.xlsx")).expect("read plaintext");
+        assert!(plaintext.starts_with(b"PK"), "plaintext must be a ZIP");
+
+        // Build a synthetic CBC-per-segment ciphertext stream matching the "legacy" scheme
+        // sometimes seen in the wild.
+        let mut ciphertext = Vec::new();
+        let mut segment_index: u32 = 0;
+        let mut offset = 0usize;
+        const SEGMENT_SIZE: usize = 0x1000;
+        while offset < plaintext.len() {
+            let seg_plain_len = (plaintext.len() - offset).min(SEGMENT_SIZE);
+            let seg_cipher_len = round_up_to_multiple(seg_plain_len, 16);
+            let mut seg = vec![0u8; seg_cipher_len];
+            seg[..seg_plain_len].copy_from_slice(&plaintext[offset..offset + seg_plain_len]);
+
+            let iv = derive_standard_segment_iv_sha1(&info.verifier.salt, segment_index);
+            encrypt_aes_cbc_no_padding(&key, &iv, &mut seg);
+            ciphertext.extend_from_slice(&seg);
+
+            offset += seg_plain_len;
+            segment_index += 1;
+        }
+
+        // Now ask the streaming Standard decryptor to auto-detect ECB vs CBC-per-segment via the
+        // `PK` probe and ensure we get the original plaintext back.
+        let mut reader = decrypted_package_reader(
+            std::io::Cursor::new(ciphertext),
+            plaintext.len() as u64,
+            &encryption_info,
+            password,
+        )
+        .expect("create decrypt reader");
+
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).expect("read decrypted bytes");
+        assert_eq!(out, plaintext);
+    }
 }
 
 fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<(), DecryptError> {
