@@ -1482,7 +1482,6 @@ pub fn open_workbook_model_with_password(
             return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
         }
     }
-
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
@@ -2988,6 +2987,9 @@ fn decrypt_encrypted_ooxml_package(
         match xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password) {
             Ok(bytes) => bytes,
             Err(err) => match err {
+                // Only treat explicit verifier/HMAC mismatches as "wrong password". Other errors
+                // indicate unsupported algorithms or malformed payloads and should surface as an
+                // unsupported-encryption error so callers get actionable diagnostics.
                 xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
                     return Err(Error::InvalidPassword {
                         path: path.to_path_buf(),
@@ -3001,11 +3003,7 @@ fn decrypt_encrypted_ooxml_package(
                     });
                 }
                 _ => {
-                    return Err(Error::UnsupportedOoxmlEncryption {
-                        path: path.to_path_buf(),
-                        version_major,
-                        version_minor,
-                    });
+                    return Err(unsupported());
                 }
             },
         }

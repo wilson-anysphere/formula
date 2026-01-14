@@ -227,13 +227,13 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/encrypted/ooxml"
     ));
- 
+
     let common_expected = StandardEncryptionInfoParams {
         version_major: 0, // filled per fixture below
         version_minor: 2,
-        // MS-OFFCRYPTO `EncryptionVersionInfo.flags`: `fCryptoAPI` (0x0000_0004) + `fAES`
-        // (0x0000_0020) => 0x0000_0024.
-        version_flags: 0x0000_0024,
+        // Some producers mirror `EncryptionHeader.flags` into `EncryptionVersionInfo.flags`
+        // (MS-OFFCRYPTO leaves this field under-specified for Standard encryption).
+        version_flags: 0x0000_0024, // fCryptoAPI | fAES
         alg_id: 0x0000_660E,      // CALG_AES_128
         alg_id_hash: 0x0000_8004, // CALG_SHA1
         key_size_bits: 128,

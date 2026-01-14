@@ -337,8 +337,6 @@ fn decrypt_standard_aes_with_scheme(
     scheme: StandardAesScheme,
     key0: &[u8],
 ) -> Result<Vec<u8>, DecryptError> {
-    use crate::offcrypto::standard::derive_key_standard_for_block;
-
     const AES_BLOCK: usize = 16;
     const SEGMENT_LEN: usize = 0x1000;
 
@@ -448,24 +446,48 @@ fn decrypt_standard_aes_with_scheme(
                 SEGMENT_LEN,
             )
         }
-        StandardAesScheme::CbcPerSegmentKeyIvZero => decrypt_segmented_aes_cbc(
-            ciphertext,
-            plaintext_len,
-            |segment_index| {
-                if segment_index == 0 {
-                    return Ok(key0.to_vec());
-                }
+        StandardAesScheme::CbcPerSegmentKeyIvZero => {
+            use crate::offcrypto::cryptoapi::{
+                crypt_derive_key, final_hash, hash_password_fixed_spin, password_to_utf16le,
+                HashAlg,
+            };
 
-                let key = derive_key_standard_for_block(info, password, segment_index).map_err(|err| {
-                    DecryptError::InvalidInfo(format!(
-                        "failed to derive Standard per-segment key (segment_index={segment_index}): {err}"
-                    ))
-                })?;
-                Ok(key)
-            },
-            |_segment_index| Ok([0u8; AES_BLOCK]),
-            SEGMENT_LEN,
-        ),
+            // Per-segment key derivation used by some non-standard Standard/CryptoAPI AES producers:
+            //
+            // - H = HashPassword(password, salt) with fixed 50k spin rounds
+            // - H_block_i = Hash(H || LE32(i))
+            // - key_i = CryptDeriveKey(H_block_i)
+            //
+            // The base password hash `H` is the expensive part; compute it once and reuse it
+            // across segments.
+
+            let hash_alg = HashAlg::from_calg_id(info.header.alg_id_hash).map_err(|err| {
+                DecryptError::InvalidInfo(format!(
+                    "unsupported Standard algIdHash=0x{:08x}: {err}",
+                    info.header.alg_id_hash
+                ))
+            })?;
+
+            let pw_utf16le = password_to_utf16le(password);
+            let h = hash_password_fixed_spin(&pw_utf16le, &info.verifier.salt, hash_alg);
+            let key_len = (info.header.key_size / 8) as usize;
+
+            decrypt_segmented_aes_cbc(
+                ciphertext,
+                plaintext_len,
+                |segment_index| {
+                    if segment_index == 0 {
+                        // Preserve the caller-provided block-0 key (it may come from a key derivation
+                        // fallback).
+                        return Ok(key0.to_vec());
+                    }
+                    let h_block = final_hash(&h, segment_index, hash_alg);
+                    Ok(crypt_derive_key(&h_block, key_len, hash_alg))
+                },
+                |_segment_index| Ok([0u8; AES_BLOCK]),
+                SEGMENT_LEN,
+            )
+        }
     }
 }
 
@@ -930,7 +952,10 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
 mod tests {
     use super::*;
     use crate::offcrypto::standard::EncryptionHeaderFlags;
-    use crate::offcrypto::{EncryptionHeader, EncryptionVerifier, StandardEncryptionInfo, CALG_AES_128, CALG_SHA1};
+    use crate::offcrypto::{
+        EncryptionHeader, EncryptionVerifier, StandardEncryptionInfo, CALG_AES_128, CALG_SHA1,
+    };
+    use std::io::{Cursor, Write as _};
 
     #[test]
     fn rejects_spin_count_above_default_max() {
@@ -1233,6 +1258,192 @@ mod tests {
         let mut out = Vec::new();
         reader.read_to_end(&mut out).expect("read decrypted bytes");
         assert_eq!(out, plaintext);
+    }
+
+    fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
+        use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+        use aes::{Aes128, Aes192, Aes256};
+
+        const AES_BLOCK: usize = 16;
+        assert!(
+            buf.len() % AES_BLOCK == 0,
+            "ECB plaintext must be block-aligned"
+        );
+
+        fn encrypt_with<C>(key: &[u8], buf: &mut [u8])
+        where
+            C: BlockEncrypt + KeyInit,
+        {
+            let cipher = C::new_from_slice(key).expect("valid AES key");
+            for block in buf.chunks_mut(AES_BLOCK) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+
+        match key.len() {
+            16 => encrypt_with::<Aes128>(key, buf),
+            24 => encrypt_with::<Aes192>(key, buf),
+            32 => encrypt_with::<Aes256>(key, buf),
+            other => panic!("invalid AES key length {other}"),
+        }
+    }
+
+    fn aes_cbc_encrypt_no_padding_in_place(key: &[u8], iv: &[u8; 16], buf: &mut [u8]) {
+        use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+        use aes::{Aes128, Aes192, Aes256};
+
+        const AES_BLOCK: usize = 16;
+        assert!(
+            buf.len() % AES_BLOCK == 0,
+            "CBC plaintext must be block-aligned"
+        );
+
+        fn encrypt_with<C>(key: &[u8], iv: &[u8; AES_BLOCK], buf: &mut [u8])
+        where
+            C: BlockEncrypt + KeyInit,
+        {
+            let cipher = C::new_from_slice(key).expect("valid AES key");
+            let mut prev = *iv;
+            for block in buf.chunks_mut(AES_BLOCK) {
+                for (b, p) in block.iter_mut().zip(prev.iter()) {
+                    *b ^= p;
+                }
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+                prev.copy_from_slice(block);
+            }
+        }
+
+        match key.len() {
+            16 => encrypt_with::<Aes128>(key, iv, buf),
+            24 => encrypt_with::<Aes192>(key, iv, buf),
+            32 => encrypt_with::<Aes256>(key, iv, buf),
+            other => panic!("invalid AES key length {other}"),
+        }
+    }
+
+    fn zip_bytes_with_large_entry() -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("hello.txt", options)
+            .expect("start hello.txt");
+        zip.write_all(&vec![b'a'; 6000])
+            .expect("write hello.txt bytes");
+        zip.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn decrypt_standard_aes_cbc_per_segment_key_iv_zero_roundtrips_two_segments() {
+        use crate::offcrypto::cryptoapi::{
+            crypt_derive_key, final_hash, hash_password_fixed_spin, password_to_utf16le, HashAlg,
+        };
+        use sha1::Digest as _;
+
+        // Build a valid ZIP payload large enough to span at least 2x 4096-byte segments.
+        let plaintext = zip_bytes_with_large_entry();
+        assert!(
+            plaintext.starts_with(b"PK\x03\x04"),
+            "expected ZIP local file header"
+        );
+        assert!(
+            plaintext.len() > 0x1000,
+            "expected plaintext to span multiple segments"
+        );
+
+        let password = "Password123";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        // --- Key derivation (Standard/CryptoAPI AES, SHA1) ---
+        let hash_alg = HashAlg::from_calg_id(crate::offcrypto::CALG_SHA1).unwrap();
+        let pw_utf16le = password_to_utf16le(password);
+        let h = hash_password_fixed_spin(&pw_utf16le, &salt, hash_alg);
+        let key_len = 32usize; // AES-256
+        let key0 = crypt_derive_key(&final_hash(&h, 0, hash_alg), key_len, hash_alg);
+
+        // --- EncryptionVerifier (AES-ECB using block-0 key) ---
+        let verifier: [u8; 16] = [
+            0x1F, 0xA2, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F, 0x80, 0x91, 0xA0, 0xB1, 0xC2, 0xD3, 0xE4,
+            0xF5, 0x06,
+        ];
+        let verifier_hash = sha1::Sha1::digest(&verifier); // 20 bytes
+        let mut verifier_plain = Vec::new();
+        verifier_plain.extend_from_slice(&verifier);
+        verifier_plain.extend_from_slice(&verifier_hash);
+        // Pad to AES block size (verifier hash ciphertext is padded in EncryptionInfo).
+        while verifier_plain.len() % 16 != 0 {
+            verifier_plain.push(0);
+        }
+        aes_ecb_encrypt_in_place(&key0, &mut verifier_plain);
+        let encrypted_verifier: [u8; 16] = verifier_plain[..16].try_into().unwrap();
+        let encrypted_verifier_hash = verifier_plain[16..].to_vec();
+        assert_eq!(encrypted_verifier_hash.len(), 32);
+
+        // --- Build Standard EncryptionInfo bytes (version 3.2) ---
+        let mut encryption_info = Vec::new();
+        encryption_info.extend_from_slice(&3u16.to_le_bytes()); // major
+        encryption_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        // EncryptionInfo.Flags (distinct from EncryptionHeader.flags; currently ignored).
+        encryption_info.extend_from_slice(&(EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES).to_le_bytes());
+
+        let header_size = 32u32; // 8 DWORD header, no CSPName
+        encryption_info.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader (8 DWORDs).
+        let header_flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
+        encryption_info.extend_from_slice(&header_flags.to_le_bytes()); // flags
+        encryption_info.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        encryption_info.extend_from_slice(&crate::offcrypto::CALG_AES_256.to_le_bytes()); // algId
+        encryption_info.extend_from_slice(&crate::offcrypto::CALG_SHA1.to_le_bytes()); // algIdHash
+        encryption_info.extend_from_slice(&256u32.to_le_bytes()); // keySize (bits)
+        encryption_info.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        encryption_info.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        encryption_info.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        // EncryptionVerifier.
+        encryption_info.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        encryption_info.extend_from_slice(&salt);
+        encryption_info.extend_from_slice(&encrypted_verifier);
+        encryption_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        encryption_info.extend_from_slice(&encrypted_verifier_hash);
+
+        // --- Encrypt EncryptedPackage with per-segment keys and IV=0 ---
+        const SEGMENT_LEN: usize = 0x1000;
+        const AES_BLOCK: usize = 16;
+        let iv = [0u8; AES_BLOCK];
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+
+        let mut segment_index = 0u32;
+        let mut offset = 0usize;
+        while offset < plaintext.len() {
+            let remaining = plaintext.len() - offset;
+            let seg_plain_len = remaining.min(SEGMENT_LEN);
+            let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK);
+
+            let mut seg_buf = vec![0u8; seg_cipher_len];
+            seg_buf[..seg_plain_len].copy_from_slice(&plaintext[offset..offset + seg_plain_len]);
+
+            let key = if segment_index == 0 {
+                key0.clone()
+            } else {
+                crypt_derive_key(&final_hash(&h, segment_index, hash_alg), key_len, hash_alg)
+            };
+            aes_cbc_encrypt_no_padding_in_place(&key, &iv, &mut seg_buf);
+            encrypted_package.extend_from_slice(&seg_buf);
+
+            offset += seg_plain_len;
+            segment_index += 1;
+        }
+
+        // --- Decrypt via the normal Standard AES scheme probing logic ---
+        let decrypted = decrypt_encrypted_package(&encryption_info, &encrypted_package, password)
+            .expect("decrypt");
+        assert_eq!(decrypted, plaintext);
     }
 }
 

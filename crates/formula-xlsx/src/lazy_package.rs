@@ -308,11 +308,14 @@ impl XlsxLazyPackage {
 
         // When macro stripping is enabled, `[Content_Types].xml` will be rewritten as part of the
         // macro-strip streaming pass (using `self.workbook_kind`). Persisting an explicit override
-        // here would force the slower two-pass `strip -> temp file -> apply overrides` path even
+        // here would be based on the *unstripped* content types file and can reintroduce
+        // references to deleted macro parts (e.g. `xl/vbaProject.bin`) after the macro-strip pass.
+        // It would also force the slower two-pass `strip -> temp file -> apply overrides` path even
         // when there are otherwise no non-macro overrides.
+        //
+        // If callers already overrode `[Content_Types].xml`, keep it in sync so it doesn't
+        // reintroduce a stale workbook content type after macro stripping.
         if self.strip_macros.is_some() {
-            // If callers already overrode `[Content_Types].xml`, keep it in sync so it doesn't
-            // reintroduce a stale workbook content type after macro stripping.
             self.patch_content_types_override_for_kind(kind)?;
             return Ok(());
         }
