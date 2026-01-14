@@ -547,7 +547,9 @@ function ensureUpdateDialog(): DialogElements {
           // Best-effort focus.
         }
       }
-    })();
+    })().catch(() => {
+      // Best-effort: avoid unhandled rejections from the async restart handler.
+    });
   });
 
   document.body.appendChild(dialog);
@@ -877,7 +879,9 @@ function showUpdateReadyToast(update: { version: string }): void {
           laterBtn.disabled = false;
         }
       }
-    })();
+    })().catch(() => {
+      // Best-effort: avoid unhandled rejections from the async restart handler.
+    });
   });
 }
 
