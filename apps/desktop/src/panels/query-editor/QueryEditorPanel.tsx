@@ -39,6 +39,7 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
     () => (effectiveSelectedStepIndex < 0 ? [] : props.query.steps.slice(0, effectiveSelectedStepIndex + 1)),
     [props.query.steps, effectiveSelectedStepIndex],
   );
+  const queryAtSelectedStep = useMemo<Query>(() => ({ ...props.query, steps: stepsToExecute }), [props.query, stepsToExecute]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +139,7 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
             setSelectedStepIndex(insertAt);
           }}
           onAiSuggest={props.onAiSuggestNextSteps}
-          aiContext={{ query: props.query, preview }}
+          aiContext={{ query: queryAtSelectedStep, preview }}
         />
         <StepsList steps={props.query.steps} selectedIndex={effectiveSelectedStepIndex} onSelect={setSelectedStepIndex} />
       </div>
