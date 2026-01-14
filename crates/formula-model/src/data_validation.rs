@@ -90,6 +90,12 @@ pub struct DataValidation {
     pub show_input_message: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub show_error_message: bool,
+    /// For list validations, whether to show the in-cell dropdown arrow (Excel UI: "In-cell
+    /// dropdown").
+    ///
+    /// Note: SpreadsheetML (XLSX) uses the inverted `showDropDown` attribute:
+    /// `showDropDown="1"` means "suppress (hide) the in-cell dropdown arrow". This field stores
+    /// the UI-facing behavior (`true` = show).
     #[serde(default, skip_serializing_if = "is_false")]
     pub show_drop_down: bool,
 
