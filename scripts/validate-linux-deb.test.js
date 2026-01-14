@@ -10,6 +10,21 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedDebName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedFileAssociationMimeTypes = Array.from(
+  new Set(
+    (tauriConf?.bundle?.fileAssociations ?? [])
+      .flatMap((assoc) => {
+        const raw = assoc?.mimeType;
+        if (Array.isArray(raw)) return raw;
+        if (raw) return [raw];
+        return [];
+      })
+      .map((mt) => String(mt).trim())
+      .filter(Boolean),
+  ),
+);
+const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};x-scheme-handler/formula;`;
+const defaultDesktopMimeValueNoScheme = `${expectedFileAssociationMimeTypes.join(";")};`;
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -75,7 +90,7 @@ echo "formula stub"
 BIN
     chmod +x "$dest/usr/bin/$fake_package"
 
-    mime_value="\${FAKE_DESKTOP_MIME_VALUE:-application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;}"
+    mime_value="\${FAKE_DESKTOP_MIME_VALUE:-${defaultDesktopMimeValue}}"
     exec_line="\${FAKE_DESKTOP_EXEC_LINE:-Exec=formula-desktop %U}"
     cat > "$dest/usr/share/applications/formula.desktop" <<DESKTOP
 [Desktop Entry]
@@ -125,7 +140,7 @@ function writeDefaultDependsFile(tmpDir) {
   return p;
 }
 
-function writeDefaultContentsFile(tmpDir, { includeBinary = true } = {}) {
+function writeDefaultContentsFile(tmpDir, { includeBinary = true, includeParquetMimeDefinition = true } = {}) {
   const p = join(tmpDir, "deb-contents.txt");
   const lines = [];
   const add = (path) => lines.push(`-rw-r--r-- root/root 0 2024-01-01 00:00 ${path}`);
@@ -133,7 +148,9 @@ function writeDefaultContentsFile(tmpDir, { includeBinary = true } = {}) {
   add("./usr/share/applications/formula.desktop");
   add(`./usr/share/doc/${expectedDebName}/LICENSE`);
   add(`./usr/share/doc/${expectedDebName}/NOTICE`);
-  add("./usr/share/mime/packages/app.formula.desktop.xml");
+  if (includeParquetMimeDefinition) {
+    add("./usr/share/mime/packages/app.formula.desktop.xml");
+  }
   writeFileSync(p, lines.join("\n"), "utf8");
   return p;
 }
@@ -239,8 +256,23 @@ test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler 
     debArg: "Formula.deb",
     dependsFile,
     contentsFile,
-    desktopMimeValue: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;",
+    desktopMimeValue: defaultDesktopMimeValueNoScheme,
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /x-scheme-handler\/formula/i);
+});
+
+test("validate-linux-deb fails when Parquet shared-mime-info definition is missing from the payload", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp, { includeParquetMimeDefinition: false });
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet shared-mime-info/i);
 });

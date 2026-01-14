@@ -76,6 +76,7 @@ jobs:
           node --test \
             scripts/check-desktop-url-scheme.test.js \
             scripts/validate-linux-appimage.test.js \
+            scripts/validate-linux-deb.test.js \
             scripts/validate-linux-rpm.test.js \
             scripts/validate-macos-bundle.test.js \
             scripts/validate-windows-bundles.test.js \

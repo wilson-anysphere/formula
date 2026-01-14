@@ -434,6 +434,9 @@ validate_static() {
       die "DEB payload missing compliance file: ./usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
     fi
   done
+  if ! grep -qx "./usr/share/mime/packages/app.formula.desktop.xml" <<<"${file_list}"; then
+    die "DEB payload missing Parquet shared-mime-info definition: ./usr/share/mime/packages/app.formula.desktop.xml"
+  fi
 
   # Extract payload and validate desktop integration metadata.
   local tmpdir
@@ -449,8 +452,18 @@ validate_static() {
     [[ -f "${tmpdir}/usr/share/doc/${EXPECTED_DEB_NAME}/${filename}" ]] || die "Extracted payload missing compliance file: usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
   done
 
-  if ! validate_desktop_integration_extracted "${tmpdir}"; then
-    die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
+  # Prefer strict validation against tauri.conf.json so we catch missing MIME types,
+  # scheme handlers, compliance artifacts, and Parquet shared-mime-info wiring in the
+  # built artifact (not just in config).
+  if command -v python3 >/dev/null 2>&1; then
+    note "Static desktop integration validation (verify extracted DEB payload)"
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$tmpdir" --tauri-config "$TAURI_CONF"; then
+      die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
+    fi
+  else
+    if ! validate_desktop_integration_extracted "${tmpdir}"; then
+      die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
+    fi
   fi
 
   cleanup_tmpdir
@@ -486,6 +499,8 @@ validate_container() {
     test -x /usr/bin/'"${EXPECTED_DEB_NAME}"'
     test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/LICENSE
     test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/NOTICE
+    test -f /usr/share/mime/packages/app.formula.desktop.xml
+    grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2
     ldd_out="$(ldd /usr/bin/'"${EXPECTED_DEB_NAME}"' 2>&1 || true)"
     echo "${ldd_out}"
     if echo "${ldd_out}" | grep -q "not found"; then
