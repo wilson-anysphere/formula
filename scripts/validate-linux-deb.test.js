@@ -434,6 +434,33 @@ test("validate-linux-deb fails when WebKitGTK 4.1 dependency is missing from Dep
   assert.match(proc.stderr, /WebKitGTK 4\.1/i);
 });
 
+test("validate-linux-deb fails when OpenSSL (libssl) dependency is missing from Depends", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = join(tmp, "deb-depends.txt");
+  writeFileSync(
+    dependsFile,
+    [
+      "shared-mime-info",
+      "libwebkit2gtk-4.1-0",
+      "libgtk-3-0",
+      "libayatana-appindicator3-1",
+      "librsvg2-2",
+      // Deliberately omit libssl dependency.
+    ].join(", "),
+    "utf8",
+  );
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /OpenSSL/i);
+});
+
 test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler (x-scheme-handler/formula)", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");
