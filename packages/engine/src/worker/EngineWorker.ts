@@ -765,10 +765,14 @@ export class EngineWorker {
 
   async goalSeek(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse> {
     await this.flush();
-    // `serde_wasm_bindgen` treats `{ foo: undefined }` as an error for `Option<T>` fields.
-    // Strip undefined optional tuning keys so callers can pass `GoalSeekRequest` objects
-    // constructed from partially-filled UI state.
-    const normalized = pruneUndefinedShallow(request);
+    // `serde_wasm_bindgen` treats `{ foo: undefined }` as an error for `Option<T>` fields. Strip
+    // undefined optional tuning keys so callers can pass `GoalSeekRequest` objects constructed from
+    // partially-filled UI state.
+    //
+    // The Rust goal seek solver defaults to a relatively loose tolerance (currently 0.001). For the
+    // TS EngineWorker API we default to a stricter tolerance so callers get stable, precise results
+    // without having to specify tuning knobs.
+    const normalized = pruneUndefinedShallow({ ...request, tolerance: request.tolerance ?? 1e-6 });
     return (await this.invoke("goalSeek", normalized, options)) as GoalSeekResponse;
   }
 

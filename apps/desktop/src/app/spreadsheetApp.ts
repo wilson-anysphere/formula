@@ -10448,6 +10448,10 @@ export class SpreadsheetApp {
       const normalizeTag = (tag: string): string => tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
       const normalizeEmu = (n: unknown): number => {
         const num = typeof n === "number" ? n : typeof n === "bigint" ? Number(n) : Number(n);
+        // EMU values are typically integers in the underlying DrawingML schema, but UI operations
+        // can legitimately compute fractional EMU values when applying pixel deltas at non-1.0
+        // zoom (e.g. nudging by 1 screen px at 2x zoom). Keep the parsed number as-is and let
+        // callers decide whether to round for persistence.
         return Number.isFinite(num) ? num : 0;
       };
       const normalizeEmuInt = (n: unknown): number => Math.round(normalizeEmu(n));

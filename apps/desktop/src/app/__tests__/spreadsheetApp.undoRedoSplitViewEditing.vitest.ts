@@ -125,7 +125,7 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc: any = app.getDocument() as any;
-    // Avoid the SpreadsheetApp constructor's seeded navigation/demo cells.
+    // Avoid the SpreadsheetApp constructor's seeded navigation/demo cells (A1:D5).
     const cell = { row: 10, col: 10 };
 
     doc.setCellInput(sheetId, cell, "Hello", { label: "Edit" });
