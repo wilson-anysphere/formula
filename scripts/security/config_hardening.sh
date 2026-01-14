@@ -34,6 +34,8 @@ done < <(
       -name '.turbo' -o \
       -name '.cache' -o \
       -name '.vite' -o \
+      -name 'playwright-report' -o \
+      -name 'test-results' -o \
       -name 'dist' -o \
       -name 'build' -o \
       -name 'coverage' -o \

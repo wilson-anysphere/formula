@@ -153,6 +153,8 @@ find_files() {
       -name '.turbo' -o \
       -name '.cache' -o \
       -name '.vite' -o \
+      -name 'playwright-report' -o \
+      -name 'test-results' -o \
       -name 'dist' -o \
       -name 'build' -o \
       -name 'coverage' -o \
@@ -423,7 +425,26 @@ from pathlib import Path
 
 root = Path(".")
 
-SKIP_DIRNAMES = {".git", "node_modules", "target", "security-report"}
+# Skip common generated output directories so this best-effort scan doesn't
+# waste time traversing large build trees once CI jobs have run.
+#
+# Note: this Python snippet runs inside a `pnpm install`/`npm ci` tree, so
+# `node_modules/` can exist and be enormous.
+SKIP_DIRNAMES = {
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    ".pnpm-store",
+    ".turbo",
+    ".cache",
+    ".vite",
+    "playwright-report",
+    "test-results",
+    "security-report",
+}
 
 def _walk():
     # Avoid recursive globbing (Path.rglob) over Cargo `target/` trees and Node `node_modules/`.
