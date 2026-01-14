@@ -1620,8 +1620,11 @@ impl Engine {
         }
         s.default_col_width = width;
 
-        // Like `set_col_width`, default column width metadata can affect `CELL("width")`. That
-        // function is volatile, so we only need to trigger an auto recalc (no full dirtying).
+        // Default column width metadata can affect `CELL("width")` outputs (and any downstream
+        // calculations that depend on those values), but it is not modeled in the calculation
+        // dependency graph. Conservatively mark compiled formula cells dirty so results refresh on
+        // the next recalc tick.
+        self.mark_all_compiled_cells_dirty();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
