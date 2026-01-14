@@ -708,6 +708,85 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("ignores non-grid overlay pointerdowns when drawing interactions are enabled (shared grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      // Add a simple placeholder shape anchored at A1.
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "1",
+          kind: { type: "shape" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: pxToEmu(100), cy: pxToEmu(50) },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      selectSpy.mockClear();
+
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+
+      // Row/col headers are 48px/24px in SpreadsheetApp; click inside the drawing just under them.
+      dispatchPointerEvent(selectionCanvas!, "pointerdown", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 1,
+        button: 0,
+      });
+      dispatchPointerEvent(selectionCanvas!, "pointerup", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 1,
+        button: 0,
+      });
+
+      expect(selectSpy).toHaveBeenCalledWith(1);
+
+      // Pointerdowns on non-grid overlays (e.g. scrollbars/outline) should not affect drawing selection
+      // even when drawing interactions are enabled.
+      selectSpy.mockClear();
+      const overlay = document.createElement("div");
+      root.appendChild(overlay);
+      dispatchPointerEvent(overlay, "pointerdown", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 2,
+        button: 0,
+      });
+      dispatchPointerEvent(overlay, "pointerup", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 2,
+        button: 0,
+      });
+      expect(selectSpy).not.toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("passes shared-grid zoom through to the drawing overlay viewport", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
