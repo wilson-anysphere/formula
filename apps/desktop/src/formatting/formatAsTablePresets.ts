@@ -89,9 +89,10 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
   const label = "Format as Table";
 
   // Ensure this formatting preset is always applied as a single undo step, even if callers
-  // don't explicitly batch (the ribbon command path already batches, but other callers/tests
-  // may invoke this helper directly).
-  doc.beginBatch({ label });
+  // don't explicitly batch. The ribbon command path already batches, so avoid creating nested
+  // batches there.
+  const shouldBatch = (doc as any).batchDepth === 0;
+  if (shouldBatch) doc.beginBatch({ label });
   try {
     const okHeader = doc.setRangeFormat(
       sheetId,
@@ -124,8 +125,21 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
     applied = applyTableBorders(doc, sheetId, table, preset) && applied;
 
     return applied;
+  } catch (err) {
+    // If we started the batch, cancel it so callers don't observe partial state.
+    if (shouldBatch) {
+      try {
+        doc.cancelBatch();
+      } catch {
+        // ignore
+      }
+    }
+    throw err;
   } finally {
-    doc.endBatch();
+    if (shouldBatch) {
+      // If the batch was canceled above, endBatch() will be a no-op.
+      doc.endBatch();
+    }
   }
 }
 
