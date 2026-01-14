@@ -190,9 +190,8 @@ fn model_workbook_import_export_round_trips() {
             CellRef::new(0, 0),
             Cell {
                 value: CellValue::Number(1.0),
-                formula: None,
-                phonetic: None,
                 style_id: bold_id,
+                ..Default::default()
             },
         );
         sheet.set_cell(
@@ -200,8 +199,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::Empty,
                 formula: Some("SUM(A1)".to_string()),
-                phonetic: None,
-                style_id: 0,
+                ..Default::default()
             },
         );
         // Very sparse cell.
@@ -209,9 +207,7 @@ fn model_workbook_import_export_round_trips() {
             CellRef::new(1_000_000, 10),
             Cell {
                 value: CellValue::String("far".to_string()),
-                formula: None,
-                phonetic: None,
-                style_id: 0,
+                ..Default::default()
             },
         );
     }
@@ -242,18 +238,15 @@ fn model_workbook_import_export_round_trips() {
             CellRef::new(0, 0),
             Cell {
                 value: CellValue::RichText(rich.clone()),
-                formula: None,
-                phonetic: None,
                 style_id: plain_id,
+                ..Default::default()
             },
         );
         sheet.set_cell(
             CellRef::new(1, 0),
             Cell {
                 value: CellValue::Array(array.clone()),
-                formula: None,
-                phonetic: None,
-                style_id: 0,
+                ..Default::default()
             },
         );
         sheet.set_cell(
@@ -262,18 +255,14 @@ fn model_workbook_import_export_round_trips() {
                 value: CellValue::Spill(SpillValue {
                     origin: CellRef::new(1, 0),
                 }),
-                formula: None,
-                phonetic: None,
-                style_id: 0,
+                ..Default::default()
             },
         );
         sheet.set_cell(
             CellRef::new(3, 0),
             Cell {
                 value: CellValue::Error(ErrorValue::Div0),
-                formula: None,
-                phonetic: None,
-                style_id: 0,
+                ..Default::default()
             },
         );
     }
