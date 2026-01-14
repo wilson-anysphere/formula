@@ -438,6 +438,32 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe("k1");
   });
 
+  it("policy helper matches sheetId case-insensitively", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    ranges.push([
+      {
+        sheetId: "SHEET-123",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      },
+    ]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe("k1");
+  });
+
   it("manager normalization rewrites legacy sheetName entries to stable sheet ids when possible", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
