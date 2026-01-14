@@ -29,7 +29,9 @@ fn cell_edit_with_formula_text_with_context_in_sheet_encodes_tableless_structure
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     // D2 (inside Table2).
@@ -70,4 +72,3 @@ fn cell_edit_with_formula_text_with_context_in_sheet_encodes_tableless_structure
         ]
     );
 }
-

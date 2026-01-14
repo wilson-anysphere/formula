@@ -57,7 +57,9 @@ fn zip_part_bytes(zip_bytes: &[u8], name: &str) -> Result<Vec<u8>, zip::result::
     let cursor = Cursor::new(zip_bytes);
     let mut archive = ZipArchive::new(cursor)?;
     let mut file = archive.by_name(name)?;
-    let mut buf = Vec::with_capacity(file.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     Ok(buf)
 }

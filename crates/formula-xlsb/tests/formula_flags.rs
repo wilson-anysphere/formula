@@ -137,7 +137,9 @@ fn write_fixture_like_xlsb(sheet1_bin: &[u8]) -> tempfile::NamedTempFile {
                 continue;
             }
             let name = entry.name().to_string();
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).expect("read fixture entry");
             if name == "xl/worksheets/sheet1.bin" {
                 bytes.clear();

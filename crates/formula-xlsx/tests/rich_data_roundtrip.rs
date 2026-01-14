@@ -26,7 +26,9 @@ fn read_zip_parts(bytes: &[u8], part_names: &[&str]) -> Result<BTreeMap<String, 
     let mut out = BTreeMap::new();
     for name in part_names {
         let mut f = archive.by_name(name)?;
-        let mut buf = Vec::with_capacity(f.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         out.insert((*name).to_string(), buf);
     }

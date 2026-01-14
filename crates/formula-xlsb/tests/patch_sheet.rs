@@ -15,7 +15,9 @@ fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb fixture");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
     let mut entry = zip.by_name(part_path).expect("find part");
-    let mut bytes = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes).expect("read part bytes");
     bytes
 }
@@ -441,7 +443,9 @@ fn patch_sheet_bin_preserves_formula_trailing_bytes() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     // No-op patch (cached value unchanged): must reserialize byte-for-byte, including the extra
@@ -491,7 +495,9 @@ fn patch_sheet_bin_can_update_formula_rgcb_bytes() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let encoded_45 =
@@ -557,7 +563,9 @@ fn cell_edit_with_formula_text_with_context_can_patch_rgcb_formulas() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let edit =
@@ -603,7 +611,9 @@ fn patch_sheet_bin_preserves_formula_rgcb_when_updating_cached_value_only() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let patched = patch_sheet_bin(
@@ -663,7 +673,9 @@ fn patch_sheet_bin_requires_new_rgcb_when_replacing_rgce_for_formula_with_existi
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let encoded_max =
@@ -751,7 +763,9 @@ fn patch_sheet_bin_can_clear_rgcb_when_replacing_rgce_for_formula_with_existing_
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     // Update the formula to a version that does not require any trailing rgcb bytes and explicitly
@@ -837,7 +851,9 @@ fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let patched = patch_sheet_bin(
@@ -1120,7 +1136,9 @@ fn patch_sheet_bin_is_byte_identical_for_noop_rk_float_edit() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let patched = patch_sheet_bin(
@@ -1153,7 +1171,9 @@ fn patch_sheet_bin_keeps_rk_record_for_float_rk_values() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let patched = patch_sheet_bin(

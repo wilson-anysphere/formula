@@ -34,10 +34,7 @@ impl PivotFieldRef {
     pub fn canonical_name(&self) -> Cow<'_, str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
-            PivotFieldRef::DataModelColumn { table, column } => {
-                Cow::Owned(format!("{table}[{column}]"))
-            }
-            PivotFieldRef::DataModelMeasure(measure) => Cow::Owned(format!("[{measure}]")),
+            _ => Cow::Owned(self.to_string()),
         }
     }
 
@@ -58,11 +55,7 @@ impl PivotFieldRef {
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
     pub fn display_string(&self) -> String {
-        match self {
-            PivotFieldRef::CacheFieldName(name) => name.clone(),
-            PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
-            PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
-        }
+        self.to_string()
     }
 
     /// Best-effort parse of an unstructured field identifier.
@@ -101,21 +94,6 @@ impl PivotFieldRef {
             return PivotFieldRef::DataModelColumn { table, column };
         }
         PivotFieldRef::CacheFieldName(raw)
-    }
-}
-
-impl fmt::Display for PivotFieldRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PivotFieldRef::CacheFieldName(name) => f.write_str(name),
-            PivotFieldRef::DataModelColumn { table, column } => {
-                // Prefer always-quoted table names to match Excel/DAX formatting and avoid
-                // ambiguity when table names contain spaces or special characters.
-                let escaped_table = table.replace('\'', "''");
-                write!(f, "'{escaped_table}'[{column}]")
-            }
-            PivotFieldRef::DataModelMeasure(name) => write!(f, "[{name}]"),
-        }
     }
 }
 
@@ -195,6 +173,43 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
             Helper::MeasureName { name } => Ok(PivotFieldRef::DataModelMeasure(name)),
         }
     }
+}
+
+impl fmt::Display for PivotFieldRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PivotFieldRef::CacheFieldName(name) => f.write_str(name),
+            PivotFieldRef::DataModelColumn { table, column } => {
+                let table = format_dax_table_ref(table);
+                let column = escape_dax_bracket_identifier(column);
+                write!(f, "{table}[{column}]")
+            }
+            PivotFieldRef::DataModelMeasure(name) => {
+                let name = escape_dax_bracket_identifier(name);
+                write!(f, "[{name}]")
+            }
+        }
+    }
+}
+
+fn escape_dax_bracket_identifier(raw: &str) -> String {
+    // In DAX, `]` is escaped as `]]` within `[...]`.
+    raw.replace(']', "]]")
+}
+
+fn format_dax_table_ref(table: &str) -> String {
+    // In DAX, a table name can be unquoted (e.g. `Sales`) or single-quoted (e.g. `'Sales 2024'`).
+    // We use a conservative heuristic: quote when the identifier contains anything other than
+    // ASCII alphanumerics or `_`.
+    let needs_quote = table
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+    if !needs_quote {
+        return table.to_string();
+    }
+
+    // Within quoted identifiers, `'` is escaped as `''`.
+    format!("'{}'", table.replace('\'', "''"))
 }
 
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.

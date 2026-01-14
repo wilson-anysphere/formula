@@ -229,7 +229,9 @@ fn with_workbook_pr_date1904(bytes: &[u8]) -> Vec<u8> {
             continue;
         }
         let name = file.name().to_string();
-        let mut buf = Vec::with_capacity(file.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut buf = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut buf).expect("read zip entry");
         if name == "xl/workbook.xml" {
             let mut xml = String::from_utf8(buf).expect("workbook.xml utf8");

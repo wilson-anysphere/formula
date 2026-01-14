@@ -195,7 +195,9 @@ mod leading_slash_zip_entries_tests {
                 format!("/{name}")
             };
 
-            let mut contents = Vec::with_capacity(entry.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut contents = Vec::new();
             entry.read_to_end(&mut contents).expect("read entry bytes");
 
             let options = base_options.compression_method(entry.compression());
@@ -776,7 +778,9 @@ fn read_zip_entry_bytes<R: Read + Seek>(
         let mut entry = zip
             .by_name(entry_name)
             .map_err(|e| format!("Failed to open zip entry {entry_name}: {e}"))?;
-        let mut buf = Vec::with_capacity(entry.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut buf = Vec::new();
         entry
             .read_to_end(&mut buf)
             .map_err(|e| format!("Failed to read zip entry {entry_name}: {e}"))?;
@@ -786,7 +790,9 @@ fn read_zip_entry_bytes<R: Read + Seek>(
     // Fast path: exact entry name.
     match zip.by_name(name) {
         Ok(mut entry) => {
-            let mut buf = Vec::with_capacity(entry.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut buf = Vec::new();
             entry
                 .read_to_end(&mut buf)
                 .map_err(|e| format!("Failed to read zip entry {name}: {e}"))?;

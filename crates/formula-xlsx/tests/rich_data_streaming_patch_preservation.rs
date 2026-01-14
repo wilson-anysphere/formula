@@ -126,7 +126,9 @@ fn read_zip_parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
         if !file.is_file() {
             continue;
         }
-        let mut buf = Vec::with_capacity(file.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut buf = Vec::new();
         file.read_to_end(&mut buf).expect("read zip entry");
         parts.insert(file.name().to_string(), buf);
     }
@@ -209,4 +211,3 @@ fn apply_cell_patches_preserves_rich_data_parts_byte_for_byte() {
         );
     }
 }
-

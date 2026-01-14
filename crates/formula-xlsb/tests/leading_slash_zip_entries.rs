@@ -35,7 +35,9 @@ fn rewrite_zip_with_leading_slash_entry_names(bytes: &[u8]) -> Vec<u8> {
             format!("/{name}")
         };
 
-        let mut contents = Vec::with_capacity(entry.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut contents = Vec::new();
         entry.read_to_end(&mut contents).expect("read entry bytes");
 
         let options = base_options
@@ -72,7 +74,9 @@ fn rewrite_zip_with_leading_slash_entry_names_and_calc_chain(bytes: &[u8]) -> Ve
             format!("/{name}")
         };
 
-        let mut contents = Vec::with_capacity(entry.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut contents = Vec::new();
         entry.read_to_end(&mut contents).expect("read entry bytes");
 
         if normalized.eq_ignore_ascii_case("[Content_Types].xml") {

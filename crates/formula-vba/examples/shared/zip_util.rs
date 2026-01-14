@@ -41,8 +41,9 @@ pub(crate) fn read_zip_entry_bytes<R: Read + Seek>(
         return Ok(None);
     }
 
-    let mut buf = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut buf = Vec::new();
     entry.read_to_end(&mut buf).map_err(ZipError::Io)?;
     Ok(Some(buf))
 }
-

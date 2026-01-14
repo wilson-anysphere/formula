@@ -110,7 +110,9 @@ fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("read sheet1.bin");
-    let mut out = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut out = Vec::new();
     entry.read_to_end(&mut out).expect("read sheet bytes");
     out
 }

@@ -83,7 +83,9 @@ fn save_with_cell_formula_text_edits_auto_interns_missing_xlfn_namex_function() 
     let file = std::fs::File::open(&output_path).expect("open output");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
     let mut wb_entry = zip.by_name("xl/workbook.bin").expect("workbook.bin");
-    let mut workbook_bin = Vec::with_capacity(wb_entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut workbook_bin = Vec::new();
     wb_entry
         .read_to_end(&mut workbook_bin)
         .expect("read workbook.bin");

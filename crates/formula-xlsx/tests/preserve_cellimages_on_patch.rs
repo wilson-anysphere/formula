@@ -93,7 +93,9 @@ fn build_minimal_xlsx_with_cellimages() -> Vec<u8> {
 fn read_zip_entry(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes)).unwrap();
     let mut file = archive.by_name(name).unwrap();
-    let mut buf = Vec::with_capacity(file.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut buf = Vec::new();
     file.read_to_end(&mut buf).unwrap();
     buf
 }
@@ -142,4 +144,3 @@ fn preserve_cellimages_parts_byte_for_byte_on_streaming_patch(
 
     Ok(())
 }
-

@@ -61,7 +61,9 @@ fn build_xlsx_with_huge_unreferenced_part() -> Vec<u8> {
             continue;
         }
         let name = file.name().to_string();
-        let mut data = Vec::with_capacity(file.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut data = Vec::new();
         file.read_to_end(&mut data).expect("read zip entry");
         writer.start_file(name, options).expect("start zip entry");
         writer.write_all(&data).expect("write zip entry");
@@ -116,4 +118,3 @@ fn preserve_pivot_parts_from_reader_does_not_read_unreferenced_large_parts() {
         "expected streaming pivot preservation to read <1MiB, but read {read} bytes"
     );
 }
-

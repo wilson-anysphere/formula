@@ -151,7 +151,9 @@ fn fixture_headers_reserialize_byte_for_byte() {
                 continue;
             }
 
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).expect("read part bytes");
 
             let mut cursor = Cursor::new(&bytes);

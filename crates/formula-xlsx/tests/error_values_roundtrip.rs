@@ -172,7 +172,9 @@ fn xlsx_error_value_na_exclamation_alias_parses_as_na() {
         }
 
         let name = file.name().to_string();
-        let mut data = Vec::with_capacity(file.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut data = Vec::new();
         file.read_to_end(&mut data).expect("read zip entry bytes");
 
         if name == "xl/worksheets/sheet1.xml" {

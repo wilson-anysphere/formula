@@ -3668,7 +3668,9 @@ mod tests {
                 format!("/{name}")
             };
 
-            let mut contents = Vec::with_capacity(entry.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut contents = Vec::new();
             entry.read_to_end(&mut contents).expect("read zip entry");
 
             if entry.is_dir() {
