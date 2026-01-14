@@ -575,8 +575,24 @@ impl DataModel {
         let mut full_row = match row.len() {
             n if n == total_columns => row,
             n if n == base_columns => {
-                let mut expanded = row;
-                expanded.resize(total_columns, Value::Blank);
+                // Insert values for non-calculated columns in schema order and leave calculated
+                // column slots blank. This ensures `insert_row` works even when calculated columns
+                // are not physically stored at the end of the table (e.g. in persisted models).
+                let calc_names: HashSet<&str> = self
+                    .calculated_columns
+                    .iter()
+                    .filter(|c| c.table == table)
+                    .map(|c| c.name.as_str())
+                    .collect();
+                let mut iter = row.into_iter();
+                let mut expanded = Vec::with_capacity(total_columns);
+                for col in table_ref.columns() {
+                    if calc_names.contains(col.as_str()) {
+                        expanded.push(Value::Blank);
+                    } else {
+                        expanded.push(iter.next().unwrap_or(Value::Blank));
+                    }
+                }
                 expanded
             }
             actual => {

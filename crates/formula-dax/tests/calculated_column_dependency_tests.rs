@@ -74,6 +74,33 @@ fn calculated_column_dependency_cycle_errors() {
 }
 
 #[test]
+fn insert_row_maps_values_around_calculated_columns() {
+    let mut model = DataModel::new();
+
+    // Simulate a persisted table where calculated columns are not physically last.
+    // Schema order: a, A (calc), b, B (calc)
+    let mut t = Table::new("T", vec!["a", "A", "b", "B"]);
+    t.push_row(vec![1.into(), 2.into(), 20.into(), 22.into()]).unwrap();
+    model.add_table(t).unwrap();
+
+    // Register definitions out-of-order to also exercise topo ordering.
+    model.add_calculated_column_definition("T", "B", "[A] + [b]")
+        .unwrap();
+    model.add_calculated_column_definition("T", "A", "[a] + 1")
+        .unwrap();
+
+    // Provide only non-calculated column values in schema order (a, b).
+    model.insert_row("T", vec![10.into(), 20.into()]).unwrap();
+
+    let t = model.table("T").unwrap();
+    assert_eq!(t.row_count(), 2);
+    assert_eq!(t.value(1, "a").unwrap(), Value::from(10.0));
+    assert_eq!(t.value(1, "b").unwrap(), Value::from(20.0));
+    assert_eq!(t.value(1, "A").unwrap(), Value::from(11.0));
+    assert_eq!(t.value(1, "B").unwrap(), Value::from(31.0));
+}
+
+#[test]
 fn calculated_column_dependencies_traverse_var_bindings_and_body() {
     let mut model = DataModel::new();
 
