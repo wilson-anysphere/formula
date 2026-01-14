@@ -23211,12 +23211,38 @@ export class SpreadsheetApp {
       try {
         const img = new Image();
         img.decoding = "async";
-        const loaded = new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error("image decode failed"));
+        await new Promise<void>((resolve, reject) => {
+          const timeoutMs = 5_000;
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+          const clear = () => {
+            if (timeoutId === null) return;
+            try {
+              clearTimeout(timeoutId);
+            } catch {
+              // Ignore clear failures (best-effort).
+            }
+            timeoutId = null;
+          };
+
+          img.onload = () => {
+            clear();
+            resolve();
+          };
+          img.onerror = () => {
+            clear();
+            reject(new Error("image decode failed"));
+          };
+
+          if (typeof setTimeout === "function") {
+            timeoutId = setTimeout(() => {
+              timeoutId = null;
+              reject(new Error("image decode timed out"));
+            }, timeoutMs);
+          }
+
+          img.src = url;
         });
-        img.src = url;
-        await loaded;
         const width = (img as any).naturalWidth ?? img.width;
         const height = (img as any).naturalHeight ?? img.height;
         if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
