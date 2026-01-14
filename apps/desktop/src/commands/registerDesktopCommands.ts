@@ -540,7 +540,7 @@ export function registerDesktopCommands(params: {
     applyFormattingToSelection,
   });
 
-  registerSortFilterCommands({ commandRegistry, app });
+  registerSortFilterCommands({ commandRegistry, app, isEditing });
 
   registerFormatAlignmentCommands({
     commandRegistry,

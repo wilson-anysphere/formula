@@ -16,8 +16,25 @@ export const SORT_FILTER_RIBBON_COMMANDS = {
   dataCustomSort: "data.sortFilter.sort.customSort",
 } as const;
 
-export function registerSortFilterCommands(params: { commandRegistry: CommandRegistry; app: SpreadsheetApp }): void {
-  const { commandRegistry, app } = params;
+export function registerSortFilterCommands(params: {
+  commandRegistry: CommandRegistry;
+  app: SpreadsheetApp;
+  /**
+   * Optional spreadsheet edit-state predicate. When omitted, falls back to `app.isEditing()`.
+   *
+   * The desktop shell passes a custom predicate that includes split-view secondary editing state.
+   */
+  isEditing?: (() => boolean) | null;
+}): void {
+  const { commandRegistry, app, isEditing: isEditingParam = null } = params;
+
+  const isEditingActive = (): boolean => {
+    if (typeof isEditingParam === "function") return isEditingParam();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const appAny = app as any;
+    if (typeof appAny?.isEditing === "function") return Boolean(appAny.isEditing());
+    return false;
+  };
 
   const category = t("commandCategory.data");
 
@@ -26,6 +43,7 @@ export function registerSortFilterCommands(params: { commandRegistry: CommandReg
       commandId,
       title,
       () => {
+        if (isEditingActive()) return;
         // `sortSelection` already restores focus to the grid in all supported code paths.
         sortSelection(app, { order });
       },
@@ -40,15 +58,17 @@ export function registerSortFilterCommands(params: { commandRegistry: CommandReg
     commandRegistry.registerBuiltinCommand(
       commandId,
       "Custom Sort…",
-      () =>
+      () => {
+        if (isEditingActive()) return;
         openCustomSortDialog({
-          isEditing: () => app.isEditing(),
+          isEditing: isEditingActive,
           getDocument: () => app.getDocument(),
           getSheetId: () => app.getCurrentSheetId(),
           getSelectionRanges: () => app.getSelectionRanges(),
           getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
           focusGrid: () => app.focus(),
-        }),
+        });
+      },
       { category, icon: null, keywords: ["sort", "custom sort"] },
     );
   };

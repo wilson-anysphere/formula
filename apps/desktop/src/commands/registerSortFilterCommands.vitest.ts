@@ -1,67 +1,85 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../sort-filter/sortSelection.js", () => ({
   sortSelection: vi.fn(),
 }));
 
+vi.mock("../sort-filter/openCustomSortDialog.js", () => ({
+  openCustomSortDialog: vi.fn(),
+}));
+
 import { CommandRegistry } from "../extensions/commandRegistry.js";
-import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbon/ribbonCommandRegistryDisabling.js";
+import { openCustomSortDialog } from "../sort-filter/openCustomSortDialog.js";
 import { sortSelection } from "../sort-filter/sortSelection.js";
 
-import { registerDesktopCommands } from "./registerDesktopCommands.js";
-import { SORT_FILTER_RIBBON_COMMANDS } from "./registerSortFilterCommands.js";
+import { registerSortFilterCommands, SORT_FILTER_RIBBON_COMMANDS } from "./registerSortFilterCommands.js";
 
-describe("Sort & Filter ribbon commands", () => {
-  it("registers sort A→Z / Z→A commands and wires execution through sortSelection", async () => {
+describe("registerSortFilterCommands", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("wires Sort A to Z / Sort Z to A commands when not editing", async () => {
     const commandRegistry = new CommandRegistry();
     const app = {} as any;
 
-    // Baseline: ids are disabled by default when unregistered.
-    const baselineDisabled = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
-    for (const id of Object.values(SORT_FILTER_RIBBON_COMMANDS)) {
-      expect(baselineDisabled[id]).toBe(true);
-    }
-
-    registerDesktopCommands({
-      commandRegistry,
-      app,
-      layoutController: null,
-      applyFormattingToSelection: vi.fn(),
-      getActiveCellNumberFormat: () => null,
-      getActiveCellIndentLevel: () => 0,
-      openFormatCells: vi.fn(),
-      showQuickPick: async () => null,
-      findReplace: { openFind: vi.fn(), openReplace: vi.fn(), openGoTo: vi.fn() },
-      workbenchFileHandlers: {
-        newWorkbook: vi.fn(),
-        openWorkbook: vi.fn(),
-        saveWorkbook: vi.fn(),
-        saveWorkbookAs: vi.fn(),
-        setAutoSaveEnabled: vi.fn(),
-        print: vi.fn(),
-        printPreview: vi.fn(),
-        closeWorkbook: vi.fn(),
-        quit: vi.fn(),
-      },
-    });
-
-    // Ensure commands are registered (prevents ribbon auto-disable).
-    for (const id of Object.values(SORT_FILTER_RIBBON_COMMANDS)) {
-      expect(commandRegistry.getCommand(id)).toBeTruthy();
-    }
-
-    // And computeRibbonDisabledByIdFromCommandRegistry keeps them enabled.
-    const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
-    for (const id of Object.values(SORT_FILTER_RIBBON_COMMANDS)) {
-      expect(disabledById[id]).toBeUndefined();
-    }
-
-    const sortSelectionMock = vi.mocked(sortSelection);
+    registerSortFilterCommands({ commandRegistry, app, isEditing: () => false });
 
     await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "ascending" });
+    expect(vi.mocked(sortSelection)).toHaveBeenLastCalledWith(app, { order: "ascending" });
 
     await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "descending" });
+    expect(vi.mocked(sortSelection)).toHaveBeenLastCalledWith(app, { order: "descending" });
+  });
+
+  it("does not execute sort commands while editing (uses provided isEditing)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const app = {} as any;
+
+    registerSortFilterCommands({ commandRegistry, app, isEditing: () => true });
+
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ);
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA);
+
+    expect(sortSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not open the custom sort dialog while editing", async () => {
+    const commandRegistry = new CommandRegistry();
+    const app = {} as any;
+
+    registerSortFilterCommands({ commandRegistry, app, isEditing: () => true });
+
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort);
+
+    expect(openCustomSortDialog).not.toHaveBeenCalled();
+  });
+
+  it("passes the provided isEditing predicate to the custom sort dialog host", async () => {
+    const commandRegistry = new CommandRegistry();
+    // `openCustomSortDialog` is mocked, so these methods are never invoked, but keep them present
+    // to reflect the actual host contract.
+    const app = {
+      getDocument: () => ({}),
+      getCurrentSheetId: () => "Sheet1",
+      getSelectionRanges: () => [],
+      getCellComputedValueForSheet: () => null,
+      focus: () => {},
+    } as any;
+
+    const isEditing = vi.fn(() => false);
+    registerSortFilterCommands({ commandRegistry, app, isEditing });
+
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
+
+    expect(openCustomSortDialog).toHaveBeenCalledTimes(1);
+    expect(isEditing).toHaveBeenCalled();
+
+    const host = vi.mocked(openCustomSortDialog).mock.calls[0]?.[0] as any;
+    expect(typeof host?.isEditing).toBe("function");
+    expect(host.isEditing()).toBe(false);
+    expect(isEditing).toHaveBeenCalledTimes(2);
   });
 });
+
