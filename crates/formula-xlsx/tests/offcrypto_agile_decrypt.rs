@@ -1,6 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::io::{Cursor, Read, Write};
+use std::path::PathBuf;
 
 use cfb::CompoundFile;
 use ms_offcrypto_writer::Ecma376AgileWriter;
@@ -9,6 +10,12 @@ use zip::write::FileOptions;
 use formula_xlsx::{decrypt_agile_encrypted_package, OffCryptoError};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join(rel)
+}
 
 fn build_tiny_zip() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -54,6 +61,18 @@ fn agile_decrypt_roundtrip() {
 }
 
 #[test]
+fn agile_decrypt_roundtrip_empty_password() {
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, "");
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "")
+        .expect("empty password should decrypt");
+    assert_eq!(decrypted, plain_zip);
+}
+
+#[test]
 fn agile_decrypt_wrong_password_fails() {
     let plain_zip = build_tiny_zip();
     let encrypted_cfb = encrypt_zip_with_password(&plain_zip, "password-1");
@@ -67,6 +86,33 @@ fn agile_decrypt_wrong_password_fails() {
         OffCryptoError::WrongPassword | OffCryptoError::IntegrityMismatch => {}
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[test]
+fn agile_decrypt_decrypts_empty_password_fixture() {
+    let encrypted_cfb = std::fs::read(fixture_path("agile-empty-password.xlsx"))
+        .expect("read agile-empty-password.xlsx");
+    let expected = std::fs::read(fixture_path("plaintext.xlsx")).expect("read plaintext.xlsx");
+
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "")
+        .expect("decrypt empty-password fixture");
+    assert_eq!(decrypted, expected);
+}
+
+#[test]
+fn agile_decrypt_decrypts_password_fixture() {
+    let encrypted_cfb = std::fs::read(fixture_path("agile.xlsx")).expect("read agile.xlsx");
+    let expected = std::fs::read(fixture_path("plaintext.xlsx")).expect("read plaintext.xlsx");
+
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "password")
+        .expect("decrypt agile fixture");
+    assert_eq!(decrypted, expected);
 }
 
 #[test]
