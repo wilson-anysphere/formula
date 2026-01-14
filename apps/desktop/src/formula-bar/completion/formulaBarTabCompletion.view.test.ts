@@ -149,10 +149,10 @@ describe("FormulaBarView tab completion (integration)", () => {
     const engineStub = {
       parseFormulaPartial: async (...args: unknown[]) => {
         calls.push(args);
-        // In de-DE, `COUNTIF` is localized as `ZÄHLENWENN`. The engine returns the locale's
-        // function name, and the desktop adapter canonicalizes it so completion can still look up
-        // range-arg metadata against the canonical FunctionRegistry.
-        return { context: { function: { name: "ZÄHLENWENN", argIndex: 0 } }, error: null, ast: {} };
+        // In de-DE, `COUNTIF` is localized as `ZÄHLENWENN`. The WASM parser returns the canonical
+        // function name (`COUNTIF`) so completion can still use `FunctionRegistry` metadata even
+        // when the user types a localized, non-ASCII name that the JS parser can’t recognize.
+        return { context: { function: { name: "COUNTIF", argIndex: 0 } }, error: null, ast: {} };
       },
     };
     const completion = new FormulaBarTabCompletionController({
