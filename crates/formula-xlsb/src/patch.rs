@@ -1951,32 +1951,53 @@ pub(crate) fn value_edit_is_noop_inline_string(
         _ => return Ok(false),
     };
 
-    let len_chars = read_u32(payload, 8)? as usize;
-    let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let expected_simple_len = 12usize.checked_add(byte_len).ok_or(Error::UnexpectedEof)?;
-    let raw = if payload.len() == expected_simple_len {
-        // Simple layout: [col][style][cch][utf16 chars...]
-        payload
-            .get(12..expected_simple_len)
-            .ok_or(Error::UnexpectedEof)?
-    } else {
-        // Flagged layout: [col][style][cch][flags:u8][utf16 chars...][extras...]
-        let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
-        payload
-            .get(ws.utf16_start..ws.utf16_end)
-            .ok_or(Error::UnexpectedEof)?
+    // BrtCellSt inline strings appear in at least two layouts:
+    // - simple:  [col][style][cch:u32][utf16 bytes...]
+    // - flagged: [col][style][cch:u32][flags:u8][utf16 bytes...][optional extras...]
+    //
+    // Some producers set the wide-string flags byte such that it implies rich/phonetic extras,
+    // but do not actually emit those blocks. For the purpose of *no-op detection*, be lenient:
+    // never hard-fail on inconsistent flags/extras. Instead, compare the raw UTF-16 bytes against
+    // the desired string, trying both plausible start offsets and allowing trailing bytes.
+    let Ok(len_chars_u32) = read_u32(payload, 8) else {
+        // Malformed record: treat as non-noop so the patcher can rewrite it.
+        return Ok(false);
     };
-
-    if desired.encode_utf16().count() != len_chars {
+    let len_chars = len_chars_u32 as usize;
+    let desired_len_chars = desired.encode_utf16().count();
+    if desired_len_chars != len_chars {
         return Ok(false);
     }
 
-    // Compare raw UTF-16LE bytes to avoid allocating a temporary `String`.
+    let Some(byte_len) = len_chars.checked_mul(2) else {
+        return Ok(false);
+    };
+
+    // Avoid parsing rich/phonetic blocks; just compare the UTF-16LE bytes directly.
     let mut desired_bytes = Vec::with_capacity(byte_len);
     for unit in desired.encode_utf16() {
         desired_bytes.extend_from_slice(&unit.to_le_bytes());
     }
-    Ok(desired_bytes == raw)
+
+    // Flagged layout: UTF-16 begins after the flags byte.
+    if let Some(end) = 13usize.checked_add(byte_len) {
+        if let Some(raw) = payload.get(13..end) {
+            if raw == desired_bytes.as_slice() {
+                return Ok(true);
+            }
+        }
+    }
+
+    // Simple layout: UTF-16 begins immediately after the `cch` field.
+    if let Some(end) = 12usize.checked_add(byte_len) {
+        if let Some(raw) = payload.get(12..end) {
+            if raw == desired_bytes.as_slice() {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 fn value_edit_is_noop_bool(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
