@@ -22,7 +22,11 @@ import { defaultRibbonSchema } from "../ribbonSchema";
  * - Keep the exemption list small and remove entries as soon as commands are implemented.
  */
 
-const CANONICAL_RIBBON_COMMAND_RE = /^(clipboard|edit|format|view|comments|workbench|ai)\./;
+// Canonical command namespaces that indicate a ribbon control should be wired to CommandRegistry.
+//
+// Note: This is intentionally a whitelist (instead of "anything with a dot") because many ribbon
+// controls are still UI placeholders with `{tab}.{group}.{action}` ids.
+const CANONICAL_RIBBON_COMMAND_RE = /^(clipboard|edit|format|view|comments|workbench|ai|audit|navigation)\./;
 
 // IDs in canonical namespaces that exist in the ribbon schema but are intentionally not
 // registered as commands yet (typically UI placeholders).
