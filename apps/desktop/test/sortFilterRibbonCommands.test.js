@@ -44,6 +44,10 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
   const disabling = fs.readFileSync(disablingPath, "utf8");
 
+  // Guardrail: AutoFilter is a registered CommandRegistry toggle command, so it should not be
+  // special-cased as a ribbon `toggleOverrides` handler.
+  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.sortFilter\.filter["']\s*:/m);
+
   // MVP AutoFilter commands are registered directly in registerDesktopCommands (via injected handlers from main.ts).
   const autoFilterIds = [
     "data.sortFilter.filter",
@@ -103,4 +107,3 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
 });
-
