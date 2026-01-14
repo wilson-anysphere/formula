@@ -38,6 +38,7 @@ export type {
   GoalSeekRequest,
   GoalSeekResponse,
   FormulaParseError,
+  FormulaLocaleInfo,
   FormulaParseOptions,
   FormulaPartialLexResult,
   FormulaPartialParseResult,

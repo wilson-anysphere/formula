@@ -127,6 +127,8 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
 
 type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
+  supportedLocaleIds?: () => unknown;
+  getLocaleInfo?: (localeId: string) => unknown;
   lexFormula: (formula: string, options?: FormulaParseOptions) => unknown;
   parseFormulaPartial: (formula: string, cursor?: number, options?: FormulaParseOptions) => unknown;
   canonicalizeFormula?: (formula: string, localeId: string, referenceStyle?: "A1" | "R1C1") => string;
@@ -416,6 +418,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
     switch (req.method) {
       case "ping":
         result = "pong";
+        break;
+      case "supportedLocaleIds":
+        {
+          const supportedLocaleIds = (mod as any).supportedLocaleIds;
+          if (typeof supportedLocaleIds !== "function") {
+            throw new Error("supportedLocaleIds: wasm module does not export supportedLocaleIds()");
+          }
+          result = cloneToPlainData(supportedLocaleIds());
+        }
+        break;
+      case "getLocaleInfo":
+        {
+          const getLocaleInfo = (mod as any).getLocaleInfo;
+          if (typeof getLocaleInfo !== "function") {
+            throw new Error("getLocaleInfo: wasm module does not export getLocaleInfo()");
+          }
+          result = cloneToPlainData(getLocaleInfo(params.localeId));
+        }
         break;
       case "lexFormula":
         {

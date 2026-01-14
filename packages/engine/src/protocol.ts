@@ -575,6 +575,23 @@ export interface FormulaParseOptions {
 }
 
 /**
+ * Locale metadata used by formula parsing/rendering.
+ *
+ * This mirrors the JS-friendly DTO returned by `crates/formula-wasm` via `getLocaleInfo(localeId)`.
+ */
+export interface FormulaLocaleInfo {
+  localeId: string;
+  decimalSeparator: string;
+  argSeparator: string;
+  arrayRowSeparator: string;
+  arrayColSeparator: string;
+  thousandsSeparator?: string;
+  isRtl: boolean;
+  booleanTrue: string;
+  booleanFalse: string;
+}
+
+/**
  * Result returned by `lexFormulaPartial`.
  */
 export interface FormulaPartialLexResult {
@@ -607,6 +624,8 @@ export type FormatRun = { startRow: number; endRowExclusive: number; styleId: nu
 export type RpcMethod =
   | "ping"
   // Editor tooling (module-level; independent of workbook state)
+  | "supportedLocaleIds"
+  | "getLocaleInfo"
   | "lexFormula"
   | "lexFormulaPartial"
   | "parseFormulaPartial"

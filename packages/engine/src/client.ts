@@ -17,6 +17,7 @@ import type {
   FormulaPartialParseResult,
   FormulaParseOptions,
   FormulaToken,
+  FormulaLocaleInfo,
   PivotCalculationResult,
   PivotConfig,
   PivotFieldItems,
@@ -347,6 +348,20 @@ export interface EngineClient {
   ): Promise<string>;
 
   /**
+   * Return the list of formula locale ids supported by the underlying engine build.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  supportedLocaleIds?(options?: RpcOptions): Promise<string[]>;
+
+  /**
+   * Return locale metadata used by formula parsing/rendering (separators, boolean literals, RTL flag, etc).
+   *
+   * This call is independent of any loaded workbook.
+   */
+  getLocaleInfo?(localeId: string, options?: RpcOptions): Promise<FormulaLocaleInfo>;
+
+  /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
    *
    * This call is independent of any loaded workbook.
@@ -613,6 +628,8 @@ export function createEngineClient(options?: {
       await withEngine((connected) => connected.canonicalizeFormula(formula, localeId, referenceStyle, rpcOptions)),
     localizeFormula: async (formula, localeId, referenceStyle, rpcOptions) =>
       await withEngine((connected) => connected.localizeFormula(formula, localeId, referenceStyle, rpcOptions)),
+    supportedLocaleIds: async (rpcOptions) => await withEngine((connected) => connected.supportedLocaleIds(rpcOptions)),
+    getLocaleInfo: async (localeId, rpcOptions) => await withEngine((connected) => connected.getLocaleInfo(localeId, rpcOptions)),
     lexFormula: async (formula: string, optionsOrRpcOptions?: FormulaParseOptions | RpcOptions, rpcOptions?: RpcOptions) =>
       await withEngine((connected) => (connected.lexFormula as any)(formula, optionsOrRpcOptions, rpcOptions)),
     lexFormulaPartial: async (

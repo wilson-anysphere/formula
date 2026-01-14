@@ -14,6 +14,7 @@ import type {
   GoalSeekResponse,
   FormulaPartialLexResult,
   FormulaPartialParseResult,
+  FormulaLocaleInfo,
   FormulaParseOptions,
   FormulaToken,
   InitMessage,
@@ -829,6 +830,26 @@ export class EngineWorker {
       { formula, localeId, referenceStyle },
       rpcOptions
     )) as string;
+  }
+
+  /**
+   * Return the list of formula locale ids supported by the underlying engine build.
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async supportedLocaleIds(rpcOptions?: RpcOptions): Promise<string[]> {
+    return (await this.invoke("supportedLocaleIds", {}, rpcOptions)) as string[];
+  }
+
+  /**
+   * Return locale metadata used by formula parsing/rendering (separators, boolean literals, RTL flag, etc).
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async getLocaleInfo(localeId: string, rpcOptions?: RpcOptions): Promise<FormulaLocaleInfo> {
+    return (await this.invoke("getLocaleInfo", { localeId }, rpcOptions)) as FormulaLocaleInfo;
   }
 
   /**
