@@ -963,6 +963,28 @@ jobs:
           path: ${{ steps.provenance_macos.outputs.bundle-path }}
           if-no-files-found: warn
 
+      - name: Upload provenance bundle to the draft release (macOS)
+        if: steps.provenance_macos.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROVENANCE_BUNDLE_PATH: ${{ steps.provenance_macos.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="provenance-${{ matrix.cache_target }}.intoto.jsonl"
+          PROVENANCE_OUT="$out" python - <<'PY'
+          import os
+          import shutil
+          
+          src = os.environ["PROVENANCE_BUNDLE_PATH"]
+          dst = os.environ["PROVENANCE_OUT"]
+          shutil.copyfile(src, dst)
+          print(f"Copied provenance bundle: {src} -> {dst}")
+          PY
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" "${out}" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
       - name: Build desktop bundles (macOS universal, dry run)
         if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -1196,6 +1218,28 @@ jobs:
           name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: ${{ steps.provenance_non_macos.outputs.bundle-path }}
           if-no-files-found: warn
+
+      - name: Upload provenance bundle to the draft release
+        if: steps.provenance_non_macos.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROVENANCE_BUNDLE_PATH: ${{ steps.provenance_non_macos.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="provenance-${{ matrix.cache_target }}.intoto.jsonl"
+          PROVENANCE_OUT="$out" python - <<'PY'
+          import os
+          import shutil
+          
+          src = os.environ["PROVENANCE_BUNDLE_PATH"]
+          dst = os.environ["PROVENANCE_OUT"]
+          shutil.copyfile(src, dst)
+          print(f"Copied provenance bundle: {src} -> {dst}")
+          PY
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" "${out}" \
+            --repo "${{ github.repository }}" \
+            --clobber
 
       - name: Build desktop bundles (dry run)
         if: runner.os != 'macOS' && needs.preflight.outputs.upload != 'true'
@@ -2540,6 +2584,7 @@ jobs:
     needs:
       - build
       - preflight
+      - sbom
       - verify-updater-manifest
       - verify-release-assets
     if: needs.preflight.outputs.upload == 'true'
@@ -2562,7 +2607,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          cmd=(node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.preflight.outputs.release_tag }}")
+          cmd=(node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.preflight.outputs.release_tag }}" --all-assets --include-sigs)
 
           # Enforce per-arch completeness + unambiguous naming in the upstream repo, where we ship
           # a full multi-arch matrix (macOS universal, Windows x64/arm64, Linux x86_64/arm64).

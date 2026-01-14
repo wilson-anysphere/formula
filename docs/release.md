@@ -1204,6 +1204,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
     - Updater metadata: `latest.json` and `latest.json.sig`
     - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
     - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
+    - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
     - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
     - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
     - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
@@ -1232,7 +1233,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
 
     Build provenance: the release workflow also generates **build provenance attestations** for the
     uploaded desktop artifacts. You can view them in GitHub’s **Attestations** UI for the workflow
-    run, and the raw attestation bundle is uploaded as a workflow artifact (`provenance-*`).
+    run, and the raw attestation bundles are attached to the draft GitHub Release as
+    `provenance-*.intoto.jsonl` (and also uploaded as workflow artifacts `provenance-*`).
 2. Download `latest.json` and confirm `platforms` includes entries for:
    - `darwin-x86_64` (macOS Intel; points at the `.app.tar.gz` updater payload)
    - `darwin-aarch64` (macOS Apple Silicon; points at the `.app.tar.gz` updater payload)
