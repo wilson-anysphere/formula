@@ -433,6 +433,11 @@ a:visited {
   margin-left: var(--space-3);
 }
 
+.formula-bar--function-autocomplete-open .formula-bar-highlight .formula-bar-ghost,
+.formula-bar--function-autocomplete-open .formula-bar-highlight .formula-bar-preview {
+  opacity: 0;
+}
+
 .formula-bar-expand-button {
   width: 24px;
   height: 24px;

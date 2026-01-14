@@ -340,6 +340,7 @@ export class FormulaBarFunctionAutocompleteController {
   close(): void {
     // Always clear state/ARIA even if the dropdown is already hidden (defensive:
     // DOM state may be manipulated externally and we don't want stale activedescendant ids).
+    this.#formulaBar.root.classList.remove("formula-bar--function-autocomplete-open");
     this.#context = null;
     this.#suggestions = [];
     this.#selectedIndex = 0;
@@ -510,6 +511,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#itemEls = [];
     this.#activeDescendantId = null;
     this.#textarea.setAttribute("aria-expanded", "true");
+    this.#formulaBar.root.classList.add("formula-bar--function-autocomplete-open");
 
     for (let i = 0; i < this.#suggestions.length; i += 1) {
       const item = this.#suggestions[i]!;
