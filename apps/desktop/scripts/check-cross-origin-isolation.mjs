@@ -110,7 +110,7 @@ function supportsTimeoutCommand() {
   // `timeout` is typically provided by GNU coreutils, but isn't universal (e.g. some minimal
   // developer environments). Only use it when we can probe it successfully.
   const probe = spawnSync("timeout", ["--version"], { stdio: "ignore", shell: false });
-  return !probe.error;
+  return !probe.error && probe.status === 0;
 }
 
 function timeoutSupportsKillAfter() {
