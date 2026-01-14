@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { getSheetNameValidationErrorMessage } from "@formula/workbook-backend";
-import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
+import { cloneYjsValue, getArrayRoot, getDocTypeConstructors, getMapRoot, getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
 
 export interface WorkbookSchemaOptions {
   defaultSheetName?: string;
@@ -266,61 +266,6 @@ function coerceTabColor(value: unknown): string | null {
   return str.toUpperCase();
 }
 
-type DocTypeConstructors = {
-  MapCtor: new () => any;
-  ArrayCtor: new () => any;
-  TextCtor: new () => any;
-};
-
-function cloneYjsValueWithCtors(value: any, ctors: DocTypeConstructors): any {
-  const map = getYMap(value);
-  if (map) {
-    const out = new ctors.MapCtor();
-    map.forEach((v: any, k: string) => {
-      out.set(k, cloneYjsValueWithCtors(v, ctors));
-    });
-    return out;
-  }
-
-  const array = getYArray(value);
-  if (array) {
-    const out = new ctors.ArrayCtor();
-    for (const item of array.toArray()) {
-      out.push([cloneYjsValueWithCtors(item, ctors)]);
-    }
-    return out;
-  }
-
-  const text = getYText(value);
-  if (text) {
-    const out = new ctors.TextCtor();
-    out.applyDelta(structuredClone(text.toDelta()));
-    return out;
-  }
-
-  if (value && typeof value === "object") {
-    return structuredClone(value);
-  }
-  return value;
-}
-
-function findAvailableRootName(doc: Y.Doc, base: string): string {
-  if (!doc.share.has(base)) return base;
-  for (let i = 1; i < 1000; i += 1) {
-    const name = `${base}_${i}`;
-    if (!doc.share.has(name)) return name;
-  }
-  return `${base}_${Date.now()}`;
-}
-
-function getDocTextConstructor(doc: any): new () => any {
-  const name = findAvailableRootName(doc, "__workbook_tmp_text");
-  const tmp = doc.getText(name);
-  const ctor = tmp.constructor as new () => any;
-  doc.share.delete(name);
-  return ctor;
-}
-
 export class SheetManager {
   readonly sheets: Y.Array<Y.Map<unknown>>;
   private readonly transact: WorkbookTransact;
@@ -332,9 +277,10 @@ export class SheetManager {
     const cells = getMapRoot<unknown>(opts.doc, "cells");
     this.sheets = getArrayRoot<Y.Map<unknown>>(opts.doc, "sheets") as Y.Array<Y.Map<unknown>>;
     this.transact = opts.transact ?? defaultTransact(opts.doc);
-    this.YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
-    this.YArrayCtor = this.sheets.constructor as unknown as { new (): Y.Array<any> };
-    this.YTextCtor = getDocTextConstructor(opts.doc) as unknown as { new (): Y.Text };
+    const ctors = getDocTypeConstructors(opts.doc as any);
+    this.YMapCtor = (ctors.Map ?? (cells as any).constructor) as unknown as { new (): Y.Map<unknown> };
+    this.YArrayCtor = (ctors.Array ?? (this.sheets as any).constructor) as unknown as { new (): Y.Array<any> };
+    this.YTextCtor = (ctors.Text ?? Y.Text) as unknown as { new (): Y.Text };
   }
 
   list(): Array<{ id: string; name: string | null; visibility?: SheetVisibility; tabColor?: string | null }> {
@@ -508,11 +454,7 @@ export class SheetManager {
       const sheet = this.sheets.get(fromIndex);
       if (!sheet) throw new Error(`Sheet missing at index ${fromIndex}: ${id}`);
 
-      const sheetClone = cloneYjsValueWithCtors(sheet, {
-        MapCtor: this.YMapCtor,
-        ArrayCtor: this.YArrayCtor,
-        TextCtor: this.YTextCtor,
-      });
+      const sheetClone = cloneYjsValue(sheet, { Map: this.YMapCtor, Array: this.YArrayCtor, Text: this.YTextCtor });
       this.sheets.delete(fromIndex, 1);
       this.sheets.insert(targetIndex, [sheetClone]);
     });
