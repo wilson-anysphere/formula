@@ -2258,6 +2258,10 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["view.freezeTopRow"];
   delete out["view.freezeFirstColumn"];
   delete out["view.unfreezePanes"];
+  delete out["view.toggleSplitView"];
+  delete out["view.splitVertical"];
+  delete out["view.splitHorizontal"];
+  delete out["view.splitNone"];
   delete out["audit.togglePrecedents"];
   delete out["audit.toggleDependents"];
   delete out["audit.toggleTransitive"];

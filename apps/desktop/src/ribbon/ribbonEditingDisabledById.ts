@@ -8,6 +8,11 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "view.freezeTopRow": true,
   "view.freezeFirstColumn": true,
   "view.unfreezePanes": true,
+  // Split view changes window layout and can disrupt in-progress edits (Excel-style disable).
+  "view.toggleSplitView": true,
+  "view.splitVertical": true,
+  "view.splitHorizontal": true,
+  "view.splitNone": true,
   "audit.togglePrecedents": true,
   "audit.toggleDependents": true,
   "audit.toggleTransitive": true,
