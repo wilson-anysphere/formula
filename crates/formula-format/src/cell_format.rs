@@ -58,6 +58,8 @@ pub fn cell_format_code(format_code: Option<&str>) -> String {
 /// Return Excel-compatible `CELL("parentheses")` flag for an Excel number format string.
 ///
 /// Excel returns `1` when negative numbers are displayed using parentheses, and `0` otherwise.
+/// With a single-section format (where Excel auto-prefixes `-` for negatives), this reports `0`
+/// even if the pattern contains parentheses literals.
 ///
 /// This helper selects the section that Excel would use for a negative numeric value and then
 /// scans that section for parenthesis characters, ignoring:
@@ -79,11 +81,7 @@ pub fn cell_parentheses_flag(format_code: Option<&str>) -> u8 {
         return 0;
     }
 
-    if pattern_contains_balanced_parentheses(negative.pattern) {
-        1
-    } else {
-        0
-    }
+    u8::from(pattern_contains_balanced_parentheses(negative.pattern))
 }
 
 fn classify_datetime_pattern_as_cell_format_code(pattern: &str) -> Option<String> {
