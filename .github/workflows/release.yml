@@ -34,7 +34,16 @@ on:
 # manual re-runs or tag updates can overlap and clobber/partially overwrite the
 # release asset set.
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  # For `workflow_dispatch`, `github.ref` is the branch the workflow is run from, but the release
+  # tag may come from inputs. Key concurrency off the *effective* release tag when we're actually
+  # uploading to a GitHub Release (`upload=true`) so dispatch release runs for a given tag can't
+  # overlap with the corresponding tag push run.
+  #
+  # NOTE: `github.event.inputs.*` may be empty/undefined for optional inputs, so guard `startsWith`
+  # with truthy checks to avoid evaluation errors.
+  #
+  # In dry-run mode (`upload=false`), fall back to the branch ref so dry runs don't block releases.
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload == 'true' && ((github.event.inputs.tag && (startsWith(github.event.inputs.tag, 'refs/tags/') && github.event.inputs.tag || (startsWith(github.event.inputs.tag, 'v') && format('refs/tags/{0}', github.event.inputs.tag) || format('refs/tags/v{0}', github.event.inputs.tag)))) || (github.event.inputs.version && (startsWith(github.event.inputs.version, 'refs/tags/') && github.event.inputs.version || (startsWith(github.event.inputs.version, 'v') && format('refs/tags/{0}', github.event.inputs.version) || format('refs/tags/v{0}', github.event.inputs.version)))) || github.ref) || github.ref }}
   cancel-in-progress: false
 
 env:
