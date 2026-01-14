@@ -1703,6 +1703,150 @@ mod filepass_tests {
     }
 
     #[test]
+    fn decrypts_rc4_cryptoapi_legacy_filepass_layout_allows_empty_password() {
+        // Legacy BIFF8 RC4 CryptoAPI files can be encrypted with an empty password. Ensure we accept
+        // `""` rather than treating it as "password missing".
+        const RECORD_BOF: u16 = 0x0809;
+        const RECORD_EOF: u16 = 0x000A;
+        const RECORD_INTERFACEHDR: u16 = 0x00E1;
+        const RECORD_BOUNDSHEET8: u16 = 0x0085;
+        const RECORD_DUMMY: u16 = 0x1234;
+
+        let password = "";
+        let wrong_password = "not-empty";
+        let hash_alg = CryptoApiHashAlg::Sha1;
+        let header_key_size_bits: u32 = 0;
+        let effective_key_size_bits: u32 =
+            if header_key_size_bits == 0 { 40 } else { header_key_size_bits };
+
+        let salt: [u8; 16] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10,
+        ];
+
+        let key_material = derive_key_material_legacy_spec(hash_alg, password, &salt);
+
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+        let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
+
+        let key0 =
+            derive_block_key_spec_padded_to_16(hash_alg, &key_material, 0, effective_key_size_bits);
+        assert_eq!(key0.len(), 16, "expected padded RC4 key length");
+
+        let mut rc4 = Rc4::new(&key0);
+        let mut encrypted_verifier = verifier_plain;
+        rc4.apply_keystream(&mut encrypted_verifier);
+        let mut encrypted_verifier_hash = verifier_hash_plain.to_vec();
+        rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+        // Build legacy CryptoAPI FILEPASS payload.
+        let mut enc_header = Vec::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // algIdHash (0 => default SHA1)
+        enc_header.extend_from_slice(&header_key_size_bits.to_le_bytes()); // keySize (bits)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        let mut filepass_payload = Vec::new();
+        filepass_payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_payload.extend_from_slice(&ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes());
+        filepass_payload.extend_from_slice(&4u16.to_le_bytes()); // vMajor
+        filepass_payload.extend_from_slice(&2u16.to_le_bytes()); // vMinor
+        filepass_payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        filepass_payload.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        filepass_payload.extend_from_slice(&enc_header);
+        // EncryptionVerifier
+        filepass_payload.extend_from_slice(&(salt.len() as u32).to_le_bytes()); // saltSize
+        filepass_payload.extend_from_slice(&salt);
+        filepass_payload.extend_from_slice(&encrypted_verifier);
+        filepass_payload.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        filepass_payload.extend_from_slice(&encrypted_verifier_hash);
+
+        let interfacehdr_payload = [0x55u8; 8];
+        let boundsheet_payload: [u8; 12] = [
+            0x44, 0x33, 0x22, 0x11, // lbPlyPos (must remain plaintext)
+            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x10, 0x20,
+        ];
+        let mut dummy_payload = vec![0u8; 2048];
+        for (i, b) in dummy_payload.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+
+        let bof_payload = [0u8; 16];
+        let plaintext_stream = [
+            record(RECORD_BOF, &bof_payload),
+            record(RECORD_FILEPASS, &filepass_payload),
+            record(RECORD_INTERFACEHDR, &interfacehdr_payload),
+            record(RECORD_BOUNDSHEET8, &boundsheet_payload),
+            record(RECORD_DUMMY, &dummy_payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Encrypt record payloads after FILEPASS according to the legacy absolute-offset scheme.
+        let (filepass_offset, filepass_len) =
+            find_filepass_record_offset(&plaintext_stream).expect("FILEPASS offset");
+        let filepass_data_end = filepass_offset + 4 + filepass_len;
+
+        let mut encrypted_stream = plaintext_stream.clone();
+        let mut offset = filepass_data_end;
+        let mut stream_pos = filepass_data_end;
+        while offset < encrypted_stream.len() {
+            let remaining = encrypted_stream.len().saturating_sub(offset);
+            if remaining < 4 {
+                break;
+            }
+
+            let record_id = u16::from_le_bytes([encrypted_stream[offset], encrypted_stream[offset + 1]]);
+            let len = u16::from_le_bytes([encrypted_stream[offset + 2], encrypted_stream[offset + 3]])
+                as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+
+            stream_pos += 4;
+
+            if !is_never_encrypted_record(record_id) {
+                match record_id {
+                    RECORD_BOUNDSHEET8 if len > 4 => apply_keystream_by_offset_spec_padded_to_16(
+                        &mut encrypted_stream[data_start + 4..data_end],
+                        stream_pos + 4,
+                        hash_alg,
+                        &key_material,
+                        effective_key_size_bits,
+                    ),
+                    _ => apply_keystream_by_offset_spec_padded_to_16(
+                        &mut encrypted_stream[data_start..data_end],
+                        stream_pos,
+                        hash_alg,
+                        &key_material,
+                        effective_key_size_bits,
+                    ),
+                }
+            }
+
+            stream_pos += len;
+            offset = data_end;
+        }
+
+        let mut wrong_stream = encrypted_stream.clone();
+        let err = decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut wrong_stream, wrong_password)
+            .expect_err("expected wrong password error");
+        assert_eq!(err, DecryptError::WrongPassword);
+
+        decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password).expect("decrypt");
+
+        let mut expected = plaintext_stream;
+        expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        assert_eq!(encrypted_stream, expected);
+    }
+
+    #[test]
     fn decrypts_rc4_cryptoapi_legacy_filepass_layout_with_padded_40_bit_key() {
         // Some legacy BIFF8 CryptoAPI RC4 producers (including Excel) appear to pad 40-bit keys to
         // 16 bytes before initializing RC4 (digest prefix + 0x00 padding).
