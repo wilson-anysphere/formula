@@ -14,9 +14,9 @@
 }
 
 .dialog__controls {
-  --dialog-controls-gap: 8px;
-  --dialog-controls-margin-top: 12px;
-  --dialog-control-padding: 4px 8px;
+  --dialog-controls-gap: var(--space-4);
+  --dialog-controls-margin-top: var(--space-5);
+  --dialog-control-padding: var(--space-2) var(--space-4);
   --dialog-control-radius: var(--radius);
 
   display: flex;
@@ -111,7 +111,7 @@
 
 .updater-dialog {
   width: 520px;
-  max-width: min(640px, calc(100vw - 32px));
+  max-width: min(640px, calc(100vw - (var(--space-6) * 2)));
 }
 
 .updater-dialog__version {
@@ -161,7 +161,7 @@
 /* --- Custom Sort dialog ----------------------------------------------------- */
 
 dialog.custom-sort-dialog {
-  width: min(520px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - (var(--space-6) * 2)));
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
   padding: 0;
@@ -182,7 +182,7 @@ dialog.custom-sort-dialog::backdrop {
 
 .organize-sheets-dialog {
   width: 720px;
-  max-width: min(720px, calc(100vw - 32px));
+  max-width: min(720px, calc(100vw - (var(--space-6) * 2)));
 }
 
 .organize-sheets-dialog__body {
