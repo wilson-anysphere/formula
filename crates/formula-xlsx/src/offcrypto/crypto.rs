@@ -540,4 +540,24 @@ mod tests {
         assert!(verify("Password1234_"), "expected verifier to accept correct password");
         assert!(!verify("wrong password"), "expected verifier to reject incorrect password");
     }
+
+    #[test]
+    fn standard_cryptoapi_sha1_password_hash_vector_spin_50k() {
+        // Standard/CryptoAPI encryption uses a fixed 50,000-iteration password hashing loop.
+        // This vector is documented in `docs/offcrypto-standard-cryptoapi.md` and is useful for
+        // catching off-by-one and byte-order regressions.
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f,
+        ];
+
+        let expected: [u8; 20] = [
+            0x1b, 0x59, 0x72, 0x28, 0x4e, 0xab, 0x64, 0x81, 0xeb, 0x65, 0x65, 0xa0, 0x98, 0x5b,
+            0x33, 0x4b, 0x3e, 0x65, 0xe0, 0x41,
+        ];
+
+        let derived = hash_password(password, &salt, 50_000, HashAlgorithm::Sha1).unwrap();
+        assert_eq!(derived.as_slice(), expected.as_slice());
+    }
 }

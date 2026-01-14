@@ -88,7 +88,6 @@ fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
         }
     }
 }
-
 impl PivotKeyPart {
     fn kind_rank(&self) -> u8 {
         match self {

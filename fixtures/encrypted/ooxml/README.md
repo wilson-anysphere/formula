@@ -231,6 +231,14 @@ cargo run -p formula-io --example generate_standard_rc4_ooxml_fixture -- \
   fixtures/encrypted/ooxml/standard-rc4.xlsx
 ```
 
+## Regenerating Standard (CryptoAPI) fixtures (deterministic)
+
+From the repo root:
+
+```bash
+bash scripts/cargo_agent.sh run -p formula-xlsx --example regen_standard_fixtures
+```
+
 ## Regenerating with Apache POI (alternative)
 
 To generate encrypted OOXML fixtures **without Excel**, you can use the Apache POI-based generator:
