@@ -69,12 +69,14 @@ def check_job(
         # - `run: pnpm build:desktop` (workspace desktop frontend build)
         # - `run: pnpm -C apps/desktop build` (package-local desktop frontend build)
         # - `cargo tauri build` / `tauri build` (Tauri bundles invoke `pnpm build` via beforeBuildCommand)
+        # - `tauri-apps/tauri-action` (runs a Tauri bundle build, which triggers beforeBuildCommand)
         if is_comment(line):
             return False
         return bool(
             re.search(r"\bpnpm\b.*\bbuild:desktop\b", line)
             or re.search(r"\bpnpm\b.*\b(?:-C|--dir)\b\s+apps/desktop\b.*\bbuild(?=$|\s)", line)
             or re.search(r"\btauri\s+build\b", line)
+            or re.search(r"\btauri-apps/tauri-action\b", line)
         )
 
     build_lines = [ln for ln, line in job_lines if is_desktop_build_cmd(line)]
