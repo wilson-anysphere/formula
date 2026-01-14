@@ -249,7 +249,17 @@ describeWasm("EngineWorker encrypted workbook load (wasm)", () => {
     const bytes = new Uint8Array(readFileSync(encryptedPath));
 
     try {
-      await expect(engine.loadWorkbookFromEncryptedXlsxBytes(bytes, "wrong-password")).rejects.toThrow(/invalid password/i);
+      let caught: unknown = null;
+      try {
+        await engine.loadWorkbookFromEncryptedXlsxBytes(bytes, "wrong-password");
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as any).name).toBe("OfficeCryptoError");
+      expect((caught as any).kind).toBe("InvalidPassword");
+      expect((caught as any).message).toMatch(/invalid password/i);
     } finally {
       engine.terminate();
     }

@@ -108,6 +108,37 @@ fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
 }
 
+const OFFICE_CRYPTO_ERROR_PREFIX: &str = "OFFICE_CRYPTO_ERROR:";
+
+fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
+    // The TS worker RPC surface currently transports errors as strings only. Encode Office
+    // encryption errors as a tagged JSON payload so callers can distinguish common cases
+    // programmatically (password required vs invalid password vs unsupported encryption).
+    let kind = match &err {
+        formula_office_crypto::OfficeCryptoError::PasswordRequired => "PasswordRequired",
+        formula_office_crypto::OfficeCryptoError::InvalidPassword => "InvalidPassword",
+        formula_office_crypto::OfficeCryptoError::SpinCountTooLarge { .. } => "SpinCountTooLarge",
+        formula_office_crypto::OfficeCryptoError::UnsupportedEncryption(_) => "UnsupportedEncryption",
+        formula_office_crypto::OfficeCryptoError::InvalidOptions(_) => "InvalidOptions",
+        formula_office_crypto::OfficeCryptoError::InvalidFormat(_) => "InvalidFormat",
+        formula_office_crypto::OfficeCryptoError::SizeLimitExceeded { .. } => "SizeLimitExceeded",
+        formula_office_crypto::OfficeCryptoError::SizeLimitExceededU64 { .. } => "SizeLimitExceeded",
+        formula_office_crypto::OfficeCryptoError::EncryptedPackageSizeOverflow { .. } => {
+            "EncryptedPackageSizeOverflow"
+        }
+        formula_office_crypto::OfficeCryptoError::EncryptedPackageAllocationFailed { .. } => {
+            "EncryptedPackageAllocationFailed"
+        }
+        formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => "IntegrityCheckFailed",
+        formula_office_crypto::OfficeCryptoError::Io(_) => "Io",
+    };
+    let payload = serde_json::json!({
+        "kind": kind,
+        "message": err.to_string(),
+    });
+    JsValue::from_str(&format!("{OFFICE_CRYPTO_ERROR_PREFIX}{payload}"))
+}
+
 fn js_value_to_object(value: &JsValue) -> Option<Object> {
     if value.is_null() || value.is_undefined() {
         return None;
@@ -5072,9 +5103,10 @@ impl WasmWorkbook {
             return Self::from_xlsx_bytes(bytes);
         }
 
-        let decrypted = formula_office_crypto::decrypt_encrypted_package_ole(bytes, &password)
-            .map_err(|err| match err {
-                formula_office_crypto::OfficeCryptoError::InvalidPassword => js_err("invalid password"),
+        let decrypted =
+            formula_office_crypto::decrypt_encrypted_package_ole(bytes, &password).map_err(|err| match err {
+                // Special-case errors that imply we decrypted successfully but didn't end up with a
+                // workbook ZIP package.
                 formula_office_crypto::OfficeCryptoError::InvalidFormat(message)
                     if message.contains("ZIP archive") =>
                 {
@@ -5082,7 +5114,7 @@ impl WasmWorkbook {
                         "decrypted payload is not an `.xlsx`/`.xlsm`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsm`/`.xlsb` is supported for now",
                     )
                 }
-                other => js_err(other.to_string()),
+                other => office_crypto_err(other),
             })?;
 
         // Office-encrypted containers can wrap arbitrary payloads (e.g. XLS, DOCX). We support

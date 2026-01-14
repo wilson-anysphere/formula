@@ -65,6 +65,30 @@ type PendingRequest = {
 
 type CellUpdate = { address: string; value: CellScalar; sheet?: string };
 
+const OFFICE_CRYPTO_ERROR_PREFIX = "OFFICE_CRYPTO_ERROR:";
+
+type OfficeCryptoErrorPayload = { kind?: string; message?: string };
+
+function parseOfficeCryptoError(raw: string): Error | null {
+  if (!raw.startsWith(OFFICE_CRYPTO_ERROR_PREFIX)) {
+    return null;
+  }
+  const json = raw.slice(OFFICE_CRYPTO_ERROR_PREFIX.length);
+  let payload: OfficeCryptoErrorPayload | null = null;
+  try {
+    payload = JSON.parse(json) as OfficeCryptoErrorPayload;
+  } catch {
+    payload = null;
+  }
+  const message = typeof payload?.message === "string" ? payload.message : raw;
+  const kind = typeof payload?.kind === "string" ? payload.kind : undefined;
+
+  const err = new Error(message) as Error & { kind?: string };
+  err.name = "OfficeCryptoError";
+  err.kind = kind;
+  return err;
+}
+
 function normalizeCellScalar(value: CellScalar): CellScalar {
   if (typeof value !== "string") return value;
   if (!isFormulaInput(value)) return value;
@@ -1315,6 +1339,7 @@ export class EngineWorker {
       return;
     }
 
-    pending.reject(new Error((msg as RpcResponseErr).error));
+    const raw = (msg as RpcResponseErr).error;
+    pending.reject(parseOfficeCryptoError(raw) ?? new Error(raw));
   }
 }
