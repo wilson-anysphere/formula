@@ -7,6 +7,8 @@
 //! - MS-OFFCRYPTO: https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
 //! - `EncryptionInfo` stream (Standard): `EncryptionInfo` → `EncryptionHeader` → `EncryptionVerifier`
 
+// This module is intentionally not wired into the main `formula-io` open path yet; keep it
+// compiling for future work without spamming downstream builds with dead-code warnings.
 #![allow(dead_code)]
 
 use thiserror::Error;
