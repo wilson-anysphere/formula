@@ -2,8 +2,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
 import type { DocumentController } from "../document/documentController.js";
 import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/mergedCells.js";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
-import type { QuickPickItem } from "../extensions/ui.js";
-import { showInputBox, showToast } from "../extensions/ui.js";
+import { showInputBox, showToast, type QuickPickItem } from "../extensions/ui.js";
 import type { LayoutController } from "../layout/layoutController.js";
 import { t } from "../i18n/index.js";
 import type { ThemeController } from "../theme/themeController.js";
@@ -11,6 +10,7 @@ import type { ThemeController } from "../theme/themeController.js";
 import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
+import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -353,6 +353,50 @@ export function registerDesktopCommands(params: {
         { forceBatch: true },
       ),
     { category: commandCategoryFormat },
+  );
+
+  // Home → Cells → Insert/Delete Cells… (shift structural edits).
+  //
+  // These were originally ribbon-only ids handled in `main.ts`. Register them as commands so:
+  // - keybindings can invoke them (Excel: Ctrl+Shift+= / Ctrl+-),
+  // - they appear in the command palette, and
+  // - ribbon disabling can rely on CommandRegistry as the source of truth.
+  const showToastForStructuralCellsCommand = (message: string, type?: "info" | "warning" | "error") => showToast(message, type);
+  commandRegistry.registerBuiltinCommand(
+    "home.cells.insert.insertCells",
+    "Insert Cells…",
+    async () => {
+      await handleHomeCellsInsertDeleteCommand({
+        app,
+        commandId: "home.cells.insert.insertCells",
+        showQuickPick,
+        showToast: showToastForStructuralCellsCommand,
+      });
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Insert cells and shift existing cells right or down",
+      keywords: ["insert", "cells", "shift", "excel"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "home.cells.delete.deleteCells",
+    "Delete Cells…",
+    async () => {
+      await handleHomeCellsInsertDeleteCommand({
+        app,
+        commandId: "home.cells.delete.deleteCells",
+        showQuickPick,
+        showToast: showToastForStructuralCellsCommand,
+      });
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Delete cells and shift remaining cells left or up",
+      keywords: ["delete", "cells", "shift", "excel"],
+    },
   );
   if (layoutController) {
     registerBuiltinCommands({

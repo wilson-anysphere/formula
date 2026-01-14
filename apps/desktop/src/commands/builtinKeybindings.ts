@@ -321,6 +321,32 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_SPREADSHEET_READY,
   },
   {
+    // Excel: Ctrl+Shift++ opens the Insert Cells dialog (Shift cells right/down, entire row/column).
+    command: "home.cells.insert.insertCells",
+    key: "ctrl+shift+=",
+    mac: "ctrl+shift+=",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
+    // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+    command: "home.cells.insert.insertCells",
+    key: "ctrl+cmd+shift+=",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
+    // Excel: Ctrl+- opens the Delete Cells dialog (Shift cells left/up, entire row/column).
+    command: "home.cells.delete.deleteCells",
+    key: "ctrl+-",
+    mac: "ctrl+-",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
+    // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+    command: "home.cells.delete.deleteCells",
+    key: "ctrl+cmd+-",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
     command: "edit.selectCurrentRegion",
     key: "ctrl+shift+*",
     mac: "cmd+shift+*",

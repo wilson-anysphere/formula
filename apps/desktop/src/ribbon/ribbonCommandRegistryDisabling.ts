@@ -48,8 +48,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "home.cells.format.organizeSheets",
 
   // Home → Cells (structural edits).
-  "home.cells.insert.insertCells",
-  "home.cells.delete.deleteCells",
   "home.cells.insert.insertSheetRows",
   "home.cells.insert.insertSheetColumns",
   "home.cells.insert.insertSheet",
