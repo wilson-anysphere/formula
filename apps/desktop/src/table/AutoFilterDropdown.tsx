@@ -78,12 +78,14 @@ export function AutoFilterDropdown({
         <input
           className="formula-sort-filter__input"
           placeholder="Search"
+          aria-label="Search filter values"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
         />
       </div>
       <div className="formula-table-filter-dropdown__list">
+        {visibleValues.length === 0 && <div className="formula-table-filter-dropdown__empty">No matches</div>}
         {visibleValues.length > 0 && (
           <label key="__select_all__" className="formula-sort-filter__row formula-table-filter-dropdown__item">
             <input

@@ -235,6 +235,12 @@
   gap: 2px;
 }
 
+.formula-table-filter-dropdown__empty {
+  padding: 8px;
+  color: var(--formula-grid-header-text, var(--text-secondary));
+  font-size: 12px;
+}
+
 .formula-table-filter-dropdown__controls {
   padding: 6px;
   border-top: 1px solid var(--formula-grid-line, var(--border));
