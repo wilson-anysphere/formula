@@ -56,7 +56,7 @@
   white-space: nowrap;
 }
 
-.selection-pane__delete {
+.selection-pane__action {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -68,8 +68,7 @@
   color: var(--text-secondary);
 }
 
-.selection-pane__delete:hover {
+.selection-pane__action:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }
-

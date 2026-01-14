@@ -3,7 +3,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { DrawingObject, DrawingObjectId } from "../../drawings/types";
 
 import { ChartIcon } from "../../ui/icons/ChartIcon";
+import { BringForwardIcon } from "../../ui/icons/BringForwardIcon";
 import { PictureIcon } from "../../ui/icons/PictureIcon";
+import { SendBackwardIcon } from "../../ui/icons/SendBackwardIcon";
 import { ShapesIcon } from "../../ui/icons/ShapesIcon";
 import { TrashIcon } from "../../ui/icons/TrashIcon";
 
@@ -14,6 +16,8 @@ type SelectionPaneApp = {
   subscribeDrawingSelection(listener: (id: DrawingObjectId | null) => void): () => void;
   selectDrawingById(id: DrawingObjectId | null): void;
   deleteDrawingById?(id: DrawingObjectId): void;
+  bringSelectedDrawingForward?(): void;
+  sendSelectedDrawingBackward?(): void;
 };
 
 function DrawingKindIcon({ kind }: { kind: DrawingObject["kind"]["type"] }) {
@@ -102,9 +106,41 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                   <DrawingKindIcon kind={obj.kind.type} />
                 </span>
                 <span className="selection-pane__label">{label}</span>
+                {typeof app.bringSelectedDrawingForward === "function" ? (
+                  <button
+                    type="button"
+                    className="selection-pane__action"
+                    aria-label={`Bring forward ${label}`}
+                    data-testid={`selection-pane-bring-forward-${obj.id}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      app.selectDrawingById(obj.id);
+                      app.bringSelectedDrawingForward?.();
+                    }}
+                  >
+                    <BringForwardIcon size={16} />
+                  </button>
+                ) : null}
+                {typeof app.sendSelectedDrawingBackward === "function" ? (
+                  <button
+                    type="button"
+                    className="selection-pane__action"
+                    aria-label={`Send backward ${label}`}
+                    data-testid={`selection-pane-send-backward-${obj.id}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      app.selectDrawingById(obj.id);
+                      app.sendSelectedDrawingBackward?.();
+                    }}
+                  >
+                    <SendBackwardIcon size={16} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="selection-pane__delete"
+                  className="selection-pane__action"
                   aria-label={`Delete ${label}`}
                   data-testid={`selection-pane-delete-${obj.id}`}
                   onClick={(e) => {
