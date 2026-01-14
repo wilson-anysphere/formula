@@ -531,7 +531,17 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        self.input[pos..].starts_with('!')
+        // Sheet reference like `[Book.xlsx]Sheet1!A1`.
+        if self.input[pos..].starts_with('!') {
+            return true;
+        }
+
+        // Workbook-scoped external defined name like `[Book.xlsx]MyName`.
+        //
+        // The canonical parser treats `[workbook]name` as a name ref (and rewrites it to
+        // `='[workbook]name'` on roundtrip) to avoid ambiguity with structured refs. Mirror that
+        // behavior so we don't interpret the workbook prefix as a structured ref.
+        true
     }
 
     fn scan_sheet_name(&self, start: usize) -> Option<usize> {
@@ -739,6 +749,25 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
         return None;
     }
     Some((start.to_string(), end.to_string()))
+}
+
+fn parse_workbook_scoped_external_name_ref(name: &str) -> Option<(String, String)> {
+    if !name.starts_with('[') {
+        return None;
+    }
+
+    let end = find_workbook_prefix_end(name, 0)?;
+    if end >= name.len() {
+        return None;
+    }
+
+    let workbook = &name[1..end - 1];
+    let name = &name[end..];
+    if workbook.is_empty() || name.is_empty() {
+        return None;
+    }
+
+    Some((workbook.to_string(), name.to_string()))
 }
 
 /// Parse an Excel-style path-qualified external workbook prefix that's been lexed as a single
@@ -1190,11 +1219,26 @@ impl ParserImpl {
                 {
                     self.parse_sheet_ref()
                 } else {
-                    self.next();
-                    Ok(SpannedExpr {
-                        span: tok.span,
-                        kind: SpannedExprKind::Error(ErrorKind::Name),
-                    })
+                    let sheet_name_tok = self.next();
+                    let name = match sheet_name_tok.kind {
+                        TokenKind::SheetName(name) => name,
+                        _ => unreachable!("peeked SheetName then consumed different token"),
+                    };
+
+                    if let Some((workbook, name)) = parse_workbook_scoped_external_name_ref(&name) {
+                        Ok(SpannedExpr {
+                            span: sheet_name_tok.span,
+                            kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                                sheet: SheetReference::External(format!("[{workbook}]")),
+                                name,
+                            }),
+                        })
+                    } else {
+                        Ok(SpannedExpr {
+                            span: sheet_name_tok.span,
+                            kind: SpannedExprKind::Error(ErrorKind::Name),
+                        })
+                    }
                 }
             }
             TokenKind::LParen => {
@@ -1235,6 +1279,16 @@ impl ParserImpl {
         span: Span,
         id: &str,
     ) -> Result<SpannedExpr<String>, FormulaParseError> {
+        if let Some((workbook, name)) = parse_workbook_scoped_external_name_ref(id) {
+            return Ok(SpannedExpr {
+                span,
+                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                    sheet: SheetReference::External(format!("[{workbook}]")),
+                    name,
+                }),
+            });
+        }
+
         if id.contains('.') {
             return self.parse_dotted_identifier(span, id);
         }
@@ -4714,6 +4768,98 @@ mod tests {
                 );
             }
             other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_unquoted_external_workbook_name_refs() {
+        let expr = parse_spanned_formula("=[Book.xlsx]MyName").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::NameRef(nref) => {
+                assert_eq!(
+                    nref.sheet,
+                    SheetReference::External("[Book.xlsx]".to_string())
+                );
+                assert_eq!(nref.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_quoted_external_workbook_name_refs() {
+        let expr = parse_spanned_formula("='[Book.xlsx]MyName'").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::NameRef(nref) => {
+                assert_eq!(
+                    nref.sheet,
+                    SheetReference::External("[Book.xlsx]".to_string())
+                );
+                assert_eq!(nref.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_external_workbook_name_refs_with_lbracket_in_workbook_name() {
+        let expr = parse_spanned_formula("=[A1[Name.xlsx]MyName+1").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::Binary { op, left, right } => {
+                assert_eq!(op, crate::eval::BinaryOp::Add);
+
+                match left.kind {
+                    SpannedExprKind::NameRef(nref) => {
+                        assert_eq!(
+                            nref.sheet,
+                            SheetReference::External("[A1[Name.xlsx]".to_string())
+                        );
+                        assert_eq!(nref.name, "MyName");
+                    }
+                    other => panic!("expected NameRef, got {other:?}"),
+                }
+
+                assert_eq!(right.kind, SpannedExprKind::Number(1.0));
+            }
+            other => panic!("expected Binary(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_external_workbook_name_refs_with_escaped_rbracket_in_workbook_name(
+    ) {
+        let expr = parse_spanned_formula("=[Book]]Name.xlsx]MyName").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::NameRef(nref) => {
+                assert_eq!(
+                    nref.sheet,
+                    SheetReference::External("[Book]]Name.xlsx]".to_string())
+                );
+                assert_eq!(nref.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_external_workbook_name_refs_with_literal_brackets_in_workbook_name(
+    ) {
+        // Workbook name: `[Book]` -> workbook id: `[Book]]` (escaped `]`)
+        let expr = parse_spanned_formula("=[[Book]]]MyName").expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::NameRef(nref) => {
+                assert_eq!(
+                    nref.sheet,
+                    SheetReference::External("[[Book]]]".to_string())
+                );
+                assert_eq!(nref.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
         }
     }
 }
