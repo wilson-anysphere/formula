@@ -154,10 +154,10 @@ impl From<crate::encrypted::EncryptedOoxmlError> for ReadError {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError> {
-    let mut file = File::open(path)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    load_from_bytes(&bytes)
+    // Avoid buffering the entire ZIP container into memory (the output `XlsxDocument` already
+    // materializes all *inflated* part bytes with explicit limits).
+    let file = File::open(path)?;
+    load_from_reader(file)
 }
 
 /// Read an XLSX workbook model from in-memory bytes without materializing every
@@ -914,7 +914,23 @@ fn detect_workbook_kind_from_content_types(xml: &[u8]) -> Option<WorkbookKind> {
 pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
+    load_from_zip_archive(&mut archive)
+}
 
+/// Load an [`XlsxDocument`] from a seekable reader without first buffering the entire ZIP file.
+///
+/// This is equivalent to [`load_from_bytes`] but avoids allocating a `Vec<u8>` for the full
+/// container (useful when opening from disk).
+pub fn load_from_reader<R: Read + Seek>(mut reader: R) -> Result<XlsxDocument, ReadError> {
+    // Ensure we start from the beginning; callers may pass a reused reader.
+    reader.seek(SeekFrom::Start(0))?;
+    let mut archive = ZipArchive::new(reader)?;
+    load_from_zip_archive(&mut archive)
+}
+
+fn load_from_zip_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<XlsxDocument, ReadError> {
     let mut budget = crate::zip_util::ZipInflateBudget::new(crate::zip_util::DEFAULT_MAX_ZIP_TOTAL_BYTES);
     let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for i in 0..archive.len() {

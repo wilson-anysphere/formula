@@ -616,11 +616,13 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
         // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
-        part_names.insert(canonical.to_string());
+        let canonical = name
+            .trim_start_matches(|c| c == '/' || c == '\\')
+            .replace('\\', "/");
+        part_names.insert(canonical.clone());
         part_name_keys
-            .entry(crate::zip_util::zip_part_name_lookup_key(canonical))
-            .or_insert_with(|| canonical.to_string());
+            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
+            .or_insert(canonical);
     }
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
@@ -734,11 +736,13 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
         // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
-        part_names.insert(canonical.to_string());
+        let canonical = name
+            .trim_start_matches(|c| c == '/' || c == '\\')
+            .replace('\\', "/");
+        part_names.insert(canonical.clone());
         part_name_keys
-            .entry(crate::zip_util::zip_part_name_lookup_key(canonical))
-            .or_insert_with(|| canonical.to_string());
+            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
+            .or_insert(canonical);
     }
 
     fn read_zip_part_required<R: Read + Seek>(
