@@ -94,3 +94,19 @@ fn decodes_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
     assert_eq!(text, "Name_123(1,2)");
     assert_parseable(&text);
 }
+
+#[test]
+fn decodes_value_class_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
+    // Same pattern as `decodes_ptg_name_as_udf_function_name_via_sentinel_funcvar`, but using the
+    // value-class `PtgName` variant (0x43). The decoder should preserve the implicit intersection
+    // marker.
+    let mut rgce = Vec::new();
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.extend_from_slice(&ptg_int(2));
+    rgce.extend_from_slice(&ptg_name(123, 0x43));
+    rgce.extend_from_slice(&ptg_funcvar_udf(3));
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Name_123(1,2)");
+    assert_parseable(&text);
+}
