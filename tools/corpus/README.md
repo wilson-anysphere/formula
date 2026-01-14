@@ -58,3 +58,9 @@ containing `tools/corpus/out/private/trend.json` for easy consumption.
 
 Trend retention note: `tools.corpus.dashboard --append-trend` caps the file to the last 90 entries by
 default. Override with `--trend-max-entries N` (set `0` for unlimited).
+
+To print a Markdown delta between the last two trend entries:
+
+```bash
+python -m tools.corpus.trend_delta --trend-json tools/corpus/out/private/trend.json
+```

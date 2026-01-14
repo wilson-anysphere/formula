@@ -336,6 +336,12 @@ be cached in CI and plotted over time.
 
 Each entry includes a `schema_version` field so downstream tooling can evolve safely as new metrics are added.
 
+To generate a quick Markdown delta between the last two entries:
+
+```bash
+python -m tools.corpus.trend_delta --trend-json tools/corpus/out/private/trend.json
+```
+
 The scheduled private corpus workflow (`.github/workflows/corpus.yml`) restores/saves this
 `trend.json` file via GitHub Actions cache so it grows over time, and uploads it as part of the
 private corpus artifact.
