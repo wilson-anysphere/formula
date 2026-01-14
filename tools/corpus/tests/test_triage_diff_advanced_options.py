@@ -31,6 +31,7 @@ class TriageDiffAdvancedOptionsPassthroughTests(unittest.TestCase):
                 diff_ignore_path_in=("xl/worksheets/*.xml:xr:uid",),
                 diff_ignore_path_kind=("attribute_changed:@",),
                 diff_ignore_path_kind_in=("xl/worksheets/*.xml:attribute_changed:@",),
+                diff_ignore_presets=("excel-volatile-ids",),
                 diff_limit=1,
                 recalc=False,
                 render_smoke=False,
@@ -60,6 +61,10 @@ class TriageDiffAdvancedOptionsPassthroughTests(unittest.TestCase):
 
         # Strict calcChain policy.
         self.assertIn("--strict-calc-chain", cmd_list)
+
+        # Ignore preset pass-through.
+        self.assertIn("--ignore-preset", cmd_list)
+        self.assertIn("excel-volatile-ids", cmd_list)
 
 
 if __name__ == "__main__":
