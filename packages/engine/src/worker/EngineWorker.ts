@@ -381,6 +381,105 @@ export class EngineWorker {
     await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
   }
 
+  async setRowStyleId(sheet: string, row: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+  async setRowStyleId(row: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  async setRowStyleId(
+    sheetOrRow: string | number,
+    rowOrStyleId: number,
+    styleIdOrSheet?: number | string | null | RpcOptions,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    let sheet: string | undefined;
+    let row: number;
+    let styleId: number | null;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof sheetOrRow === "string") {
+      sheet = sheetOrRow;
+      row = rowOrStyleId;
+      styleId = styleIdOrSheet as number | null;
+      finalRpcOptions = options;
+    } else {
+      row = sheetOrRow;
+      styleId = rowOrStyleId;
+      if (typeof styleIdOrSheet === "string" || styleIdOrSheet == null) {
+        sheet = typeof styleIdOrSheet === "string" ? styleIdOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        // Allow: setRowStyleId(row, styleId, rpcOptions)
+        sheet = undefined;
+        finalRpcOptions = styleIdOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setRowStyleId", { sheet, row, styleId }, finalRpcOptions);
+  }
+
+  async setColStyleId(sheet: string, col: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+  async setColStyleId(col: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  async setColStyleId(
+    sheetOrCol: string | number,
+    colOrStyleId: number,
+    styleIdOrSheet?: number | string | null | RpcOptions,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    let sheet: string | undefined;
+    let col: number;
+    let styleId: number | null;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof sheetOrCol === "string") {
+      sheet = sheetOrCol;
+      col = colOrStyleId;
+      styleId = styleIdOrSheet as number | null;
+      finalRpcOptions = options;
+    } else {
+      col = sheetOrCol;
+      styleId = colOrStyleId;
+      if (typeof styleIdOrSheet === "string" || styleIdOrSheet == null) {
+        sheet = typeof styleIdOrSheet === "string" ? styleIdOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        sheet = undefined;
+        finalRpcOptions = styleIdOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setColStyleId", { sheet, col, styleId }, finalRpcOptions);
+  }
+
+  async setSheetDefaultStyleId(sheet: string, styleId: number | null, options?: RpcOptions): Promise<void>;
+  async setSheetDefaultStyleId(styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  async setSheetDefaultStyleId(
+    sheetOrStyleId: string | number,
+    styleIdOrSheet?: number | string | null | RpcOptions,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    let sheet: string | undefined;
+    let styleId: number | null;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof sheetOrStyleId === "string") {
+      sheet = sheetOrStyleId;
+      styleId = styleIdOrSheet as number | null;
+      finalRpcOptions = options;
+    } else {
+      styleId = sheetOrStyleId;
+      if (typeof styleIdOrSheet === "string" || styleIdOrSheet == null) {
+        sheet = typeof styleIdOrSheet === "string" ? styleIdOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        sheet = undefined;
+        finalRpcOptions = styleIdOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setSheetDefaultStyleId", { sheet, styleId }, finalRpcOptions);
+  }
+
   /**
    * Set (or clear) a per-column width override.
    *

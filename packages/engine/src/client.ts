@@ -231,9 +231,39 @@ export interface EngineClient {
   /**
    * Set (or clear) a per-column width override.
    *
-   * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
-   */
+  * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+  */
   setColWidthChars(sheet: string, col: number, widthChars: number | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set a row-level formatting style id (layered formatting).
+   *
+   * Preferred signature: `(sheet, row, styleId)` where `null` clears the row style.
+   * Legacy signature: `(row, styleId, sheet?)` where `styleId=0` clears the row style.
+   */
+  setRowStyleId?: {
+    (sheet: string, row: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+    (row: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  };
+  /**
+   * Set a column-level formatting style id (layered formatting).
+   *
+   * Preferred signature: `(sheet, col, styleId)` where `null` clears the column style.
+   * Legacy signature: `(col, styleId, sheet?)` where `styleId=0` clears the column style.
+   */
+  setColStyleId?: {
+    (sheet: string, col: number, styleId: number | null, options?: RpcOptions): Promise<void>;
+    (col: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  };
+  /**
+   * Set the sheet default style id (layered formatting base).
+   *
+   * Preferred signature: `(sheet, styleId)` where `null` resets to the default style.
+   * Legacy signature: `(styleId, sheet?)` where `styleId=0` clears the override.
+   */
+  setSheetDefaultStyleId?: {
+    (sheet: string, styleId: number | null, options?: RpcOptions): Promise<void>;
+    (styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
+  };
 
   /**
    * Apply an Excel-like structural edit operation (insert/delete rows/cols, move/copy/fill).
@@ -427,6 +457,10 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setWorkbookFileMetadata(directory, filename, rpcOptions)),
     setCellStyleId: async (address, styleId, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setCellStyleId(address, styleId, sheet, rpcOptions)),
+    setRowStyleId: async (...args: any[]) => await withEngine((connected) => (connected.setRowStyleId as any)(...args)),
+    setColStyleId: async (...args: any[]) => await withEngine((connected) => (connected.setColStyleId as any)(...args)),
+    setSheetDefaultStyleId: async (...args: any[]) =>
+      await withEngine((connected) => (connected.setSheetDefaultStyleId as any)(...args)),
     setColWidth: async (col, width, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
     setColHidden: async (col, hidden, sheet, rpcOptions) =>
