@@ -98,7 +98,12 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
   -LocaleId de-DE `
   -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
 
+# Normalize sources (omits identity mappings + enforces stable casing)
+node scripts/normalize-locale-function-sources.js
+
+# Regenerate + verify TSVs
 node scripts/generate-locale-function-tsv.js
+node scripts/generate-locale-function-tsv.js --check
 ```
 
 Example for Spanish (`es-ES`):
@@ -107,6 +112,10 @@ Example for Spanish (`es-ES`):
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId es-ES `
   -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+
+node scripts/normalize-locale-function-sources.js
+node scripts/generate-locale-function-tsv.js
+node scripts/generate-locale-function-tsv.js --check
 ```
 
 Notes / caveats:
