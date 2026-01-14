@@ -24,6 +24,7 @@ export class CellEditorOverlay {
   private editingCell: CellCoord | null = null;
   private minWidth = 0;
   private minHeight = 0;
+  private isComposing = false;
 
   constructor(
     private container: HTMLElement,
@@ -39,6 +40,16 @@ export class CellEditorOverlay {
 
     this.element.addEventListener("input", () => this.adjustSize());
     this.element.addEventListener("keydown", (e) => this.onKeyDown(e));
+    this.element.addEventListener("compositionstart", () => {
+      this.isComposing = true;
+    });
+    this.element.addEventListener("compositionend", () => {
+      this.isComposing = false;
+    });
+    this.element.addEventListener("blur", () => {
+      // Defensive: some environments can drop `compositionend` events on blur.
+      this.isComposing = false;
+    });
 
     this.container.appendChild(this.element);
   }
@@ -125,6 +136,13 @@ export class CellEditorOverlay {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (!this.editingCell) return;
+
+    if (
+      (this.isComposing || e.isComposing) &&
+      (e.key === "Enter" || e.key === "Escape" || e.key === "Tab" || e.key === "F4")
+    ) {
+      return;
+    }
 
     if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.element.value.trim().startsWith("=")) {
       e.preventDefault();
