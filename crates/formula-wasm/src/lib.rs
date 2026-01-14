@@ -3827,11 +3827,15 @@ impl WasmWorkbook {
     /// `row` is 0-indexed (engine coordinates). `style_id=0` (or `null`/`undefined`) clears the override.
     #[wasm_bindgen(js_name = "setRowStyleId")]
     pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet);
         // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
         // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
-        self.inner.engine.set_row_style_id(&sheet, row, style_id);
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(&sheet);
+            this.engine.set_row_style_id(&sheet, row, style_id);
+            Ok(())
+        });
     }
 
     /// Set (or clear) the default style id for all cells in a column.
@@ -3839,11 +3843,15 @@ impl WasmWorkbook {
     /// `col` is 0-indexed (engine coordinates). `style_id=0` (or `null`/`undefined`) clears the override.
     #[wasm_bindgen(js_name = "setColStyleId")]
     pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet);
         // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
         // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
-        self.inner.engine.set_col_style_id(&sheet, col, style_id);
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(&sheet);
+            this.engine.set_col_style_id(&sheet, col, style_id);
+            Ok(())
+        });
     }
 
     /// Replace the compressed format-run layer for a column (DocumentController `formatRunsByCol`).
@@ -3930,10 +3938,12 @@ impl WasmWorkbook {
             }
         }
 
-        self.inner
-            .engine
-            .set_format_runs_by_col(&sheet, col, parsed)
-            .map_err(|err| js_err(err.to_string()))
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            this.engine
+                .set_format_runs_by_col(&sheet, col, parsed)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
 
     /// Set (or clear) the default style id for an entire sheet.
@@ -3941,11 +3951,15 @@ impl WasmWorkbook {
     /// Pass `null`/`undefined` (or `0` for backward compatibility) to clear the override.
     #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
     pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet);
         // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
         // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
-        self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(&sheet);
+            this.engine.set_sheet_default_style_id(&sheet, style_id);
+            Ok(())
+        });
     }
 
     /// Replace the range-run formatting runs for a column.
@@ -4099,8 +4113,11 @@ impl WasmWorkbook {
         update_number(&obj, "memavail", &mut next.memavail)?;
         update_number(&obj, "totmem", &mut next.totmem)?;
 
-        self.inner.engine.set_engine_info(next);
-        Ok(())
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(next);
+            Ok(())
+        })
     }
 
     #[wasm_bindgen(js_name = "setInfoOrigin")]
@@ -4109,8 +4126,11 @@ impl WasmWorkbook {
             let s = s.trim();
             (!s.is_empty()).then_some(s.to_string())
         });
-        self.inner.engine.set_info_origin(origin);
-        Ok(())
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_info_origin(origin);
+            Ok(())
+        })
     }
 
     #[wasm_bindgen(js_name = "setInfoOriginForSheet")]
@@ -4123,61 +4143,82 @@ impl WasmWorkbook {
         if sheet_name.is_empty() {
             return Err(js_err("sheet must be a non-empty string"));
         }
-        let sheet = self.inner.ensure_sheet(sheet_name);
         let origin_trimmed = origin_a1
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
 
-        // `INFO("origin")` is tied to host-provided worksheet view state. The core engine
-        // validates and stores the origin as a parsed A1 cell reference, so we pass the host
-        // string through verbatim (after trimming) and let the engine handle parsing.
-        self.inner
-            .engine
-            .set_sheet_origin(&sheet, origin_trimmed)
-            .map_err(|err| js_err(err.to_string()))
+        // `INFO("origin")` is tied to host-provided worksheet view state. The core engine validates
+        // and stores the origin as a parsed A1 cell reference, so we pass the host string through
+        // verbatim (after trimming) and let the engine handle parsing.
+        //
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet_name);
+            this.engine
+                .set_sheet_origin(&sheet, origin_trimmed)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
 
     #[wasm_bindgen(js_name = "setInfoSystem")]
     pub fn set_info_system(&mut self, system: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.system = system;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "setInfoOSVersion")]
     pub fn set_info_os_version(&mut self, os_version: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.osversion = os_version;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "setInfoRelease")]
     pub fn set_info_release(&mut self, release: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.release = release;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "setInfoVersion")]
     pub fn set_info_version(&mut self, version: Option<String>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.version = version;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "setInfoMemAvail")]
     pub fn set_info_mem_avail(&mut self, mem_avail: Option<f64>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.memavail = mem_avail;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "setInfoTotMem")]
     pub fn set_info_tot_mem(&mut self, tot_mem: Option<f64>) {
         let mut info = self.inner.engine.engine_info().clone();
         info.totmem = tot_mem;
-        self.inner.engine.set_engine_info(info);
+        let _ = self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_engine_info(info);
+            Ok(())
+        });
     }
 
     #[wasm_bindgen(js_name = "fromJson")]
@@ -4823,7 +4864,6 @@ impl WasmWorkbook {
         } else {
             sheet_name
         };
-        let sheet = self.inner.ensure_sheet(sheet_name);
 
         let origin_opt: Option<String> = if origin.is_null() || origin.is_undefined() {
             None
@@ -4840,10 +4880,13 @@ impl WasmWorkbook {
             .map(str::trim)
             .filter(|s| !s.is_empty());
 
-        self.inner
-            .engine
-            .set_sheet_origin(&sheet, origin_trimmed)
-            .map_err(|err| js_err(err.to_string()))
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet_name);
+            this.engine
+                .set_sheet_origin(&sheet, origin_trimmed)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
