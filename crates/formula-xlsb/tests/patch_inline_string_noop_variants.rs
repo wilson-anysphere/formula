@@ -191,3 +191,28 @@ fn malformed_flagged_inline_string_text_change_succeeds_and_is_parseable() {
         .expect("find cell");
     assert_eq!(cell.value, CellValue::Text(new_text));
 }
+
+#[test]
+fn parser_reads_malformed_flagged_inline_string_without_blocks() {
+    // Regression: some BrtCellSt records include a flags byte with rich/phonetic bits set but omit
+    // the corresponding blocks. The reader should still decode the UTF-16 text correctly.
+    let text = "Old".to_string();
+    let cch = text.encode_utf16().count() as u32;
+    let utf16 = utf16_le_bytes(&text);
+
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&cch.to_le_bytes());
+    cell_st_payload.push(0x83); // flags: rich + phonetic (+ reserved), but blocks are missing
+    cell_st_payload.extend_from_slice(&utf16);
+
+    let sheet_bin = sheet_with_single_cell_st(&cell_st_payload);
+    let parsed = parse_sheet_bin(&mut Cursor::new(&sheet_bin), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(text));
+}

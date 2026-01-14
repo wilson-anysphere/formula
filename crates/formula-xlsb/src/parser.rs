@@ -1806,11 +1806,40 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let parsed = match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
                             Ok(parsed) => parsed,
                             Err(Error::UnexpectedEof) => {
+                                // Some files use the "simple" inline-string layout without a flags
+                                // byte, while others include a flags byte that may imply rich/
+                                // phonetic blocks that are not actually present.
+                                //
+                                // `read_xl_wide_string` expects the full `XLWideString` layout, so
+                                // it can fail with `UnexpectedEof` in both cases:
+                                // - simple layout: missing flags byte (EOF while reading text)
+                                // - malformed flagged layout: rich/phonetic bits set but blocks
+                                //   missing (EOF while reading those blocks)
+                                //
+                                // Be lenient and try a minimal flagged parse first
+                                // (`[cch][flags:u8][utf16...]`), then fall back to the simple parse
+                                // (`[cch][utf16...]`) if that fails.
                                 rr.offset = start_offset;
-                                ParsedXlsbString {
-                                    text: rr.read_utf16_string()?,
-                                    rich: None,
-                                    phonetic: None,
+                                let flagged = (|| -> Result<ParsedXlsbString, Error> {
+                                    let cch = rr.read_u32()? as usize;
+                                    let _flags = rr.read_u8()?;
+                                    Ok(ParsedXlsbString {
+                                        text: rr.read_utf16_chars(cch)?,
+                                        rich: None,
+                                        phonetic: None,
+                                    })
+                                })();
+                                match flagged {
+                                    Ok(parsed) => parsed,
+                                    Err(Error::UnexpectedEof) => {
+                                        rr.offset = start_offset;
+                                        ParsedXlsbString {
+                                            text: rr.read_utf16_string()?,
+                                            rich: None,
+                                            phonetic: None,
+                                        }
+                                    }
+                                    Err(e) => return Err(e),
                                 }
                             }
                             Err(e) => return Err(e),
