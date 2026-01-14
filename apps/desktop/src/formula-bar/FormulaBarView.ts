@@ -1028,6 +1028,9 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
+  #destroyed = false;
+  #domAbort = new AbortController();
+
   #readOnly = false;
   #isComposing = false;
   #isFunctionPickerComposing = false;
@@ -1436,23 +1439,37 @@ export class FormulaBarView {
     this.#functionPickerListEl = functionPickerList;
     this.#nameBoxErrorId = nameBoxErrorId;
 
-    address.addEventListener("focus", () => {
-      address.select();
-    });
+    address.addEventListener(
+      "focus",
+      () => {
+        address.select();
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    address.addEventListener("input", () => {
-      if (!this.#isNameBoxInvalid) return;
-      this.#clearNameBoxError();
-    });
+    address.addEventListener(
+      "input",
+      () => {
+        if (!this.#isNameBoxInvalid) return;
+        this.#clearNameBoxError();
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    address.addEventListener("blur", () => {
-      // Don't leave the Name Box in an "invalid" visual state if the user abandons the entry.
-      if (!this.#isNameBoxInvalid) return;
-      this.#clearNameBoxError();
-      address.value = this.#nameBoxValue;
-    });
+    address.addEventListener(
+      "blur",
+      () => {
+        // Don't leave the Name Box in an "invalid" visual state if the user abandons the entry.
+        if (!this.#isNameBoxInvalid) return;
+        this.#clearNameBoxError();
+        address.value = this.#nameBoxValue;
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    nameBoxDropdown.addEventListener("click", () => {
+    nameBoxDropdown.addEventListener(
+      "click",
+      () => {
       if (this.#nameBoxDropdownProvider) {
         if (this.#isNameBoxDropdownOpen) {
           this.#closeNameBoxDropdown({ restoreAddress: true, reason: "toggle" });
@@ -1482,9 +1499,13 @@ export class FormulaBarView {
 
       // Fallback affordance: focus the address input so keyboard "Go To" still feels natural.
       address.focus();
-    });
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    address.addEventListener("keydown", (e) => {
+    address.addEventListener(
+      "keydown",
+      (e) => {
       if (
         (this.#isNameBoxComposing || e.isComposing) &&
         (e.key === "Enter" || e.key === "Escape" || e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "F4")
@@ -1636,97 +1657,222 @@ export class FormulaBarView {
         address.value = this.#nameBoxValue;
         address.blur();
       }
-    });
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    address.addEventListener("compositionstart", () => {
-      this.#isNameBoxComposing = true;
-    });
-    address.addEventListener("compositionend", () => {
-      this.#isNameBoxComposing = false;
-    });
-    address.addEventListener("blur", () => {
-      this.#isNameBoxComposing = false;
-    });
+    address.addEventListener(
+      "compositionstart",
+      () => {
+        this.#isNameBoxComposing = true;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    address.addEventListener(
+      "compositionend",
+      () => {
+        this.#isNameBoxComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    address.addEventListener(
+      "blur",
+      () => {
+        this.#isNameBoxComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    address.addEventListener("input", () => {
-      if (!this.#isNameBoxDropdownOpen) return;
-      this.#updateNameBoxDropdownFilter(address.value);
-    });
+    address.addEventListener(
+      "input",
+      () => {
+        if (!this.#isNameBoxDropdownOpen) return;
+        this.#updateNameBoxDropdownFilter(address.value);
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    textarea.addEventListener("focus", () => this.#beginEditFromFocus());
-    textarea.addEventListener("input", () => this.#onInputOrSelection());
-    textarea.addEventListener("mousedown", (e) => this.#onTextareaMouseDown(e));
-    textarea.addEventListener("click", () => this.#onTextareaClick());
-    textarea.addEventListener("keyup", () => this.#onInputOrSelection());
-    textarea.addEventListener("select", () => this.#onInputOrSelection());
-    textarea.addEventListener("scroll", () => this.#syncScroll());
-    textarea.addEventListener("keydown", (e) => this.#onKeyDown(e));
-    textarea.addEventListener("compositionstart", () => {
-      this.#isComposing = true;
-    });
-    textarea.addEventListener("compositionend", () => {
-      this.#isComposing = false;
-    });
-    textarea.addEventListener("blur", () => {
-      this.#isComposing = false;
-    });
+    textarea.addEventListener("focus", () => this.#beginEditFromFocus(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("input", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("mousedown", (e) => this.#onTextareaMouseDown(e), { signal: this.#domAbort.signal });
+    textarea.addEventListener("click", () => this.#onTextareaClick(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("keyup", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("select", () => this.#onInputOrSelection(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("scroll", () => this.#syncScroll(), { signal: this.#domAbort.signal });
+    textarea.addEventListener("keydown", (e) => this.#onKeyDown(e), { signal: this.#domAbort.signal });
+    textarea.addEventListener(
+      "compositionstart",
+      () => {
+        this.#isComposing = true;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    textarea.addEventListener(
+      "compositionend",
+      () => {
+        this.#isComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    textarea.addEventListener(
+      "blur",
+      () => {
+        this.#isComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
 
     // Non-AI function autocomplete dropdown (Excel-like).
     // Mount after registering FormulaBarView's own listeners so focus/input updates keep the model in sync first.
     this.#functionAutocomplete = new FormulaBarFunctionAutocompleteController({ formulaBar: this, anchor: editor });
 
     // When not editing, allow hover previews using the highlighted spans.
-    highlight.addEventListener("mousemove", (e) => this.#onHighlightHover(e));
-    highlight.addEventListener("mouseleave", () => this.#clearHoverOverride());
-    highlight.addEventListener("mousedown", (e) => {
-      // Prevent selecting text in <pre> and instead focus the textarea.
-      e.preventDefault();
-      this.focus({ cursor: "end" });
+    highlight.addEventListener("mousemove", (e) => this.#onHighlightHover(e), { signal: this.#domAbort.signal });
+    highlight.addEventListener("mouseleave", () => this.#clearHoverOverride(), { signal: this.#domAbort.signal });
+    highlight.addEventListener(
+      "mousedown",
+      (e) => {
+        // Prevent selecting text in <pre> and instead focus the textarea.
+        e.preventDefault();
+        this.focus({ cursor: "end" });
+      },
+      { signal: this.#domAbort.signal },
+    );
+
+    errorButton.addEventListener(
+      "click",
+      () => {
+        if (!this.root.classList.contains("formula-bar--has-error")) return;
+        this.#setErrorPanelOpen(!this.#isErrorPanelOpen);
+      },
+      { signal: this.#domAbort.signal },
+    );
+
+    errorCloseButton.addEventListener("click", () => this.#setErrorPanelOpen(false, { restoreFocus: true }), {
+      signal: this.#domAbort.signal,
     });
+    errorPanel.addEventListener("keydown", (e) => this.#onErrorPanelKeyDown(e), { signal: this.#domAbort.signal });
+    errorFixAiButton.addEventListener("click", () => this.#fixFormulaErrorWithAi(), { signal: this.#domAbort.signal });
+    errorShowRangesButton.addEventListener("click", () => this.#toggleErrorReferenceHighlights(), { signal: this.#domAbort.signal });
 
-    errorButton.addEventListener("click", () => {
-      if (!this.root.classList.contains("formula-bar--has-error")) return;
-      this.#setErrorPanelOpen(!this.#isErrorPanelOpen);
-    });
+    cancelButton.addEventListener("click", () => this.#cancel(), { signal: this.#domAbort.signal });
+    commitButton.addEventListener("click", () => this.#commit({ reason: "command", shift: false }), { signal: this.#domAbort.signal });
+    fxButton.addEventListener("click", () => this.#focusFx(), { signal: this.#domAbort.signal });
+    fxButton.addEventListener(
+      "mousedown",
+      (e) => {
+        // Preserve the caret/selection in the textarea when clicking the fx button.
+        e.preventDefault();
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    errorCloseButton.addEventListener("click", () => this.#setErrorPanelOpen(false, { restoreFocus: true }));
-    errorPanel.addEventListener("keydown", (e) => this.#onErrorPanelKeyDown(e));
-    errorFixAiButton.addEventListener("click", () => this.#fixFormulaErrorWithAi());
-    errorShowRangesButton.addEventListener("click", () => this.#toggleErrorReferenceHighlights());
+    expandButton.addEventListener("click", () => this.#toggleExpanded(), { signal: this.#domAbort.signal });
+    expandButton.addEventListener(
+      "mousedown",
+      (e) => {
+        // Preserve the caret/selection in the textarea when clicking the toggle button.
+        e.preventDefault();
+      },
+      { signal: this.#domAbort.signal },
+    );
 
-    cancelButton.addEventListener("click", () => this.#cancel());
-    commitButton.addEventListener("click", () => this.#commit({ reason: "command", shift: false }));
-    fxButton.addEventListener("click", () => this.#focusFx());
-    fxButton.addEventListener("mousedown", (e) => {
-      // Preserve the caret/selection in the textarea when clicking the fx button.
-      e.preventDefault();
-    });
-
-    expandButton.addEventListener("click", () => this.#toggleExpanded());
-    expandButton.addEventListener("mousedown", (e) => {
-      // Preserve the caret/selection in the textarea when clicking the toggle button.
-      e.preventDefault();
-    });
-
-    functionPickerInput.addEventListener("input", () => this.#onFunctionPickerInput());
+    functionPickerInput.addEventListener("input", () => this.#onFunctionPickerInput(), { signal: this.#domAbort.signal });
     const pickerKeyDown = (e: KeyboardEvent) => this.#onFunctionPickerKeyDown(e);
-    functionPickerInput.addEventListener("keydown", pickerKeyDown);
-    functionPickerList.addEventListener("keydown", pickerKeyDown);
-    functionPickerInput.addEventListener("compositionstart", () => {
-      this.#isFunctionPickerComposing = true;
-    });
-    functionPickerInput.addEventListener("compositionend", () => {
-      this.#isFunctionPickerComposing = false;
-    });
-    functionPickerInput.addEventListener("blur", () => {
-      this.#isFunctionPickerComposing = false;
-    });
+    functionPickerInput.addEventListener("keydown", pickerKeyDown, { signal: this.#domAbort.signal });
+    functionPickerList.addEventListener("keydown", pickerKeyDown, { signal: this.#domAbort.signal });
+    functionPickerInput.addEventListener(
+      "compositionstart",
+      () => {
+        this.#isFunctionPickerComposing = true;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    functionPickerInput.addEventListener(
+      "compositionend",
+      () => {
+        this.#isFunctionPickerComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
+    functionPickerInput.addEventListener(
+      "blur",
+      () => {
+        this.#isFunctionPickerComposing = false;
+      },
+      { signal: this.#domAbort.signal },
+    );
 
     this.#syncExpandedUi();
 
     // Initial render.
     this.model.setActiveCell({ address: "A1", input: "", value: "" });
     this.#render({ preserveTextareaValue: false });
+  }
+
+  destroy(): void {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+
+    // Cancel any scheduled work first so it can't re-attach listeners or update DOM after teardown.
+    this.#cancelPendingRender();
+    this.#cancelPendingTooling();
+    this.#clearArgumentPreviewState();
+
+    // Close transient UI surfaces (these also detach any global listeners they own).
+    try {
+      this.#closeFunctionPicker({ restoreFocus: false });
+    } catch {
+      // ignore
+    }
+    try {
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "toggle" });
+    } catch {
+      // ignore
+    }
+    try {
+      this.#nameBoxMenu?.close();
+    } catch {
+      // ignore
+    }
+    this.#nameBoxMenu = null;
+    this.#nameBoxMenuEscapeListener = null;
+
+    // Remove autocomplete dropdown + its listeners.
+    try {
+      this.#functionAutocomplete.destroy();
+    } catch {
+      // ignore
+    }
+
+    // Detach all DOM event handlers registered with `#domAbort`.
+    try {
+      this.#domAbort.abort();
+    } catch {
+      // ignore
+    }
+
+    // If the formula bar host element is reused for another workbook, ensure it starts empty.
+    // (FormulaBarView does not clear existing children on construction.)
+    try {
+      this.root.replaceChildren();
+    } catch {
+      // ignore
+    }
+
+    try {
+      this.root.classList.remove(
+        "formula-bar",
+        "formula-bar--expanded",
+        "formula-bar--function-autocomplete-open",
+        "formula-bar--has-error",
+        "formula-bar--read-only",
+        "formula-bar--editing",
+        "formula-bar--error-panel-open",
+      );
+    } catch {
+      // ignore
+    }
   }
 
   #toggleNameBoxMenu(): void {
@@ -1771,7 +1917,7 @@ export class FormulaBarView {
       if (!menu.isOpen()) return;
       this.#restoreNameBoxFocusOnMenuClose = true;
     };
-    window.addEventListener("keydown", this.#nameBoxMenuEscapeListener, true);
+    window.addEventListener("keydown", this.#nameBoxMenuEscapeListener, { capture: true, signal: this.#domAbort.signal });
 
     const rawItems = this.#callbacks.getNameBoxMenuItems?.() ?? [];
     const items: ContextMenuItem[] = [];
@@ -2483,7 +2629,7 @@ export class FormulaBarView {
     this.#positionFunctionPicker();
     this.#renderFunctionPickerResults();
 
-    document.addEventListener("mousedown", this.#functionPickerDocMouseDown, true);
+    document.addEventListener("mousedown", this.#functionPickerDocMouseDown, { capture: true, signal: this.#domAbort.signal });
 
     this.#functionPickerInputEl.focus();
     this.#functionPickerInputEl.select();
@@ -3598,7 +3744,7 @@ export class FormulaBarView {
       if (this.#nameBoxEl.contains(target)) return;
       this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
     };
-    window.addEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, true);
+    window.addEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, { capture: true, signal: this.#domAbort.signal });
 
     this.#nameBoxDropdownFocusInListener = (e: FocusEvent) => {
       if (!this.#isNameBoxDropdownOpen) return;
@@ -3608,7 +3754,7 @@ export class FormulaBarView {
       if (this.#nameBoxEl.contains(target)) return;
       this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
     };
-    document.addEventListener("focusin", this.#nameBoxDropdownFocusInListener, true);
+    document.addEventListener("focusin", this.#nameBoxDropdownFocusInListener, { capture: true, signal: this.#domAbort.signal });
 
     this.#nameBoxDropdownScrollListener = (e: Event) => {
       if (!this.#isNameBoxDropdownOpen) return;
@@ -3616,19 +3762,19 @@ export class FormulaBarView {
       if (target && this.#nameBoxDropdownPopupEl.contains(target)) return;
       this.#closeNameBoxDropdown({ restoreAddress: true, reason: "scroll" });
     };
-    window.addEventListener("scroll", this.#nameBoxDropdownScrollListener, true);
+    window.addEventListener("scroll", this.#nameBoxDropdownScrollListener, { capture: true, signal: this.#domAbort.signal });
 
     this.#nameBoxDropdownResizeListener = () => {
       if (!this.#isNameBoxDropdownOpen) return;
       this.#closeNameBoxDropdown({ restoreAddress: true, reason: "resize" });
     };
-    window.addEventListener("resize", this.#nameBoxDropdownResizeListener);
+    window.addEventListener("resize", this.#nameBoxDropdownResizeListener, { signal: this.#domAbort.signal });
 
     this.#nameBoxDropdownBlurListener = () => {
       if (!this.#isNameBoxDropdownOpen) return;
       this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
     };
-    window.addEventListener("blur", this.#nameBoxDropdownBlurListener);
+    window.addEventListener("blur", this.#nameBoxDropdownBlurListener, { signal: this.#domAbort.signal });
   }
 
   #detachNameBoxDropdownGlobalListeners(): void {
@@ -3725,18 +3871,30 @@ export class FormulaBarView {
         const index = this.#nameBoxDropdownOptionEls.length;
         this.#nameBoxDropdownOptionEls.push(option);
 
-        option.addEventListener("mousemove", () => {
-          this.#setNameBoxDropdownActiveIndex(index);
-        });
-        option.addEventListener("mousedown", (e) => {
-          // Avoid selecting the underlying input text.
-          e.preventDefault();
-        });
-        option.addEventListener("click", () => {
-          const chosen = this.#nameBoxDropdownFilteredItems[index] ?? null;
-          if (!chosen) return;
-          this.#selectNameBoxDropdownItem(chosen);
-        });
+        option.addEventListener(
+          "mousemove",
+          () => {
+            this.#setNameBoxDropdownActiveIndex(index);
+          },
+          { signal: this.#domAbort.signal },
+        );
+        option.addEventListener(
+          "mousedown",
+          (e) => {
+            // Avoid selecting the underlying input text.
+            e.preventDefault();
+          },
+          { signal: this.#domAbort.signal },
+        );
+        option.addEventListener(
+          "click",
+          () => {
+            const chosen = this.#nameBoxDropdownFilteredItems[index] ?? null;
+            if (!chosen) return;
+            this.#selectNameBoxDropdownItem(chosen);
+          },
+          { signal: this.#domAbort.signal },
+        );
 
         group.appendChild(option);
       }

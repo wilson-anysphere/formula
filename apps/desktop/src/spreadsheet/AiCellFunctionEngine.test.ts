@@ -204,6 +204,58 @@ describe("AiCellFunctionEngine", () => {
     }
   });
 
+  it("dispose aborts in-flight requests without persisting #AI! errors", async () => {
+    vi.useFakeTimers();
+    try {
+      const llmClient = {
+        chat: vi.fn((request: any) => {
+          return new Promise((_resolve, reject) => {
+            const signal = request?.signal as AbortSignal | undefined;
+            if (!signal) {
+              reject(new Error("missing abort signal"));
+              return;
+            }
+            if (signal.aborted) {
+              reject(signal.reason ?? new Error("aborted"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => {
+                reject(signal.reason ?? new Error("aborted"));
+              },
+              { once: true },
+            );
+          });
+        }),
+      };
+      const persistKey = "test:ai-cell-cache";
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        model: "test-model",
+        auditStore: new MemoryAIAuditStore(),
+        cache: { persistKey },
+      });
+
+      const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(pending).toBe(AI_CELL_PLACEHOLDER);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+      engine.dispose();
+
+      // Allow any abort-driven catch/finally handlers to run.
+      await Promise.resolve();
+      vi.advanceTimersByTime(100);
+      await Promise.resolve();
+
+      const persisted = globalThis.localStorage?.getItem(persistKey);
+      expect(persisted ?? "").not.toContain(AI_CELL_ERROR);
+      expect(((engine as any).inFlightByKey as Map<string, unknown>).size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cache hit avoids re-calling the LLM", async () => {
     const llmClient = {
       chat: vi.fn(async (_request: any) => ({

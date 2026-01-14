@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageBitmapCache } from "../../drawings/imageBitmapCache";
 import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
+import { FormulaBarView } from "../../formula-bar/FormulaBarView";
+import { AiCellFunctionEngine } from "../../spreadsheet/AiCellFunctionEngine.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -140,6 +142,8 @@ describe("SpreadsheetApp drawings teardown", () => {
 
   it("disposes drawing interaction listeners + clears bitmap caches on app.dispose()", () => {
     const root = createRoot();
+    const formulaBarRoot = document.createElement("div");
+    document.body.appendChild(formulaBarRoot);
     const status = {
       activeCell: document.createElement("div"),
       selectionRange: document.createElement("div"),
@@ -148,7 +152,9 @@ describe("SpreadsheetApp drawings teardown", () => {
 
     const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
     const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
-    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const formulaBarDestroySpy = vi.spyOn(FormulaBarView.prototype, "destroy");
+    const aiDisposeSpy = vi.spyOn(AiCellFunctionEngine.prototype, "dispose");
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true, formulaBar: formulaBarRoot });
 
     // Register a few listeners and seed caches so destroy() can be validated as a
     // best-effort memory release path even when the app object stays referenced.
@@ -218,6 +224,8 @@ describe("SpreadsheetApp drawings teardown", () => {
 
     // Overlay + caches should be cleared.
     expect(clearSpy).toHaveBeenCalled();
+    expect(formulaBarDestroySpy).toHaveBeenCalled();
+    expect(aiDisposeSpy).toHaveBeenCalled();
     expect(((app as any).computedValuesByCoord as Map<string, unknown>).size).toBe(0);
     expect(imageStore.get("in_cell_img")).toBeNull();
     expect(((app as any).selectionListeners as Set<unknown>).size).toBe(0);

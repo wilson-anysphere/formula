@@ -4055,6 +4055,18 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    // Cancel in-flight AI work promptly so destroyed SpreadsheetApp instances don't stay
+    // referenced by long-running LLM requests (tests/hot reload/multi-document flows).
+    try {
+      (this.aiCellFunctions as any)?.dispose?.();
+    } catch {
+      // ignore
+    }
+    try {
+      (this.searchWorkbook as any)?.dispose?.();
+    } catch {
+      // ignore
+    }
     // Ensure any drawing interaction controller listeners are released promptly.
     this.drawingInteractionController?.dispose({ revert: false });
     this.drawingInteractionController = null;
@@ -4152,6 +4164,9 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
+    this.formulaBarCompletion = null;
+    this.formulaBar?.destroy();
+    this.formulaBar = null;
     this.formulaRangePreviewTooltipUpdateUnsubscribe?.();
     this.formulaRangePreviewTooltipUpdateUnsubscribe = null;
     this.syncFormulaRangePreviewTooltipDescribedBy(false);

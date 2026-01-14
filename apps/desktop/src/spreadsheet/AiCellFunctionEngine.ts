@@ -236,10 +236,12 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly inFlightByKey = new Map<string, Promise<void>>();
   private readonly pendingAudits = new Set<Promise<void>>();
   private readonly dlpIndexCache = new Map<string, DlpCellIndex>();
+  private readonly abortControllersByKey = new Map<string, AbortController>();
 
   private cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
   private cachePersistPromise: Promise<void> | null = null;
   private cachePersistPromiseResolve: (() => void) | null = null;
+  private disposed = false;
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? getDesktopLLMClient();
@@ -291,6 +293,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const fn = params.name.toUpperCase();
     const cellAddress = params.cellAddress;
 
+    if (this.disposed) return AI_CELL_ERROR;
     if (params.args.length === 0) return "#VALUE!";
     if ((fn === "AI.EXTRACT" || fn === "AI.CLASSIFY" || fn === "AI.TRANSLATE") && params.args.length < 2) return "#VALUE!";
 
@@ -479,6 +482,47 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     if (pending) await pending;
   }
 
+  /**
+   * Cancel any in-flight AI calls and release large caches (prompt hashes, DLP indexes, etc).
+   *
+   * Intended for SpreadsheetApp teardown and tests; once disposed, the engine will not start
+   * new requests or write cache entries.
+   */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    // Best-effort: flush any pending cache persistence before we clear in-memory state.
+    // This prevents losing freshly-resolved values, while also ensuring we don't persist
+    // teardown-driven abort errors (we suppress cache writes once `disposed` is true).
+    try {
+      this.flushCachePersistenceNow();
+    } catch {
+      // ignore
+    }
+
+    for (const controller of this.abortControllersByKey.values()) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }
+    this.abortControllersByKey.clear();
+
+    this.inFlightByKey.clear();
+    this.pendingAudits.clear();
+    this.dlpIndexCache.clear();
+    this.cache.clear();
+
+    if (this.cachePersistTimer) {
+      clearTimeout(this.cachePersistTimer);
+      this.cachePersistTimer = null;
+    }
+    this.cachePersistPromise = null;
+    this.cachePersistPromiseResolve = null;
+  }
+
   private getMemoizedDlpCellIndex(params: {
     sheetIds: Set<string>;
     records: Array<{ selector: any; classification: any }>;
@@ -567,6 +611,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
 
     const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    if (abortController) {
+      this.abortControllersByKey.set(params.cacheKey, abortController);
+    }
     const timeoutMs = typeof this.requestTimeoutMs === "number" && this.requestTimeoutMs > 0 ? this.requestTimeoutMs : null;
     const timeoutError = timeoutMs !== null ? new Error(`AI cell function request timed out after ${timeoutMs}ms`) : null;
     let didTimeout = false;
@@ -576,6 +623,11 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       let started = 0;
       const response = await this.requestLimiter.run((release) => {
         started = nowMs();
+
+        if (this.disposed || abortController?.signal.aborted) {
+          release();
+          throw abortController?.signal.reason ?? new Error("AI cell function request aborted");
+        }
 
         const chatPromise = this.llmClient.chat({
           model: this.model,
@@ -592,7 +644,28 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         // queued requests can start in the same microtask flush.
         chatPromise.finally(release).catch(() => undefined);
 
-        if (timeoutMs === null || !timeoutError) return chatPromise as any;
+        const abortPromise =
+          abortController && typeof abortController.signal?.addEventListener === "function"
+            ? new Promise<never>((_resolve, reject) => {
+                if (abortController.signal.aborted) {
+                  release();
+                  reject(abortController.signal.reason ?? new Error("AI cell function request aborted"));
+                  return;
+                }
+                abortController.signal.addEventListener(
+                  "abort",
+                  () => {
+                    release();
+                    reject(abortController.signal.reason ?? new Error("AI cell function request aborted"));
+                  },
+                  { once: true },
+                );
+              })
+            : null;
+
+        if (timeoutMs === null || !timeoutError) {
+          return abortPromise ? (Promise.race([chatPromise, abortPromise]) as any) : (chatPromise as any);
+        }
 
         const timeoutPromise = new Promise<never>((_resolve, reject) => {
           timeoutId = setTimeout(() => {
@@ -607,7 +680,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
           }, timeoutMs);
         });
 
-        return Promise.race([chatPromise, timeoutPromise]) as any;
+        const raced: Array<Promise<any>> = [chatPromise as any, timeoutPromise];
+        if (abortPromise) raced.push(abortPromise);
+        return Promise.race(raced) as any;
       });
 
       if (timeoutId != null) {
@@ -645,9 +720,14 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       if (didTimeout) recorder.setUserFeedback("rejected");
       this.writeCache(params.cacheKey, AI_CELL_ERROR);
     } finally {
+      if (abortController) {
+        this.abortControllersByKey.delete(params.cacheKey);
+      }
       if (timeoutId != null) clearTimeout(timeoutId);
       await recorder.finalize();
-      this.onUpdate?.();
+      if (!this.disposed) {
+        this.onUpdate?.();
+      }
     }
   }
 
@@ -693,6 +773,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   }
 
   private writeCache(cacheKey: string, value: SpreadsheetValue): void {
+    if (this.disposed) return;
     this.cache.set(cacheKey, { value, updatedAtMs: Date.now() });
     while (this.cache.size > this.cacheMaxEntries) {
       const oldestKey = this.cache.keys().next().value as string | undefined;
@@ -756,6 +837,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   }
 
   private scheduleCachePersistence(): void {
+    if (this.disposed) return;
     if (!this.cachePersistKey) return;
     if (!getLocalStorageOrNull()) return;
 

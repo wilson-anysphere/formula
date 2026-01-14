@@ -17,4 +17,5 @@ export class DocumentWorkbookAdapter {
   getTable(name: string): any | null;
 
   clearSchema(): void;
+  dispose(): void;
 }

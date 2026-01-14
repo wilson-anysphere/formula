@@ -106,6 +106,21 @@ export class DocumentWorkbookAdapter {
     this.tables.clear();
   }
 
+  dispose() {
+    // Best-effort memory release: clear cached sheet adapters + schema so a workbook adapter
+    // doesn't retain large name/table metadata after a SpreadsheetApp teardown.
+    try {
+      this.clearSchema();
+    } catch {
+      // ignore
+    }
+    try {
+      this.#sheetsById.clear();
+    } catch {
+      // ignore
+    }
+  }
+
   #resolveSheetIdByName(sheetName) {
     const trimmed = (() => {
       const raw = String(sheetName ?? "").trim();
