@@ -8,8 +8,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use formula_model::rich_text::{RichText, RichTextRunStyle};
+use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
 use formula_model::{CellRef, CellValue, ColProperties, ErrorValue, StyleTable};
+use formula_model::Color;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
@@ -2413,7 +2414,7 @@ fn parse_existing_cell_semantics(
 ) -> Result<ExistingCellSemantics, XlsxError> {
     let mut formula: Option<String> = None;
     let mut v_text: Option<String> = None;
-    let mut is_text: Option<String> = None;
+    let mut is_value: Option<ExistingCellValue> = None;
 
     let mut depth = 0usize;
     let mut idx = 0usize;
@@ -2433,11 +2434,11 @@ fn parse_existing_cell_semantics(
                         idx = next_idx;
                         continue;
                     }
-                    if is_text.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"is")
+                    if is_value.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"is")
                     {
-                        let (text, next_idx) =
-                            extract_inline_string_text(inner_events, idx, cell_prefix)?;
-                        is_text = Some(text);
+                        let (value, next_idx) =
+                            extract_inline_string_value(inner_events, idx, cell_prefix)?;
+                        is_value = Some(value);
                         idx = next_idx;
                         continue;
                     }
@@ -2452,10 +2453,10 @@ fn parse_existing_cell_semantics(
                         && is_element_named(e.name().as_ref(), cell_prefix, b"v")
                     {
                         v_text = Some(String::new());
-                    } else if is_text.is_none()
+                    } else if is_value.is_none()
                         && is_element_named(e.name().as_ref(), cell_prefix, b"is")
                     {
-                        is_text = Some(String::new());
+                        is_value = Some(ExistingCellValue::String(String::new()));
                     }
                 }
             }
@@ -2467,8 +2468,8 @@ fn parse_existing_cell_semantics(
         idx += 1;
     }
 
-    let value = if let Some(text) = is_text {
-        ExistingCellValue::String(text)
+    let value = if let Some(value) = is_value {
+        value
     } else if let Some(v) = v_text {
         match cell_t.unwrap_or("n") {
             "b" => ExistingCellValue::Boolean(v.trim() == "1"),
@@ -2525,73 +2526,229 @@ fn extract_element_text(
     Ok((out, events.len()))
 }
 
-fn extract_inline_string_text(
+fn extract_inline_string_value(
     events: &[Event<'static>],
     start_idx: usize,
     cell_prefix: Option<&[u8]>,
-) -> Result<(String, usize), XlsxError> {
-    fn is_visible_inline_string_t(stack: &[Vec<u8>]) -> bool {
-        // stack: ["is", ... , "t"]
-        if !stack.last().is_some_and(|n| n.as_slice() == b"t") {
-            return false;
-        }
-        // `<rPh>` phonetic guide text is not visible.
-        if stack.iter().any(|n| n.as_slice() == b"rPh") {
-            return false;
-        }
-        // Visible text is encoded as either:
-        // - <is><t>...</t></is>
-        // - <is><r><t>...</t></r></is>
-        if stack.len() == 2 && stack[0].as_slice() == b"is" {
-            return true;
-        }
-        if stack.len() >= 3 && stack[0].as_slice() == b"is" && stack[1].as_slice() == b"r" {
-            return true;
-        }
-        false
-    }
-
-    let mut out = String::new();
+) -> Result<(ExistingCellValue, usize), XlsxError> {
+    let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
     let mut idx = start_idx + 1;
     let mut depth = 1usize;
-    let mut stack: Vec<Vec<u8>> = vec![b"is".to_vec()];
-    let mut in_visible_t = false;
     while idx < events.len() {
         match &events[idx] {
             Event::Start(e) => {
+                if depth == 1 {
+                    match local_name(e.name().as_ref()) {
+                        b"t" => {
+                            let (text, next_idx) = extract_element_text(events, idx)?;
+                            segments.push((text, RichTextRunStyle::default()));
+                            idx = next_idx;
+                            continue;
+                        }
+                        b"r" => {
+                            let (segment, next_idx) =
+                                extract_inline_string_run(events, idx, cell_prefix)?;
+                            segments.push(segment);
+                            idx = next_idx;
+                            continue;
+                        }
+                        _ => {
+                            // Skip non-visible subtrees (phonetic/ruby annotations, extensions, etc.)
+                            idx = skip_owned_subtree(events, idx);
+                            continue;
+                        }
+                    }
+                }
                 depth += 1;
-                let name = local_name(e.name().as_ref()).to_vec();
-                stack.push(name.clone());
-                if name.as_slice() == b"t" && is_visible_inline_string_t(&stack) {
-                    in_visible_t = true;
+            }
+            Event::Empty(e) => {
+                if depth == 1 {
+                    match local_name(e.name().as_ref()) {
+                        b"t" => segments.push((String::new(), RichTextRunStyle::default())),
+                        b"r" => segments.push((String::new(), RichTextRunStyle::default())),
+                        _ => {}
+                    }
                 }
             }
-            Event::Empty(_) => {}
             Event::End(e) => {
-                if in_visible_t && local_name(e.name().as_ref()) == b"t" {
-                    in_visible_t = false;
-                }
                 depth = depth.saturating_sub(1);
                 if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"is") {
-                    return Ok((out, idx + 1));
-                }
-                stack.pop();
-            }
-            Event::Text(t) => {
-                if in_visible_t {
-                    out.push_str(&t.unescape()?.into_owned());
-                }
-            }
-            Event::CData(t) => {
-                if in_visible_t {
-                    out.push_str(&String::from_utf8_lossy(t.as_ref()));
+                    let plain = segments
+                        .iter()
+                        .map(|(t, _)| t.as_str())
+                        .collect::<String>();
+                    if segments.iter().all(|(_, style)| style.is_empty()) {
+                        return Ok((ExistingCellValue::String(plain), idx + 1));
+                    }
+                    return Ok((
+                        ExistingCellValue::SharedString(RichText::from_segments(segments)),
+                        idx + 1,
+                    ));
                 }
             }
             _ => {}
         }
         idx += 1;
     }
-    Ok((out, events.len()))
+
+    Ok((ExistingCellValue::String(String::new()), events.len()))
+}
+
+fn extract_inline_string_run(
+    events: &[Event<'static>],
+    start_idx: usize,
+    cell_prefix: Option<&[u8]>,
+) -> Result<((String, RichTextRunStyle), usize), XlsxError> {
+    let mut style = RichTextRunStyle::default();
+    let mut text = String::new();
+    let mut idx = start_idx + 1;
+    let mut depth = 1usize;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(e) => {
+                if depth == 1 {
+                    match local_name(e.name().as_ref()) {
+                        b"rPr" => {
+                            let (parsed, next_idx) =
+                                extract_inline_string_rpr(events, idx, cell_prefix)?;
+                            style = parsed;
+                            idx = next_idx;
+                            continue;
+                        }
+                        b"t" => {
+                            let (t, next_idx) = extract_element_text(events, idx)?;
+                            text.push_str(&t);
+                            idx = next_idx;
+                            continue;
+                        }
+                        _ => {
+                            idx = skip_owned_subtree(events, idx);
+                            continue;
+                        }
+                    }
+                }
+                depth += 1;
+            }
+            Event::End(e) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"r") {
+                    return Ok(((text, style), idx + 1));
+                }
+            }
+            Event::Empty(e) => {
+                if depth == 1 && local_name(e.name().as_ref()) == b"t" {
+                    // `<t/>` is legal (empty text run).
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    Ok(((text, style), events.len()))
+}
+
+fn extract_inline_string_rpr(
+    events: &[Event<'static>],
+    start_idx: usize,
+    _cell_prefix: Option<&[u8]>,
+) -> Result<(RichTextRunStyle, usize), XlsxError> {
+    let mut style = RichTextRunStyle::default();
+    let mut idx = start_idx + 1;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Empty(e) => {
+                parse_inline_string_rpr_tag(e, &mut style)?;
+            }
+            Event::Start(e) => {
+                parse_inline_string_rpr_tag(e, &mut style)?;
+                idx = skip_owned_subtree(events, idx);
+                continue;
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"rPr" => {
+                return Ok((style, idx + 1));
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    Ok((style, events.len()))
+}
+
+fn parse_inline_string_rpr_tag(
+    e: &BytesStart<'_>,
+    style: &mut RichTextRunStyle,
+) -> Result<(), XlsxError> {
+    match local_name(e.name().as_ref()) {
+        b"b" => style.bold = Some(parse_bool_val(e)?),
+        b"i" => style.italic = Some(parse_bool_val(e)?),
+        b"u" => {
+            let val = attr_value(e, b"val")?;
+            if let Some(ul) = Underline::from_ooxml(val.as_deref()) {
+                style.underline = Some(ul);
+            }
+        }
+        b"color" => {
+            if let Some(rgb) = attr_value(e, b"rgb")? {
+                if rgb.len() == 8 {
+                    if let Ok(argb) = u32::from_str_radix(&rgb, 16) {
+                        style.color = Some(Color::new_argb(argb));
+                    }
+                }
+            }
+        }
+        b"rFont" | b"name" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                style.font = Some(val);
+            }
+        }
+        b"sz" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                if let Some(sz) = parse_size_100pt(&val) {
+                    style.size_100pt = Some(sz);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Result<Option<String>, XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if local_name(attr.key.as_ref()) == key {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_bool_val(e: &BytesStart<'_>) -> Result<bool, XlsxError> {
+    let Some(val) = attr_value(e, b"val")? else {
+        return Ok(true);
+    };
+    Ok(!(val == "0" || val.eq_ignore_ascii_case("false")))
+}
+
+fn parse_size_100pt(val: &str) -> Option<u16> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+
+    if let Some((int_part, frac_part)) = val.split_once('.') {
+        let int: u16 = int_part.parse().ok()?;
+        let mut frac = frac_part.chars().take(2).collect::<String>();
+        while frac.len() < 2 {
+            frac.push('0');
+        }
+        let frac: u16 = frac.parse().ok()?;
+        int.checked_mul(100)?.checked_add(frac)
+    } else {
+        let int: u16 = val.parse().ok()?;
+        int.checked_mul(100)
+    }
 }
 
 fn formula_is_material(formula: Option<&str>) -> bool {
