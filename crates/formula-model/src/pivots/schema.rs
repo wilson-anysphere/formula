@@ -224,6 +224,7 @@ impl fmt::Display for PivotFieldRef {
         }
     }
 }
+
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // DAX identifiers (when unquoted) follow an identifier-like grammar. Everything else (spaces,
     // punctuation, leading digits, etc.) must be wrapped in single quotes.
