@@ -2008,8 +2008,9 @@ export function bindYjsToDocumentController(options) {
           // interactions (freeze panes, resizing) do not accidentally wipe them.
           if (existingView !== undefined) {
             const json = yjsValueToJson(existingView);
-            if (isRecord(json)) {
-              for (const [key, value] of Object.entries(json)) {
+            const sanitized = sanitizeSheetViewForPreservation(json);
+            if (isRecord(sanitized)) {
+              for (const [key, value] of Object.entries(sanitized)) {
                 if (
                   key === "frozenRows" ||
                   key === "frozenCols" ||
