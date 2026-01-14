@@ -243,6 +243,8 @@ deb_smoke_test_dir() {
       # shared-mime-info definition under /usr/share/mime/packages and relies on the
       # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
       test -f /usr/share/mime/packages/app.formula.desktop.xml
+      grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+      grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
       if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
         echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
         echo "Parquet-related globs2 lines:" >&2
@@ -325,6 +327,8 @@ rpm_smoke_test_dir() {
 
       # Validate that installer-time MIME integration ran successfully.
       test -f /usr/share/mime/packages/app.formula.desktop.xml
+      grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+      grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
       if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
         echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
         echo "Parquet-related globs2 lines:" >&2
