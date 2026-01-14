@@ -223,3 +223,27 @@ fn lex_es_es_accepts_canonical_leading_decimal() {
     assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == ".5"));
     assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
 }
+
+#[test]
+fn lex_comma_decimal_locales_accept_canonical_decimal_separator_in_numbers() {
+    // Users can copy/paste canonical formulas into comma-decimal locales (de-DE/fr-FR/es-ES).
+    // Ensure the lexer accepts `.` as a decimal separator (as long as it isn't a thousands-group
+    // pattern like `1.234` in `de-DE`).
+    for locale in [
+        LocaleConfig::de_de(),
+        LocaleConfig::fr_fr(),
+        LocaleConfig::es_es(),
+    ] {
+        let mut opts = ParseOptions::default();
+        opts.locale = locale;
+        let tokens = lex("SUM(1.23;4.56)", &opts).unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+        assert!(matches!(tokens[1].kind, TokenKind::LParen));
+        assert!(matches!(tokens[2].kind, TokenKind::Number(ref n) if n == "1.23"));
+        assert!(matches!(tokens[3].kind, TokenKind::ArgSep));
+        assert!(matches!(tokens[4].kind, TokenKind::Number(ref n) if n == "4.56"));
+        assert!(matches!(tokens[5].kind, TokenKind::RParen));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+    }
+}
