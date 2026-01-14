@@ -568,6 +568,67 @@ describe("OrganizeSheetsDialog", () => {
     expect(dialog!.querySelector('[data-testid="organize-sheet-row-s2"]')).toBeInstanceOf(HTMLElement);
   });
 
+  it("clears inline rename state when a sheet disappears after store replacement", async () => {
+    const doc = new DocumentController();
+    const store1 = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+    const store2 = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+
+    let activeSheetId = "s1";
+    let currentStore: WorkbookSheetStore = store1;
+    const getStore = () => currentStore;
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store: currentStore,
+        getStore,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    // Wait a tick for the dialog's effect to install the metadata-change listener.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const renameBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s2"]');
+    expect(renameBtn).toBeInstanceOf(HTMLButtonElement);
+    act(() => {
+      renameBtn!.click();
+    });
+
+    expect(dialog!.querySelector('[data-testid="organize-sheet-rename-input-s2"]')).toBeInstanceOf(HTMLInputElement);
+
+    act(() => {
+      currentStore = store2;
+      window.dispatchEvent(new CustomEvent("formula:sheet-metadata-changed"));
+    });
+
+    // s2 row + rename UI should be gone, and remaining actions should be enabled.
+    expect(dialog!.querySelector('[data-testid="organize-sheet-row-s2"]')).toBeNull();
+    expect(dialog!.querySelector('[data-testid="organize-sheet-rename-input-s2"]')).toBeNull();
+
+    const renameS1 = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s1"]');
+    expect(renameS1).toBeInstanceOf(HTMLButtonElement);
+    expect(renameS1!.disabled).toBe(false);
+
+    const activateS1 = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-activate-s1"]');
+    expect(activateS1).toBeInstanceOf(HTMLButtonElement);
+    expect(activateS1!.disabled).toBe(false);
+  });
+
   it("disables sheet-structure mutations in readOnly mode", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([

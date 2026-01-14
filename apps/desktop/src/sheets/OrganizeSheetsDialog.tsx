@@ -88,6 +88,20 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     });
   }, [store]);
 
+  // If the underlying store is replaced (collab) or a sheet is removed remotely while the
+  // dialog is open, clear any inline UI state that references non-existent sheets so the
+  // dialog doesn't get stuck in a "disabled" state.
+  React.useEffect(() => {
+    if (renameSheetId && !sheets.some((s) => s.id === renameSheetId)) {
+      setRenameSheetId(null);
+      setRenameDraft("");
+      renameDraftRef.current = "";
+    }
+    if (deleteConfirmSheetId && !sheets.some((s) => s.id === deleteConfirmSheetId)) {
+      setDeleteConfirmSheetId(null);
+    }
+  }, [deleteConfirmSheetId, renameSheetId, sheets]);
+
   const visibleCount = React.useMemo(() => sheets.filter((s) => s.visibility === "visible").length, [sheets]);
 
   const reportError = React.useCallback(
