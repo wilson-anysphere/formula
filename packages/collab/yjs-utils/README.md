@@ -23,6 +23,7 @@ of the collab stack doesn’t have to re-implement it.
 - `isYAbstractType` – structural `AbstractType` detection without relying solely on `instanceof`.
 - `replaceForeignRootType` – normalize a foreign root into this module’s constructors.
 - `getMapRoot`, `getArrayRoot`, `getTextRoot` – safe root access that avoids constructor-mismatch throws.
+- `patchForeignItemConstructor` – best-effort prototype patching so foreign Yjs `Item` structs pass `instanceof Y.Item` checks (used by UndoManager integrations).
 - `yjsValueToJson` / `cloneYjsValueToJson` – best-effort conversion of nested Yjs values into plain JSON-ish values.
 
 ## Notes
@@ -31,4 +32,3 @@ of the collab stack doesn’t have to re-implement it.
   `yjs` import. If the entire document was created by a foreign Yjs build, mixing
   local types into it is unsafe; in that case the helpers fall back to returning
   the existing foreign types.
-
