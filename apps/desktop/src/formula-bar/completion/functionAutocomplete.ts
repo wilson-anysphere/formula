@@ -279,6 +279,7 @@ export class FormulaBarFunctionAutocompleteController {
     dropdown.className = "formula-bar-function-autocomplete";
     dropdown.dataset.testid = "formula-function-autocomplete";
     dropdown.setAttribute("role", "listbox");
+    dropdown.setAttribute("aria-label", "Function suggestions");
     dropdown.id = this.#listboxId;
     dropdown.hidden = true;
     opts.anchor.appendChild(dropdown);
