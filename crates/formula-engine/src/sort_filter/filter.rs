@@ -70,6 +70,11 @@ pub enum DateComparison {
 pub enum FilterCriterion {
     Equals(FilterValue),
     TextMatch(TextMatch),
+    /// Negated text match (e.g. "doesNotContain").
+    ///
+    /// This is used for interpreting certain AutoFilter `customFilter/@operator` values that have
+    /// explicit negated semantics.
+    NotTextMatch(TextMatch),
     Number(NumberComparison),
     Date(DateComparison),
     Blanks,
@@ -219,9 +224,45 @@ fn model_criterion_to_engine(c: &model_af::FilterCriterion) -> Option<FilterCrit
             "tomorrow" => Some(FilterCriterion::Date(DateComparison::Tomorrow)),
             _ => None,
         },
-        // Unsupported criteria types are ignored by the engine filter evaluator
-        // (they are still preserved in the model for XLSX round-trip).
-        model_af::FilterCriterion::OpaqueCustom(_) => None,
+        model_af::FilterCriterion::OpaqueCustom(c) => {
+            // Best-effort: interpret supported OOXML customFilter operator names so filters can be
+            // evaluated. Unknown operators remain ignored (but preserved in the model for XLSX
+            // round-trip).
+            let pattern = c.value.clone().unwrap_or_default();
+            match c.operator.as_str() {
+                "contains" => Some(FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::Contains,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                "beginsWith" => Some(FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::BeginsWith,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                "endsWith" => Some(FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::EndsWith,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                "doesNotContain" => Some(FilterCriterion::NotTextMatch(TextMatch {
+                    kind: TextMatchKind::Contains,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                "doesNotBeginWith" => Some(FilterCriterion::NotTextMatch(TextMatch {
+                    kind: TextMatchKind::BeginsWith,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                "doesNotEndWith" => Some(FilterCriterion::NotTextMatch(TextMatch {
+                    kind: TextMatchKind::EndsWith,
+                    pattern,
+                    case_sensitive: false,
+                })),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -357,6 +398,7 @@ fn evaluate_criterion(
         FilterCriterion::NonBlanks => !is_blank(cell),
         FilterCriterion::Equals(value) => equals_value(cell, value, value_locale),
         FilterCriterion::TextMatch(m) => text_match(cell, m, value_locale),
+        FilterCriterion::NotTextMatch(m) => !text_match(cell, m, value_locale),
         FilterCriterion::Number(cmp) => number_cmp(cell, cmp, value_locale),
         FilterCriterion::Date(cmp) => date_cmp(cell, cmp, value_locale),
     }

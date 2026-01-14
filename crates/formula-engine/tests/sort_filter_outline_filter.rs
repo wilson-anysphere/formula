@@ -4,7 +4,7 @@ use formula_engine::sort_filter::{
 };
 use formula_model::{
     CellRef, CellValue, FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison,
-    Outline, Range, SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
+    OpaqueCustomFilter, Outline, Range, SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
 };
 
 #[test]
@@ -48,6 +48,46 @@ fn autofilter_updates_outline_filter_hidden_flags_and_can_be_cleared() {
     // shape (entries should drop back to defaults).
     let cleared = apply_autofilter_to_outline(&sheet, &mut outline, range, None);
     assert_eq!(cleared.hidden_sheet_rows, Vec::<usize>::new());
+    assert!(!outline.rows.entry(3).hidden.filter);
+}
+
+#[test]
+fn autofilter_evaluates_negative_text_ops_from_opaque_custom() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+    sheet.set_value(CellRef::new(0, 0), CellValue::String("Name".into()));
+    sheet.set_value(CellRef::new(1, 0), CellValue::String("Alice".into()));
+    sheet.set_value(CellRef::new(2, 0), CellValue::String("Bob".into()));
+
+    let range = Range::from_a1("A1:A3").unwrap();
+
+    // Negative text operators are preserved as `OpaqueCustom` in the model so they can round-trip
+    // through XLSX, but the engine still interprets and evaluates them.
+    let filter = SheetAutoFilter {
+        range,
+        filter_columns: vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                operator: "doesNotContain".into(),
+                value: Some("ali".into()),
+            })],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        sort_state: None,
+        raw_xml: Vec::new(),
+    };
+
+    let mut outline = Outline::default();
+    let result = apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+
+    // Header row is never hidden.
+    assert_eq!(result.visible_rows[0], true);
+
+    // `doesNotContain("ali")` hides "Alice" but leaves "Bob" visible.
+    assert_eq!(result.visible_rows, vec![true, false, true]);
+    assert_eq!(result.hidden_sheet_rows, vec![1]);
+    assert!(outline.rows.entry(2).hidden.filter);
     assert!(!outline.rows.entry(3).hidden.filter);
 }
 
