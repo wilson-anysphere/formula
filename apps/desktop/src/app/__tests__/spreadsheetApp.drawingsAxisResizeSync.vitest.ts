@@ -127,7 +127,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     };
   });
 
-  it("re-renders drawings when shared-grid column widths change", () => {
+  it("re-renders drawings when shared-grid column widths change", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -171,6 +171,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       // Initial render.
       (app as any).renderDrawings();
+      // DrawingOverlay may await async image hydration (IndexedDB) before emitting placeholder
+      // stroke calls; yield to the event loop so any pending microtasks complete.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
@@ -197,6 +200,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
         zoom: renderer.getZoom(),
         source: "resize",
       });
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(renderSpy).toHaveBeenCalled();
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
