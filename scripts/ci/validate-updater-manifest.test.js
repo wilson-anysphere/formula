@@ -58,6 +58,22 @@ test("fails when Linux updater URL points at a non-updatable package (.deb)", ()
   );
 });
 
+test("fails when Linux updater URL points at a non-updatable package (.rpm)", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["linux-x86_64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/formula_0.1.0_amd64.rpm";
+  assetNames.delete("Formula_0.1.0_x86_64.AppImage");
+  assetNames.add("formula_0.1.0_amd64.rpm");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.equal(result.invalidTargets.length, 0);
+  assert.equal(result.missingAssets.length, 0);
+  assert.ok(
+    result.errors.some((e) => e.includes("Updater asset type mismatch in latest.json.platforms")),
+    `Expected asset type mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
+});
+
 test("fails when Windows updater URL points at a non-updatable extension", () => {
   const { platforms, assetNames } = baseline();
   platforms["windows-x86_64"].url =

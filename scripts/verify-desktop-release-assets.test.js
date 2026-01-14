@@ -292,6 +292,36 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
   );
 });
 
+test("validateLatestJson rejects Linux .rpm updater URLs (even if asset exists)", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.rpm", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.rpm",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.app.tar.gz",
+  ]);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assets),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("linux-x86_64") &&
+      err.message.includes("Formula.rpm"),
+  );
+});
+
 test("validateLatestJson rejects Windows .zip updater URLs (even if asset exists)", () => {
   const manifest = {
     version: "0.1.0",
