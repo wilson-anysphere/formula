@@ -290,3 +290,49 @@ test("verify-linux-package-deps fails when RPM Parquet shared-mime-info XML is m
   assert.match(proc.stderr, /shared-mime-info definition file is missing expected content/i);
 });
 
+test("verify-linux-package-deps fails when DEB Parquet shared-mime-info XML is missing expected content", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-verify-linux-package-deps-"));
+  const binDir = path.join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeToolchain(binDir);
+
+  const cargoTargetDir = path.join(tmp, "target");
+  const debDir = path.join(cargoTargetDir, "release", "bundle", "deb");
+  const rpmDir = path.join(cargoTargetDir, "release", "bundle", "rpm");
+  mkdirSync(debDir, { recursive: true });
+  mkdirSync(rpmDir, { recursive: true });
+  writeFileSync(path.join(debDir, "Formula.deb"), "not-a-real-deb", "utf8");
+  writeFileSync(path.join(rpmDir, "Formula.rpm"), "not-a-real-rpm", "utf8");
+
+  const requiresFile = path.join(tmp, "rpm-requires.txt");
+  writeFileSync(
+    requiresFile,
+    [
+      "shared-mime-info",
+      "(webkit2gtk4.1 or libwebkit2gtk-4_1-0)",
+      "(gtk3 or libgtk-3-0)",
+      "((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))",
+      "(librsvg2 or librsvg-2-2)",
+      "(openssl-libs or libopenssl3)",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const proc = runVerifier({
+    env: {
+      PATH: `${binDir}:${process.env.PATH}`,
+      CARGO_TARGET_DIR: cargoTargetDir,
+      FAKE_RPM_REQUIRES_FILE: requiresFile,
+      // Corrupt DEB MIME XML: omit the '*.parquet' glob.
+      FAKE_DEB_MIME_XML_CONTENT: `<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.apache.parquet" />
+</mime-info>`,
+      FAKE_DEB_VERSION: expectedVersion,
+      FAKE_DEB_PACKAGE: expectedMainBinary,
+      FAKE_RPM_VERSION: expectedVersion,
+      FAKE_RPM_NAME: expectedMainBinary,
+    },
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /shared-mime-info definition file is missing expected content/i);
+});
