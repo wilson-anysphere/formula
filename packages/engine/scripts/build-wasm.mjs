@@ -63,6 +63,18 @@ const targets = [
 
 const wasmPackBin = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
 
+const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
+
+async function readPinnedWasmPackVersion() {
+  try {
+    const text = await readFile(releaseWorkflowPath, "utf8");
+    const match = text.match(/^[\t ]*WASM_PACK_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 const scriptArgs = process.argv.slice(2);
 const forceBuild =
   scriptArgs.includes("--force") ||
@@ -263,12 +275,16 @@ if (outputExists) {
 {
   const check = spawnSync(wasmPackBin, ["--version"], { encoding: "utf8", env: childEnv });
   if (check.error) {
+    const pinnedWasmPack = await readPinnedWasmPackVersion();
+    const pinnedHint = pinnedWasmPack
+      ? `  - bash ${cargoAgentPath()} install wasm-pack --version "${pinnedWasmPack}" --locked --force`
+      : `  - bash ${cargoAgentPath()} install wasm-pack`;
     fatal(
       [
         "[formula] wasm-pack is required to build the Rust/WASM engine but was not found on PATH.",
         "",
         "Install it with one of:",
-        `  - bash ${cargoAgentPath()} install wasm-pack`,
+        pinnedHint,
         "  - https://rustwasm.github.io/wasm-pack/installer/",
         "",
         `Original error: ${check.error?.message ?? "unknown"}`

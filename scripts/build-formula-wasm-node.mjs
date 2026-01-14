@@ -39,6 +39,17 @@ const outDir = path.join(crateDir, "pkg-node");
 const outPackageJsonPath = path.join(outDir, "package.json");
 const outEntryJsPath = path.join(outDir, "formula_wasm.js");
 const outWasmPath = path.join(outDir, "formula_wasm_bg.wasm");
+const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
+
+function readPinnedWasmPackVersion() {
+  try {
+    const text = readFileSync(releaseWorkflowPath, "utf8");
+    const match = text.match(/^[\t ]*WASM_PACK_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Ensure we have a Node-compatible (wasm-bindgen `--target nodejs`) build of
@@ -95,11 +106,15 @@ export function formulaWasmNodeEntryUrl() {
 function assertPrereqs() {
   const cargoAgent = path.relative(process.cwd(), path.join(repoRoot, "scripts", "cargo_agent.sh"));
   const cargoAgentCmd = cargoAgent || path.join(repoRoot, "scripts", "cargo_agent.sh");
+  const pinnedWasmPack = readPinnedWasmPackVersion();
+  const pinnedHint = pinnedWasmPack
+    ? `  bash ${cargoAgentCmd} install wasm-pack --version "${pinnedWasmPack}" --locked --force`
+    : `  bash ${cargoAgentCmd} install wasm-pack`;
   assertCommand("wasm-pack", ["--version"], `Missing \`wasm-pack\`.
 
 Install it from https://rustwasm.github.io/wasm-pack/installer/ (recommended),
 or via the repo cargo wrapper (agent-safe):
-  bash ${cargoAgentCmd} install wasm-pack
+${pinnedHint}
 `);
 
   // wasm-pack ultimately needs this rust target.
