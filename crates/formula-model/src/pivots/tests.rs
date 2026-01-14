@@ -1,4 +1,6 @@
 use super::*;
+
+use std::collections::HashSet;
 use serde_json::json;
 
 #[test]
