@@ -74,6 +74,20 @@ test('agent-init does not leak setup_display helper function (bash)', { skip: !h
   assert.equal(out, 'ok');
 });
 
+test('agent-init does not leak REPO_ROOT helper variable (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset REPO_ROOT',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      // `${VAR+x}` expands to 'x' when VAR is set (even if empty), and empty when unset.
+      'if [ -z "${REPO_ROOT+x}" ]; then echo ok; else echo leak; fi',
+    ].join(' && '),
+  );
+  assert.equal(out, 'ok');
+});
+
 test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
   const cargoHome = runBash(
     [
@@ -364,6 +378,21 @@ test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !h
 
   assert.equal(stderr, '');
   assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
+});
+
+test('agent-init does not leak REPO_ROOT helper variable under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset REPO_ROOT',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'if [ -z "${REPO_ROOT+x}" ]; then echo ok; else echo leak; fi',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'ok');
 });
 
 test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {
