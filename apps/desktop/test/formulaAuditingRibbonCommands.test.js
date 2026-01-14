@@ -32,7 +32,7 @@ test("Ribbon schema includes Formulas → Formula Auditing command ids", () => {
   }
 });
 
-test("Desktop main.ts wires Formulas → Formula Auditing commands to SpreadsheetApp", () => {
+test("Formulas → Formula Auditing ribbon commands are registered in CommandRegistry (not wired only in main.ts)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
@@ -53,8 +53,8 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
     );
   }
 
-  // The desktop shell now routes ribbon commands through CommandRegistry when a builtin command exists
-  // with the same id. These ribbon command ids should *not* be special-cased in main.ts anymore.
+  // The ribbon ids should be executed through CommandRegistry (registered built-in commands),
+  // not wired directly in main.ts (ribbon command switch).
   for (const commandId of [
     "formulas.formulaAuditing.tracePrecedents",
     "formulas.formulaAuditing.traceDependents",
@@ -62,15 +62,56 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
   ]) {
     assert.doesNotMatch(
       main,
-      new RegExp(`\\b${escapeRegExp(commandId)}\\b`),
-      `Did not expect main.ts to special-case ${commandId}; it should be executed via CommandRegistry`,
+      new RegExp(escapeRegExp(commandId)),
+      `Expected main.ts to not mention ${commandId} directly (handled via CommandRegistry)`,
     );
   }
 
+  // Ensure the built-in command implementations call into SpreadsheetApp with Excel-like behavior.
+  assert.match(
+    builtins,
+    new RegExp(
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.tracePrecedents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
+        `[\\s\\S]*?app\\.toggleAuditingPrecedents\\(\\);` +
+        `[\\s\\S]*?app\\.focus\\(\\);`,
+      "m",
+    ),
+    "Expected tracePrecedents command to clear + toggle precedents + focus SpreadsheetApp",
+  );
+
+  assert.match(
+    builtins,
+    new RegExp(
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.traceDependents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
+        `[\\s\\S]*?app\\.toggleAuditingDependents\\(\\);` +
+        `[\\s\\S]*?app\\.focus\\(\\);`,
+      "m",
+    ),
+    "Expected traceDependents command to clear + toggle dependents + focus SpreadsheetApp",
+  );
+
+  assert.match(
+    builtins,
+    new RegExp(
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.removeArrows["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
+        `[\\s\\S]*?app\\.focus\\(\\);`,
+      "m",
+    ),
+    "Expected removeArrows command to clear auditing + focus SpreadsheetApp",
+  );
+
   assert.match(
     main,
-    /const\s+cmd\s*=\s*commandRegistry\.getCommand\(commandId\)[\s\S]*?cmd\?\.\s*source\.kind\s*===\s*["']builtin["'][\s\S]*?executeBuiltinCommand\(commandId\);/m,
-    "Expected main.ts ribbon handler to dispatch builtin ribbon ids via CommandRegistry",
+    // Ribbon toggles are handled via createRibbonActionsFromCommands toggleOverrides.
+    new RegExp(
+      `toggleOverrides:\\s*\\{[\\s\\S]*?["']view\\.toggleShowFormulas["']\\s*:\\s*(?:async\\s*)?\\(pressed\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?commandRegistry\\.executeCommand\\(["']view\\.toggleShowFormulas["']`,
+      "m",
+    ),
+    "Expected main.ts to handle view.toggleShowFormulas via the ribbon toggleOverrides hook",
   );
 
   assert.match(
