@@ -244,7 +244,10 @@ export default defineConfig({
       "src/drawings/__tests__/selectionHandles.test.ts",
       // Drawing model adapter tests use the `.test.ts` suffix as well.
       "src/drawings/__tests__/modelAdapters.test.ts",
+      // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
+      // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
+      "tests/performance/**/*.vitest.ts",
     ],
-    exclude: ["tests/**", "node_modules/**"],
+    exclude: ["tests/e2e/**", "node_modules/**"],
   },
 });
