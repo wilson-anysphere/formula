@@ -196,6 +196,34 @@ fn structural_edits_update_unicode_sheet_range_references() {
 }
 
 #[test]
+fn range_map_edits_update_unicode_sheet_range_references() {
+    // Regression test for Unicode sheet name matching in range-map rewrites (insert/delete cells,
+    // move range, etc.).
+    //
+    // Like structural edits, 3D spans are defined by sheet tab order and sheet name comparisons
+    // must be Unicode-aware.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Café", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM('CAFÉ:Sheet3'!A1)")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertCellsShiftDown {
+            sheet: "Sheet2".to_string(),
+            range: range("A1"),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Summary", "A1"),
+        Some("=SUM('CAFÉ:Sheet3'!A2)")
+    );
+}
+
+#[test]
 fn insert_row_updates_mixed_absolute_and_relative_references() {
     let mut engine = Engine::new();
     engine
