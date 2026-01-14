@@ -273,7 +273,9 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
   - Reads `metadata.encryptedRanges` (including legacy schemas) to answer:
     - **should this cell be encrypted on write?** (`shouldEncryptCell`)
     - **which key id applies?** (`keyIdForCell`)
-  - Overlap rule: when multiple ranges match, the most recently added match wins for the canonical array schema (last entry wins).
+  - Overlap rule: when multiple ranges match:
+    - canonical array schema (`Y.Array`): the most recently added match wins (last entry wins)
+    - legacy map schema (`Y.Map<id, ...>`): the lexicographically greatest key wins (deterministic ordering)
 
 #### Wiring pattern: derive `shouldEncryptCell` from shared metadata
 
