@@ -157,6 +157,15 @@ type RunOnceOptions = {
   binPath: string;
   timeoutMs: number;
   /**
+   * Override whether to run the desktop process under `scripts/xvfb-run-safe.sh` (Linux-only).
+   *
+   * Defaults to `shouldUseXvfb()`.
+   *
+   * This exists primarily for unit tests that spawn a non-GUI "desktop" process and should not
+   * depend on Xvfb being installed even when running under CI.
+   */
+  xvfb?: boolean;
+  /**
    * Extra CLI args to pass to the desktop binary.
    *
    * This is primarily used for special/CI modes like `--startup-bench` that should not
@@ -221,6 +230,7 @@ function sleep(ms: number): Promise<void> {
 export async function runOnce({
   binPath,
   timeoutMs,
+  xvfb: xvfbOverride,
   argv,
   envOverrides,
   profileDir: profileDirRaw,
@@ -261,7 +271,7 @@ export async function runOnce({
   mkdirSync(dirs.appData, { recursive: true });
   mkdirSync(dirs.localAppData, { recursive: true });
 
-  const useXvfb = shouldUseXvfb();
+  const useXvfb = xvfbOverride ?? shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
   const command = useXvfb ? 'bash' : binPath;
   const desktopArgs = argv ?? [];

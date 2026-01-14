@@ -30,15 +30,6 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       return;
     }
 
-    const prevCi = process.env.CI;
-    const prevDisplay = process.env.DISPLAY;
-    const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-
-    // Ensure `shouldUseXvfb()` does not wrap the command in `xvfb-run-safe.sh`.
-    delete process.env.CI;
-    process.env.DISPLAY = process.env.DISPLAY || ':99';
-    delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-
     const profileDir = `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`;
     const pidFile = resolve(profileDir, 'grandchild.pid');
 
@@ -59,6 +50,7 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       const metrics = await runOnce({
         binPath: process.execPath,
         timeoutMs: 5000,
+        xvfb: false,
         profileDir,
         argv: ['-e', code],
         envOverrides: {
@@ -98,16 +90,6 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
           // ignore
         }
       }
-
-      if (prevCi === undefined) delete process.env.CI;
-      else process.env.CI = prevCi;
-
-      if (prevDisplay === undefined) delete process.env.DISPLAY;
-      else process.env.DISPLAY = prevDisplay;
-
-      if (prevResetHome === undefined) delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-      else process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = prevResetHome;
     }
   });
 });
-
