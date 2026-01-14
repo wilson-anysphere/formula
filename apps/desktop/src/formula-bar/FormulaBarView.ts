@@ -3075,7 +3075,21 @@ export class FormulaBarView {
         this.#clearArgumentPreviewState();
       } else {
         const provider = this.#argumentPreviewProvider;
-        const activeArg = this.model.activeArgumentSpan();
+        let activeArg = this.model.activeArgumentSpan();
+
+        // Keep the argument preview in sync with the hint behavior when the caret is
+        // positioned just after a closing paren, e.g. `=ROUND(1,2)|`. In that case
+        // `activeArgumentSpan()` returns null because the tokenizer-based parser has
+        // already consumed the closing `)`, but the hint panel still treats the last
+        // argument as active (Excel UX).
+        if (
+          !activeArg &&
+          this.model.cursorStart === this.model.cursorEnd &&
+          this.model.cursorStart > 0 &&
+          draft[this.model.cursorStart - 1] === ")"
+        ) {
+          activeArg = this.model.activeArgumentSpan(this.model.cursorStart - 1);
+        }
         const wantsArgPreview = Boolean(
           activeArg &&
             typeof provider === "function" &&
