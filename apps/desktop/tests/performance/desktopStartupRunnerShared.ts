@@ -32,6 +32,10 @@ export type DesktopStartupTargets = {
   ttiTargetMs: number;
 };
 
+export function resolveDesktopStartupArgv(benchKind: DesktopStartupBenchKind): string[] {
+  return benchKind === 'shell' ? ['--startup-bench'] : [];
+}
+
 export function parseDesktopStartupMode(raw: string): DesktopStartupMode | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === 'cold' || normalized === 'warm') return normalized;

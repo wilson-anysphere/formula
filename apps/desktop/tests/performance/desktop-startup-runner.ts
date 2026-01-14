@@ -6,6 +6,7 @@ import {
   percentile,
   runDesktopStartupIterations,
   resolveDesktopStartupBenchKind,
+  resolveDesktopStartupArgv,
   resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
   resolvePerfHome,
@@ -223,7 +224,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const argv = benchKind === "shell" ? ["--startup-bench"] : [];
+  const argv = resolveDesktopStartupArgv(benchKind);
 
   const perfHome = resolvePerfHome();
   const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);

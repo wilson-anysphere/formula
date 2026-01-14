@@ -57,6 +57,7 @@ import {
   median,
   percentile,
   runDesktopStartupIterations,
+  resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
@@ -337,7 +338,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
-  const argv = benchKind === 'shell' ? ['--startup-bench'] : [];
+  const argv = resolveDesktopStartupArgv(benchKind);
 
   const rssIdleDelayMs = Math.max(
     0,
