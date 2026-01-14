@@ -1,7 +1,7 @@
 mod common;
 
 use common::build_model;
-use formula_dax::{DaxEngine, FilterContext, RowContext, Value};
+use formula_dax::{DataModel, DaxEngine, FilterContext, RowContext, Table, Value};
 
 #[test]
 fn concatenatex_values_returns_all_distinct_regions() {
@@ -61,4 +61,27 @@ fn concatenatex_orders_by_expression_desc() {
         .unwrap();
 
     assert_eq!(value, Value::from("Carol,Bob,Alice"));
+}
+
+#[test]
+fn concatenatex_order_by_text_is_case_insensitive() {
+    let mut model = DataModel::new();
+    let mut t = Table::new("T", vec!["Name"]);
+    t.push_row(vec![Value::from("b")]).unwrap();
+    t.push_row(vec![Value::from("a")]).unwrap();
+    t.push_row(vec![Value::from("B")]).unwrap();
+    model.add_table(t).unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX(T, T[Name], \",\", T[Name], ASC)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // Case-insensitive sort key with deterministic case-sensitive tiebreak (B before b).
+    assert_eq!(value, Value::from("a,B,b"));
 }

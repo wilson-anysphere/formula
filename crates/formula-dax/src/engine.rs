@@ -18,6 +18,7 @@ use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
 use ordered_float::OrderedFloat;
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 pub type DaxResult<T> = Result<T, DaxError>;
@@ -1137,11 +1138,21 @@ impl DaxEngine {
                             .into_iter()
                             .map(|(key, text)| (coerce_text(&key).into_owned(), text))
                             .collect();
-                        if descending {
-                            items.sort_by(|a, b| b.0.cmp(&a.0));
-                        } else {
-                            items.sort_by(|a, b| a.0.cmp(&b.0));
-                        }
+                        items.sort_by(|a, b| {
+                            // Match Excel-like case-insensitive text ordering, with a deterministic
+                            // case-sensitive tiebreak (so ordering remains total).
+                            let ord = cmp_text_case_insensitive(&a.0, &b.0);
+                            let ord = if ord != Ordering::Equal {
+                                ord
+                            } else {
+                                a.0.cmp(&b.0)
+                            };
+                            if descending {
+                                ord.reverse()
+                            } else {
+                                ord
+                            }
+                        });
 
                         for (_key, text) in items {
                             if !first {
@@ -2415,7 +2426,8 @@ impl DaxEngine {
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
-                    let values = self.distinct_column_values(model, source_col_expr, &eval_filter)?;
+                    let values =
+                        self.distinct_column_values(model, source_col_expr, &eval_filter)?;
                     column_filters.push((key, values));
                 }
                 Expr::Call { name, args }
@@ -3153,7 +3165,9 @@ impl DaxEngine {
                                         let allowed_to = row_sets
                                             .get(rel_info.rel.to_table.as_str())
                                             .ok_or_else(|| {
-                                                DaxError::UnknownTable(rel_info.rel.to_table.clone())
+                                                DaxError::UnknownTable(
+                                                    rel_info.rel.to_table.clone(),
+                                                )
                                             })?;
 
                                         let mut next_rows: HashSet<usize> = HashSet::new();
@@ -3164,14 +3178,12 @@ impl DaxEngine {
                                             if fk.is_blank() {
                                                 continue;
                                             }
-                                            let Some(to_row_set) = rel_info.to_index.get(&fk) else {
+                                            let Some(to_row_set) = rel_info.to_index.get(&fk)
+                                            else {
                                                 continue;
                                             };
                                             to_row_set.for_each_row(|to_row| {
-                                                if allowed_to
-                                                    .get(to_row)
-                                                    .copied()
-                                                    .unwrap_or(false)
+                                                if allowed_to.get(to_row).copied().unwrap_or(false)
                                                 {
                                                     next_rows.insert(to_row);
                                                 }
@@ -3657,9 +3669,10 @@ impl DaxEngine {
                                 }
                             } else {
                                 // Fallback: scan the fact table to preserve blank-member semantics.
-                                let from_table_ref = model.table(target_table).ok_or_else(|| {
-                                    DaxError::UnknownTable(target_table.to_string())
-                                })?;
+                                let from_table_ref =
+                                    model.table(target_table).ok_or_else(|| {
+                                        DaxError::UnknownTable(target_table.to_string())
+                                    })?;
                                 for row in 0..from_table_ref.row_count() {
                                     if !allowed.get(row).copied().unwrap_or(false) {
                                         continue;
@@ -3681,9 +3694,9 @@ impl DaxEngine {
                                 }
                             }
                         } else {
-                            let from_table_ref = model.table(target_table).ok_or_else(|| {
-                                DaxError::UnknownTable(target_table.to_string())
-                            })?;
+                            let from_table_ref = model
+                                .table(target_table)
+                                .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
                             if let Some(candidates) =
                                 from_table_ref.filter_eq(rel.from_column_idx, &key)
                             {
@@ -3728,9 +3741,9 @@ impl DaxEngine {
                             .get(rel_idx)
                             .expect("relationship index from path");
 
-                        let to_table_ref = model.table(&rel_info.rel.to_table).ok_or_else(|| {
-                            DaxError::UnknownTable(rel_info.rel.to_table.clone())
-                        })?;
+                        let to_table_ref = model
+                            .table(&rel_info.rel.to_table)
+                            .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
                         let mut key_set: HashSet<Value> = HashSet::new();
                         let mut keys: Vec<Value> = Vec::new();
@@ -3785,9 +3798,10 @@ impl DaxEngine {
                                 }
                             }
                         } else {
-                            let from_table_ref = model.table(&rel_info.rel.from_table).ok_or_else(
-                                || DaxError::UnknownTable(rel_info.rel.from_table.clone()),
-                            )?;
+                            let from_table_ref =
+                                model.table(&rel_info.rel.from_table).ok_or_else(|| {
+                                    DaxError::UnknownTable(rel_info.rel.from_table.clone())
+                                })?;
 
                             if !keys.is_empty() {
                                 if let Some(rows) =
@@ -3816,9 +3830,7 @@ impl DaxEngine {
                                         let v = from_table_ref
                                             .value_by_idx(row, rel_info.from_column_idx)
                                             .unwrap_or(Value::Blank);
-                                        if v.is_blank()
-                                            || !rel_info.to_index.contains_key(&v)
-                                        {
+                                        if v.is_blank() || !rel_info.to_index.contains_key(&v) {
                                             next_rows.push(row);
                                         }
                                     }
@@ -4055,7 +4067,8 @@ fn resolve_row_sets(
 
             changed |= propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
             if cross_filter_direction == CrossFilterDirection::Both {
-                changed |= propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
+                changed |=
+                    propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
             }
         }
     }
@@ -4228,7 +4241,10 @@ fn propagate_filter(
 
             if let Some(from_index) = relationship.from_index.as_ref() {
                 for (key, rows) in from_index {
-                    if !rows.iter().any(|row| from_set.get(*row).copied().unwrap_or(false)) {
+                    if !rows
+                        .iter()
+                        .any(|row| from_set.get(*row).copied().unwrap_or(false))
+                    {
                         continue;
                     }
 
@@ -4322,6 +4338,48 @@ fn coerce_text(value: &Value) -> Cow<'_, str> {
         Value::Blank => Cow::Borrowed(""),
         // DAX displays boolean values as TRUE/FALSE.
         Value::Boolean(b) => Cow::Borrowed(if *b { "TRUE" } else { "FALSE" }),
+    }
+}
+
+fn cmp_text_case_insensitive(a: &str, b: &str) -> Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        return cmp_ascii_case_insensitive(a, b);
+    }
+
+    // Compare using Unicode-aware uppercasing so semantics match Excel-like case-insensitive
+    // ordering for non-ASCII text (e.g. ß -> SS).
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            },
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
     }
 }
 
@@ -4475,9 +4533,9 @@ fn virtual_blank_row_exists(
         let Some(sets) = sets else {
             continue;
         };
-        let from_set = sets.get(rel.rel.from_table.as_str()).ok_or_else(|| {
-            DaxError::UnknownTable(rel.rel.from_table.clone())
-        })?;
+        let from_set = sets
+            .get(rel.rel.from_table.as_str())
+            .ok_or_else(|| DaxError::UnknownTable(rel.rel.from_table.clone()))?;
 
         if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
             if unmatched
