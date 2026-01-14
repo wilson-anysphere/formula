@@ -322,16 +322,6 @@ Example excerpt:
   "windows": ["main"],
   "permissions": [
     "allow-invoke",
-    // Tauri core permission for invoke scoping. Keep this in object form with an explicit allowlist
-    // (never the string form `core:allow-invoke` which behaves like an allow-all/default allowlist).
-    {
-      "identifier": "core:allow-invoke",
-      "allow": [
-        { "command": "network_fetch" },
-        { "command": "open_external_url" }
-        // ... (see the real file for the full list)
-      ]
-    },
     { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
@@ -350,16 +340,15 @@ update the relevant allowlists in `capabilities/main.json`.
 When adding a new Rust `#[tauri::command]` invoked from the frontend, also update the invoke allowlist in:
 
 - `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission; guardrailed by `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` and `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`)
-- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` object form allowlist; guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`)
 
 The `allow-invoke` permission is granted to the `main` window via `apps/desktop/src-tauri/capabilities/main.json` by
 including `"allow-invoke"` in that capability’s `"permissions"` list.
 
 This is guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`, which ensures the command
 allowlist is explicit (no wildcards/duplicates) and matches actual frontend `invoke("...")` usage. It also asserts we do
-not grant the unscoped string form `core:allow-invoke` (default allowlist). This repo grants `core:allow-invoke` in the
-**object form** `{ "identifier": "core:allow-invoke", "allow": [{ "command": "..." }] }`; keep it explicit and in sync
-with `permissions/allow-invoke.json` + actual frontend `invoke("...")` usage.
+not grant the unscoped string form `core:allow-invoke` (default allowlist). Some toolchains also expose a scoped
+`core:allow-invoke` permission; if we add it in the future, use the **object form** with an explicit allowlist (no
+wildcards) and keep it in sync with `permissions/allow-invoke.json` + actual frontend `invoke("...")` usage.
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
@@ -1246,7 +1235,6 @@ High-level contents (see the file for the exhaustive list):
 - We avoid `core:default` (broad, unscoped access to core plugins like event/window) to keep the permission surface minimal/explicit.
 - We keep custom Rust IPC calls explicit via:
   - `allow-invoke` (application permission defined in `apps/desktop/src-tauri/permissions/allow-invoke.json`, kept in sync with `generate_handler![...]`)
-  - `core:allow-invoke` (core permission object in `apps/desktop/src-tauri/capabilities/main.json`, kept in sync with real `invoke("...")` usage)
 - We scope `core:event:allow-listen` / `core:event:allow-emit` to explicit event-name allowlists (no wildcards).
 - `core:event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
@@ -1318,7 +1306,6 @@ WebView toolchain for your platform).
 - For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`:
   - register them in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
   - add them to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission `commands.allow`)
-  - add them to the `core:allow-invoke` allowlist in `apps/desktop/src-tauri/capabilities/main.json` (`allow: [{ "command": "..." }]`)
   - keep input validation and scope checks in Rust (trusted-origin + window-label checks, etc)
 
 Guardrails (CI/tests):
