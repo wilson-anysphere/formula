@@ -213,6 +213,7 @@ dialog.ribbon-auto-filter-dialog {
   border: none;
   background: transparent;
   box-shadow: none;
+  overflow: visible;
 }
 
 .formula-table-filter-dropdown {
