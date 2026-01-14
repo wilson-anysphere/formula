@@ -257,6 +257,14 @@ export default defineConfig({
       // Clipboard + extension helpers have a few small `.test.ts` suites as well.
       "src/clipboard/**/__tests__/**/*.test.ts",
       "src/extensions/**/*.test.ts",
+      // Misc small leaf packages with `.test.ts` suites.
+      "src/tauri/__tests__/**/*.test.ts",
+      "src/macros/**/*.test.ts",
+      "src/charts/__tests__/**/*.test.ts",
+      "src/sheets/**/*.test.ts",
+      "src/sort-filter/**/__tests__/**/*.test.ts",
+      "src/scripting/**/*.test.ts",
+      "src/dlp/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
