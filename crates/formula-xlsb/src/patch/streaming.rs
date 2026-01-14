@@ -30,9 +30,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
     output: W,
     edits: &[CellEdit],
 ) -> Result<bool, Error> {
-    let mut writer = Biff12Writer::new(output);
-
     if edits.is_empty() {
+        let mut writer = Biff12Writer::new(output);
         copy_remaining(&mut input, &mut writer)?;
         return Ok(false);
     }
@@ -78,11 +77,111 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         super::bounds_include(&mut requested_bounds, edit.row, edit.col);
     }
 
+    // When the worksheet stream lacks BrtWsDim (DIMENSION), we need to synthesize it so used-range
+    // metadata stays consistent after inserting non-blank cells. The streaming patcher cannot
+    // backpatch already-written bytes, so when we *might* need to insert DIMENSION we first scan
+    // the record prefix:
+    // - If we encounter DIMENSION before SHEETDATA, we can proceed streaming normally.
+    // - If we hit SHEETDATA first, DIMENSION may appear later (non-standard) or be missing
+    //   entirely. In that case we fall back to the in-memory patcher so we can deterministically
+    //   insert DIMENSION before SHEETDATA when needed.
+    let mut prefix_bytes: Vec<u8> = Vec::new();
+    let mut changed = false;
+    if requested_bounds.is_some() {
+        let mut saw_dimension = false;
+        while let Some(header) = read_record_header(&mut input)? {
+            let id = header.id;
+            let len = header.len as usize;
+
+            match id {
+                biff12::DIMENSION => {
+                    let mut payload = read_payload(&mut input, len)?;
+                    if len < 16 {
+                        return Err(Error::UnexpectedEof);
+                    }
+
+                    let r1 = super::read_u32(&payload, 0)?;
+                    let r2 = super::read_u32(&payload, 4)?;
+                    let c1 = super::read_u32(&payload, 8)?;
+                    let c2 = super::read_u32(&payload, 12)?;
+
+                    let mut new_r1 = r1;
+                    let mut new_r2 = r2;
+                    let mut new_c1 = c1;
+                    let mut new_c2 = c2;
+
+                    if let Some(bounds) = requested_bounds {
+                        new_r1 = new_r1.min(bounds.min_row);
+                        new_r2 = new_r2.max(bounds.max_row);
+                        new_c1 = new_c1.min(bounds.min_col);
+                        new_c2 = new_c2.max(bounds.max_col);
+                    }
+
+                    if (new_r1, new_r2, new_c1, new_c2) != (r1, r2, c1, c2) {
+                        payload[0..4].copy_from_slice(&new_r1.to_le_bytes());
+                        payload[4..8].copy_from_slice(&new_r2.to_le_bytes());
+                        payload[8..12].copy_from_slice(&new_c1.to_le_bytes());
+                        payload[12..16].copy_from_slice(&new_c2.to_le_bytes());
+                        changed = true;
+                    }
+
+                    prefix_bytes.extend_from_slice(&header.id_raw);
+                    prefix_bytes.extend_from_slice(&header.len_raw);
+                    prefix_bytes.extend_from_slice(&payload);
+                    saw_dimension = true;
+                    break;
+                }
+                biff12::SHEETDATA => {
+                    // No DIMENSION record appeared before SHEETDATA. Buffer the entire stream and
+                    // delegate to the in-memory patcher so we can insert DIMENSION before SHEETDATA
+                    // iff it is missing entirely.
+                    prefix_bytes.extend_from_slice(&header.id_raw);
+                    prefix_bytes.extend_from_slice(&header.len_raw);
+                    let payload = read_payload(&mut input, len)?;
+                    prefix_bytes.extend_from_slice(&payload);
+
+                    let mut sheet_bin = prefix_bytes;
+                    input
+                        .read_to_end(&mut sheet_bin)
+                        .map_err(super::map_io_error)?;
+                    let patched = super::patch_sheet_bin(&sheet_bin, edits)?;
+
+                    let mut writer = Biff12Writer::new(output);
+                    writer.write_raw(&patched)?;
+                    return Ok(patched != sheet_bin);
+                }
+                _ => {
+                    prefix_bytes.extend_from_slice(&header.id_raw);
+                    prefix_bytes.extend_from_slice(&header.len_raw);
+                    let payload = read_payload(&mut input, len)?;
+                    prefix_bytes.extend_from_slice(&payload);
+                }
+            }
+        }
+
+        if !saw_dimension {
+            // End-of-stream (or malformed worksheet) without any DIMENSION record.
+            let mut sheet_bin = prefix_bytes;
+            input
+                .read_to_end(&mut sheet_bin)
+                .map_err(super::map_io_error)?;
+            let patched = super::patch_sheet_bin(&sheet_bin, edits)?;
+
+            let mut writer = Biff12Writer::new(output);
+            writer.write_raw(&patched)?;
+            return Ok(patched != sheet_bin);
+        }
+    }
+
+    let mut writer = Biff12Writer::new(output);
+    if !prefix_bytes.is_empty() {
+        writer.write_raw(&prefix_bytes)?;
+    }
+
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
     let mut row_template: Option<Vec<u8>> = None;
     let mut dim_additions: Option<super::Bounds> = None;
-    let mut changed = false;
 
     while let Some(header) = read_record_header(&mut input)? {
         let id = header.id;

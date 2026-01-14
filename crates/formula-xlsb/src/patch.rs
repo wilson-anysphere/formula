@@ -318,6 +318,22 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         return Ok(sheet_bin.to_vec());
     }
 
+    // When BrtWsDim is missing from the input stream, we may need to synthesize it so the
+    // worksheet used-range metadata stays consistent after inserting non-blank cells.
+    //
+    // Mirror the streaming patcher's conservative bounding-box logic: only include edits that
+    // materialize a non-blank cell after patching.
+    let mut requested_bounds: Option<Bounds> = None;
+    for edit in edits {
+        if insertion_is_noop(edit) {
+            continue;
+        }
+        if matches!(edit.new_value, CellValue::Blank) {
+            continue;
+        }
+        bounds_include(&mut requested_bounds, edit.row, edit.col);
+    }
+
     let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
         if edit.clear_formula
@@ -354,6 +370,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     let mut row_template: Option<Vec<u8>> = None;
     let mut dim_record: Option<DimensionRecordInfo> = None;
     let mut dim_additions: Option<Bounds> = None;
+    let mut changed = false;
+    let mut dim_insert_offset: Option<usize> = None;
+    let mut observed_cell_bounds: Option<Bounds> = None;
 
     while offset < sheet_bin.len() {
         let record_start = offset;
@@ -401,6 +420,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
             biff12::SHEETDATA => {
+                if dim_insert_offset.is_none() {
+                    dim_insert_offset = Some(writer.bytes_written());
+                }
                 in_sheet_data = true;
                 current_row = None;
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
@@ -409,7 +431,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 if in_sheet_data {
                     // Flush any trailing cell inserts for the final row before leaving SheetData.
                     if let Some(row) = current_row {
-                        let _ = flush_remaining_cells_in_row(
+                        if flush_remaining_cells_in_row(
                             &mut writer,
                             edits,
                             &mut applied,
@@ -417,10 +439,12 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             &mut insert_cursor,
                             row,
                             &mut dim_additions,
-                        )?;
+                        )? {
+                            changed = true;
+                        }
                     }
                     // And append any remaining missing rows/cells.
-                    let _ = flush_remaining_rows(
+                    if flush_remaining_rows(
                         &mut writer,
                         row_template.as_deref(),
                         edits,
@@ -428,7 +452,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         &ordered_edits,
                         &mut insert_cursor,
                         &mut dim_additions,
-                    )?;
+                    )? {
+                        changed = true;
+                    }
                 }
                 in_sheet_data = false;
                 current_row = None;
@@ -437,7 +463,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
             biff12::ROW if in_sheet_data => {
                 // Before advancing to a new row, insert any missing cells for the prior row.
                 if let Some(row) = current_row {
-                    let _ = flush_remaining_cells_in_row(
+                    if flush_remaining_cells_in_row(
                         &mut writer,
                         edits,
                         &mut applied,
@@ -445,7 +471,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         &mut insert_cursor,
                         row,
                         &mut dim_additions,
-                    )?;
+                    )? {
+                        changed = true;
+                    }
                 }
 
                 if row_template.is_none() && payload.len() >= 4 {
@@ -454,7 +482,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
 
                 let row = read_u32(payload, 0)?;
                 // Insert any missing rows before this one (row-major order).
-                let _ = flush_missing_rows_before(
+                if flush_missing_rows_before(
                     &mut writer,
                     row_template.as_deref(),
                     edits,
@@ -463,7 +491,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     &mut insert_cursor,
                     row,
                     &mut dim_additions,
-                )?;
+                )? {
+                    changed = true;
+                }
 
                 current_row = Some(row);
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
@@ -485,8 +515,13 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let col = read_u32(payload, 0)?;
                 let style = read_u32(payload, 4)?;
 
+                // Best-effort: if BrtWsDim is missing, treat any existing cell records as part of
+                // the used range so a synthesized DIMENSION covers both the edits and any
+                // pre-existing cells.
+                bounds_include(&mut observed_cell_bounds, row, col);
+
                 // Insert any missing cells that should appear before this one.
-                let _ = flush_missing_cells_before(
+                if flush_missing_cells_before(
                     &mut writer,
                     edits,
                     &mut applied,
@@ -495,7 +530,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     row,
                     col,
                     &mut dim_additions,
-                )?;
+                )? {
+                    changed = true;
+                }
 
                 let Some(&edit_idx) = edits_by_coord.get(&(row, col)) else {
                     writer.write_raw(&sheet_bin[record_start..record_end])?;
@@ -531,6 +568,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
+                            changed = true;
                             patch_fmla_num(
                                 &mut writer,
                                 payload,
@@ -545,6 +583,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_string_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
+                            changed = true;
                             patch_fmla_string(
                                 &mut writer,
                                 payload,
@@ -559,6 +598,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_bool_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
+                            changed = true;
                             patch_fmla_bool(
                                 &mut writer,
                                 payload,
@@ -573,6 +613,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_error_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
+                            changed = true;
                             patch_fmla_error(
                                 &mut writer,
                                 payload,
@@ -597,6 +638,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -620,6 +662,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_rk_cell(
                                 &mut writer,
                                 col,
@@ -644,6 +687,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -669,6 +713,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             (&edit.new_value, edit.shared_string_index)
                         {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             if payload.len() < 12 {
                                 return Err(Error::UnexpectedEof);
                             }
@@ -694,6 +739,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
                             // keep shared-string semantics.
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -717,6 +763,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -740,6 +787,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -753,6 +801,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_blank(style, edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -763,6 +812,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -774,6 +824,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     }
                     _ => {
                         if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -784,6 +835,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
                             patch_value_cell(
                                 &mut writer,
                                 col,
@@ -795,6 +847,12 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     }
                 }
             }
+            biff12::WORKSHEET_END => {
+                if dim_insert_offset.is_none() {
+                    dim_insert_offset = Some(writer.bytes_written());
+                }
+                writer.write_raw(&sheet_bin[record_start..record_end])?;
+            }
             _ => {
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
@@ -805,7 +863,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         // Worksheet streams should always close `BrtSheetData`, but if they don't, still make a
         // best-effort attempt to apply all edits.
         if let Some(row) = current_row {
-            let _ = flush_remaining_cells_in_row(
+            if flush_remaining_cells_in_row(
                 &mut writer,
                 edits,
                 &mut applied,
@@ -813,9 +871,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 &mut insert_cursor,
                 row,
                 &mut dim_additions,
-            )?;
+            )? {
+                changed = true;
+            }
         }
-        let _ = flush_remaining_rows(
+        if flush_remaining_rows(
             &mut writer,
             row_template.as_deref(),
             edits,
@@ -823,7 +883,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
             &ordered_edits,
             &mut insert_cursor,
             &mut dim_additions,
-        )?;
+        )? {
+            changed = true;
+        }
     }
 
     if applied.iter().any(|&ok| !ok) {
@@ -862,6 +924,43 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 payload[8..12].copy_from_slice(&c1.to_le_bytes());
                 payload[12..16].copy_from_slice(&c2.to_le_bytes());
             }
+        }
+    } else if changed {
+        if let Some(mut bounds) = requested_bounds {
+            if let Some(additions) = dim_additions {
+                bounds.min_row = bounds.min_row.min(additions.min_row);
+                bounds.max_row = bounds.max_row.max(additions.max_row);
+                bounds.min_col = bounds.min_col.min(additions.min_col);
+                bounds.max_col = bounds.max_col.max(additions.max_col);
+            }
+            if let Some(observed) = observed_cell_bounds {
+                bounds.min_row = bounds.min_row.min(observed.min_row);
+                bounds.max_row = bounds.max_row.max(observed.max_row);
+                bounds.min_col = bounds.min_col.min(observed.min_col);
+                bounds.max_col = bounds.max_col.max(observed.max_col);
+            }
+
+            // No BrtWsDim record was present in the input. Synthesize a new one so consumers that
+            // rely on the worksheet used-range metadata (including our own parser) can observe the
+            // edits.
+            //
+            // Only do this when we actually changed the sheet stream; for a complete no-op patch we
+            // keep the output byte-identical to the input.
+            let insert_at = dim_insert_offset.unwrap_or(out.len());
+            if insert_at > out.len() {
+                return Err(Error::UnexpectedEof);
+            }
+
+            let mut dim_bytes = Vec::with_capacity(24);
+            {
+                let mut w = Biff12Writer::new(&mut dim_bytes);
+                w.write_record_header(biff12::DIMENSION, 16)?;
+                w.write_u32(bounds.min_row)?;
+                w.write_u32(bounds.max_row)?;
+                w.write_u32(bounds.min_col)?;
+                w.write_u32(bounds.max_col)?;
+            }
+            out.splice(insert_at..insert_at, dim_bytes);
         }
     }
 
