@@ -302,6 +302,10 @@ running `pnpm -C apps/desktop dev` or `pnpm -C apps/desktop build` (this runs
 `scripts/ensure-pyodide-assets.mjs`, populating `apps/desktop/public/pyodide/`
 which Vite then serves/copies into `dist/`).
 
+When bundled into `dist/`, the packaged desktop app will prefer loading Pyodide
+from `/pyodide/...` (embedded assets) instead of downloading it into the
+app-data cache.
+
 ## Content Security Policy (Tauri)
 
 The desktop app ships with a strict CSP in `apps/desktop/src-tauri/tauri.conf.json`.

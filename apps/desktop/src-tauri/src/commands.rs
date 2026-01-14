@@ -8429,6 +8429,7 @@ pub async fn pyodide_index_url(
     window: tauri::WebviewWindow,
     download: Option<bool>,
 ) -> Result<Option<String>, String> {
+    use tauri::Manager as _;
     ipc_origin::ensure_main_window_and_stable_origin(
         &window,
         "python runtime download",
@@ -8436,6 +8437,23 @@ pub async fn pyodide_index_url(
     )?;
 
     let download = download.unwrap_or(false);
+
+    // If Pyodide assets were explicitly bundled into `dist/` (opt-in via
+    // `FORMULA_BUNDLE_PYODIDE_ASSETS=1`), prefer loading them from the embedded frontend assets
+    // instead of downloading into the app-data cache.
+    //
+    // This keeps offline bundled builds functional without needing a first-run download, while
+    // default builds still use the on-demand cache to keep installers small.
+    let version_tag = crate::pyodide_assets::pyodide_version_tag();
+    let bundled_probe = format!("pyodide/{version_tag}/full/pyodide.js");
+    if window
+        .app_handle()
+        .asset_resolver()
+        .get(bundled_probe)
+        .is_some()
+    {
+        return Ok(Some(format!("/pyodide/{version_tag}/full/")));
+    }
 
     crate::pyodide_assets::pyodide_index_url_from_cache(download, |progress| {
         let _ = window.emit(

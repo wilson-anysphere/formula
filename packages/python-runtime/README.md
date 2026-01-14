@@ -113,7 +113,8 @@ For the `apps/desktop` Vite webview in this repository:
 - To bundle Pyodide into `dist/` for offline development/CI, run desktop builds
   with `FORMULA_BUNDLE_PYODIDE_ASSETS=1` (this runs
   `apps/desktop/scripts/ensure-pyodide-assets.mjs` and copies the assets into
-  `dist/`).
+  `dist/`). When bundled, the packaged desktop app will prefer loading the
+  embedded `/pyodide/...` assets instead of downloading on-demand.
 
 ## Host spreadsheet bridge contract
 
