@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -28,30 +28,48 @@ function yamlListItemBlock(lines, startIdx) {
   const startLine = lines[startIdx] ?? "";
   const indent = startLine.match(/^\s*/)?.[0]?.length ?? 0;
   const nextItemRe = new RegExp(`^\\s{${indent}}-\\s+`);
- 
+  
   let endIdx = startIdx + 1;
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
   for (; endIdx < lines.length; endIdx += 1) {
     const line = lines[endIdx] ?? "";
-    if (line.trim() === "") continue;
+    const trimmed = line.trim();
     const lineIndent = line.match(/^\s*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      if (trimmed === "") continue;
+      if (lineIndent > blockIndent) continue;
+      inBlock = false;
+    }
+
+    if (trimmed === "") continue;
     if (lineIndent < indent) break;
     if (nextItemRe.test(line)) break;
+
+    if (blockRe.test(line.trimEnd())) {
+      inBlock = true;
+      blockIndent = lineIndent;
+    }
   }
   return lines.slice(startIdx, endIdx).join("\n");
 }
 
 test("release workflow includes a Linux ARM64 (aarch64) build runner in the matrix", async () => {
   const text = await readReleaseWorkflow();
+  const searchText = stripYamlBlockScalarBodies(text);
 
   const armRunnerRe = /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/m;
   assert.match(
-    text,
+    searchText,
     armRunnerRe,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to include an Ubuntu ARM64 runner (ubuntu-24.04-arm64).`,
   );
 
   const lines = text.split(/\r?\n/);
-  const idx = lines.findIndex((line) => /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/.test(line));
+  const searchLines = searchText.split(/\r?\n/);
+  const idx = searchLines.findIndex((line) => /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/.test(line));
   assert.ok(idx >= 0);
   const snippet = yamlListItemBlock(lines, idx);
   assert.match(snippet, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
@@ -60,9 +78,10 @@ test("release workflow includes a Linux ARM64 (aarch64) build runner in the matr
 test("release workflow validates .deb packages on all Linux runners (x86_64 + arm64)", async () => {
   const text = await readReleaseWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stepNeedle = "Verify Linux .deb package (deps + ldd + desktop integration)";
-  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stepNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
@@ -93,7 +112,8 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
  * @param {number} windowSize
  */
 function snippetAfter(lines, needle, windowSize = 40) {
-  const idx = lines.findIndex((line) => needle.test(line));
+  const searchLines = stripYamlBlockScalarBodies(lines.join("\n")).split(/\r?\n/);
+  const idx = searchLines.findIndex((line) => needle.test(line));
   assert.ok(idx >= 0, `Expected to find line matching ${needle}`);
   return yamlListItemBlock(lines, idx);
 }
@@ -138,9 +158,10 @@ test("release workflow builds Linux bundles (.AppImage + .deb + .rpm) on x86_64 
 test("release workflow verifies Linux artifacts include .AppImage + .deb + .rpm (not x86-only)", async () => {
   const text = await readReleaseWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stepNeedle = "Verify Linux release artifacts (AppImage + deb + rpm + signatures)";
-  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stepNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
@@ -165,9 +186,10 @@ test("release workflow verifies Linux artifacts include .AppImage + .deb + .rpm 
 test("release workflow installs required Linux build deps for both x86_64 and ARM64 runners", async () => {
   const text = await readReleaseWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stepNeedle = "Install Linux dependencies";
-  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stepNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,

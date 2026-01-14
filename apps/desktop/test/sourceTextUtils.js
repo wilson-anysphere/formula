@@ -415,6 +415,51 @@ export function stripHashComments(source) {
   return out;
 }
 
+export function stripYamlBlockScalarBodies(source) {
+  // Strip YAML block scalar *bodies* (e.g. the lines following `run: |` or `path: >-`) while
+  // preserving newlines.
+  //
+  // This is useful for "source scanning" guardrails that need to search workflow *structure*
+  // (e.g. step names, `uses:` lines, env pins) without being fooled by YAML-like strings embedded
+  // inside multiline script/data values.
+  //
+  // Notes:
+  // - This intentionally does NOT attempt to fully parse YAML.
+  // - Blank lines are treated as part of the scalar.
+  // - The scalar ends when indentation returns to the block-start level (or less).
+  const text = String(source);
+  const lines = text.split("\n");
+  const commentStripped = stripHashComments(text);
+  const detectLines = commentStripped.split("\n");
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const detect = detectLines[i] ?? "";
+    const indent = detect.match(/^[ \t]*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      if (detect.trim() === "") {
+        lines[i] = "";
+        continue;
+      }
+      if (indent > blockIndent) {
+        lines[i] = "";
+        continue;
+      }
+      inBlock = false;
+    }
+
+    if (blockRe.test(detect.trimEnd())) {
+      inBlock = true;
+      blockIndent = indent;
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export function stripPowerShellComments(source) {
   // Strip PowerShell line comments (`# ...`) and block comments (`<# ... #>`) while preserving:
   // - string literals (single/double quoted)

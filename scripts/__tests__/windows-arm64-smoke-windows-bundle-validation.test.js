@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "windows-arm64-smoke.yml");
@@ -32,16 +32,17 @@ test("windows-arm64-smoke workflow validates desktop compliance artifact bundlin
 test("windows-arm64-smoke workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const buildNeedle = "Build Windows ARM64 bundles (MSI + NSIS)";
-  const buildIdx = lines.findIndex((line) => line.includes(buildNeedle));
+  const buildIdx = searchLines.findIndex((line) => line.includes(buildNeedle));
   assert.ok(
     buildIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
   );
 
   const stripNeedle = "Verify desktop binary is stripped (no symbols)";
-  const stripIdx = lines.findIndex((line) => line.includes(stripNeedle));
+  const stripIdx = searchLines.findIndex((line) => line.includes(stripNeedle));
   assert.ok(
     stripIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${stripNeedle}`,

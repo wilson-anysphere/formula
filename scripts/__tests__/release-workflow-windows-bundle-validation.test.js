@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -16,9 +16,10 @@ async function readReleaseWorkflow() {
 test("release workflow validates built Windows bundles (MSI + NSIS) after build", async () => {
   const text = await readReleaseWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stepNeedle = "Validate Windows installer bundles";
-  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stepNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,

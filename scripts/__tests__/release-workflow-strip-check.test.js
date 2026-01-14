@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -30,12 +30,30 @@ function yamlListItemBlock(lines, startIdx) {
   const nextItemRe = new RegExp(`^\\s{${indent}}-\\s+`);
 
   let endIdx = startIdx + 1;
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
   for (; endIdx < lines.length; endIdx += 1) {
     const line = lines[endIdx] ?? "";
-    if (line.trim() === "") continue;
+    const trimmed = line.trim();
     const lineIndent = line.match(/^\s*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      if (trimmed === "") continue;
+      if (lineIndent > blockIndent) continue;
+      inBlock = false;
+    }
+
+    if (trimmed === "") continue;
     if (lineIndent < indent) break;
     if (nextItemRe.test(line)) break;
+
+    // Detect YAML block scalars (e.g. `run: |`, `path: >-`) so `- ...` inside the scalar body
+    // doesn't terminate the list item early.
+    if (blockRe.test(line.trimEnd())) {
+      inBlock = true;
+      blockIndent = lineIndent;
+    }
   }
   return lines.slice(startIdx, endIdx).join("\n");
 }
@@ -43,9 +61,10 @@ function yamlListItemBlock(lines, startIdx) {
 test("release workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stripNeedle = "Verify desktop binary is stripped (no symbols)";
-  const stripIdx = lines.findIndex((line) => line.includes(stripNeedle));
+  const stripIdx = searchLines.findIndex((line) => line.includes(stripNeedle));
   assert.ok(
     stripIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${stripNeedle}`,
@@ -53,7 +72,7 @@ test("release workflow verifies the produced desktop binary is stripped", async 
 
   // The strip check must happen after the desktop bundling step(s) (`tauri-apps/tauri-action`).
   const tauriActionRe = /^\s*uses:\s*tauri-apps\/tauri-action@/;
-  const buildIdx = lines.findIndex((line) => tauriActionRe.test(line));
+  const buildIdx = searchLines.findIndex((line) => tauriActionRe.test(line));
   assert.ok(
     buildIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to use tauri-apps/tauri-action for bundling.`,
@@ -71,9 +90,10 @@ test("release workflow verifies the produced desktop binary is stripped", async 
 test("release workflow uploads dry-run desktop bundles via non-recursive release/bundle globs", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const needle = "Upload desktop bundles (dry run)";
-  const idx = lines.findIndex((line) => line.includes(needle));
+  const idx = searchLines.findIndex((line) => line.includes(needle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${needle}`,
@@ -105,9 +125,10 @@ test("release workflow uploads dry-run desktop bundles via non-recursive release
 test("release workflow caches Cargo release artifacts without recursive target/** globs", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const needle = "Cache cargo target (release build artifacts)";
-  const idx = lines.findIndex((line) => line.includes(needle));
+  const idx = searchLines.findIndex((line) => line.includes(needle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${needle}`,

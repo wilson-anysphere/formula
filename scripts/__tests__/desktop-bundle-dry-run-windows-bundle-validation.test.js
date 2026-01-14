@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "desktop-bundle-dry-run.yml");
@@ -30,12 +30,28 @@ function yamlListItemBlock(lines, startIdx) {
   const nextItemRe = new RegExp(`^\\s{${indent}}-\\s+`);
 
   let endIdx = startIdx + 1;
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
   for (; endIdx < lines.length; endIdx += 1) {
     const line = lines[endIdx] ?? "";
-    if (line.trim() === "") continue;
+    const trimmed = line.trim();
     const lineIndent = line.match(/^\s*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      if (trimmed === "") continue;
+      if (lineIndent > blockIndent) continue;
+      inBlock = false;
+    }
+
+    if (trimmed === "") continue;
     if (lineIndent < indent) break;
     if (nextItemRe.test(line)) break;
+
+    if (blockRe.test(line.trimEnd())) {
+      inBlock = true;
+      blockIndent = lineIndent;
+    }
   }
   return lines.slice(startIdx, endIdx).join("\n");
 }
@@ -43,9 +59,10 @@ function yamlListItemBlock(lines, startIdx) {
 test("desktop-bundle-dry-run workflow validates built Windows bundles (MSI + NSIS)", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const stepNeedle = "Validate Windows installer bundles";
-  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stepNeedle));
   assert.ok(idx >= 0, `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${stepNeedle}`);
 
   const snippet = lines.slice(idx, idx + 40).join("\n");
@@ -71,16 +88,17 @@ test("desktop-bundle-dry-run workflow validates desktop compliance artifact bund
 test("desktop-bundle-dry-run workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const buildNeedle = "Build desktop bundles (dry run)";
-  const buildIdx = lines.findIndex((line) => line.includes(buildNeedle));
+  const buildIdx = searchLines.findIndex((line) => line.includes(buildNeedle));
   assert.ok(
     buildIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
   );
 
   const stripNeedle = "Verify desktop binary is stripped (no symbols)";
-  const idx = lines.findIndex((line) => line.includes(stripNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stripNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${stripNeedle}`,
@@ -98,9 +116,10 @@ test("desktop-bundle-dry-run workflow verifies the produced desktop binary is st
 test("desktop-bundle-dry-run workflow restores tauri.conf.json before asserting a clean git diff", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const restoreNeedle = "Restore CI-only Tauri config patches";
-  const restoreIdx = lines.findIndex((line) => line.includes(restoreNeedle));
+  const restoreIdx = searchLines.findIndex((line) => line.includes(restoreNeedle));
   assert.ok(
     restoreIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${restoreNeedle}`,
@@ -114,7 +133,7 @@ test("desktop-bundle-dry-run workflow restores tauri.conf.json before asserting 
   );
 
   const diffNeedle = "Fail if the build modified tracked files";
-  const diffIdx = lines.findIndex((line) => line.includes(diffNeedle));
+  const diffIdx = searchLines.findIndex((line) => line.includes(diffNeedle));
   assert.ok(
     diffIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${diffNeedle}`,
@@ -128,9 +147,10 @@ test("desktop-bundle-dry-run workflow restores tauri.conf.json before asserting 
 test("desktop-bundle-dry-run workflow uploads bundles without recursive target/** globs", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const needle = "Upload desktop bundles";
-  const idx = lines.findIndex((line) => line.includes(needle));
+  const idx = searchLines.findIndex((line) => line.includes(needle));
   assert.ok(idx >= 0, `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${needle}`);
 
   const snippet = yamlListItemBlock(lines, idx);
@@ -165,9 +185,10 @@ test("desktop-bundle-dry-run workflow uploads bundles without recursive target/*
 test("desktop-bundle-dry-run workflow caches Cargo release artifacts without recursive target/** globs", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const needle = "Cache cargo target (release build artifacts)";
-  const idx = lines.findIndex((line) => line.includes(needle));
+  const idx = searchLines.findIndex((line) => line.includes(needle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${needle}`,

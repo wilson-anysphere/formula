@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -19,7 +19,8 @@ async function readWorkflow() {
  * @param {number} windowSize
  */
 function snippetAfter(lines, needle, windowSize = 40) {
-  const idx = lines.findIndex((line) => needle.test(line));
+  const searchLines = stripYamlBlockScalarBodies(lines.join("\n")).split(/\r?\n/);
+  const idx = searchLines.findIndex((line) => needle.test(line));
   assert.ok(idx >= 0, `Expected to find line matching ${needle} in ${path.relative(repoRoot, workflowPath)}`);
   return lines.slice(idx, idx + windowSize).join("\n");
 }

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "desktop-bundle-size.yml");
@@ -30,12 +30,28 @@ function yamlListItemBlock(lines, startIdx) {
   const nextItemRe = new RegExp(`^\\s{${indent}}-\\s+`);
 
   let endIdx = startIdx + 1;
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
   for (; endIdx < lines.length; endIdx += 1) {
     const line = lines[endIdx] ?? "";
-    if (line.trim() === "") continue;
+    const trimmed = line.trim();
     const lineIndent = line.match(/^\s*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      if (trimmed === "") continue;
+      if (lineIndent > blockIndent) continue;
+      inBlock = false;
+    }
+
+    if (trimmed === "") continue;
     if (lineIndent < indent) break;
     if (nextItemRe.test(line)) break;
+
+    if (blockRe.test(line.trimEnd())) {
+      inBlock = true;
+      blockIndent = lineIndent;
+    }
   }
   return lines.slice(startIdx, endIdx).join("\n");
 }
@@ -43,9 +59,10 @@ function yamlListItemBlock(lines, startIdx) {
 test("desktop-bundle-size workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
+  const searchLines = stripYamlBlockScalarBodies(text).split(/\r?\n/);
 
   const buildNeedle = "Build desktop bundles (Tauri)";
-  const buildIdx = lines.findIndex((line) => line.includes(buildNeedle));
+  const buildIdx = searchLines.findIndex((line) => line.includes(buildNeedle));
   assert.ok(
     buildIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
@@ -61,7 +78,7 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
   );
 
   const stripNeedle = "Verify desktop binary is stripped (no symbols)";
-  const idx = lines.findIndex((line) => line.includes(stripNeedle));
+  const idx = searchLines.findIndex((line) => line.includes(stripNeedle));
   assert.ok(
     idx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${stripNeedle}`,
