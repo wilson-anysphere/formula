@@ -167,6 +167,9 @@ describe("engine.worker goalSeek RPC normalization", () => {
       const payload = (resp as RpcResponseOk).result as any;
       expect(payload.result.status).toBe("Converged");
       expect(payload.result.solution).toBe(5);
+      // Legacy flat payloads may omit `finalOutput`; the worker should reconstruct it as
+      // `targetValue + finalError` (matches `formula_engine::what_if::goal_seek` semantics).
+      expect(payload.result.finalOutput).toBe(25);
       // Legacy responses did not include changes.
       expect(payload.changes).toEqual([]);
     } finally {
@@ -187,4 +190,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-

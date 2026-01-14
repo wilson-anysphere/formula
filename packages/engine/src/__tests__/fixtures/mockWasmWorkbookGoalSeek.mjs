@@ -57,7 +57,8 @@ export class WasmWorkbook {
       solution: 5,
       iterations: 3,
       finalError: 0,
-      finalOutput: 25,
+      // Intentionally omit `finalOutput` to exercise the worker's legacy compatibility shim
+      // (it should compute `finalOutput` from `targetValue + finalError`).
     };
   }
 }
@@ -67,4 +68,3 @@ export class WasmWorkbook {
 export function lexFormula() {
   return [];
 }
-

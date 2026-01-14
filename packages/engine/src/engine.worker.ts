@@ -875,18 +875,27 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                         : legacy.success
                           ? "Converged"
                           : "NumericalFailure";
+                    const targetValue = typeof params?.targetValue === "number" && Number.isFinite(params.targetValue) ? params.targetValue : null;
+                    const finalError = typeof legacy.finalError === "number" ? legacy.finalError : Number(legacy.finalError);
+                    const legacyFinalOutput =
+                      typeof legacy.finalOutput === "number"
+                        ? legacy.finalOutput
+                        : legacy.finalOutput === undefined
+                          ? null
+                          : Number(legacy.finalOutput);
+                    const finalOutput =
+                      legacyFinalOutput != null && Number.isFinite(legacyFinalOutput)
+                        ? legacyFinalOutput
+                        : targetValue != null && Number.isFinite(targetValue) && Number.isFinite(finalError)
+                          ? targetValue + finalError
+                          : NaN;
                     result = {
                       result: {
                         status,
                         solution: typeof legacy.solution === "number" ? legacy.solution : Number(legacy.solution),
                         iterations: typeof legacy.iterations === "number" ? legacy.iterations : Number(legacy.iterations),
-                        finalOutput:
-                          typeof legacy.finalOutput === "number"
-                            ? legacy.finalOutput
-                            : legacy.finalOutput === undefined
-                              ? NaN
-                              : Number(legacy.finalOutput),
-                        finalError: typeof legacy.finalError === "number" ? legacy.finalError : Number(legacy.finalError),
+                        finalOutput,
+                        finalError,
                       },
                       changes: [],
                     };
