@@ -1,7 +1,7 @@
 use super::*;
-use std::collections::HashSet;
 
 use serde_json::json;
+use std::collections::HashSet;
 
 #[test]
 fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
@@ -130,6 +130,58 @@ fn pivot_field_ref_from_unstructured_parses_dax_like_refs() {
             column: "Order ID".to_string(),
         }
     );
+}
+
+#[test]
+fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields() {
+    let cache: PivotFieldRef = serde_json::from_value(json!("Region")).unwrap();
+    assert_eq!(cache, PivotFieldRef::CacheFieldName("Region".to_string()));
+    assert_eq!(cache.as_cache_field_name(), Some("Region"));
+    assert_eq!(serde_json::to_value(&cache).unwrap(), json!("Region"));
+    assert_eq!(cache.to_string(), "Region");
+    assert!(cache == "Region");
+
+    let col: PivotFieldRef = serde_json::from_value(json!("'Sales Table'[Amount]")).unwrap();
+    assert_eq!(
+        col,
+        PivotFieldRef::DataModelColumn {
+            table: "Sales Table".to_string(),
+            column: "Amount".to_string()
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(&col).unwrap(),
+        json!({"table": "Sales Table", "column": "Amount"})
+    );
+    assert_eq!(col.to_string(), "'Sales Table'[Amount]");
+    assert!(col != "Amount");
+
+    let escaped_col: PivotFieldRef = serde_json::from_value(json!("'O''Brien'[Amount]")).unwrap();
+    assert_eq!(
+        escaped_col,
+        PivotFieldRef::DataModelColumn {
+            table: "O'Brien".to_string(),
+            column: "Amount".to_string()
+        }
+    );
+    assert_eq!(escaped_col.to_string(), "'O''Brien'[Amount]");
+
+    let measure: PivotFieldRef = serde_json::from_value(json!("[Total Sales]")).unwrap();
+    assert_eq!(
+        measure,
+        PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+    );
+    assert_eq!(measure.as_cache_field_name(), None);
+    assert_eq!(
+        serde_json::to_value(&measure).unwrap(),
+        json!({"measure": "Total Sales"})
+    );
+    assert_eq!(measure.to_string(), "[Total Sales]");
+
+    // Back-compat: allow `{ name: \"...\" }` as an alternate measure payload shape.
+    let measure_alt: PivotFieldRef =
+        serde_json::from_value(json!({"name": "Total Sales"})).unwrap();
+    assert_eq!(measure_alt, measure);
 }
 
 #[test]
