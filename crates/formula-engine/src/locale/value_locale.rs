@@ -114,6 +114,9 @@ impl ValueLocaleConfig {
         let parts = super::parse_locale_key(&key)?;
 
         match parts.lang {
+            // Many POSIX environments report locale as `C` / `POSIX` for the default "C locale".
+            // Treat these as `en-US` so callers don't need to special-case.
+            "c" | "posix" => Some(Self::en_us()),
             "en" => match parts.region {
                 // Note: the formula parsing locale still maps `en-GB` to `en-US` (English function
                 // names + `,` argument separators), but value parsing needs the date-order tweak.

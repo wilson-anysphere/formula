@@ -81,7 +81,9 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
     // Map language/region variants onto the small set of engine-supported locales.
     // For example, `fr-CA` still resolves to `fr-FR`, and `de-AT` resolves to `de-DE`.
     match parts.lang {
-        "en" => Some("en-US"),
+        // Many POSIX environments report locale as `C` / `POSIX` for the default "C locale".
+        // Treat these as English (United States) so callers don't need to special-case.
+        "en" | "c" | "posix" => Some("en-US"),
         "ja" => Some("ja-JP"),
         "zh" => {
             // Prefer explicit region codes when present.

@@ -35,6 +35,9 @@ fn locale_id_normalization_get_locale_normalizes_locale_ids() {
         ("en-NZ", &locale::EN_US),
         ("en-IE", &locale::EN_US),
         ("en-ZA", &locale::EN_US),
+        // POSIX "C locale" aliases.
+        ("C", &locale::EN_US),
+        ("POSIX", &locale::EN_US),
         // Ignore BCP-47 variants/extensions.
         ("fr-FR-u-nu-latn", &locale::FR_FR),
         ("de-CH-1996", &locale::DE_DE),
@@ -107,6 +110,9 @@ fn locale_id_normalization_value_locale_config_for_locale_id_normalizes_locale_i
         ("fr-CA", ValueLocaleConfig::fr_fr()),
         ("de-AT", ValueLocaleConfig::de_de()),
         ("es-MX", ValueLocaleConfig::es_es()),
+        // POSIX "C locale" aliases.
+        ("C", ValueLocaleConfig::en_us()),
+        ("POSIX", ValueLocaleConfig::en_us()),
         // Ignore BCP-47 variants/extensions.
         ("fr-FR-u-nu-latn", ValueLocaleConfig::fr_fr()),
         ("de-CH-1996", ValueLocaleConfig::de_de()),
