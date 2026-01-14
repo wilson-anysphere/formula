@@ -271,4 +271,47 @@ describe("DrawingInteractionController anchor normalization", () => {
       dispose();
     }
   });
+
+  it("clamps pointer movement into headers so scroll offsets do not cause jumps", () => {
+    const geom = createGeom({ colWidths: [50, 50, 50], rowHeights: [30] });
+    const object: DrawingObject = {
+      id: 1,
+      kind: { type: "shape", label: "box" },
+      zOrder: 0,
+      anchor: {
+        type: "oneCell",
+        from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+        size: { cx: pxToEmu(40), cy: pxToEmu(20) },
+      },
+    };
+
+    const { element, getObject, dispose } = createControllerHarness({
+      geom,
+      object,
+      viewport: {
+        headerOffsetX: 10,
+        headerOffsetY: 10,
+        frozenCols: 1,
+        scrollX: 100,
+      },
+    });
+
+    try {
+      // Start inside the drawing (which is rendered at x=headerOffsetX, y=headerOffsetY).
+      element.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 30, clientY: 20, pointerId: 1 }));
+      // Move into the row header area (x < headerOffsetX). This should NOT suddenly apply scrollX.
+      element.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 5, clientY: 20, pointerId: 1 }));
+      element.dispatchPointerEvent("pointerup", createPointerEvent({ clientX: 5, clientY: 20, pointerId: 1 }));
+
+      const after = getObject();
+      expect(after.anchor.type).toBe("oneCell");
+      if (after.anchor.type !== "oneCell") return;
+
+      // The object should clamp against the left edge rather than jumping right.
+      expect(after.anchor.from.cell.col).toBe(0);
+      expect(after.anchor.from.offset.xEmu).toBe(0);
+    } finally {
+      dispose();
+    }
+  });
 });

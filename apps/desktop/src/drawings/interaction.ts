@@ -294,10 +294,16 @@ export class DrawingInteractionController {
     const index = this.getHitTestIndex(objects, zoom);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
-    const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
-    const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
-    const startSheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-    const startSheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+    // Pointer coordinates are reported for the full overlay element, including the row/column
+    // header areas. Drawings live in the cell area under the headers, so clamp pointer
+    // coordinates to the cell-area boundary before converting to sheet-space (avoids jumps
+    // when a drag crosses into the header region while scroll offsets are non-zero).
+    const clampedX = Math.max(x, paneLayout.headerOffsetX);
+    const clampedY = Math.max(y, paneLayout.headerOffsetY);
+    const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
+    const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
+    const startSheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+    const startSheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
 
     // Allow grabbing a resize handle for the current selection even when the
     // pointer is slightly outside the object's bounds (handles are centered on
@@ -483,11 +489,12 @@ export class DrawingInteractionController {
       const viewport = this.callbacks.getViewport();
       const zoom = sanitizeZoom(viewport.zoom);
       const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
-      const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
-      const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
-      const sheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-      const sheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+      const clampedX = Math.max(x, paneLayout.headerOffsetX);
+      const clampedY = Math.max(y, paneLayout.headerOffsetY);
+      const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
+      const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
+      const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+      const sheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
       let dx = sheetX - this.resizing.startSheetX;
       let dy = sheetY - this.resizing.startSheetY;
 
@@ -545,11 +552,12 @@ export class DrawingInteractionController {
       const viewport = this.callbacks.getViewport();
       const zoom = sanitizeZoom(viewport.zoom);
       const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
-      const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
-      const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
-      const sheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-      const sheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+      const clampedX = Math.max(x, paneLayout.headerOffsetX);
+      const clampedY = Math.max(y, paneLayout.headerOffsetY);
+      const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
+      const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
+      const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+      const sheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
       const dx = sheetX - this.dragging.startSheetX;
       const dy = sheetY - this.dragging.startSheetY;
 

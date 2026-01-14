@@ -213,6 +213,7 @@ describe("SpreadsheetApp drawings teardown", () => {
     setObjectsSpy.mockClear();
 
     // Pointer events on the old root should not invoke drawing callbacks once disposed.
+    setObjectsSpy.mockClear();
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
     dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 100, clientY: 70, pointerId: 2 });
     expect(setObjectsSpy).not.toHaveBeenCalled();

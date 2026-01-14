@@ -14314,15 +14314,16 @@ export class SpreadsheetApp {
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
       const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
       const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
-      const inHeader = x < headerOffsetX || y < headerOffsetY;
-      const pointInFrozenCols = !inHeader && x < frozenBoundaryX;
-      const pointInFrozenRows = !inHeader && y < frozenBoundaryY;
+      const clampedX = Math.max(x, headerOffsetX);
+      const clampedY = Math.max(y, headerOffsetY);
+      const pointInFrozenCols = clampedX < frozenBoundaryX;
+      const pointInFrozenRows = clampedY < frozenBoundaryY;
       // Absolute anchors always scroll; oneCell/twoCell anchors use the frozen pane under the pointer.
       const alwaysScroll = gesture.startAnchor.type === "absolute";
       const scrollX = alwaysScroll ? viewport.scrollX : pointInFrozenCols ? 0 : viewport.scrollX;
       const scrollY = alwaysScroll ? viewport.scrollY : pointInFrozenRows ? 0 : viewport.scrollY;
-      const sheetX = x - headerOffsetX + scrollX;
-      const sheetY = y - headerOffsetY + scrollY;
+      const sheetX = clampedX - headerOffsetX + scrollX;
+      const sheetY = clampedY - headerOffsetY + scrollY;
 
       let dxPx = sheetX - gesture.startSheetX;
       let dyPx = sheetY - gesture.startSheetY;
