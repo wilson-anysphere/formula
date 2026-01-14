@@ -153,7 +153,9 @@ export class ChunkedLocalStorageBinaryStorage {
     }
     // Guard against corrupted metadata that could otherwise hang the main thread
     // by attempting to load an absurd number of chunks.
-    const MAX_CHUNKS = 10_000;
+    // This should be high enough to allow very small chunk sizes while still
+    // preventing pathological hangs when meta is corrupted.
+    const MAX_CHUNKS = 1_000_000;
     if (chunks > MAX_CHUNKS) {
       try {
         await this.remove();

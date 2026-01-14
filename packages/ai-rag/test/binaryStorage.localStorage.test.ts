@@ -254,12 +254,23 @@ test("ChunkedLocalStorageBinaryStorage clears absurd chunk counts in meta (corru
   });
 
   const ls = getTestLocalStorage();
-  ls.setItem(`${storage.key}:meta`, JSON.stringify({ chunks: 20_000 }));
+  ls.setItem(`${storage.key}:meta`, JSON.stringify({ chunks: 2_000_000 }));
   ls.setItem(`${storage.key}:0`, "AAAA");
 
-  const loaded = await storage.load();
-  expect(loaded).toBeNull();
-  expect(listKeysWithPrefix(ls, `${storage.key}:`)).toEqual([]);
+  // Ensure the corruption guard short-circuits before trying to read chunk keys.
+  const originalGetItem = (Storage.prototype as any).getItem as (...args: any[]) => any;
+  (Storage.prototype as any).getItem = function (key: string) {
+    if (key === `${storage.key}:0`) throw new Error("Should not read chunk keys when meta is corrupted");
+    return originalGetItem.call(this, key);
+  };
+
+  try {
+    const loaded = await storage.load();
+    expect(loaded).toBeNull();
+    expect(listKeysWithPrefix(ls, `${storage.key}:`)).toEqual([]);
+  } finally {
+    (Storage.prototype as any).getItem = originalGetItem;
+  }
 });
 
 test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
