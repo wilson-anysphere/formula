@@ -1108,6 +1108,11 @@ function resolveDrawingsDemoEnabledFromUrl(): boolean {
   }
 }
 
+const EMPTY_DRAWING_OBJECTS: DrawingObject[] = [];
+// Keep ChartStore (AI-generated) charts above workbook DrawingML objects without
+// scanning for `maxZ` on every scroll frame.
+const CANVAS_CHART_Z_ORDER_BASE = 1_000_000;
+
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
@@ -1457,6 +1462,20 @@ export class SpreadsheetApp {
   >();
   private readonly chartCanvasStoreAdapter: ChartCanvasStoreAdapter;
   private chartRecordLookupCache: { list: readonly ChartRecord[]; map: Map<string, ChartRecord> } | null = null;
+  private canvasChartDrawingObjectsCache:
+    | {
+        source: readonly ChartRecord[];
+        bySheetId: Map<string, DrawingObject[]>;
+      }
+    | null = null;
+  private canvasChartCombinedDrawingObjectsCache:
+    | {
+        sheetId: string;
+        base: DrawingObject[];
+        charts: DrawingObject[];
+        combined: DrawingObject[];
+      }
+    | null = null;
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
@@ -2772,7 +2791,7 @@ export class SpreadsheetApp {
           geom,
           {
             getViewport: () => this.getDrawingInteractionViewport(),
-            getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0),
+            getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId),
             shouldHandlePointerDown: (e) => {
               // When the formula bar is in range-selection mode, chart hits should not steal the
               // pointerdown; let normal grid range selection continue.
@@ -2791,7 +2810,7 @@ export class SpreadsheetApp {
               );
             },
             setObjects: (next) => {
-              const current = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0);
+              const current = this.listCanvasChartDrawingObjectsForSheet(this.sheetId);
               const prevById = new Map<number, DrawingObject>();
               for (const obj of current) prevById.set(obj.id, obj);
 
@@ -2820,7 +2839,7 @@ export class SpreadsheetApp {
             },
             onSelectionChange: (selectedId) => {
               const selected =
-                selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0).find((o) => o.id === selectedId) : null;
+                selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId).find((o) => o.id === selectedId) : null;
               const nextChartId =
                 selected?.kind.type === "chart" && typeof selected.kind.chartId === "string" ? selected.kind.chartId : null;
 
@@ -3143,6 +3162,7 @@ export class SpreadsheetApp {
     const invalidateAndRenderDrawings = (reason?: string) => {
       // Keep memory bounded: only cache the active sheet's objects.
       this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.scheduleDrawingsRender(reason);
       this.dispatchDrawingsChanged();
@@ -3949,6 +3969,9 @@ export class SpreadsheetApp {
     this.dirtyChartIds.clear();
     this.chartHasFormulaCells.clear();
     this.chartRangeRectsCache.clear();
+    this.chartRecordLookupCache = null;
+    this.canvasChartDrawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.chartSelectionViewportMemo = null;
     this.conflictUiContainer = null;
 
@@ -6454,6 +6477,7 @@ export class SpreadsheetApp {
     this.drawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.selectedDrawingId = null;
     this.syncActiveSheetBackgroundImage();
@@ -6522,6 +6546,7 @@ export class SpreadsheetApp {
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
@@ -6591,6 +6616,7 @@ export class SpreadsheetApp {
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
@@ -6726,13 +6752,8 @@ export class SpreadsheetApp {
    */
   getDrawingObjects(sheetId: string = this.sheetId): DrawingObject[] {
     const id = String(sheetId ?? this.sheetId);
-    if (!id) return [];
-    const baseObjects = this.listDrawingObjectsForSheet(id);
-    if (!this.useCanvasCharts) return baseObjects;
-
-    const maxZ = baseObjects.reduce((acc, obj) => Math.max(acc, obj.zOrder), -1);
-    const charts = this.listCanvasChartDrawingObjectsForSheet(id, maxZ + 1);
-    return charts.length > 0 ? [...baseObjects, ...charts] : baseObjects;
+    if (!id) return EMPTY_DRAWING_OBJECTS;
+    return this.listDrawingOverlayObjectsForSheet(id);
   }
 
   /**
@@ -7876,6 +7897,7 @@ export class SpreadsheetApp {
     if (this.isReadOnly() || this.isEditing()) {
       // Revert any live preview state to the persisted document snapshot.
       this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
       return;
@@ -8095,6 +8117,7 @@ export class SpreadsheetApp {
 
     // Ensure we don't keep stale in-memory objects after the commit.
     this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
   }
 
@@ -8199,6 +8222,7 @@ export class SpreadsheetApp {
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
     this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     // Deleting an object changes both the drawings list and the active selection.
@@ -8236,6 +8260,7 @@ export class SpreadsheetApp {
 
     // Clear the caches so hit testing + overlay re-render see the committed state.
     this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.selectDrawing(result.duplicatedId);
   }
@@ -13050,10 +13075,51 @@ export class SpreadsheetApp {
     this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
   }
 
-  private listCanvasChartDrawingObjectsForSheet(sheetId: string, zBase: number): DrawingObject[] {
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === sheetId);
-    if (charts.length === 0) return [];
-    return charts.map((chart, idx) => chartRecordToDrawingObject(chart, zBase + idx));
+  private listCanvasChartDrawingObjectsForSheet(sheetId: string): DrawingObject[] {
+    const id = String(sheetId ?? "");
+    if (!id) return EMPTY_DRAWING_OBJECTS;
+    const charts = this.chartStore.listCharts();
+    const cached = this.canvasChartDrawingObjectsCache;
+    if (cached && cached.source === charts) {
+      return cached.bySheetId.get(id) ?? EMPTY_DRAWING_OBJECTS;
+    }
+
+    const bySheetId = new Map<string, DrawingObject[]>();
+    const indexBySheetId = new Map<string, number>();
+
+    for (const chart of charts) {
+      const chartSheetId = String(chart.sheetId ?? "");
+      if (!chartSheetId) continue;
+      const idx = indexBySheetId.get(chartSheetId) ?? 0;
+      indexBySheetId.set(chartSheetId, idx + 1);
+      const obj = chartRecordToDrawingObject(chart, CANVAS_CHART_Z_ORDER_BASE + idx);
+      const bucket = bySheetId.get(chartSheetId);
+      if (bucket) bucket.push(obj);
+      else bySheetId.set(chartSheetId, [obj]);
+    }
+
+    this.canvasChartDrawingObjectsCache = { source: charts, bySheetId };
+    return bySheetId.get(id) ?? EMPTY_DRAWING_OBJECTS;
+  }
+
+  private listDrawingOverlayObjectsForSheet(sheetId: string, baseObjects?: DrawingObject[]): DrawingObject[] {
+    const id = String(sheetId ?? "");
+    if (!id) return EMPTY_DRAWING_OBJECTS;
+    const base = baseObjects ?? this.listDrawingObjectsForSheet(id);
+    if (!this.useCanvasCharts) return base;
+
+    const charts = this.listCanvasChartDrawingObjectsForSheet(id);
+    if (charts.length === 0) return base;
+    if (base.length === 0) return charts;
+
+    const cached = this.canvasChartCombinedDrawingObjectsCache;
+    if (cached && cached.sheetId === id && cached.base === base && cached.charts === charts) {
+      return cached.combined;
+    }
+
+    const combined = [...base, ...charts];
+    this.canvasChartCombinedDrawingObjectsCache = { sheetId: id, base, charts, combined };
+    return combined;
   }
 
   private invalidateCanvasChartsForActiveSheet(): void {
@@ -13078,14 +13144,7 @@ export class SpreadsheetApp {
     if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
       this.selectedDrawingId = null;
     }
-    const objects: DrawingObject[] = (() => {
-      if (!this.useCanvasCharts) return baseObjects;
-      // `listDrawingObjectsForSheet` keeps drawings z-order sorted ascending (back-to-front).
-      // Use the final entry for `maxZ` to avoid an O(n) scan per render.
-      const maxZ = baseObjects.length > 0 ? baseObjects[baseObjects.length - 1]!.zOrder : -1;
-      const charts = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, maxZ + 1);
-      return charts.length > 0 ? [...baseObjects, ...charts] : baseObjects;
-    })();
+    const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
 
     if (this.useCanvasCharts && this.selectedDrawingId == null && this.selectedChartId != null) {
       // Validating a chart selection should not scan every drawing; chart counts are
@@ -13107,15 +13166,6 @@ export class SpreadsheetApp {
         : this.useCanvasCharts && this.selectedChartId != null
           ? chartStoreIdToDrawingId(this.selectedChartId)
           : null;
-
-    const keepChartIds = new Set<string>();
-    for (const obj of objects) {
-      if (obj.kind.type !== "chart") continue;
-      const id = typeof obj.kind.chartId === "string" ? obj.kind.chartId.trim() : "";
-      if (id) keepChartIds.add(id);
-    }
-    // Avoid retaining cached offscreen surfaces for charts that are no longer on the active sheet.
-    this.drawingChartRenderer.pruneSurfaces(keepChartIds);
 
     // In shared-grid mode, drawing selection handles are rendered by the DrawingOverlay canvas.
     // In legacy grid mode (without the dedicated interaction controller), drawing selection handles are
@@ -17988,6 +18038,7 @@ export class SpreadsheetApp {
 
     const prevEffectiveSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     const prevDrawingSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
