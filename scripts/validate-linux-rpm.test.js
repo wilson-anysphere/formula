@@ -151,6 +151,7 @@ function writeFakeRpmExtractTools(
     withSchemeMime = true,
     withParquetMime = true,
     execLine = `Exec=${expectedMainBinary} %U`,
+    docPackageName = expectedRpmName,
   } = {},
 ) {
   const rpm2cpioScript = `#!/usr/bin/env bash
@@ -199,9 +200,9 @@ cat > usr/share/applications/formula.desktop <<'DESKTOP'
 ${desktopLines.join("\n")}
 DESKTOP
 
-mkdir -p usr/share/doc/${expectedRpmName}
-echo "LICENSE stub" > usr/share/doc/${expectedRpmName}/LICENSE
-echo "NOTICE stub" > usr/share/doc/${expectedRpmName}/NOTICE
+ mkdir -p usr/share/doc/${docPackageName}
+ echo "LICENSE stub" > usr/share/doc/${docPackageName}/LICENSE
+ echo "NOTICE stub" > usr/share/doc/${docPackageName}/NOTICE
 
 cat > usr/share/mime/packages/app.formula.desktop.xml <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
@@ -337,10 +338,10 @@ test("validate-linux-rpm accepts when RPM %{NAME} is overridden for validation",
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
   writeFakeRpmTool(binDir);
-  writeFakeRpmExtractTools(binDir);
   writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 
   const overrideName = "formula-desktop-alt";
+  writeFakeRpmExtractTools(binDir, { docPackageName: overrideName });
   const listFile = join(tmp, "rpm-list.txt");
   const requiresFile = writeDefaultRequiresFile(tmp);
   writeFileSync(

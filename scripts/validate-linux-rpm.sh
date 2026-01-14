@@ -504,7 +504,11 @@ validate_desktop_mime_associations_extracted() {
   # built artifact (not just in config).
   if command -v python3 >/dev/null 2>&1; then
     note "Static desktop integration validation (verify extracted RPM payload)"
-    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$tmpdir" --tauri-config "$TAURI_CONF"; then
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" \
+      --package-root "$tmpdir" \
+      --tauri-config "$TAURI_CONF" \
+      --expected-main-binary "$EXPECTED_MAIN_BINARY" \
+      --doc-package-name "$EXPECTED_RPM_NAME"; then
       err "Linux desktop integration verification failed for extracted RPM payload. See output above for expected vs observed MIME types."
       return 1
     fi
