@@ -1053,6 +1053,7 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         y_mode: child_attr(manual_node, "yMode", "val").map(|v| v.trim().to_string()),
         w_mode: child_attr(manual_node, "wMode", "val").map(|v| v.trim().to_string()),
         h_mode: child_attr(manual_node, "hMode", "val").map(|v| v.trim().to_string()),
+        layout_target: child_attr(manual_node, "layoutTarget", "val").map(|v| v.trim().to_string()),
     };
 
     if model == ManualLayoutModel::default() {

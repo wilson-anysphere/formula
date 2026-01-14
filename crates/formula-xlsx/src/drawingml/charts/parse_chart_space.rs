@@ -189,7 +189,7 @@ pub fn parse_chart_space(
         .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
-    let plot_area_layout = parse_layout_manual(plot_area_node);
+    let plot_area_layout = parse_layout_manual(plot_area_node, &mut diagnostics, "plotArea.layout");
 
     let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, xml, &mut diagnostics);
     let axes = parse_axes(plot_area_node, xml, &mut diagnostics);
@@ -1070,7 +1070,7 @@ fn parse_title(
         text.box_style = Some(box_style);
     }
 
-    let layout = parse_layout_manual(title_node);
+    let layout = parse_layout_manual(title_node, diagnostics, "title.layout");
     if let (Some(layout), Some(text)) = (layout, parsed.as_mut()) {
         text.layout = Some(layout);
     }
@@ -1124,7 +1124,7 @@ fn parse_legend(
         .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
-    let layout = parse_layout_manual(legend_node);
+    let layout = parse_layout_manual(legend_node, diagnostics, "legend.layout");
 
     Some(LegendModel {
         position,
@@ -1555,7 +1555,11 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
         .and_then(|n| n.text())
 }
 
-fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
+fn parse_layout_manual(
+    node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<ManualLayoutModel> {
     let layout_node = node
         .children()
         .filter(|n| n.is_element())
@@ -1565,24 +1569,43 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
 
-    fn parse_f64(value: &str) -> Option<f64> {
-        value.trim().parse::<f64>().ok()
-    }
-
     let model = ManualLayoutModel {
-        x: child_attr(manual_node, "x", "val").and_then(parse_f64),
-        y: child_attr(manual_node, "y", "val").and_then(parse_f64),
-        w: child_attr(manual_node, "w", "val").and_then(parse_f64),
-        h: child_attr(manual_node, "h", "val").and_then(parse_f64),
+        x: parse_manual_layout_f64(manual_node, "x", diagnostics, context),
+        y: parse_manual_layout_f64(manual_node, "y", diagnostics, context),
+        w: parse_manual_layout_f64(manual_node, "w", diagnostics, context),
+        h: parse_manual_layout_f64(manual_node, "h", diagnostics, context),
         x_mode: child_attr(manual_node, "xMode", "val").map(|v| v.trim().to_string()),
         y_mode: child_attr(manual_node, "yMode", "val").map(|v| v.trim().to_string()),
         w_mode: child_attr(manual_node, "wMode", "val").map(|v| v.trim().to_string()),
         h_mode: child_attr(manual_node, "hMode", "val").map(|v| v.trim().to_string()),
+        layout_target: child_attr(manual_node, "layoutTarget", "val").map(|v| v.trim().to_string()),
     };
 
     if model == ManualLayoutModel::default() {
         None
     } else {
         Some(model)
+    }
+}
+
+fn parse_manual_layout_f64(
+    manual_node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<f64> {
+    let Some(raw) = child_attr(manual_node, child, "val") else {
+        return None;
+    };
+
+    match raw.trim().parse::<f64>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("{context}: invalid manualLayout {child}/@val {raw:?}"),
+            );
+            None
+        }
     }
 }

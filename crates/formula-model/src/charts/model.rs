@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::RichText;
 
-use super::{ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle};
+use super::{
+    ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,8 @@ pub struct ManualLayoutModel {
     pub w_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub h_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
