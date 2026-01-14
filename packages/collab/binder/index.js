@@ -2817,7 +2817,23 @@ export function bindYjsToDocumentController(options) {
         existingEnc = true;
         existingEncPayload = encRaw;
         encPayloadSupported = isEncryptedCellPayload(encRaw);
-        const keyId = typeof encRaw === "object" && encRaw && typeof encRaw.keyId === "string" ? String(encRaw.keyId).trim() : "";
+        const keyId = (() => {
+          if (!encRaw || typeof encRaw !== "object") return "";
+          const direct = encRaw.keyId;
+          if (typeof direct === "string") return direct.trim();
+          const getter = encRaw.get;
+          if (typeof getter === "function") {
+            try {
+              const raw = getter.call(encRaw, "keyId");
+              const normalized = normalizeOptionalId(raw);
+              if (!normalized || /^\[object .*]$/.test(normalized)) return "";
+              return normalized;
+            } catch {
+              // ignore
+            }
+          }
+          return "";
+        })();
         if (keyId) {
           existingEncKeyId = keyId;
         }
