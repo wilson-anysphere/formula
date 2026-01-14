@@ -936,6 +936,23 @@ mod tests {
     }
 
     #[test]
+    fn inserts_after_merge_cells_and_before_data_validations() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells><dataValidations/></worksheet>"#;
+        let rules = vec![expr_rule("A1:A1", "A1>0")];
+        let updated = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+
+        let merge_end = updated
+            .find("</mergeCells>")
+            .expect("mergeCells end tag exists");
+        let cf_pos = updated.find("<conditionalFormatting").expect("inserted cf");
+        let dv_pos = updated.find("<dataValidations").expect("dataValidations exists");
+        assert!(
+            merge_end < cf_pos && cf_pos < dv_pos,
+            "expected CF after mergeCells and before dataValidations, got:\n{updated}"
+        );
+    }
+
+    #[test]
     fn replaces_and_removes_existing_conditional_formatting() {
         let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><conditionalFormatting sqref="A1:A1"><cfRule type="expression" priority="1"><formula>OLD</formula></cfRule></conditionalFormatting><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#;
         let rules = vec![expr_rule("B1:B1", "NEW")];
@@ -1002,6 +1019,21 @@ mod tests {
             !cleared.contains(X14_CONDITIONAL_FORMATTING_EXT_URI),
             "expected x14 ext entry removed, got:\n{cleared}"
         );
+    }
+
+    #[test]
+    fn x14_extlst_inserts_entry_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><extLst><ext uri="{OTHER}"><foo/></ext></extLst></worksheet>"#;
+        let rules = vec![x14_data_bar_rule("B1:B3")];
+        let updated = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+
+        assert!(updated.contains(r#"uri="{OTHER}""#));
+        assert!(updated.contains("<foo"));
+        assert!(
+            updated.contains(X14_CONDITIONAL_FORMATTING_EXT_URI),
+            "expected x14 CF ext entry inserted, got:\n{updated}"
+        );
+        assert!(updated.contains("x14:conditionalFormattings"));
     }
 
     #[test]
