@@ -265,6 +265,81 @@ fn refresh_pivot_infers_dates_from_column_number_formats_when_cell_styles_inheri
 }
 
 #[test]
+fn refresh_pivot_prefers_row_number_format_over_column_date_format() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Sales").unwrap();
+
+    let serial = ymd_to_serial(
+        ExcelDate::new(2024, 1, 15),
+        ExcelDateSystem::Excel1900 { lotus_compat: true },
+    )
+    .unwrap() as f64;
+    engine.set_cell_value("Sheet1", "A2", serial).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+
+    // Column says "date"...
+    let date_style = date_style_id(&mut engine, "m/d/yyyy");
+    engine.set_col_style_id("Sheet1", 0, Some(date_style));
+
+    // ...but the row overrides it with a non-date number format. Row should win over column, so
+    // the pivot should treat the serial as a number (no date output formatting).
+    let number_style = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine.set_row_style_id("Sheet1", 1, Some(number_style)); // row 2
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Date".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B2")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: PivotConfig {
+            row_fields: vec![PivotField::new("Date")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        },
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(serial));
+    let style_id = engine
+        .get_cell_style_id("Sheet1", "D2")
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(style_id, 0);
+}
+
+#[test]
 fn refresh_pivot_applies_value_field_number_format() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", "Region").unwrap();

@@ -272,6 +272,7 @@ fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
@@ -323,6 +324,7 @@ fn delete_sheet_drops_pivot_definitions_that_referenced_it() {
             cell: cell("D1"),
         },
         config: sum_sales_by_region_config(),
+        apply_number_formats: true,
         last_output_range: None,
         needs_refresh: true,
     });
