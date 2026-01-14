@@ -1181,8 +1181,24 @@ export function bindYjsToDocumentController(options) {
       const found = findYjsSheetEntryById(sheetId);
       const sheetEntry = found?.entry;
 
-      const after = readSheetViewFromYjsSheetEntry(sheetEntry);
       const before = documentController.getSheetView(sheetId);
+      const normalizedAfter = readSheetViewFromYjsSheetEntry(sheetEntry);
+      // Preserve unknown view metadata that the binder does not currently sync (e.g. merged ranges,
+      // drawings). The desktop `DocumentController` stores some shared layout state alongside frozen
+      // panes + axis overrides; clobbering the entire view object would silently drop that state.
+      const after = { ...(before ?? {}) };
+      after.frozenRows = normalizedAfter.frozenRows;
+      after.frozenCols = normalizedAfter.frozenCols;
+      if (normalizedAfter.colWidths) {
+        after.colWidths = normalizedAfter.colWidths;
+      } else {
+        delete after.colWidths;
+      }
+      if (normalizedAfter.rowHeights) {
+        after.rowHeights = normalizedAfter.rowHeights;
+      } else {
+        delete after.rowHeights;
+      }
 
       if (!sheetViewStateEquals(before, after)) {
         sheetViewDeltas.push({ sheetId, before, after });
