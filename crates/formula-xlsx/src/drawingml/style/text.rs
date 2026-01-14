@@ -19,6 +19,7 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     //
     // This matches how Excel often structures chart text, while remaining resilient to
     // missing/empty elements.
+
     let first_paragraph = node
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "p");
