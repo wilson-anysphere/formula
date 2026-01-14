@@ -23,6 +23,14 @@ function safeGetProp(obj, prop) {
 }
 
 /**
+ * Cache of wrappers that preserve invoke method binding + argument count without mutating
+ * the injected `__TAURI__` object.
+ *
+ * @type {WeakMap<object, { invoke: Function, bound: TauriInvoke }>}
+ */
+const boundInvokeCache = new WeakMap();
+
+/**
  * @returns {any | null}
  */
 function getTauriGlobalOrNull() {
@@ -42,7 +50,27 @@ export function getTauriInvokeOrNull() {
   const tauri = getTauriGlobalOrNull();
   const core = safeGetProp(tauri, "core");
   const invoke = /** @type {unknown} */ (safeGetProp(core, "invoke"));
-  return typeof invoke === "function" ? /** @type {TauriInvoke} */ (invoke) : null;
+  if (typeof invoke !== "function") return null;
+  if (core && (typeof core === "object" || typeof core === "function")) {
+    const cached = boundInvokeCache.get(core);
+    if (cached?.invoke === invoke) return cached.bound;
+    const bound = /** @type {TauriInvoke} */ (function (cmd, args) {
+      if (arguments.length < 2) {
+        return invoke.call(core, cmd);
+      }
+      return invoke.call(core, cmd, args);
+    });
+    boundInvokeCache.set(core, { invoke, bound });
+    return bound;
+  }
+
+  // Extremely defensive fallback: bind without caching when `core` is not a WeakMap key.
+  return /** @type {TauriInvoke} */ (function (cmd, args) {
+    if (arguments.length < 2) {
+      return invoke.call(core, cmd);
+    }
+    return invoke.call(core, cmd, args);
+  });
 }
 
 /**

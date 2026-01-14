@@ -415,12 +415,30 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriInvokeOrThrow()).toThrowError("Tauri invoke API not available");
     });
 
-    it("detects core.invoke when available", () => {
-      const invoke = vi.fn(async () => null);
-      (globalThis as any).__TAURI__ = { core: { invoke } };
-      expect(getTauriInvokeOrNull()).toBe(invoke);
-      expect(getTauriInvokeOrThrow()).toBe(invoke);
+    it("detects core.invoke when available and preserves method binding + argument count", async () => {
+      const core: any = {};
+      let invokeThis: any = null;
+      const invoke = vi.fn(async function (cmd: string, args?: any) {
+        invokeThis = this;
+        return { cmd, args, argc: arguments.length };
+      });
+      core.invoke = invoke;
+      (globalThis as any).__TAURI__ = { core };
+
+      const invokeFn = getTauriInvokeOrNull();
+      expect(typeof invokeFn).toBe("function");
+      expect(getTauriInvokeOrThrow()).toBe(invokeFn);
       expect(hasTauriInvoke()).toBe(true);
+
+      await expect(invokeFn!("ping")).resolves.toEqual({ cmd: "ping", args: undefined, argc: 1 });
+      expect(invokeThis).toBe(core);
+      expect(invoke.mock.calls[0]).toEqual(["ping"]);
+
+      await expect(invokeFn!("ping", { value: 1 })).resolves.toEqual({ cmd: "ping", args: { value: 1 }, argc: 2 });
+      expect(invoke.mock.calls[1]).toEqual(["ping", { value: 1 }]);
+
+      // Repeated access should be stable for performance (no new wrapper allocation).
+      expect(getTauriInvokeOrNull()).toBe(invokeFn);
     });
 
     it("treats throwing nested properties (e.g. core getter) as unavailable", () => {
