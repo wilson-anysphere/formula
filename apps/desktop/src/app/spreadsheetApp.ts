@@ -6308,6 +6308,7 @@ export class SpreadsheetApp {
       const prevSelectedDrawingId = this.selectedDrawingId;
       if (prevSelectedDrawingId != null) {
         this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
         this.drawingOverlay.setSelectedId(null);
         this.dispatchDrawingSelectionChanged();
       }
@@ -6338,8 +6339,10 @@ export class SpreadsheetApp {
         // swapping `sheetId`.
         this.drawingInteractionController?.reset({ clearSelection: true });
         this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
         this.drawingOverlay.setSelectedId(null);
         this.drawingObjectsCache = null;
+        this.canvasChartCombinedDrawingObjectsCache = null;
         this.invalidateDrawingHitTestIndexCaches();
 
         this.sheetId = sheetIds[0];
@@ -6599,6 +6602,7 @@ export class SpreadsheetApp {
     this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.selectedDrawingId = null;
+    this.selectedDrawingIndex = null;
     this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
@@ -6669,6 +6673,7 @@ export class SpreadsheetApp {
       this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -6740,6 +6745,7 @@ export class SpreadsheetApp {
       this.canvasChartCombinedDrawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
