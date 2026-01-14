@@ -94,6 +94,37 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
+  it("can retry host TTI reporting after an invoke timeout", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      // Avoid waiting on rAF; focus the test on invoke timeout.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      const invoke = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = true;
+
+      const first = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+      await vi.runAllTimersAsync();
+      await first;
+
+      const second = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+      await vi.runAllTimersAsync();
+      await second;
+
+      const calls = invoke.mock.calls.map((args) => args[0]);
+      expect(calls.filter((c) => c === "report_startup_tti")).toHaveLength(2);
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
   it("reports first render before TTI when first-render was not previously reported", async () => {
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -301,6 +332,36 @@ describe("startupMetrics", () => {
       expect(calls.filter((c) => c === "report_startup_first_render")).toHaveLength(2);
     } finally {
       (globalThis as any).requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it("can retry first-render reporting after an invoke timeout", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      // Avoid waiting on rAF; focus the test on invoke timeout.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      const invoke = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+
+      const first = markStartupFirstRender();
+      await vi.runAllTimersAsync();
+      await first;
+
+      const second = markStartupFirstRender();
+      await vi.runAllTimersAsync();
+      await second;
+
+      const calls = invoke.mock.calls.map((args) => args[0]);
+      expect(calls.filter((c) => c === "report_startup_first_render")).toHaveLength(2);
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
     }
   });
 
