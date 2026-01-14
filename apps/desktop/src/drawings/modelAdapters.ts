@@ -697,6 +697,31 @@ function decodeBase64ToBytes(base64: string): Uint8Array | null {
 }
 
 function parseBytes(value: unknown, context: string): Uint8Array {
+  // Some interop layers wrap byte payloads as singleton arrays or objects with numeric keys
+  // (e.g. `{0: [1,2,3]}` or `{0: "AQID"}`). Be careful to *not* unwrap legitimate byte objects
+  // where `"0"` is a real byte index (including 1-byte payloads like `{0: 255}`).
+  let unwrapped: unknown = value;
+  for (let depth = 0; depth < 4; depth++) {
+    // Only unwrap singleton arrays when the wrapped payload is not a number, so `[255]`
+    // (valid 1-byte arrays) remains intact.
+    if (Array.isArray(unwrapped) && unwrapped.length === 1 && typeof unwrapped[0] !== "number") {
+      unwrapped = unwrapped[0];
+      continue;
+    }
+    if (isRecord(unwrapped)) {
+      const keys = Object.keys(unwrapped);
+      if (keys.length === 1 && Object.prototype.hasOwnProperty.call(unwrapped, "0")) {
+        const candidate = (unwrapped as JsonRecord)["0"];
+        if (candidate != null && typeof candidate !== "number") {
+          unwrapped = candidate;
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  value = unwrapped;
+
   if (value instanceof Uint8Array) {
     if (value.byteLength > MAX_INSERT_IMAGE_BYTES) {
       throw new Error(`${context} exceeds maximum image size (${value.byteLength} bytes)`);
