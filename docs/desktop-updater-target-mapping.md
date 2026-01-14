@@ -31,11 +31,11 @@ actual” diff, and this document should be updated alongside the validators.
 
 ### macOS universal note
 
-We build a **single** universal macOS updater archive (a tarball; `*.app.tar.gz` preferred), but
-**tauri-action writes it under both arch keys**:
+We build a **single** universal macOS updater archive (`*.app.tar.gz`), but **tauri-action writes it
+under both arch keys**:
 
-- `darwin-x86_64` → macOS updater archive (same tarball)
-- `darwin-aarch64` → macOS updater archive (same tarball)
+- `darwin-x86_64` → `*.app.tar.gz` (same archive)
+- `darwin-aarch64` → `*.app.tar.gz` (same archive)
 
 This is intentional: on Intel Macs the updater target is `darwin-x86_64`, and on Apple Silicon it is
 `darwin-aarch64` even when the binary itself is universal.
