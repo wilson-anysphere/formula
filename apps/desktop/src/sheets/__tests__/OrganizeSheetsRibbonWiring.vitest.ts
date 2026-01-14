@@ -13,16 +13,18 @@ describe("Organize Sheets ribbon wiring", () => {
     const commands = stripComments(readFileSync(commandsPath, "utf8"));
 
     // The ribbon schema uses `home.cells.format.organizeSheets`. Ensure it's registered as a
-    // real CommandRegistry command (no main.ts switch-case wiring).
-    const registerMatch = commands.match(/\bregisterBuiltinCommand\(\s*["']home\.cells\.format\.organizeSheets["']/);
+    // real CommandRegistry command (no main.ts switch-case wiring) and delegates to the
+    // `sheetStructureHandlers` hook.
+    const registerMatch = commands.match(
+      /\bregisterBuiltinCommand\s*\(\s*["']home\.cells\.format\.organizeSheets["']/,
+    );
     expect(registerMatch).not.toBeNull();
     const registerIndex = registerMatch?.index ?? -1;
     expect(registerIndex).toBeGreaterThanOrEqual(0);
-    expect(commands.slice(registerIndex, registerIndex + 600)).toContain("sheetStructureHandlers?.openOrganizeSheets");
+    expect(commands.slice(registerIndex, registerIndex + 800)).toMatch(/\bsheetStructureHandlers\s*\?\.\s*openOrganizeSheets\b/);
 
     // Ensure `main.ts` passes the handler into registerDesktopCommands (so the command can open the dialog).
-    const handlersMatch = main.match(/\bsheetStructureHandlers\s*:\s*{[\s\S]*?\bopenOrganizeSheets\b/);
-    expect(handlersMatch).not.toBeNull();
+    expect(main).toMatch(/\bsheetStructureHandlers\s*:\s*\{[\s\S]{0,800}?\bopenOrganizeSheets\b/);
 
     // Ensure the helper exists and delegates to `openOrganizeSheetsDialog`.
     const fnMatch = main.match(/(?:function\s+openOrganizeSheets\s*\(|const\s+openOrganizeSheets\s*=\s*\(\)\s*=>)/);
