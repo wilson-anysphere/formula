@@ -99,6 +99,15 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(store).toBeInstanceOf(MemoryAIAuditStore);
   });
 
+  it("forwards max_entries/max_age_ms to the default memory store", async () => {
+    const store = await createDefaultAIAuditStore({ bounded: false, max_entries: 7, max_age_ms: 1234 });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).maxEntries).toBe(7);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).maxAgeMs).toBe(1234);
+  });
+
   it("propagates bounded options to BoundedAIAuditStore", async () => {
     const store = await createDefaultAIAuditStore({ bounded: { max_entry_chars: 123 } });
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
@@ -172,6 +181,16 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
 
     const store = await createDefaultAIAuditStore({ prefer: "localstorage", bounded: false });
     expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
+  it('prefer: "localstorage" forwards max_entries/max_age_ms', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis as any, "localStorage", { value: storage, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage", bounded: false, max_entries: 7, max_age_ms: 1234 });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+    expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
+    expect((store as LocalStorageAIAuditStore).maxAgeMs).toBe(1234);
   });
 
   it('prefer: "localstorage" falls back to memory when localStorage access throws', async () => {
