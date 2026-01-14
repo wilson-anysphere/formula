@@ -103,6 +103,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // --- Home editing -----------------------------------------------------------
   "home.editing.autoSum",
   "home.editing.autoSum.sum",
+  "home.editing.autoSum.average",
+  "home.editing.autoSum.countNumbers",
+  "home.editing.autoSum.max",
+  "home.editing.autoSum.min",
   "home.editing.fill.down",
   "home.editing.fill.right",
   "home.editing.fill.up",

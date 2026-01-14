@@ -80,6 +80,18 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
   });
 
+  it("keeps AutoSum dropdown variants enabled even though they are not registered", () => {
+    const commandRegistry = new CommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    // AutoSum dropdown variants are wired via `apps/desktop/src/main.ts` (not CommandRegistry), so they must
+    // be exempt from the registry-backed disabling allowlist to stay clickable in the ribbon.
+    expect(baselineDisabledById["home.editing.autoSum.average"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.autoSum.countNumbers"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.autoSum.max"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.autoSum.min"]).toBeUndefined();
+  });
+
   it("keeps exempt menu items enabled even when the CommandRegistry does not register them", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -130,7 +142,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => {
-      root.render(<Ribbon actions={{}} schema={schema} />);
+      root.render(React.createElement(Ribbon, { actions: {}, schema }));
     });
 
     const trigger = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format"]');
