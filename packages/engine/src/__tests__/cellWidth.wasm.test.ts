@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { readFileSync } from "node:fs";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
@@ -70,8 +69,7 @@ describeWasm("CELL(\"width\") + column width/hidden metadata (wasm)", () => {
   it("imports column widths + hidden metadata from XLSX so CELL(\"width\") matches Excel immediately", async () => {
     const wasm = await loadFormulaWasm();
 
-    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-    const fixturePath = path.join(repoRoot, "fixtures", "xlsx", "basic", "row-col-attrs.xlsx");
+    const fixturePath = fileURLToPath(new URL("../../../../fixtures/xlsx/basic/row-col-attrs.xlsx", import.meta.url));
     const bytes = new Uint8Array(readFileSync(fixturePath));
 
     const wb = wasm.WasmWorkbook.fromXlsxBytes(bytes);
