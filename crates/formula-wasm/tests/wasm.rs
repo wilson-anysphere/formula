@@ -168,6 +168,50 @@ fn set_format_runs_by_col_accepts_valid_runs_and_null_clears() {
         .unwrap();
 }
 
+#[wasm_bindgen_test]
+fn set_format_runs_by_col_rejects_non_array_payloads() {
+    let mut wb = WasmWorkbook::new();
+
+    let err = wb
+        .set_format_runs_by_col(
+            DEFAULT_SHEET.to_string(),
+            0,
+            JsValue::from_str("not an array"),
+        )
+        .expect_err("expected setFormatRunsByCol to reject non-array input");
+
+    assert_eq!(
+        err.as_string().unwrap_or_default(),
+        "setFormatRunsByCol: runs must be an array"
+    );
+}
+
+#[wasm_bindgen_test]
+fn set_format_runs_by_col_validates_run_ranges() {
+    let mut wb = WasmWorkbook::new();
+
+    let style_id = wb
+        .intern_style(to_js_value(&json!({ "numberFormat": "0.00" })))
+        .unwrap();
+
+    let err = wb
+        .set_format_runs_by_col(
+            DEFAULT_SHEET.to_string(),
+            0,
+            to_js_value(&json!([{
+                "startRow": 1,
+                "endRowExclusive": 1,
+                "styleId": style_id,
+            }])),
+        )
+        .expect_err("expected setFormatRunsByCol to reject invalid run range");
+
+    assert_eq!(
+        err.as_string().unwrap_or_default(),
+        "setFormatRunsByCol: runs[0].endRowExclusive must be greater than startRow"
+    );
+}
+
 #[derive(Debug, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct PartialParseResult {
