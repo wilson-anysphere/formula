@@ -1616,6 +1616,8 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
     where
         D: serde::Deserializer<'de>,
     {
+        use serde::de::IntoDeserializer;
+
         struct PivotFieldRefVisitor;
 
         impl PivotFieldRefVisitor {
@@ -1623,13 +1625,8 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
             where
                 E: de::Error,
             {
-                if value.len() > crate::resource_limits::MAX_PIVOT_TEXT_BYTES {
-                    return Err(E::custom(format!(
-                        "string is too large (max {} bytes)",
-                        crate::resource_limits::MAX_PIVOT_TEXT_BYTES
-                    )));
-                }
-                Ok(IpcPivotFieldRef::Text(LimitedString(value.to_owned())))
+                let text = PivotText::deserialize(value.into_deserializer())?;
+                Ok(IpcPivotFieldRef::Text(text))
             }
         }
         impl<'de> de::Visitor<'de> for PivotFieldRefVisitor {
@@ -1657,13 +1654,8 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
             where
                 E: de::Error,
             {
-                if v.len() > crate::resource_limits::MAX_PIVOT_TEXT_BYTES {
-                    return Err(E::custom(format!(
-                        "string is too large (max {} bytes)",
-                        crate::resource_limits::MAX_PIVOT_TEXT_BYTES
-                    )));
-                }
-                Ok(IpcPivotFieldRef::Text(LimitedString(v)))
+                let text = PivotText::deserialize(v.into_deserializer())?;
+                Ok(IpcPivotFieldRef::Text(text))
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>

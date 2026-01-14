@@ -73,6 +73,22 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
         "expected exactly one mark_ready_and_drain call inside OAUTH_REDIRECT_READY_EVENT listener, found {ready_calls_in_listener}"
     );
 
+    // Extra guardrail: the backend should only flip *oauth-redirect* readiness in response to the
+    // frontend readiness signal. If `mark_ready_and_drain` starts getting called on the
+    // `SharedOauthRedirectState` elsewhere (e.g. during startup), cold-start redirects can be
+    // emitted before the JS listener exists.
+    let mut oauth_redirect_ready_calls = 0;
+    for (idx, _) in main_rs.match_indices("state::<SharedOauthRedirectState>") {
+        let window = main_rs
+            .get(idx..idx.saturating_add(300))
+            .unwrap_or(&main_rs[idx..]);
+        oauth_redirect_ready_calls += window.matches(".mark_ready_and_drain(").count();
+    }
+    assert_eq!(
+        oauth_redirect_ready_calls, 1,
+        "expected exactly one mark_ready_and_drain call associated with SharedOauthRedirectState in desktop main.rs, found {oauth_redirect_ready_calls}"
+    );
+
     let emits_oauth_redirect = listener_body.contains("emit_oauth_redirect_event")
         || listener_body.contains(".emit(OAUTH_REDIRECT_EVENT")
         || listener_body.contains(".emit(\"oauth-redirect\"");
