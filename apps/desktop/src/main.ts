@@ -9331,35 +9331,6 @@ const ribbonActions = createRibbonActionsFromCommands({
     await ensureExtensionsLoadedRef?.();
     syncContributedCommandsRef?.();
   },
-  // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
-  // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
-  toggleOverrides: {
-    "view.toggleShowFormulas": async (pressed) => {
-      // Route all ribbon "Show Formulas" toggles through the canonical command so
-      // ribbon, command palette, and keybindings share the same logic/guards.
-      try {
-        if (app.getShowFormulas() !== pressed) {
-          await commandRegistry.executeCommand("view.toggleShowFormulas");
-        }
-      } finally {
-        app.focus();
-      }
-    },
-    "view.togglePerformanceStats": async (pressed) => {
-      try {
-        await commandRegistry.executeCommand("view.togglePerformanceStats", pressed);
-      } finally {
-        app.focus();
-      }
-    },
-    "view.toggleSplitView": async (pressed) => {
-      try {
-        await commandRegistry.executeCommand("view.toggleSplitView", pressed);
-      } finally {
-        app.focus();
-      }
-    },
-  },
   onUnknownCommand: handleRibbonCommand,
 });
 

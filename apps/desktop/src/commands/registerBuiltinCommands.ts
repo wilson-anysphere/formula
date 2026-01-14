@@ -576,13 +576,29 @@ export function registerBuiltinCommands(params: {
     "view.toggleShowFormulas",
     t("command.view.toggleShowFormulas"),
     (next?: boolean) => {
-      if (app.isEditing()) return;
-      if (getTextEditingTarget()) return;
-      if (typeof next === "boolean") {
-        app.setShowFormulas(next);
+      // When invoked from the Ribbon, the command receives an explicit boolean pressed state.
+      // In that case, restore grid focus so users can keep working (Excel-style).
+      //
+      // When invoked from other surfaces (command palette / keybindings), `next` is typically omitted,
+      // so we avoid focusing here (the host owns returning focus after it closes overlays).
+      const focusAfter = typeof next === "boolean";
+
+      if (app.isEditing() || getTextEditingTarget()) {
+        // Ribbon toggles optimistically update their internal pressed state before the command runs.
+        // Refresh so the toggle reflects the actual (unchanged) app state.
+        refresh();
         return;
       }
+
+      if (typeof next === "boolean") {
+        app.setShowFormulas(next);
+        refresh();
+        if (focusAfter) focusApp();
+        return;
+      }
+
       app.toggleShowFormulas();
+      refresh();
     },
     {
       category: t("commandCategory.view"),
@@ -600,6 +616,8 @@ export function registerBuiltinCommands(params: {
       const current = Boolean(perfStats?.enabled);
       const enabled = typeof next === "boolean" ? next : !current;
       app.setGridPerfStatsEnabled(enabled);
+      refresh();
+      if (typeof next === "boolean") focusApp();
     },
     {
       category: t("commandCategory.view"),
@@ -624,7 +642,8 @@ export function registerBuiltinCommands(params: {
         layoutController.setSplitDirection("vertical", 0.5);
       }
 
-      app.focus();
+      refresh();
+      focusApp();
     },
     {
       category: t("commandCategory.view"),
