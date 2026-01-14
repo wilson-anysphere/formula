@@ -436,6 +436,7 @@ impl Workbook {
         );
         self.sheet_order = new_order;
     }
+
     fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
         self.sheet_order.iter().position(|&id| id == sheet)
     }
@@ -15151,6 +15152,26 @@ mod tests {
             engine.get_cell_value("Sheet1", "A3"),
             Value::Text("Automatic except for tables".to_string())
         );
+    }
+
+    #[test]
+    fn cell_width_reflects_column_metadata() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=CELL("width", A1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.43));
+
+        // Column widths are stored in Excel "character" units (OOXML `col/@width`).
+        engine.set_col_width("Sheet1", 0, Some(15.0));
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.0));
+
+        // Hidden columns should return 0 for CELL("width").
+        engine.set_col_hidden("Sheet1", 0, true);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
     }
 
     #[test]

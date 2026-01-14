@@ -17,11 +17,15 @@ As of today:
 - `INFO("system")` is implemented but currently hard-coded to `"pcdos"`.
 - Other `INFO()` keys listed below currently return `#N/A` (recognized but not available).
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
-- `CELL("protect")` and `CELL("prefix")` return best-effort defaults:
+- `CELL("protect")` and `CELL("prefix")` are recognized and return **best-effort defaults** today:
   - `protect`: `1` (locked)
   - `prefix`: `""` (no prefix)
-- `CELL("width")` returns the referenced column's width metadata (OOXML "character" units) when available,
-  defaulting to `8.43` when unset. Hidden columns currently return `0` (Excel's exact hidden-width encoding is not implemented yet).
+- `CELL("width")` is **partially implemented**:
+  - consults per-column metadata when available (`ColProperties.width` / `ColProperties.hidden`)
+  - returns the column width in **Excel character units** (OOXML `col/@width`), defaulting to `8.43` when unset
+  - returns `0` when the column is hidden
+
+  This is not yet fully Excel-compatible (Excel uses a more idiosyncratic width/hidden encoding).
 
 Tracking implementation: `crates/formula-engine/src/functions/information/worksheet.rs`.
 
@@ -86,9 +90,9 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
-| `protect` | number | **effective style** (`protection.locked`) | **partially implemented** (currently always returns `1`) |
-| `prefix` | text | **effective style** (`alignment.horizontal`) | **partially implemented** (currently always returns `""`) |
-| `width` | number | column width + column hidden state | **partially implemented** (currently uses column width metadata) |
+| `protect` | number | **effective style** (`protection.locked`) | best-effort (currently always returns `1`) |
+| `prefix` | text | **effective style** (`alignment.horizontal`) | best-effort (currently always returns `""`) |
+| `width` | number | column width + column hidden state | **partially implemented** (consults `ColProperties.width` / `hidden`; defaults to `8.43`, returns `0` when hidden) |
 
 Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
 
@@ -174,8 +178,8 @@ This must use the cell’s **effective alignment** (layered style merge), not ju
 
 Current behavior:
 
-- Returns the referenced column's width metadata (Excel/OOXML "character" units) when available, defaulting to `8.43` when unset.
-- Hidden columns currently return `0` (Excel's exact hidden-width encoding is not implemented yet).
+- Returns the per-column `ColProperties.width` value when available (in **Excel character units**), defaulting to `8.43`.
+- Returns `0` when the referenced column is marked hidden (`ColProperties.hidden = true`).
 
 Planned behavior:
 
