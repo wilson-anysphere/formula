@@ -955,6 +955,17 @@ impl NameRef {
                 }
 
                 out.push('\'');
+                if workbook_contains_unescaped_rbracket(book) {
+                    if let Some((path_prefix, file_name)) = split_workbook_path_prefix(book) {
+                        fmt_sheet_name_escaped(out, path_prefix);
+                        out.push('[');
+                        fmt_sheet_name_escaped(out, file_name);
+                        out.push(']');
+                        fmt_sheet_name_escaped(out, &self.name);
+                        out.push('\'');
+                        return;
+                    }
+                }
                 out.push('[');
                 fmt_sheet_name_escaped(out, book);
                 out.push(']');
@@ -1140,6 +1151,49 @@ fn fmt_sheet_range_name(out: &mut String, start: &str, end: &str, reference_styl
     }
 }
 
+fn workbook_contains_unescaped_rbracket(workbook: &str) -> bool {
+    // Excel external workbook prefixes escape literal `]` characters as `]]`, but workbook ids can
+    // also come from path-qualified references where bracketed path components (e.g. `C:\[foo]\`)
+    // contribute literal `]` characters *outside* of the workbook name's `[...]` segment.
+    //
+    // When serializing `"[{workbook}]{sheet}"` back into formula syntax, unescaped `]` characters
+    // inside the workbook segment would terminate the prefix early and corrupt parsing.
+    //
+    // Detect a `]` that is not part of an Excel escape pair (`]]`).
+    let bytes = workbook.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return true;
+        }
+        let ch = workbook[i..].chars().next().expect("i always at char boundary");
+        i += ch.len_utf8();
+    }
+    false
+}
+
+fn split_workbook_path_prefix(workbook: &str) -> Option<(&str, &str)> {
+    // Best-effort split for Windows/posix-ish path qualified workbook ids.
+    // We only need this when serializing path-qualified external refs that contain literal `]`
+    // characters (from bracketed path components like `C:\[foo]\`).
+    let last_backslash = workbook.rfind('\\');
+    let last_slash = workbook.rfind('/');
+    let split_at = match (last_backslash, last_slash) {
+        (Some(a), Some(b)) => a.max(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => return None,
+    };
+    if split_at + 1 >= workbook.len() {
+        return None;
+    }
+    Some(workbook.split_at(split_at + 1))
+}
+
 fn fmt_ref_prefix(
     out: &mut String,
     workbook: &Option<String>,
@@ -1203,6 +1257,29 @@ fn fmt_ref_prefix(
             // sheet name requires quoting (e.g. spaces / characters that aren't valid identifiers).
             match sheet_ref {
                 SheetRef::Sheet(sheet) => {
+                    // Path-qualified external workbook refs can contain bracketed path components
+                    // like `C:\[foo]\[Book.xlsx]Sheet1`. After canonicalization, the workbook id is
+                    // stored as `C:\[foo]\Book.xlsx` (folding the path prefix into the workbook
+                    // identifier). Serializing this back into the canonical `[workbook]sheet` form
+                    // would require escaping the literal `]` in the path prefix, which would not
+                    // round-trip through our parser (we treat workbook ids as opaque strings).
+                    //
+                    // Instead, serialize these workbook ids back into Excel's path-qualified form:
+                    //   `'C:\[foo]\[Book.xlsx]{sheet}'!A1`
+                    if workbook_contains_unescaped_rbracket(book) {
+                        if let Some((path_prefix, file_name)) = split_workbook_path_prefix(book) {
+                            out.push('\'');
+                            fmt_sheet_name_escaped(out, path_prefix);
+                            out.push('[');
+                            fmt_sheet_name_escaped(out, file_name);
+                            out.push(']');
+                            fmt_sheet_name_escaped(out, sheet);
+                            out.push('\'');
+                            out.push('!');
+                            return;
+                        }
+                    }
+
                     // Workbook names inside `[...]` are permissive (Excel allows spaces, dashes,
                     // etc), but the sheet name portion follows normal quoting rules.
                     //
@@ -1230,6 +1307,21 @@ fn fmt_ref_prefix(
                 SheetRef::SheetRange { start, end } => {
                     if sheet_name_eq_case_insensitive(start, end) {
                         // Degenerate 3D span within an external workbook.
+                        if workbook_contains_unescaped_rbracket(book) {
+                            if let Some((path_prefix, file_name)) = split_workbook_path_prefix(book)
+                            {
+                                out.push('\'');
+                                fmt_sheet_name_escaped(out, path_prefix);
+                                out.push('[');
+                                fmt_sheet_name_escaped(out, file_name);
+                                out.push(']');
+                                fmt_sheet_name_escaped(out, start);
+                                out.push('\'');
+                                out.push('!');
+                                return;
+                            }
+                        }
+
                         let needs_quotes = sheet_name_needs_quotes(start, reference_style)
                             || book.contains('[')
                             || book.contains(']');
@@ -1248,6 +1340,23 @@ fn fmt_ref_prefix(
                         }
                         out.push('!');
                     } else {
+                        if workbook_contains_unescaped_rbracket(book) {
+                            if let Some((path_prefix, file_name)) = split_workbook_path_prefix(book)
+                            {
+                                out.push('\'');
+                                fmt_sheet_name_escaped(out, path_prefix);
+                                out.push('[');
+                                fmt_sheet_name_escaped(out, file_name);
+                                out.push(']');
+                                fmt_sheet_name_escaped(out, start);
+                                out.push(':');
+                                fmt_sheet_name_escaped(out, end);
+                                out.push('\'');
+                                out.push('!');
+                                return;
+                            }
+                        }
+
                         let needs_quotes = book.contains('[')
                             || book.contains(']')
                             || sheet_name_needs_quotes(start, reference_style)
