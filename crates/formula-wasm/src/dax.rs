@@ -82,6 +82,21 @@ fn cross_filter_direction_from_js(raw: Option<&str>) -> Result<CrossFilterDirect
     }
 }
 
+fn cardinality_to_js(cardinality: Cardinality) -> &'static str {
+    match cardinality {
+        Cardinality::OneToMany => "OneToMany",
+        Cardinality::OneToOne => "OneToOne",
+        Cardinality::ManyToMany => "ManyToMany",
+    }
+}
+
+fn cross_filter_direction_to_js(dir: CrossFilterDirection) -> &'static str {
+    match dir {
+        CrossFilterDirection::Single => "Single",
+        CrossFilterDirection::Both => "Both",
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RelationshipDto {
@@ -110,6 +125,42 @@ struct GroupByDto {
 struct PivotMeasureDto {
     name: String,
     expression: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxTableSchemaDto {
+    name: String,
+    columns: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxMeasureSchemaDto {
+    name: String,
+    expression: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxRelationshipSchemaDto {
+    name: String,
+    from_table: String,
+    from_column: String,
+    to_table: String,
+    to_column: String,
+    cardinality: String,
+    cross_filter_direction: String,
+    is_active: bool,
+    enforce_referential_integrity: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxModelSchemaDto {
+    tables: Vec<DaxTableSchemaDto>,
+    measures: Vec<DaxMeasureSchemaDto>,
+    relationships: Vec<DaxRelationshipSchemaDto>,
 }
 
 /// JS-friendly wrapper around [`formula_dax::DataModel`].
@@ -202,6 +253,57 @@ impl DaxModel {
         self.model
             .add_calculated_column(table, name, expression)
             .map_err(dax_error_to_js)
+    }
+
+    /// Returns a lightweight schema for the current Data Model (tables/columns, measures, relationships).
+    ///
+    /// This is intended for pivot UIs that need to enumerate available fields.
+    #[wasm_bindgen(js_name = "getSchema")]
+    pub fn get_schema(&self) -> Result<JsValue, JsValue> {
+        let mut tables: Vec<DaxTableSchemaDto> = self
+            .model
+            .tables()
+            .map(|t| DaxTableSchemaDto {
+                name: t.name().to_string(),
+                columns: t.columns().to_vec(),
+            })
+            .collect();
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut measures: Vec<DaxMeasureSchemaDto> = self
+            .model
+            .measures_definitions()
+            .map(|m| DaxMeasureSchemaDto {
+                name: m.name.clone(),
+                expression: m.expression.clone(),
+            })
+            .collect();
+        measures.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut relationships: Vec<DaxRelationshipSchemaDto> = self
+            .model
+            .relationships_definitions()
+            .map(|r| DaxRelationshipSchemaDto {
+                name: r.name.clone(),
+                from_table: r.from_table.clone(),
+                from_column: r.from_column.clone(),
+                to_table: r.to_table.clone(),
+                to_column: r.to_column.clone(),
+                cardinality: cardinality_to_js(r.cardinality).to_string(),
+                cross_filter_direction: cross_filter_direction_to_js(r.cross_filter_direction)
+                    .to_string(),
+                is_active: r.is_active,
+                enforce_referential_integrity: r.enforce_referential_integrity,
+            })
+            .collect();
+        relationships.sort_by(|a, b| a.name.cmp(&b.name));
+
+        serde_wasm_bindgen::to_value(&DaxModelSchemaDto {
+            tables,
+            measures,
+            relationships,
+        })
+        .map_err(|err| js_error(err.to_string()))
     }
 
     #[wasm_bindgen(js_name = "evaluate")]
@@ -436,6 +538,26 @@ impl DaxModel {
         let obj = Object::new();
         object_set(&obj, "data", &data.into())?;
         Ok(obj.into())
+    }
+
+    /// Borrowing variant of [`pivot_crosstab`](Self::pivot_crosstab) that does not consume the filter context.
+    #[wasm_bindgen(js_name = "pivotCrosstabWithFilter")]
+    pub fn pivot_crosstab_with_filter(
+        &self,
+        base_table: &str,
+        row_fields: JsValue,
+        column_fields: JsValue,
+        measures: JsValue,
+        filter_context: &DaxFilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context.ctx.clone();
+        self.pivot_crosstab(
+            base_table,
+            row_fields,
+            column_fields,
+            measures,
+            Some(DaxFilterContext { ctx: filter }),
+        )
     }
 
     /// Pivot query variant that borrows the provided `DaxFilterContext` instead of consuming it.

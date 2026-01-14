@@ -38,6 +38,40 @@ struct PivotResultDto {
     rows: Vec<Vec<serde_json::Value>>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxModelSchemaDto {
+    tables: Vec<DaxTableSchemaDto>,
+    measures: Vec<DaxMeasureSchemaDto>,
+    relationships: Vec<DaxRelationshipSchemaDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DaxTableSchemaDto {
+    name: String,
+    columns: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DaxMeasureSchemaDto {
+    name: String,
+    expression: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DaxRelationshipSchemaDto {
+    name: String,
+    from_table: String,
+    from_column: String,
+    to_table: String,
+    to_column: String,
+    cardinality: String,
+    cross_filter_direction: String,
+    is_active: bool,
+    enforce_referential_integrity: bool,
+}
+
 fn build_basic_model(enforce_referential_integrity: bool) -> DaxModel {
     let mut model = DaxModel::new();
 
@@ -94,6 +128,33 @@ fn build_basic_model(enforce_referential_integrity: bool) -> DaxModel {
 fn dax_model_evaluate_and_pivot() {
     let model = build_basic_model(true);
 
+    let schema_js = model.get_schema().unwrap();
+    let schema: DaxModelSchemaDto = serde_wasm_bindgen::from_value(schema_js).unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    assert_eq!(schema.tables[0].name, "Customers");
+    assert_eq!(
+        schema.tables[0].columns,
+        vec!["CustomerId", "Name", "Region"]
+    );
+    assert_eq!(schema.tables[1].name, "Orders");
+    assert_eq!(
+        schema.tables[1].columns,
+        vec!["OrderId", "CustomerId", "Amount"]
+    );
+    assert_eq!(schema.measures.len(), 1);
+    assert_eq!(schema.measures[0].name, "Total");
+    assert_eq!(schema.measures[0].expression, "SUM(Orders[Amount])");
+    assert_eq!(schema.relationships.len(), 1);
+    assert_eq!(schema.relationships[0].name, "Orders_Customers");
+    assert_eq!(schema.relationships[0].from_table, "Orders");
+    assert_eq!(schema.relationships[0].from_column, "CustomerId");
+    assert_eq!(schema.relationships[0].to_table, "Customers");
+    assert_eq!(schema.relationships[0].to_column, "CustomerId");
+    assert_eq!(schema.relationships[0].cardinality, "OneToMany");
+    assert_eq!(schema.relationships[0].cross_filter_direction, "Single");
+    assert!(schema.relationships[0].is_active);
+    assert!(schema.relationships[0].enforce_referential_integrity);
+
     // Measure evaluation (no filter context).
     let total = model.evaluate("Total", None).unwrap();
     assert_eq!(total.as_f64().unwrap(), 43.0);
@@ -146,6 +207,43 @@ fn dax_model_evaluate_and_pivot() {
 
     assert_eq!(pivot.rows[1][0].as_str().unwrap(), "West");
     assert_eq!(pivot.rows[1][1].as_f64().unwrap(), 5.0);
+}
+
+#[wasm_bindgen_test]
+fn dax_model_pivot_crosstab_with_filter_borrows_filter_context() {
+    let model = build_basic_model(true);
+
+    let mut filter = DaxFilterContext::new();
+    filter
+        .set_column_equals("Customers", "Region", JsValue::from_str("East"))
+        .unwrap();
+
+    let row_fields = serde_wasm_bindgen::to_value(&vec![GroupByDto {
+        table: "Customers".into(),
+        column: "Region".into(),
+    }])
+    .unwrap();
+    let column_fields = serde_wasm_bindgen::to_value::<Vec<GroupByDto>>(&vec![]).unwrap();
+    let measures = serde_wasm_bindgen::to_value(&vec![PivotMeasureDto {
+        name: "Total".into(),
+        expression: "[Total]".into(),
+    }])
+    .unwrap();
+
+    #[derive(Debug, serde::Deserialize)]
+    struct PivotGridDto {
+        data: Vec<Vec<serde_json::Value>>,
+    }
+
+    let grid_js = model
+        .pivot_crosstab_with_filter("Orders", row_fields, column_fields, measures, &filter)
+        .unwrap();
+    let grid: PivotGridDto = serde_wasm_bindgen::from_value(grid_js).unwrap();
+    assert_eq!(grid.data.len(), 2);
+    assert_eq!(grid.data[0][0].as_str().unwrap(), "Customers[Region]");
+    assert_eq!(grid.data[0][1].as_str().unwrap(), "Total");
+    assert_eq!(grid.data[1][0].as_str().unwrap(), "East");
+    assert_eq!(grid.data[1][1].as_f64().unwrap(), 38.0);
 }
 
 #[wasm_bindgen_test]
