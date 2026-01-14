@@ -55,6 +55,14 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn xlsb_fixture_bytes() -> Vec<u8> {
+    let path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    std::fs::read(path).expect("read xlsb fixture bytes")
+}
+
 #[test]
 fn open_workbook_with_password_decrypts_agile_encrypted_package() {
     let password = "correct horse battery staple";
@@ -111,6 +119,52 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
     assert_eq!(
         sheet.value(CellRef::from_a1("B1").unwrap()),
         CellValue::String("Hello".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
+    let password = "password";
+    let plain_xlsb = xlsb_fixture_bytes();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
+
+    let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
+    match wb {
+        Workbook::Xlsb(wb) => {
+            assert_eq!(wb.sheet_metas().len(), 1);
+            let sheet = wb.read_sheet(0).expect("read sheet");
+            assert!(
+                sheet.cells.iter().any(|c| c.row == 0 && c.col == 0),
+                "expected to see cell A1"
+            );
+        }
+        other => panic!("expected Workbook::Xlsb, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
+    let password = "password";
+    let plain_xlsb = xlsb_fixture_bytes();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
+
+    let model = open_workbook_model_with_password(&path, Some(password)).expect("open model");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("Hello".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::Number(42.5)
     );
 }
 
