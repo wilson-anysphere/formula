@@ -245,9 +245,9 @@ export class FormulaBarModel {
       cache = { optionsVersion: currentOptionsVersion, entries: new Map() };
       this.#resolvedReferenceTextCache = cache;
     }
-    if (cache.entries.has(trimmed)) {
-      return cache.entries.get(trimmed) ?? null;
-    }
+    const cached = cache.entries.get(trimmed);
+    // Values are either `RangeAddress` (hit) or `null` (negative cache). `undefined` means "not cached".
+    if (cached !== undefined) return cached;
 
     const a1 = parseSheetQualifiedA1Range(trimmed);
     if (a1) {
