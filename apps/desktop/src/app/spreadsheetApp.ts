@@ -266,6 +266,9 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
   if (typeof engine.setSheetDefaultStyleId === "function") {
     target.setSheetDefaultStyleId = (sheet, styleId) => engine.setSheetDefaultStyleId(sheet, styleId);
   }
+  if (typeof engine.setFormatRunsByCol === "function") {
+    target.setFormatRunsByCol = (sheet, col, runs) => engine.setFormatRunsByCol(sheet, col, runs);
+  }
 
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
   return target;

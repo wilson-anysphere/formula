@@ -570,6 +570,51 @@ export class EngineWorker {
 
     await this.invoke("setSheetDefaultStyleId", { sheet, styleId }, finalRpcOptions);
   }
+
+  async setFormatRunsByCol(
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    options?: RpcOptions
+  ): Promise<void>;
+  async setFormatRunsByCol(
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<void>;
+  async setFormatRunsByCol(
+    sheetOrCol: string | number,
+    colOrRuns: number | Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    runsOrSheet?: Array<{ startRow: number; endRowExclusive: number; styleId: number }> | string | null | RpcOptions,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    let sheet: string | undefined;
+    let col: number;
+    let runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof sheetOrCol === "string") {
+      sheet = sheetOrCol;
+      col = colOrRuns as number;
+      runs = runsOrSheet as Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+      finalRpcOptions = options;
+    } else {
+      col = sheetOrCol;
+      runs = colOrRuns as Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+      if (typeof runsOrSheet === "string" || runsOrSheet == null) {
+        sheet = typeof runsOrSheet === "string" ? runsOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        // Allow: setFormatRunsByCol(col, runs, rpcOptions)
+        sheet = undefined;
+        finalRpcOptions = runsOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setFormatRunsByCol", { sheet, col, runs }, finalRpcOptions);
+  }
   /**
    * Set (or clear) a per-column width override.
    *

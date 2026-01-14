@@ -54,6 +54,11 @@ type WasmWorkbookInstance = {
   setRowStyleId?: (sheet: string, row: number, styleId?: number) => void;
   setColStyleId?: (sheet: string, col: number, styleId?: number) => void;
   setSheetDefaultStyleId?: (sheet: string, styleId?: number) => void;
+  setFormatRunsByCol?: (
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>
+  ) => void;
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
@@ -842,6 +847,15 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setSheetDefaultStyleId(sheet, styleId);
               }
+              result = null;
+              break;
+            case "setFormatRunsByCol":
+              if (typeof (wb as any).setFormatRunsByCol !== "function") {
+                throw new Error(
+                  "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
+                );
+              }
+              (wb as any).setFormatRunsByCol(params.sheet ?? "Sheet1", params.col, params.runs ?? []);
               result = null;
               break;
             case "setColWidth":

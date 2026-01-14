@@ -72,6 +72,10 @@ export class WasmWorkbook {
     recordCall("setSheetDefaultStyleId", sheet, styleId);
   }
 
+  setFormatRunsByCol(sheet, col, runs) {
+    recordCall("setFormatRunsByCol", sheet, col, runs);
+  }
+
   setColWidth(sheet, col, width) {
     recordCall("setColWidth", sheet, col, width);
   }

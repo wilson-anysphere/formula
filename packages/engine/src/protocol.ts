@@ -641,6 +641,7 @@ export type RpcMethod =
   | "setRowStyleId"
   | "setColStyleId"
   | "setSheetDefaultStyleId"
+  | "setFormatRunsByCol"
   | "setColWidth"
   | "setColWidthChars"
   | "setColHidden"

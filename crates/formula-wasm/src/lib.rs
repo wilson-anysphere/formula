@@ -10,7 +10,7 @@ use formula_engine::pivot as pivot_engine;
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
     EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
-    ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    FormatRun, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
@@ -139,17 +139,26 @@ fn get_js_string(obj: &Object, keys: &[&str]) -> Option<String> {
 fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
     let obj = js_value_to_object(value)?;
 
-    let horizontal = get_js_string(&obj, &["horizontal"]).and_then(|raw| {
-        match raw.trim().to_lowercase().as_str() {
-            "general" => Some(HorizontalAlignment::General),
-            "left" => Some(HorizontalAlignment::Left),
-            "center" | "centre" => Some(HorizontalAlignment::Center),
-            "right" => Some(HorizontalAlignment::Right),
-            "fill" => Some(HorizontalAlignment::Fill),
-            "justify" => Some(HorizontalAlignment::Justify),
-            _ => None,
-        }
-    });
+    // For patch semantics, an explicit `null` should behave as "clear back to General",
+    // whereas missing/undefined means "no override".
+    let horizontal = Reflect::get(&obj, &JsValue::from_str("horizontal"))
+        .ok()
+        .filter(|v| !v.is_undefined())
+        .and_then(|v| {
+            if v.is_null() {
+                return Some(HorizontalAlignment::General);
+            }
+            let raw = v.as_string()?;
+            match raw.trim().to_lowercase().as_str() {
+                "general" => Some(HorizontalAlignment::General),
+                "left" => Some(HorizontalAlignment::Left),
+                "center" | "centre" => Some(HorizontalAlignment::Center),
+                "right" => Some(HorizontalAlignment::Right),
+                "fill" => Some(HorizontalAlignment::Fill),
+                "justify" => Some(HorizontalAlignment::Justify),
+                _ => None,
+            }
+        });
 
     let vertical = get_js_string(&obj, &["vertical"]).and_then(|raw| {
         match raw.trim().to_lowercase().as_str() {
@@ -3671,6 +3680,43 @@ impl WasmWorkbook {
         // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_col_style_id(&sheet, col, style_id);
+    }
+
+    /// Replace the compressed format-run layer for a column (DocumentController `formatRunsByCol`).
+    ///
+    /// `runs` must be an array of `{ startRow, endRowExclusive, styleId }` objects.
+    #[wasm_bindgen(js_name = "setFormatRunsByCol")]
+    pub fn set_format_runs_by_col(
+        &mut self,
+        sheet: String,
+        col: u32,
+        runs: JsValue,
+    ) -> Result<(), JsValue> {
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct FormatRunDto {
+            start_row: u32,
+            end_row_exclusive: u32,
+            style_id: u32,
+        }
+
+        let sheet = self.inner.ensure_sheet(&sheet);
+
+        let runs: Vec<FormatRunDto> = serde_wasm_bindgen::from_value(runs)
+            .map_err(|err| js_err(format!("runs must be an array of objects: {err}")))?;
+        let runs: Vec<FormatRun> = runs
+            .into_iter()
+            .map(|r| FormatRun {
+                start_row: r.start_row,
+                end_row_exclusive: r.end_row_exclusive,
+                style_id: r.style_id,
+            })
+            .collect();
+
+        self.inner
+            .engine
+            .set_format_runs_by_col(&sheet, col, runs)
+            .map_err(|err| js_err(err.to_string()))
     }
 
     /// Set (or clear) the default style id for an entire sheet.

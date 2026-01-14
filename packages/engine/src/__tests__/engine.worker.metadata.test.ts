@@ -193,6 +193,14 @@ describe("engine.worker workbook metadata RPCs", () => {
       resp = await sendRequest(port, {
         type: "request",
         id: 6,
+        method: "setFormatRunsByCol",
+        params: { sheet: "Sheet1", col: 2, runs: [{ startRow: 0, endRowExclusive: 10, styleId: 17 }] }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 7,
         method: "setColWidth",
         params: { sheet: "Sheet1", col: 2, width: 120 }
       });
@@ -200,7 +208,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 7,
+        id: 8,
         method: "setColHidden",
         params: { sheet: "Sheet1", col: 2, hidden: true }
       });
@@ -208,7 +216,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 8,
+        id: 9,
         method: "internStyle",
         params: { style: { font: { bold: true } } }
       });
@@ -232,6 +240,7 @@ describe("engine.worker workbook metadata RPCs", () => {
         ["setColStyleId", "Sheet1", 3, 0],
         ["setSheetDefaultStyleId", "Sheet1", 13],
         ["setSheetDefaultStyleId", "Sheet1", 0],
+        ["setFormatRunsByCol", "Sheet1", 2, [{ startRow: 0, endRowExclusive: 10, styleId: 17 }]],
         ["setColWidth", "Sheet1", 2, 120],
         ["setColHidden", "Sheet1", 2, true],
         ["internStyle", { font: { bold: true } }],

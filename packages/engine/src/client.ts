@@ -276,6 +276,26 @@ export interface EngineClient {
     (sheet: string, styleId: number | null, options?: RpcOptions): Promise<void>;
     (styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
   };
+  /**
+   * Replace the compressed range-run formatting layer for a column (DocumentController `formatRunsByCol`).
+   *
+   * Preferred signature: `(sheet, col, runs)`.
+   * Legacy signature: `(col, runs, sheet?)`.
+   */
+  setFormatRunsByCol?: {
+    (
+      sheet: string,
+      col: number,
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+      options?: RpcOptions
+    ): Promise<void>;
+    (
+      col: number,
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+      sheet?: string,
+      options?: RpcOptions
+    ): Promise<void>;
+  };
 
   /**
    * Apply an Excel-like structural edit operation (insert/delete rows/cols, move/copy/fill).
@@ -519,6 +539,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => (connected.setColStyleId as any).call(connected, ...args)),
     setSheetDefaultStyleId: async (...args: any[]) =>
       await withEngine((connected) => (connected.setSheetDefaultStyleId as any).call(connected, ...args)),
+    setFormatRunsByCol: async (...args: any[]) =>
+      await withEngine((connected) => (connected.setFormatRunsByCol as any).call(connected, ...args)),
     setColWidth: async (col, width, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
     setColHidden: async (col, hidden, sheet, rpcOptions) =>
