@@ -8232,7 +8232,10 @@ export class SpreadsheetApp {
     this.splitViewSecondaryGridPointerAbort?.abort();
     this.splitViewSecondaryGridPointerAbort = null;
     this.splitViewSecondarySelectionCanvas = null;
-    this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: false });
+    // If the secondary pane is being replaced/removed while the SpreadsheetApp remains alive (e.g. user closes split
+    // view mid-drag), cancel any in-progress drawing gesture and revert live preview objects back to their
+    // pre-gesture state. During full app teardown (`this.disposed`), avoid invoking `setObjects` work.
+    this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: !this.disposed });
     this.splitViewSecondaryDrawingInteractionController = null;
 
     this.splitViewSecondaryGrid = view;

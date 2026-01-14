@@ -421,4 +421,59 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     secondaryContainer.remove();
     root.remove();
   });
+
+  it("reverts an in-progress drag when the secondary pane is torn down", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas, drawing } = setup();
+
+    const sheetId = app.getCurrentSheetId();
+    (app.getDocument() as any).setSheetDrawings(sheetId, [drawing], { label: "Set Drawings" });
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+    const rect = secondaryContainer.getBoundingClientRect();
+
+    const startX = headerOffsetX + 40;
+    const startY = headerOffsetY + 40;
+    const dx = 30;
+    const dy = 20;
+    const endX = startX + dx;
+    const endY = startY + dy;
+
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: rect.left + startX,
+      clientY: rect.top + startY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    const move = createPointerLikeMouseEvent("pointermove", {
+      clientX: rect.left + endX,
+      clientY: rect.top + endY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(move);
+
+    // Simulate the split-view secondary pane being removed mid-gesture (e.g. user closes split view).
+    app.setSplitViewSecondaryGridView(null);
+
+    // The drag gesture should be canceled (no commit), and any in-memory preview state should be reverted.
+    const persisted = (app.getDocument() as any).getSheetDrawings(sheetId) as any[];
+    const persistedDrawing = persisted.find((d) => d?.id === 1) ?? null;
+    expect(persistedDrawing).not.toBeNull();
+    expect(persistedDrawing.anchor?.pos?.xEmu).toBeCloseTo(0, 4);
+    expect(persistedDrawing.anchor?.pos?.yEmu).toBeCloseTo(0, 4);
+
+    const inMemory = app.sheetDrawings.find((d) => d.id === 1) ?? null;
+    expect(inMemory).not.toBeNull();
+    expect(inMemory!.anchor.type).toBe("absolute");
+    expect((inMemory!.anchor as any).pos?.xEmu).toBeCloseTo(0, 4);
+    expect((inMemory!.anchor as any).pos?.yEmu).toBeCloseTo(0, 4);
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
 });
