@@ -341,6 +341,32 @@ describe("drawings/modelAdapters", () => {
     expect(ui[0]?.preserved).toEqual({ "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>" });
   });
 
+  it("preserves transform metadata even when falling back to the formula-model adapter", () => {
+    // This object is in the formula-model/Rust JSON shape (externally-tagged enums),
+    // but includes UI-authored `transform` metadata at the top-level. The DocumentController
+    // adapter should keep that metadata rather than dropping it during conversion.
+    const drawings = [
+      {
+        id: 1,
+        kind: { Image: { image_id: "img1" } },
+        anchor: {
+          Absolute: {
+            pos: { x_emu: 0, y_emu: 0 },
+            ext: { cx: 10, cy: 10 },
+          },
+        },
+        z_order: 0,
+        preserved: { "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>" },
+        transform: { rotationDeg: 30, flipH: true, flipV: false },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.kind).toEqual({ type: "image", imageId: "img1" });
+    expect(ui[0]?.transform).toEqual({ rotationDeg: 30, flipH: true, flipV: false });
+  });
+
   it("accepts workbook snapshots with sheets encoded as an object map", () => {
     const workbook = {
       images: {
