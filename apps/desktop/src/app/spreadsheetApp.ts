@@ -2299,23 +2299,23 @@ export class SpreadsheetApp {
              // resize drags and after programmatic size changes.
              const renderer = this.sharedGrid?.renderer;
              if (renderer) {
-               const rowsVersion = renderer.scroll.rows.getVersion();
-               const colsVersion = renderer.scroll.cols.getVersion();
-                  if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
-                    this.sharedGridRowsVersion = rowsVersion;
-                    this.sharedGridColsVersion = colsVersion;
-                    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-                    overlay?.invalidateSpatialIndex();
-                    this.invalidateDrawingHitTestIndexCaches();
-                    this.drawingsInteraction?.invalidateHitTestIndex();
-                    this.drawingInteractionController?.invalidateHitTestIndex();
-                  }
+                const rowsVersion = renderer.scroll.rows.getVersion();
+                const colsVersion = renderer.scroll.cols.getVersion();
+                if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
+                  this.sharedGridRowsVersion = rowsVersion;
+                  this.sharedGridColsVersion = colsVersion;
+                  const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+                  overlay?.invalidateSpatialIndex();
+                  this.invalidateDrawingHitTestIndexCaches();
+                  this.drawingsInteraction?.invalidateHitTestIndex();
+                  this.drawingInteractionController?.invalidateHitTestIndex();
                 }
-             this.clearSharedHoverCellCache();
-             this.hideCommentTooltip();
-             this.renderDrawings(effectiveViewport);
-             if (!this.useCanvasCharts) {
-               this.renderCharts(false);
+              }
+              this.clearSharedHoverCellCache();
+              this.hideCommentTooltip();
+              this.renderDrawings(effectiveViewport);
+              if (!this.useCanvasCharts) {
+                this.renderCharts(false);
             }
             this.renderAuditing();
             this.renderSelection();
@@ -5589,6 +5589,7 @@ export class SpreadsheetApp {
 
     // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
     this.invalidateDrawingHitTestIndexCaches();
+    this.drawingsInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
   }
 
@@ -9147,6 +9148,7 @@ export class SpreadsheetApp {
     // store sheet-space bounds derived from `drawingGeom`, which is stable by reference
     // but depends on live CanvasGridRenderer axis sizes.
     this.invalidateDrawingHitTestIndexCaches();
+    this.drawingsInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
