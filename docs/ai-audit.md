@@ -118,8 +118,8 @@ it is still possible for a single entry to grow unexpectedly large (prompt attac
 parameters, etc).
 
 `BoundedAIAuditStore` is a lightweight wrapper that enforces a hard cap on the serialized size of
-each stored entry (default: **200k characters**). If an entry exceeds the cap, it stores a compacted
-copy that:
+each stored entry (default: **200k characters**). If an entry exceeds the cap **or is not JSON-serializable**
+(e.g. contains `bigint` values or cycles), it stores a compacted copy that:
 
 - preserves filter-critical fields (`id`, `timestamp_ms`, `session_id`, `workbook_id`, `mode`, `model`)
 - replaces `input` with a truncated JSON string summary (with `audit_truncated` metadata)
