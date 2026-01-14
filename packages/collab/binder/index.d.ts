@@ -10,6 +10,13 @@ export interface SheetViewState {
   frozenRows: number;
   frozenCols: number;
   /**
+   * Optional tiled worksheet background image id.
+   *
+   * This references an entry in the workbook-scoped image store (handled by the
+   * host application's DocumentController).
+   */
+  backgroundImageId?: string;
+  /**
    * Per-column width overrides keyed by zero-based column index.
    *
    * Keys are serialized as strings to match Yjs map/object encoding.

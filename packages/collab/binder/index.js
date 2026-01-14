@@ -38,6 +38,20 @@ function coerceString(value) {
 }
 
 /**
+ * Normalize a potentially user-provided id (string-ish) into a trimmed non-empty string,
+ * or `null` if it is unset/invalid.
+ *
+ * @param {any} value
+ * @returns {string | null}
+ */
+function normalizeOptionalId(value) {
+  const raw = coerceString(value);
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
  * @param {any} value
  * @returns {number}
  */
@@ -52,7 +66,7 @@ function normalizeFrozenCount(value) {
  * by DocumentController.
  *
  * @param {any} view
- * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+ * @returns {{ frozenRows: number, frozenCols: number, backgroundImageId?: string, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
  */
 function normalizeSheetViewState(view) {
   const normalizeAxisSize = (value) => {
@@ -93,10 +107,12 @@ function normalizeSheetViewState(view) {
 
   const colWidths = normalizeAxisOverrides(view?.colWidths);
   const rowHeights = normalizeAxisOverrides(view?.rowHeights);
+  const backgroundImageId = normalizeOptionalId(view?.backgroundImageId ?? view?.background_image_id);
 
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
     frozenCols: normalizeFrozenCount(view?.frozenCols),
+    ...(backgroundImageId ? { backgroundImageId } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
   };
@@ -115,6 +131,7 @@ function sheetViewStateEquals(a, b) {
   if (!a || !b) return false;
   if (a.frozenRows !== b.frozenRows) return false;
   if (a.frozenCols !== b.frozenCols) return false;
+  if (normalizeOptionalId(a.backgroundImageId) !== normalizeOptionalId(b.backgroundImageId)) return false;
 
   const axisEquals = (left, right) => {
     if (left === right) return true;
@@ -836,6 +853,7 @@ export function bindYjsToDocumentController(options) {
       // and also accept `colWidths`/`rowHeights` in case older clients stored them similarly.
       const frozenRows = sheetMap.get("frozenRows");
       const frozenCols = sheetMap.get("frozenCols");
+      const backgroundImageId = sheetMap.get("backgroundImageId") ?? sheetMap.get("background_image_id");
       const colWidths = sheetMap.get("colWidths");
       const rowHeights = sheetMap.get("rowHeights");
       const defaultFormat = sheetMap.get("defaultFormat");
@@ -844,6 +862,7 @@ export function bindYjsToDocumentController(options) {
       if (
         frozenRows !== undefined ||
         frozenCols !== undefined ||
+        backgroundImageId !== undefined ||
         colWidths !== undefined ||
         rowHeights !== undefined ||
         defaultFormat !== undefined ||
@@ -853,6 +872,7 @@ export function bindYjsToDocumentController(options) {
         return {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
+          backgroundImageId: yjsValueToJson(backgroundImageId),
           colWidths: yjsValueToJson(colWidths),
           rowHeights: yjsValueToJson(rowHeights),
           defaultFormat: yjsValueToJson(defaultFormat),
@@ -875,6 +895,7 @@ export function bindYjsToDocumentController(options) {
 
       const frozenRows = sheetEntry.frozenRows;
       const frozenCols = sheetEntry.frozenCols;
+      const backgroundImageId = sheetEntry.backgroundImageId ?? sheetEntry.background_image_id;
       const colWidths = sheetEntry.colWidths;
       const rowHeights = sheetEntry.rowHeights;
       const defaultFormat = sheetEntry.defaultFormat;
@@ -883,13 +904,14 @@ export function bindYjsToDocumentController(options) {
       if (
         frozenRows !== undefined ||
         frozenCols !== undefined ||
+        backgroundImageId !== undefined ||
         colWidths !== undefined ||
         rowHeights !== undefined ||
         defaultFormat !== undefined ||
         rowFormats !== undefined ||
         colFormats !== undefined
       ) {
-        return { frozenRows, frozenCols, colWidths, rowHeights, defaultFormat, rowFormats, colFormats };
+        return { frozenRows, frozenCols, backgroundImageId, colWidths, rowHeights, defaultFormat, rowFormats, colFormats };
       }
     }
 
@@ -1189,6 +1211,11 @@ export function bindYjsToDocumentController(options) {
       const after = { ...(before ?? {}) };
       after.frozenRows = normalizedAfter.frozenRows;
       after.frozenCols = normalizedAfter.frozenCols;
+      if (normalizedAfter.backgroundImageId) {
+        after.backgroundImageId = normalizedAfter.backgroundImageId;
+      } else {
+        delete after.backgroundImageId;
+      }
       if (normalizedAfter.colWidths) {
         after.colWidths = normalizedAfter.colWidths;
       } else {
@@ -1817,7 +1844,16 @@ export function bindYjsToDocumentController(options) {
             const json = yjsValueToJson(existingView);
             if (isRecord(json)) {
               for (const [key, value] of Object.entries(json)) {
-                if (key === "frozenRows" || key === "frozenCols" || key === "colWidths" || key === "rowHeights") continue;
+                if (
+                  key === "frozenRows" ||
+                  key === "frozenCols" ||
+                  key === "backgroundImageId" ||
+                  key === "background_image_id" ||
+                  key === "colWidths" ||
+                  key === "rowHeights"
+                ) {
+                  continue;
+                }
                 if (value === undefined) continue;
                 nextView[key] = value;
               }

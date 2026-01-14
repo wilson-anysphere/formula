@@ -79,6 +79,7 @@ import {
   const view: SheetViewState = {
     frozenRows: 1,
     frozenCols: 2,
+    backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "0": 24 },
   };
