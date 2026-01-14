@@ -25,10 +25,10 @@ Cargo/Tauri output directories (e.g. <target>/release/bundle/appimage/*.AppImage
  use:
    bash scripts/validate-linux-appimage.sh
 
- Environment overrides:
-   FORMULA_APPIMAGE_MAIN_BINARY
-     Expected basename of the main binary under squashfs-root/usr/bin/.
-     Defaults to `apps/desktop/src-tauri/tauri.conf.json` mainBinaryName when available.
+  Environment overrides:
+    FORMULA_APPIMAGE_MAIN_BINARY
+      Expected basename of the main binary under squashfs-root/usr/bin/.
+      Defaults to tauri.conf.json mainBinaryName when available (respects FORMULA_TAURI_CONF_PATH).
 
   FORMULA_TAURI_CONF_PATH
     Optional path override for apps/desktop/src-tauri/tauri.conf.json (useful for local testing).
