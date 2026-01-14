@@ -1,11 +1,15 @@
 <#
 .SYNOPSIS
-  Validate Windows desktop installer bundle outputs are present and (when signing is configured) Authenticode-signed.
+  Validate Windows desktop installer bundle outputs are present, contain required desktop integration metadata, and (when signing is configured) are Authenticode-signed.
 
 .DESCRIPTION
   In release CI, we want to fail early if the Windows desktop installers were not
   produced (publishing an empty Windows release), and to ensure that when
   signing is configured the produced installers are Authenticode-signed.
+ 
+  We also validate that the built installers include registry entries for:
+    - spreadsheet file associations (at least `.xlsx`)
+    - the `formula://` URL protocol handler.
 
   By default this script searches common Tauri output locations (including
   workspace target roots and per-target-triple subdirectories):
@@ -485,15 +489,18 @@ try {
     throw "No Windows installer artifacts were found (.exe and .msi are both missing). Ensure the release build produces installers under release/bundle/(nsis|nsis-web|msi)."
   }
 
-  # Validate file association metadata is present in the produced installers.
+  # Validate desktop integration metadata is present in the produced installers:
+  # - spreadsheet file associations (at least `.xlsx`)
+  # - the `formula://` URL protocol handler.
   #
   # On Windows, `.xlsx` file associations are typically registered via MSI tables
   # (Extension/ProgId/Verb). This is the most reliable thing to validate in CI.
   #
-  # For NSIS `.exe` installers, reliable inspection tooling is not always available on
-  # GitHub-hosted runners. We do a best-effort string scan for registry paths that
-  # indicate file association registration. If an MSI is present, MSI validation is
-  # authoritative; the EXE scan is treated as a warning.
+  # For NSIS `.exe` installers, reliable structured inspection tooling is not always available on
+  # GitHub-hosted runners. We do a best-effort streaming marker scan for well-known strings.
+  #
+  # NOTE: EXE validation is heuristic: it is designed to catch obvious regressions, not to fully
+  # prove that the installer will register everything correctly on every machine.
   function Get-ExpectedFileAssociationSpec {
     param(
       [Parameter(Mandatory = $true)]
@@ -550,6 +557,70 @@ try {
     return [pscustomobject]@{
       Extensions = @("xlsx")
       XlsxMimeType = $mime
+    }
+  }
+ 
+  function Get-ExpectedUrlProtocolSpec {
+    param(
+      [Parameter(Mandatory = $true)]
+      [string]$RepoRoot
+    )
+ 
+    $configPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+    $default = [pscustomobject]@{
+      Schemes = @("formula")
+    }
+ 
+    if (-not (Test-Path -LiteralPath $configPath)) {
+      return $default
+    }
+ 
+    try {
+      $conf = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    } catch {
+      Write-Warning "Failed to parse tauri.conf.json for URL protocol expectations: $($_.Exception.Message)"
+      return $default
+    }
+ 
+    $pluginsProp = $conf.PSObject.Properties["plugins"]
+    if ($null -eq $pluginsProp -or $null -eq $pluginsProp.Value) {
+      return $default
+    }
+    $plugins = $pluginsProp.Value
+ 
+    $deepLinkProp = $plugins.PSObject.Properties["deep-link"]
+    if ($null -eq $deepLinkProp -or $null -eq $deepLinkProp.Value) {
+      return $default
+    }
+    $deepLink = $deepLinkProp.Value
+ 
+    $desktopProp = $deepLink.PSObject.Properties["desktop"]
+    if ($null -eq $desktopProp -or $null -eq $desktopProp.Value) {
+      return $default
+    }
+    $desktop = $desktopProp.Value
+ 
+    $schemesProp = $desktop.PSObject.Properties["schemes"]
+    if ($null -eq $schemesProp -or $null -eq $schemesProp.Value) {
+      return $default
+    }
+ 
+    $schemesRaw = $schemesProp.Value
+    $schemes = @()
+    foreach ($s in @($schemesRaw)) {
+      if ($null -eq $s) { continue }
+      $v = $s.ToString().Trim()
+      if ([string]::IsNullOrWhiteSpace($v)) { continue }
+      # Normalize common user input like "formula://" to just the scheme name.
+      $v = $v.TrimEnd("/").TrimEnd(":")
+      $schemes += $v
+    }
+    if ($schemes.Count -eq 0) {
+      return $default
+    }
+ 
+    return [pscustomobject]@{
+      Schemes = @($schemes | Sort-Object -Unique)
     }
   }
 
@@ -736,6 +807,70 @@ try {
       }
     }
   }
+ 
+  function Assert-MsiRegistersUrlProtocol {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Msi,
+      [Parameter(Mandatory = $true)]
+      [string]$Scheme
+    )
+ 
+    $schemeNorm = $Scheme.Trim().TrimEnd("/").TrimEnd(":")
+    if ([string]::IsNullOrWhiteSpace($schemeNorm)) {
+      throw "URL protocol handler check: expected a non-empty scheme name."
+    }
+ 
+    Write-Host "URL protocol handler check (MSI): $($Msi.FullName)"
+ 
+    $tables = @()
+    try {
+      $tables = Get-MsiTableNames -MsiPath $Msi.FullName
+    } catch {
+      throw "Failed to open MSI for inspection: $($Msi.FullName)`n$($_.Exception.Message)"
+    }
+ 
+    if (-not ($tables -contains "Registry")) {
+      throw "MSI is missing the Registry table; cannot verify URL protocol handler registration for '$schemeNorm://'."
+    }
+ 
+    $rows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `Root`, `Key`, `Name`, `Value` FROM `Registry`' -ColumnCount 4
+ 
+    $schemeKeyMatch = $false
+    $urlProtocolValueMatch = $false
+    foreach ($r in $rows) {
+      if ($r.Count -lt 4) { continue }
+      $keyRaw = if ($null -ne $r[1]) { $r[1] } else { "" }
+      $nameRaw = if ($null -ne $r[2]) { $r[2] } else { "" }
+ 
+      $key = $keyRaw.Trim().Replace("/", "\").TrimStart("\")
+      $name = $nameRaw.Trim()
+ 
+      if ([string]::IsNullOrWhiteSpace($key)) { continue }
+ 
+      # The protocol can be registered either directly under HKCR\<scheme> (Root=0, Key="formula")
+      # or under HKCU/HKLM\Software\Classes\<scheme> which merges into HKCR.
+      $isSchemeKey =
+        ($key -ieq $schemeNorm) -or
+        ($key -match "(?i)(^|\\)Software\\Classes\\$([regex]::Escape($schemeNorm))$") -or
+        ($key -match "(?i)(^|\\)$([regex]::Escape($schemeNorm))$")
+ 
+      if (-not $isSchemeKey) { continue }
+      $schemeKeyMatch = $true
+ 
+      if ($name -ieq "URL Protocol") {
+        $urlProtocolValueMatch = $true
+        break
+      }
+    }
+ 
+    if (-not $schemeKeyMatch) {
+      throw "MSI did not contain any Registry table entries for the '$schemeNorm' protocol key. Expected to see a key like HKCR\\$schemeNorm or (HKCU/HKLM)\\Software\\Classes\\$schemeNorm."
+    }
+    if (-not $urlProtocolValueMatch) {
+      throw "MSI did not register '$schemeNorm://' as a URL protocol handler. Expected a Registry table value named 'URL Protocol' under HKCR\\$schemeNorm (or equivalent under Software\\Classes\\$schemeNorm)."
+    }
+  }
 
   function Assert-MsiContainsComplianceArtifacts {
     param(
@@ -796,6 +931,140 @@ try {
       $presentSample = @($fileNames | Sort-Object -Unique | Select-Object -First 50) -join ", "
       throw "MSI installer is missing required compliance files: $($missing -join ", "). Expected LICENSE/NOTICE to be included in the installed app directory (typically under resources\\). File table sample: $presentSample"
     }
+  }
+ 
+  function Test-ByteArrayContainsSubsequence {
+    param(
+      [Parameter(Mandatory = $true)] [byte[]]$Haystack,
+      [Parameter(Mandatory = $true)] [byte[]]$Needle
+    )
+ 
+    if ($Needle.Length -eq 0) { return $true }
+    if ($Haystack.Length -lt $Needle.Length) { return $false }
+ 
+    $first = $Needle[0]
+    $limit = $Haystack.Length - $Needle.Length
+    for ($i = 0; $i -le $limit; $i++) {
+      if ($Haystack[$i] -ne $first) { continue }
+      $match = $true
+      for ($j = 1; $j -lt $Needle.Length; $j++) {
+        if ($Haystack[$i + $j] -ne $Needle[$j]) { $match = $false; break }
+      }
+      if ($match) { return $true }
+    }
+    return $false
+  }
+ 
+  function Find-BinaryMarkerInFile {
+    <#
+      Streaming substring search over a binary file.
+      Returns the marker string found, or $null.
+ 
+      This mirrors the marker scan strategy used by scripts/ci/check-windows-webview2-installer.py.
+    #>
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$File,
+      [Parameter(Mandatory = $true)]
+      [string[]]$MarkerStrings
+    )
+ 
+    $markers = @($MarkerStrings | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.ToString() } | Sort-Object -Unique)
+    if ($markers.Count -eq 0) {
+      return $null
+    }
+ 
+    $patterns = New-Object System.Collections.Generic.List[object]
+    foreach ($m in $markers) {
+      # Search for both UTF-8/ASCII and UTF-16LE encodings.
+      $patterns.Add([pscustomobject]@{ Marker = $m; Bytes = [System.Text.Encoding]::UTF8.GetBytes($m) })
+      $patterns.Add([pscustomobject]@{ Marker = $m; Bytes = [System.Text.Encoding]::Unicode.GetBytes($m) }) # UTF-16LE
+    }
+ 
+    $maxLen = 0
+    foreach ($p in $patterns) {
+      $len = $p.Bytes.Length
+      if ($len -gt $maxLen) { $maxLen = $len }
+    }
+    $overlap = [Math]::Max(0, $maxLen - 1)
+ 
+    $bufferSize = 1024 * 1024 # 1 MiB
+    $buffer = New-Object byte[] $bufferSize
+    $carry = New-Object byte[] 0
+ 
+    $stream = [System.IO.File]::Open($File.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      while ($true) {
+        $read = $stream.Read($buffer, 0, $buffer.Length)
+        if ($read -le 0) { break }
+ 
+        $data = New-Object byte[] ($carry.Length + $read)
+        if ($carry.Length -gt 0) {
+          [Array]::Copy($carry, 0, $data, 0, $carry.Length)
+        }
+        [Array]::Copy($buffer, 0, $data, $carry.Length, $read)
+ 
+        foreach ($p in $patterns) {
+          if ($p.Bytes.Length -eq 0) { continue }
+          if (Test-ByteArrayContainsSubsequence -Haystack $data -Needle $p.Bytes) {
+            return $p.Marker
+          }
+        }
+ 
+        if ($overlap -gt 0) {
+          $carryLen = [Math]::Min($overlap, $data.Length)
+          $carry = New-Object byte[] $carryLen
+          if ($carryLen -gt 0) {
+            [Array]::Copy($data, $data.Length - $carryLen, $carry, 0, $carryLen)
+          }
+        } else {
+          $carry = New-Object byte[] 0
+        }
+      }
+    } finally {
+      $stream.Dispose()
+    }
+ 
+    return $null
+  }
+ 
+  function Find-ExeDesktopIntegrationMarker {
+    <#
+      Best-effort marker scan for desktop integration metadata in NSIS installers.
+ 
+      We look for at least one of:
+        - URL Protocol
+        - x-scheme-handler/<scheme>
+        - \<scheme>\shell\open\command
+        - .xlsx
+ 
+      NOTE: This validation is heuristic.
+    #>
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Exe,
+      [Parameter(Mandatory = $true)]
+      [string]$ExtensionNoDot,
+      [Parameter(Mandatory = $true)]
+      [string]$UrlScheme
+    )
+ 
+    $dotExt = "." + ($ExtensionNoDot.Trim().TrimStart("."))
+    $scheme = $UrlScheme.Trim()
+    if ([string]::IsNullOrWhiteSpace($scheme)) { $scheme = "formula" }
+    $scheme = $scheme.TrimEnd("/").TrimEnd(":")
+ 
+    $markers = @(
+      "URL Protocol",
+      "URL protocol",
+      "x-scheme-handler/$scheme",
+      "\$scheme\shell\open\command",
+      "$scheme\shell\open\command",
+      $dotExt,
+      $dotExt.ToUpperInvariant()
+    )
+ 
+    return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
 
   function Test-StringContainsIgnoreCase {
@@ -910,6 +1179,13 @@ try {
   if ($null -ne $assocSpec -and $null -ne $assocSpec.XlsxMimeType) {
     $expectedXlsxMimeType = ($assocSpec.XlsxMimeType).ToString().Trim()
   }
+ 
+  $urlSpec = Get-ExpectedUrlProtocolSpec -RepoRoot $repoRoot
+  $requiredScheme = ($urlSpec.Schemes | Select-Object -First 1)
+  if ([string]::IsNullOrWhiteSpace($requiredScheme)) {
+    $requiredScheme = "formula"
+  }
+  $requiredScheme = $requiredScheme.Trim().TrimEnd("/").TrimEnd(":")
 
   if ($msiInstallers.Count -gt 0) {
     foreach ($msi in $msiInstallers) {
@@ -947,14 +1223,51 @@ try {
           throw
         }
       }
+ 
+      try {
+        Assert-MsiRegistersUrlProtocol -Msi $msi -Scheme $requiredScheme
+      } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match 'Failed to open MSI for inspection') {
+          Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
+          # Best-effort fallback: scan for protocol-related strings in the MSI binary.
+          $bytes = [System.IO.File]::ReadAllBytes($msi.FullName)
+          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $needles = @(
+            "URL Protocol",
+            "URL protocol",
+            $requiredScheme,
+            "\$requiredScheme\shell\open\command",
+            "$requiredScheme\shell\open\command"
+          )
+          $found = $false
+          foreach ($n in $needles) {
+            if ($ascii.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+            if ($unicode.IndexOf($n, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+          }
+          if (-not $found) {
+            throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$requiredScheme://' in the MSI binary: $($msi.FullName)"
+          }
+          Write-Warning "MSI table inspection failed, but the MSI contained strings related to '$requiredScheme://'. Assuming URL protocol metadata is present (best-effort)."
+        } else {
+          throw
+        }
+      }
       Assert-MsiContainsComplianceArtifacts -Msi $msi
     }
   } else {
-    Write-Warning "No MSI installers found; falling back to best-effort EXE inspection for file association metadata."
+    Write-Warning "No MSI installers found; falling back to best-effort EXE inspection for file association + URL protocol metadata."
   }
 
   if ($exeInstallers.Count -gt 0) {
     foreach ($exe in $exeInstallers) {
+      $integrationMarker = Find-ExeDesktopIntegrationMarker -Exe $exe -ExtensionNoDot $requiredExtensionNoDot -UrlScheme $requiredScheme
+      if ([string]::IsNullOrWhiteSpace($integrationMarker)) {
+        throw "EXE installer did not contain any expected desktop integration marker strings. This validation is heuristic for NSIS installers.`n- Installer: $($exe.FullName)`n- Looked for: URL Protocol, x-scheme-handler/$requiredScheme, \\$requiredScheme\\shell\\open\\command, .$requiredExtensionNoDot"
+      }
+      Write-Host ("EXE marker scan: found {0}" -f $integrationMarker)
+ 
       $ok = Test-ExeHasFileAssociationHints -Exe $exe -ExtensionNoDot $requiredExtensionNoDot
       if (-not $ok) {
         $msg = "EXE installer did not contain obvious file association registry strings for '.$requiredExtensionNoDot'."
