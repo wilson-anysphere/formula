@@ -816,9 +816,8 @@ try {
 
     Write-Host "File association check (NSIS/EXE, best-effort): $($Exe.FullName)"
 
-    # TODO: Replace this with a structured NSIS inspection (if/when reliable tooling becomes
-    # available on GH runners). For now, scan for registry path strings that strongly suggest
-    # file association registration.
+    # Best-effort validation: scan for registry path strings that strongly suggest file
+    # association registration. (We intentionally avoid relying on external NSIS parsing tools.)
     $dotExt = "." + $ExtensionNoDot
     $strongNeedles = @(
       "Software\\Classes\\$dotExt",
@@ -1002,7 +1001,7 @@ try {
       Assert-VersionMatch -ArtifactPath $installer.FullName -FoundVersion ([string]$msiVersion) -ExpectedVersion $expectedVersion -Context "MSI ProductVersion"
       Write-Host ("version: OK (.msi) {0}" -f $installer.FullName)
     } else {
-      Write-Warning ("TODO: Unable to read MSI ProductVersion for {0}. Skipping MSI version check because Windows Installer COM query failed. Consider installing lessmsi/msiinfo or enabling COM access in this environment." -f $installer.FullName)
+      Write-Warning ("Unable to read MSI ProductVersion for {0}. Skipping MSI version check because Windows Installer COM query failed. Consider enabling COM access or using an MSI inspection tool (lessmsi/msiinfo) in this environment." -f $installer.FullName)
     }
   }
 
