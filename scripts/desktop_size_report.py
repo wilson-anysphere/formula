@@ -6,6 +6,7 @@ import argparse
 import gzip
 import json
 import os
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -244,6 +245,37 @@ def _default_desktop_binary_path() -> Path:
     return Path("target/release/formula-desktop")
 
 
+def _cargo_target_directory(repo_root: Path) -> Path | None:
+    """
+    Resolve Cargo's target directory via `cargo metadata`.
+
+    This respects `CARGO_TARGET_DIR` when set and is more reliable than assuming
+    `<repo>/target`.
+    """
+    try:
+        cp = subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version=1"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError:
+        return None
+    if cp.returncode != 0:
+        return None
+    try:
+        meta = json.loads(cp.stdout)
+    except json.JSONDecodeError:
+        return None
+    target_dir = meta.get("target_directory")
+    if not target_dir:
+        return None
+    return Path(str(target_dir))
+
+
 def _candidate_default_binary_paths(repo_root: Path) -> list[Path]:
     """
     Best-effort discovery for the built desktop binary in common locations.
@@ -252,16 +284,47 @@ def _candidate_default_binary_paths(repo_root: Path) -> list[Path]:
     or non-workspace builds may place artifacts under `apps/desktop/src-tauri/target`.
     """
     exe = "formula-desktop.exe" if os.name == "nt" else "formula-desktop"
-    candidates: list[Path] = [
-        repo_root / "target" / "release" / exe,
-        repo_root / "apps" / "desktop" / "src-tauri" / "target" / "release" / exe,
-    ]
+
+    base_dirs: list[Path] = []
+
+    raw_target_dir = os.environ.get("CARGO_TARGET_DIR", "").strip()
+    if raw_target_dir:
+        td = Path(raw_target_dir)
+        if not td.is_absolute():
+            td = repo_root / td
+        base_dirs.append(td)
+
+    cargo_target_dir = _cargo_target_directory(repo_root)
+    if cargo_target_dir is not None:
+        base_dirs.append(cargo_target_dir)
+
+    base_dirs.extend(
+        [
+            repo_root / "target",
+            repo_root / "apps" / "desktop" / "src-tauri" / "target",
+        ]
+    )
+
+    # De-dupe base dirs while preserving order.
+    seen_base: set[Path] = set()
+    uniq_base: list[Path] = []
+    for p in base_dirs:
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key in seen_base:
+            continue
+        seen_base.add(key)
+        uniq_base.append(p)
+    base_dirs = uniq_base
+
+    candidates: list[Path] = []
+    for base in base_dirs:
+        candidates.append(base / "release" / exe)
 
     # Cross-compile / target-triple build outputs.
-    for base in (
-        repo_root / "target",
-        repo_root / "apps" / "desktop" / "src-tauri" / "target",
-    ):
+    for base in base_dirs:
         if not base.is_dir():
             continue
         try:
