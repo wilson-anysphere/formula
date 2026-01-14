@@ -74,6 +74,23 @@ export function registerBuiltinCommands(params: {
     openGoalSeekDialog = null,
   } = params;
 
+  const refresh = (): void => {
+    if (!refreshRibbonUiState) return;
+    try {
+      refreshRibbonUiState();
+    } catch {
+      // Best-effort only.
+    }
+  };
+
+  const focusApp = (): void => {
+    try {
+      (app as any)?.focus?.();
+    } catch {
+      // Best-effort only.
+    }
+  };
+
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryData = t("commandCategory.data");
   const commandCategoryPageLayout = t("commandCategory.pageLayout");
