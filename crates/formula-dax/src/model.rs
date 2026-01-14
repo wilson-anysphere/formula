@@ -544,7 +544,6 @@ impl UnmatchedFactRows {
             UnmatchedFactRows::Dense { count, .. } => *count == 0,
         }
     }
-
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {

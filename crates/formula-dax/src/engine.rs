@@ -1134,7 +1134,6 @@ impl DaxEngine {
                     let mut keyed: Vec<(Value, String)> =
                         Vec::with_capacity(table_result.row_count());
                     let mut saw_text = false;
-                    let mut saw_numeric = false;
 
                     for row in table_result.iter_rows() {
                         let inner_ctx = table_result.push_row_ctx(row_ctx, row);
@@ -1143,19 +1142,10 @@ impl DaxEngine {
 
                         let key =
                             self.eval_scalar(model, order_by_expr, filter, &inner_ctx, env)?;
-                        match &key {
-                            Value::Text(_) => saw_text = true,
-                            Value::Number(_) | Value::Boolean(_) => saw_numeric = true,
-                            Value::Blank => {}
+                        if matches!(&key, Value::Text(_)) {
+                            saw_text = true;
                         }
                         keyed.push((key, text));
-                    }
-
-                    if saw_text && saw_numeric {
-                        return Err(DaxError::Type(
-                            "CONCATENATEX order_by_expr produced mixed text and numeric values"
-                                .into(),
-                        ));
                     }
 
                     if saw_text {
@@ -2209,6 +2199,7 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
+            env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
@@ -2373,6 +2364,7 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
+                    env,
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
@@ -2388,6 +2380,7 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
+                        env,
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,

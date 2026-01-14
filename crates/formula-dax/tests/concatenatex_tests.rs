@@ -85,3 +85,26 @@ fn concatenatex_order_by_text_is_case_insensitive() {
     // Case-insensitive sort key with deterministic case-sensitive tiebreak (B before b).
     assert_eq!(value, Value::from("a,B,b"));
 }
+
+#[test]
+fn concatenatex_order_by_text_can_mix_numeric_and_text_keys() {
+    // Our engine allows order-by expressions that produce mixed scalar types. If any key evaluates
+    // to text, we sort by text (coercing other types to text).
+    let mut model = DataModel::new();
+    let mut t = Table::new("T", vec!["Key"]);
+    t.push_row(vec![Value::from("A")]).unwrap();
+    t.push_row(vec![Value::from(2)]).unwrap();
+    model.add_table(t).unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX(T, T[Key], \",\", T[Key], ASC)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, Value::from("2,A"));
+}
