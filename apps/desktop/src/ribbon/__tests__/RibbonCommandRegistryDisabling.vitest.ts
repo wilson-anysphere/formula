@@ -12,7 +12,7 @@ import { registerFormatPainterCommand } from "../../commands/formatPainterComman
 import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands";
 import { Ribbon } from "../Ribbon";
 import type { RibbonSchema } from "../ribbonSchema";
-import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
+import { COMMAND_REGISTRY_EXEMPT_IDS, computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
 import { setRibbonUiState } from "../ribbonUiState";
 
 afterEach(() => {
