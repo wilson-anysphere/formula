@@ -3892,6 +3892,38 @@ mod tests {
     }
 
     #[test]
+    fn standard_verify_password_mismatch_uses_constant_time_compare() {
+        // `decrypt_from_bytes` uses `verify_password` (not `standard_verify_key`). Ensure its
+        // verifier digest comparison also uses the shared constant-time helper.
+        util::reset_ct_eq_calls();
+
+        let key = [0u8; 16];
+
+        fn aes128_ecb_encrypt_in_place(key: &[u8; 16], buf: &mut [u8]) {
+            let cipher = Aes128::new_from_slice(key).expect("valid AES-128 key");
+            for block in buf.chunks_mut(16) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+
+        // Use all-zero plaintext verifier and verifierHash so the decrypted verifierHash will not
+        // match sha1(verifier).
+        let mut encrypted_verifier = [0u8; 16];
+        let mut encrypted_verifier_hash = vec![0u8; 32];
+        aes128_ecb_encrypt_in_place(&key, &mut encrypted_verifier);
+        aes128_ecb_encrypt_in_place(&key, &mut encrypted_verifier_hash);
+
+        let err = verify_password(&key, &encrypted_verifier, &encrypted_verifier_hash)
+            .expect_err("expected verifier mismatch");
+        assert!(matches!(err, OffcryptoError::InvalidPassword));
+
+        assert!(
+            util::ct_eq_call_count() >= 1,
+            "expected ct_eq helper to be invoked"
+        );
+    }
+
+    #[test]
     fn agile_spin_count_just_below_limit_succeeds() {
         let limits = DecryptLimits {
             max_spin_count: Some(10),

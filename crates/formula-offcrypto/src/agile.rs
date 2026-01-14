@@ -36,13 +36,13 @@ const KEY_VALUE_BLOCK: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6
 const VERIFIER_HASH_INPUT_LEN: usize = 16;
 
 #[cfg(test)]
-std::thread_local! {
+thread_local! {
     static ITERATED_HASH_CALLS: Cell<usize> = Cell::new(0);
 }
 
 #[cfg(test)]
 fn inc_iterated_hash_calls() {
-    ITERATED_HASH_CALLS.with(|calls| calls.set(calls.get() + 1));
+    ITERATED_HASH_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
 }
 
 #[cfg(test)]
