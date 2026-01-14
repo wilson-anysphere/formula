@@ -164,8 +164,6 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
-
       const root = createRoot();
       const status = {
         activeCell: document.createElement("div"),
@@ -174,6 +172,7 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
+      const renderSpy = vi.spyOn((app as any).drawingOverlay, "render");
       const doc = app.getDocument();
       doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
 
@@ -289,6 +288,55 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
         width: w,
         height: h,
       });
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("passes frozen pane metadata to the drawing overlay viewport (legacy grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const renderSpy = vi.spyOn((app as any).drawingOverlay, "render");
+      expect(app.getGridMode()).toBe("legacy");
+
+      const doc = app.getDocument();
+      renderSpy.mockClear();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 2, { label: "Freeze" });
+
+      expect(renderSpy).toHaveBeenCalled();
+      const viewport = renderSpy.mock.calls.at(-1)?.[1] as any;
+
+      expect(viewport).toEqual(
+        expect.objectContaining({
+          frozenRows: 1,
+          frozenCols: 2,
+        }),
+      );
+
+      // Frozen extents should be expressed in drawing-canvas coordinates (cell-area),
+      // i.e. they exclude the row/col header offsets.
+      const headerX = 48;
+      const headerY = 24;
+      const firstScrollableCol = app.getCellRectA1("C1");
+      const firstScrollableRow = app.getCellRectA1("A2");
+      expect(firstScrollableCol).not.toBeNull();
+      expect(firstScrollableRow).not.toBeNull();
+
+      expect(viewport.frozenWidthPx).toBe(firstScrollableCol!.x - headerX);
+      expect(viewport.frozenHeightPx).toBe(firstScrollableRow!.y - headerY);
 
       app.destroy();
       root.remove();
