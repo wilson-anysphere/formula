@@ -1027,8 +1027,9 @@ async function fetchModuleSource(url, rootUrl) {
     throw new Error("Strict import validation requires fetch support in this runtime");
   }
   const response = await nativeFetch(url);
+  const responseUrl = typeof response?.url === "string" ? response.url.trim() : "";
   const effectiveUrl =
-    typeof response?.url === "string" && response.url.trim().length > 0 ? response.url : String(url);
+    responseUrl.length > 0 ? responseUrl : String(url);
   if (
     rootUrl &&
     effectiveUrl &&

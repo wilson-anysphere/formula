@@ -142,6 +142,18 @@ globalThis.fetch = async (input, init) => {
       }
     };
   }
+  if (url.endsWith("/whitespace-url.mjs")) {
+    const data = await readFile(fileURLToPath(url));
+    return {
+      ok: true,
+      status: 200,
+      redirected: false,
+      url: "  " + url + "  ",
+      async arrayBuffer() {
+        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      }
+    };
+  }
   if (/\\/alias-big\\d+\\.mjs$/.test(url)) {
     const targetUrl = url.replace(/\\/alias-big\\d+\\.mjs$/, "/target-big.mjs");
     if (!aliasBigBytes) {
@@ -564,6 +576,22 @@ test("extension-worker: rejects modules that redirect outside the extension base
       () => activateExtensionWorker({ mainUrl, extensionPath }),
       /redirected outside the extension base URL/i
     );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: trims response.url before validating extension root prefix", async () => {
+  const dir = await createTempDir("formula-ext-worker-redirect-trim-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "./whitespace-url.mjs";\nexport async function activate() {}\n`,
+      "whitespace-url.mjs": `export const x = 1;\n`,
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await activateExtensionWorker({ mainUrl, extensionPath });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
