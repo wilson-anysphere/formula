@@ -425,6 +425,69 @@ describe("OrganizeSheetsDialog", () => {
     expect(activeSheetId).toBe("s2");
   });
 
+  it("disables other sheet actions while renaming (only Save/Cancel remain active)", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const renameBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s1"]');
+    expect(renameBtn).toBeInstanceOf(HTMLButtonElement);
+    act(() => {
+      renameBtn!.click();
+    });
+
+    // Save/Cancel should remain enabled.
+    const save = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-save-s1"]');
+    expect(save).toBeInstanceOf(HTMLButtonElement);
+    expect(save!.disabled).toBe(false);
+
+    const cancel = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-cancel-s1"]');
+    expect(cancel).toBeInstanceOf(HTMLButtonElement);
+    expect(cancel!.disabled).toBe(false);
+
+    // Other actions should be disabled while the rename UI is open.
+    const hide = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-hide-s1"]');
+    expect(hide).toBeInstanceOf(HTMLButtonElement);
+    expect(hide!.disabled).toBe(true);
+
+    const del = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-s1"]');
+    expect(del).toBeInstanceOf(HTMLButtonElement);
+    expect(del!.disabled).toBe(true);
+
+    const move = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-move-down-s1"]');
+    expect(move).toBeInstanceOf(HTMLButtonElement);
+    expect(move!.disabled).toBe(true);
+
+    const activate = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-activate-s1"]');
+    expect(activate).toBeInstanceOf(HTMLButtonElement);
+    expect(activate!.disabled).toBe(true);
+
+    // Other rows should also be disabled.
+    const otherRename = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s2"]');
+    expect(otherRename).toBeInstanceOf(HTMLButtonElement);
+    expect(otherRename!.disabled).toBe(true);
+  });
+
   it("restores focus via host.focusGrid when closing the dialog", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([

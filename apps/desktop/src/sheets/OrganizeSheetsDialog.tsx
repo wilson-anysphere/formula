@@ -105,7 +105,6 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
 
   const isSpreadsheetEditing = host.isEditing();
   const isReadOnly = host.readOnly === true;
-  const isRenaming = renameSheetId != null;
 
   const beginRename = React.useCallback(
     (sheet: SheetMeta) => {
@@ -285,6 +284,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         {sheets.map((sheet, index) => {
           const isActive = sheet.id === activeSheetId;
           const badge = visibilityBadgeLabel(sheet.visibility);
+          const rowIsRenaming = renameSheetId === sheet.id;
+          const rowIsConfirmingDelete = deleteConfirmSheetId === sheet.id;
+          const hasAnyInlineModal = renameSheetId != null || deleteConfirmSheetId != null;
+          const otherInlineModalActive =
+            (renameSheetId != null && !rowIsRenaming) || (deleteConfirmSheetId != null && !rowIsConfirmingDelete);
+
           // Mirror Excel: you cannot delete the last *visible* sheet (even if hidden sheets remain).
           const canDelete = sheets.length > 1 && (sheet.visibility !== "visible" || visibleCount > 1);
           const canHide = sheet.visibility === "visible" && visibleCount > 1;
@@ -292,11 +297,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
           const moveUpDisabled = index <= 0;
           const moveDownDisabled = index >= sheets.length - 1;
 
-          const actionDisabled = busy || isSpreadsheetEditing || (isRenaming && renameSheetId !== sheet.id);
-          const confirmingDelete = deleteConfirmSheetId === sheet.id;
+          const actionDisabled = busy || isSpreadsheetEditing || otherInlineModalActive;
+          const confirmingDelete = rowIsConfirmingDelete;
           const activateLabel = sheet.visibility === "visible" ? "Activate" : "Unhide & Activate";
-          const mutationDisabled = actionDisabled || isReadOnly;
+          const mutationDisabled = actionDisabled || isReadOnly || rowIsRenaming || rowIsConfirmingDelete;
           const canActivate = sheet.visibility === "visible" || !isReadOnly;
+          const activateDisabled = actionDisabled || rowIsRenaming || rowIsConfirmingDelete || !canActivate || (hasAnyInlineModal && !rowIsRenaming && !rowIsConfirmingDelete);
 
           return (
             <div
@@ -353,7 +359,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                 <button
                   type="button"
                   onClick={() => activate(sheet.id)}
-                  disabled={actionDisabled || !canActivate}
+                  disabled={activateDisabled}
                   data-testid={`organize-sheet-activate-${sheet.id}`}
                 >
                   {activateLabel}
@@ -414,7 +420,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                     <button
                       type="button"
                       onClick={() => void remove(sheet)}
-                      disabled={mutationDisabled || !canDelete}
+                      disabled={busy || isSpreadsheetEditing || isReadOnly || !canDelete}
                       data-testid={`organize-sheet-delete-confirm-${sheet.id}`}
                     >
                       Confirm Delete
