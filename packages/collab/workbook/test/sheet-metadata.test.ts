@@ -28,6 +28,16 @@ describe("@formula/collab-workbook sheet metadata", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<unknown>>("sheets");
 
+    const drawings = [
+      {
+        id: "drawing-1",
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ];
+    const mergedRanges = [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }];
+
     // Insert a "real" Sheet1 first (hidden + tabColor + renamed), then a placeholder
     // Sheet1 later. The schema normalizer keeps the last entry by index, but should
     // not lose richer metadata from the earlier entry.
@@ -46,12 +56,19 @@ describe("@formula/collab-workbook sheet metadata", () => {
       real.set("name", "Real Sheet");
       real.set("visibility", "hidden");
       real.set("tabColor", "FF00FF00");
+      real.set("view", {
+        frozenRows: 2,
+        frozenCols: 1,
+        mergedRanges,
+        drawings,
+      });
       sheets.push([real]);
 
       const placeholder = new Y.Map<unknown>();
       placeholder.set("id", "Sheet1");
       placeholder.set("name", "Sheet1");
       placeholder.set("visibility", "visible");
+      placeholder.set("view", { frozenRows: 0, frozenCols: 0 });
       sheets.push([placeholder]);
     });
 
@@ -64,6 +81,14 @@ describe("@formula/collab-workbook sheet metadata", () => {
     expect(sheet1.get("name")).toBe("Real Sheet");
     expect(sheet1.get("visibility")).toBe("hidden");
     expect(sheet1.get("tabColor")).toBe("FF00FF00");
+
+    // Ensure shared layout metadata survives dedupe.
+    expect(sheet1.get("view")).toEqual({
+      frozenRows: 2,
+      frozenCols: 1,
+      mergedRanges,
+      drawings,
+    });
   });
 
   it("preserves visibility + tabColor across rename + move operations", () => {

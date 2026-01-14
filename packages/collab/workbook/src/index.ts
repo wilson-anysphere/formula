@@ -1,6 +1,15 @@
 import * as Y from "yjs";
 import { getSheetNameValidationErrorMessage } from "@formula/workbook-backend";
-import { cloneYjsValue, getArrayRoot, getDocTypeConstructors, getMapRoot, getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
+import {
+  cloneYjsValue,
+  getArrayRoot,
+  getDocTypeConstructors,
+  getMapRoot,
+  getYArray,
+  getYMap,
+  getYText,
+  yjsValueToJson,
+} from "@formula/collab-yjs-utils";
 
 export interface WorkbookSchemaOptions {
   defaultSheetName?: string;
@@ -21,6 +30,16 @@ export type WorkbookSchemaRoots = {
   namedRanges: Y.Map<unknown>;
 };
 
+function isRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeFrozenCount(value: unknown): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
 export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
   return {
     cells: getMapRoot<unknown>(doc, "cells"),
@@ -33,6 +52,9 @@ export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
 export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions = {}): WorkbookSchemaRoots {
   const { cells, sheets, metadata, namedRanges } = getWorkbookRoots(doc);
   const YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
+  const YArrayCtor = sheets.constructor as unknown as { new (): Y.Array<any> };
+  const { Text: YTextCtor } = getDocTypeConstructors(doc as any);
+  const cloneCtors = { Map: YMapCtor, Array: YArrayCtor, Text: YTextCtor as unknown as { new (): Y.Text } };
 
   const defaultSheetId = options.defaultSheetId ?? "Sheet1";
   const defaultSheetName = options.defaultSheetName ?? defaultSheetId;
@@ -145,6 +167,147 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
             const entryTab = coerceTabColor(entry.get("tabColor"));
             if (!winnerTab && entryTab) {
               winner.set("tabColor", entryTab);
+            }
+
+            // Preserve sheet view/layout metadata (frozen panes, axis sizes, drawings, merged ranges)
+            // across deterministic duplicate-sheet pruning. This avoids losing shared sheet-level
+            // UI metadata if it was written to (or migrated into) a losing entry.
+            //
+            // Note: this is best-effort and intentionally biased toward "prefer non-default" values
+            // so placeholder sheets (typically `{ frozenRows: 0, frozenCols: 0 }`) don't wipe richer
+            // layout state.
+            const viewKeysToMerge = [
+              "view",
+              // Legacy/experimental top-level view keys.
+              "frozenRows",
+              "frozenCols",
+              "backgroundImageId",
+              "background_image_id",
+              "colWidths",
+              "rowHeights",
+              "mergedRanges",
+              "mergedCells",
+              "merged_cells",
+              "drawings",
+            ];
+
+            for (const key of viewKeysToMerge) {
+              const winnerVal = winner.get(key);
+              const entryVal = entry.get(key);
+
+              if (winnerVal === undefined) {
+                if (entryVal !== undefined) {
+                  winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                }
+                continue;
+              }
+
+              // For legacy numeric view keys, prefer non-zero values over 0.
+              if (key === "frozenRows" || key === "frozenCols") {
+                const winnerNum = normalizeFrozenCount(yjsValueToJson(winnerVal));
+                const entryNum = normalizeFrozenCount(yjsValueToJson(entryVal));
+                if (winnerNum === 0 && entryNum > 0) {
+                  winner.set(key, entryNum);
+                }
+              }
+
+              // For legacy list keys, prefer non-empty over empty/undefined.
+              if (key === "drawings" || key === "mergedRanges" || key === "mergedCells" || key === "merged_cells") {
+                const winnerArr = Array.isArray(yjsValueToJson(winnerVal)) ? yjsValueToJson(winnerVal) : [];
+                const entryArr = Array.isArray(yjsValueToJson(entryVal)) ? yjsValueToJson(entryVal) : [];
+                if (winnerArr.length === 0 && entryArr.length > 0) {
+                  winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                }
+              }
+
+              if (key === "backgroundImageId" || key === "background_image_id") {
+                const winnerStr = coerceString(yjsValueToJson(winnerVal))?.trim() ?? "";
+                const entryStr = coerceString(yjsValueToJson(entryVal))?.trim() ?? "";
+                if (!winnerStr && entryStr) {
+                  winner.set(key, entryStr);
+                }
+              }
+            }
+
+            // If both entries have a `view` object, merge it field-by-field so we don't lose
+            // shared metadata like drawings/mergedRanges when one entry is missing them.
+            const winnerViewRaw = winner.get("view");
+            const entryViewRaw = entry.get("view");
+            if (winnerViewRaw !== undefined && entryViewRaw !== undefined) {
+              const winnerViewMap = getYMap(winnerViewRaw);
+              const entryViewMap = getYMap(entryViewRaw);
+              if (winnerViewMap && entryViewMap) {
+                const keys = Array.from(entryViewMap.keys()).sort();
+                for (const k of keys) {
+                  const wv = winnerViewMap.get(k);
+                  const ev = entryViewMap.get(k);
+
+                  if (wv === undefined) {
+                    winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    continue;
+                  }
+
+                  if (k === "frozenRows" || k === "frozenCols") {
+                    const wNum = normalizeFrozenCount(yjsValueToJson(wv));
+                    const eNum = normalizeFrozenCount(yjsValueToJson(ev));
+                    if (wNum === 0 && eNum > 0) winnerViewMap.set(k, eNum);
+                    continue;
+                  }
+
+                  if (k === "backgroundImageId" || k === "background_image_id") {
+                    const wStr = coerceString(yjsValueToJson(wv))?.trim() ?? "";
+                    const eStr = coerceString(yjsValueToJson(ev))?.trim() ?? "";
+                    if (!wStr && eStr) winnerViewMap.set(k, eStr);
+                    continue;
+                  }
+
+                  if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+                    const wArr = Array.isArray(yjsValueToJson(wv)) ? yjsValueToJson(wv) : [];
+                    const eArr = Array.isArray(yjsValueToJson(ev)) ? yjsValueToJson(ev) : [];
+                    if (wArr.length === 0 && eArr.length > 0) {
+                      winnerViewMap.set(k, cloneYjsValue(ev, cloneCtors));
+                    }
+                    continue;
+                  }
+                }
+              } else {
+                // Fall back to JSON merge for non-map view encodings (plain objects).
+                const wJson = yjsValueToJson(winnerViewRaw);
+                const eJson = yjsValueToJson(entryViewRaw);
+                if (isRecord(wJson) && isRecord(eJson)) {
+                  /** @type {Record<string, any>} */
+                  const merged = { ...wJson };
+                  for (const [k, ev] of Object.entries(eJson)) {
+                    const wv = merged[k];
+                    if (wv === undefined) {
+                      merged[k] = structuredClone(ev);
+                      continue;
+                    }
+
+                    if (k === "frozenRows" || k === "frozenCols") {
+                      const wNum = normalizeFrozenCount(wv);
+                      const eNum = normalizeFrozenCount(ev);
+                      if (wNum === 0 && eNum > 0) merged[k] = eNum;
+                      continue;
+                    }
+
+                    if (k === "backgroundImageId" || k === "background_image_id") {
+                      const wStr = coerceString(wv)?.trim() ?? "";
+                      const eStr = coerceString(ev)?.trim() ?? "";
+                      if (!wStr && eStr) merged[k] = eStr;
+                      continue;
+                    }
+
+                    if (k === "drawings" || k === "mergedRanges" || k === "mergedCells" || k === "merged_cells") {
+                      const wArr = Array.isArray(wv) ? wv : [];
+                      const eArr = Array.isArray(ev) ? ev : [];
+                      if (wArr.length === 0 && eArr.length > 0) merged[k] = structuredClone(ev);
+                      continue;
+                    }
+                  }
+                  winner.set("view", merged);
+                }
+              }
             }
           }
         }
