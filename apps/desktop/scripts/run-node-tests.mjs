@@ -204,12 +204,212 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const tsImportRe = new RegExp(
     `from\\s+["'][^"']+\\.(${extGroup})["']|import\\(\\s*["'][^"']+\\.(${extGroup})["']\\s*\\)`,
   );
+
+  // In environments without TS/TSX execution, we also need to skip tests that import
+  // workspace packages whose entrypoints are authored as `.ts`/`.tsx` (even if the test
+  // itself doesn't directly import a `.ts`/`.tsx` file).
+  const workspacePackages = await loadWorkspacePackageEntrypoints();
+  const disallowedEntrypointExtensions = new Set(extensions.map((ext) => `.${ext}`));
+  const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
+  const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
+  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+
+  /**
+   * @param {string} specifier
+   * @returns {{ packageName: string, exportKey: string } | null}
+   */
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Prefer Node's default ESM condition order.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
+
+  /**
+   * @param {string} text
+   */
+  function importsWorkspaceTypeScriptEntrypoint(text) {
+    /** @type {string[]} */
+    const specifiers = [];
+    for (const match of text.matchAll(importFromRe)) specifiers.push(match[2]);
+    for (const match of text.matchAll(sideEffectImportRe)) specifiers.push(match[1]);
+    for (const match of text.matchAll(dynamicImportRe)) specifiers.push(match[1]);
+    for (const match of text.matchAll(requireCallRe)) specifiers.push(match[1]);
+
+    for (const rawSpecifier of specifiers) {
+      if (!rawSpecifier) continue;
+      const parsed = parseWorkspaceSpecifier(rawSpecifier.split("?")[0].split("#")[0]);
+      if (!parsed) continue;
+      const info = workspacePackages.get(parsed.packageName);
+      if (!info) continue;
+      const resolved = resolveExportPath(info.exports, parsed.exportKey, info.main);
+      if (!resolved) continue;
+      const resolvedBase = resolved.split("?")[0].split("#")[0];
+      for (const ext of disallowedEntrypointExtensions) {
+        if (resolvedBase.endsWith(ext)) return true;
+      }
+    }
+
+    return false;
+  }
+
   for (const file of files) {
     const text = await readFile(file, "utf8").catch(() => "");
     if (tsImportRe.test(text)) continue;
+    if (importsWorkspaceTypeScriptEntrypoint(text)) continue;
     out.push(file);
   }
   return out;
+}
+
+/**
+ * Load workspace package entrypoints by scanning `package.json` files under the monorepo.
+ *
+ * This is used for:
+ * - skipping node:test suites that depend on TS/TSX entrypoints when TS execution is unavailable, and
+ * - resolving missing workspace links in partial `node_modules` environments.
+ *
+ * @returns {Promise<Map<string, { rootDir: string, exports: any, main: string | null }>>}
+ */
+/** @type {Promise<Map<string, { rootDir: string, exports: any, main: string | null }>> | null} */
+var workspacePackageEntrypointsPromise;
+async function loadWorkspacePackageEntrypoints() {
+  if (workspacePackageEntrypointsPromise) return workspacePackageEntrypointsPromise;
+  workspacePackageEntrypointsPromise = (async () => {
+    /** @type {string[]} */
+    const packageJsonFiles = [];
+    for (const dir of ["packages", "apps", "services", "shared"]) {
+      const full = path.join(repoRoot, dir);
+      try {
+        const stats = await stat(full);
+        if (!stats.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      await collectPackageJsonFiles(full, packageJsonFiles);
+    }
+
+    /** @type {Map<string, { rootDir: string, exports: any, main: string | null }>} */
+    const out = new Map();
+    for (const file of packageJsonFiles) {
+      const raw = await readFile(file, "utf8").catch(() => null);
+      if (!raw) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      if (typeof parsed.name !== "string") continue;
+      if (out.has(parsed.name)) continue;
+      out.set(parsed.name, {
+        rootDir: path.dirname(file),
+        exports: parsed.exports ?? null,
+        main: typeof parsed.main === "string" ? parsed.main : null,
+      });
+    }
+
+    return out;
+  })();
+  return workspacePackageEntrypointsPromise;
+}
+
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+async function collectPackageJsonFiles(dir, out) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    // Keep this list in sync with `scripts/run-node-tests.mjs` at the repo root.
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === "coverage" ||
+      entry.name === "target" ||
+      entry.name === "build" ||
+      entry.name === ".turbo" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".cache" ||
+      entry.name === ".vite" ||
+      entry.name === "playwright-report" ||
+      entry.name === "test-results" ||
+      entry.name === "security-report" ||
+      entry.name.startsWith(".tmp")
+    ) {
+      continue;
+    }
+
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectPackageJsonFiles(fullPath, out);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    if (entry.name !== "package.json") continue;
+    out.push(fullPath);
+  }
 }
 
 function resolveTypeScriptLoaderArgs() {
@@ -363,6 +563,76 @@ async function filterExternalDependencyTests(files, opts) {
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
+
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Prefer Node's default ESM condition order.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
+
+  async function getWorkspacePackages() {
+    if (workspacePackages) return workspacePackages;
+    workspacePackages = await loadWorkspacePackageEntrypoints();
+    return workspacePackages;
+  }
 
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
@@ -642,15 +912,17 @@ async function filterExternalDependencyTests(files, opts) {
 }
 
 /**
- * Filter out node:test files that import workspace packages that aren't present in
- * the local `node_modules/` tree.
+ * Filter out node:test files that depend on workspace packages that can't be resolved.
  *
  * Some environments (including agent sandboxes) may have third-party dependencies
- * installed but only a subset of workspace package links. In that case, running
- * the full node:test suite would fail fast with `ERR_MODULE_NOT_FOUND` for the
- * missing workspace packages.
+ * installed but only a subset of workspace package links. In that case, running the
+ * full node:test suite would fail fast with `ERR_MODULE_NOT_FOUND` for the missing
+ * workspace packages.
  *
- * We conservatively skip tests that depend on missing `@formula/*` imports.
+ * This function first checks `require.resolve()` (so normal `node_modules` installs
+ * keep working), then falls back to a best-effort resolution via local workspace
+ * `package.json` `exports`/`main` entries. We skip tests only when a dependency still
+ * can't be resolved.
  *
  * @param {string[]} files
  * @param {{ canStripTypes: boolean, canExecuteTsx: boolean }} opts
@@ -661,6 +933,8 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   /** @type {Set<string>} */
   const visiting = new Set();
   const builtins = new Set(builtinModules);
+  /** @type {Map<string, { rootDir: string, exports: any, main: string | null }> | null} */
+  let workspacePackages = null;
   /**
    * Map an arbitrary directory to the nearest enclosing package.json (if any).
    * The cache stores the *resolved* nearest package for that directory (not just
@@ -673,9 +947,81 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
 
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
+  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const requireRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
+
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Prefer Node's default ESM condition order.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
+
+  async function getWorkspacePackages() {
+    if (workspacePackages) return workspacePackages;
+    workspacePackages = await loadWorkspacePackageEntrypoints();
+    return workspacePackages;
+  }
 
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
@@ -800,7 +1146,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
    * @param {string} importingFile
    * @returns {string | null}
    */
-  function resolveWorkspaceSpecifier(specifier, importingFile) {
+  async function resolveWorkspaceSpecifier(specifier, importingFile) {
     // `import.meta.resolve()` currently resolves relative to the module it's invoked from
     // (this runner), so it's not suitable for checking whether a workspace package is
     // installed relative to an arbitrary test file directory. Use `require.resolve()`
@@ -808,6 +1154,59 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
     try {
       return require.resolve(specifier, { paths: [path.dirname(importingFile), repoRoot] });
     } catch {
+      // Fall back to a best-effort local workspace resolution. This keeps node:test resilient
+      // in environments with stale/partial `node_modules` that are missing some workspace links.
+      const parsed = parseWorkspaceSpecifier(specifier.split("?")[0].split("#")[0]);
+      if (!parsed) return null;
+      const pkgs = await getWorkspacePackages();
+      const info = pkgs.get(parsed.packageName);
+      if (!info) return null;
+
+      const target = resolveExportPath(info.exports, parsed.exportKey, info.main);
+      if (!target) return null;
+
+      const cleanedTarget =
+        target.startsWith("./") || target.startsWith("../") || target.startsWith("/") ? target : `./${target}`;
+      const basePath = path.resolve(info.rootDir, cleanedTarget.split("?")[0].split("#")[0]);
+
+      if (path.extname(basePath)) {
+        try {
+          const stats = await stat(basePath);
+          if (stats.isFile()) return basePath;
+        } catch {
+          return null;
+        }
+        return null;
+      }
+
+      for (const ext of candidateExtensions) {
+        const candidate = `${basePath}${ext}`;
+        try {
+          const stats = await stat(candidate);
+          if (stats.isFile()) return candidate;
+        } catch {
+          // continue
+        }
+      }
+
+      // Directory export: try index files.
+      try {
+        const stats = await stat(basePath);
+        if (stats.isDirectory()) {
+          for (const ext of candidateExtensions) {
+            const candidate = path.join(basePath, `index${ext}`);
+            try {
+              const idxStats = await stat(candidate);
+              if (idxStats.isFile()) return candidate;
+            } catch {
+              // continue
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       return null;
     }
   }
@@ -942,6 +1341,14 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
       const specifier = match[1];
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
+    for (const match of text.matchAll(dynamicImportRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(requireRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
 
     for (const { specifier: raw, typeOnly } of imports) {
       const specifier = raw.split("?")[0].split("#")[0];
@@ -984,7 +1391,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
         continue;
       }
 
-      const resolved = resolveWorkspaceSpecifier(specifier, file);
+      const resolved = await resolveWorkspaceSpecifier(specifier, file);
       if (!resolved) {
         missing = true;
         break;
