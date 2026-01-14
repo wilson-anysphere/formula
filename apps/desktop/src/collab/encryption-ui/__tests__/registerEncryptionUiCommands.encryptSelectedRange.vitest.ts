@@ -174,4 +174,55 @@ describe("registerEncryptionUiCommands", () => {
     expect(keyStore.set).toHaveBeenCalledTimes(1);
     expect(manager.add).toHaveBeenCalledWith(expect.objectContaining({ keyId: "k1" }));
   });
+
+  it("encryptSelectedRange refuses to generate new key bytes for a keyId already used in policy when key bytes are missing", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => null),
+      set: vi.fn(async (_docId: string, keyId: string) => ({ keyId })),
+    };
+
+    const manager = {
+      add: vi.fn(() => "r1"),
+      list: () => [
+        {
+          id: "existing",
+          sheetId: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 0,
+          endCol: 0,
+          keyId: "k1",
+        },
+      ],
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({
+        doc: { guid: "doc-1" },
+        getRole: () => "editor",
+        getPermissions: () => ({ userId: "u1" }),
+      }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("k1");
+
+    await commandRegistry.executeCommand("collab.encryptSelectedRange");
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(keyStore.set).not.toHaveBeenCalled();
+    expect(manager.add).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/already used by an encrypted range/i), "warning");
+  });
 });

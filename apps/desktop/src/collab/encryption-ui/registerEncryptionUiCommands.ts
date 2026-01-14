@@ -190,6 +190,25 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const isReusingKey = existingKeyBytes != null;
       const displayKeyId = existingStoredKeyId ?? keyId;
 
+      // Safety: if the key id is already used in the document policy but we don't have key bytes,
+      // we must not generate new key material for the same id (it would conflict with the existing key
+      // and could make collaborators' encrypted cells unreadable).
+      if (!existingKeyBytes) {
+        try {
+          const existingRanges = manager.list();
+          const keyIdInUse = existingRanges.some((r) => String(r.keyId ?? "").trim() === keyId);
+          if (keyIdInUse) {
+            showToast(
+              `Key ID "${keyId}" is already used by an encrypted range. Import the key first (or choose a new Key ID) to avoid key conflicts.`,
+              "warning",
+            );
+            return;
+          }
+        } catch {
+          // Best-effort; fall through to the existing-key-lookup-failed warning prompt below.
+        }
+      }
+
       const confirmed = await showQuickPick(
         [
           {

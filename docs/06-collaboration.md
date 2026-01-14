@@ -343,6 +343,7 @@ Desktop encryption commands (Command Palette):
 
 - `collab.encryptSelectedRange` — encrypt the current selection and generate a shareable key string.
   - If the entered `keyId` already exists in the local key store, the desktop UI will reuse it (it does not silently overwrite key bytes).
+  - If the `keyId` is already used by an existing encrypted range but the key is not imported, the UI refuses to generate a new key for that id (import the key first or choose a different id).
 - `collab.removeEncryptedRange` — remove encrypted range *metadata* overlapping the current selection.
   - Note: removing a range does **not** decrypt cells that already have an `enc` payload.
   - If multiple ranges overlap, the desktop UI can remove a single chosen range or all overlaps.
