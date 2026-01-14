@@ -187,6 +187,20 @@ renderer.setTheme(resolveGridThemeFromCssVars(containerEl));
 renderer.setHeaders(1, 1);
 ```
 
+If you build custom scrollbars or overlays that depend on viewport metrics (total size, frozen extents, max scroll),
+you can subscribe to *layout* viewport changes (axis sizes, frozen panes, resize, zoom) via:
+
+```ts
+const unsubscribe = renderer.subscribeViewport(
+  ({ viewport, reason }) => {
+    // Recompute scrollbar thumbs, overlay geometry, etc.
+    // Note: this does NOT fire on scroll offset changes (to avoid per-frame work during scroll).
+    console.log(reason, viewport.maxScrollX, viewport.maxScrollY);
+  },
+  { animationFrame: true } // throttle to 1 callback per frame
+);
+```
+
 ## Accessibility
 
 The grid is canvas-rendered, but includes baseline accessibility scaffolding:
