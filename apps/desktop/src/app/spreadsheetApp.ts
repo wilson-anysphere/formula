@@ -8738,7 +8738,10 @@ export class SpreadsheetApp {
 
         const normalizedType = normalizeEnumTag(type);
         const hasDirectImageId = Boolean(normalizeImageId(kindAny.imageId ?? kindAny.image_id));
-        const isImage = normalizedType === "image" || (normalizedType === "" && hasDirectImageId);
+        // Best-effort: treat any kind that includes an `imageId` field as an image even when the
+        // kind tag itself is missing/mis-encoded. False positives are acceptable here; false
+        // negatives can delete still-referenced bytes from persistence.
+        const isImage = normalizedType === "image" || hasDirectImageId;
         if (!isImage) continue;
 
         const payload =

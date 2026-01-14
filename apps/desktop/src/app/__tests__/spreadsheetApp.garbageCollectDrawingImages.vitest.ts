@@ -237,6 +237,41 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     root.remove();
   });
 
+  it("keeps image ids when drawing kinds omit an explicit type tag", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    app.getDocument().setSheetDrawings(sheetId, [
+      {
+        id: "drawing_doc_no_type",
+        // Intentionally omit `type`/`kind`. Some older/buggy encodings may still include the image id.
+        kind: { imageId: "image_kind_no_type.png" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+        zOrder: 0,
+      },
+    ]);
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_kind_no_type.png")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps image ids referenced by in-cell images", async () => {
     const root = createRoot();
     const status = {
