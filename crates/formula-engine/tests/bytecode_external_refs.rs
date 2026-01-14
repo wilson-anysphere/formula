@@ -138,6 +138,37 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
 }
 
 #[test]
+fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provider() {
+    let mut engine = Engine::new();
+    let provider = Arc::new(Provider::new());
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_bytecode_enabled(true);
+
+    engine
+        .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)+1")
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected dynamic INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    );
+}
+
+#[test]
 fn bytecode_sum_over_external_range_compiles_and_uses_reference_semantics() {
     // Excel quirk: SUM over references ignores logicals/text stored in cells.
     struct Provider;

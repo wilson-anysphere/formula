@@ -5222,11 +5222,11 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 (start_id == end_id).then_some(SheetId::Local(start_id))
             }
             crate::eval::SheetReference::External(key) => {
-                // Mirror `functions::builtins_reference::INDIRECT`: allow single-sheet external
-                // workbook references (e.g. `[Book.xlsx]Sheet1!A1`), but reject external 3D spans
-                // (`[Book.xlsx]Sheet1:Sheet3!A1`) which require sheet-order expansion.
+                // Match `functions::builtins_reference::INDIRECT`: allow single-sheet external
+                // workbook references (e.g. `"[Book.xlsx]Sheet1"`), but reject external 3D spans
+                // like `"[Book.xlsx]Sheet1:Sheet3"`.
                 crate::eval::is_valid_external_sheet_key(key)
-                    .then_some(SheetId::External(Arc::from(key.as_str())))
+                    .then_some(SheetId::External(Arc::from(key.clone())))
             }
         }
     }
