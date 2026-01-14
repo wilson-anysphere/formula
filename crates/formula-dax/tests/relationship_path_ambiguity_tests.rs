@@ -1,6 +1,6 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
-    RowContext, Table, Value,
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
+    GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
 };
 
 fn build_ambiguous_snowflake_model() -> DataModel {
@@ -116,6 +116,76 @@ fn relatedtable_errors_on_ambiguous_relationship_paths() {
             assert!(
                 message.contains("ambiguous active relationship path between Categories and Sales"),
                 "unexpected error message: {message}"
+            );
+        }
+        other => panic!("expected DaxError::Eval, got {other:?}"),
+    }
+}
+
+#[test]
+fn pivot_errors_on_ambiguous_relationship_paths() {
+    let model = build_ambiguous_snowflake_model();
+
+    let group_by = vec![GroupByColumn::new("Categories", "CategoryName")];
+    let measures = vec![PivotMeasure::new("Total Sales", "SUM(Sales[SaleId])").unwrap()];
+
+    let err = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap_err();
+
+    match err {
+        DaxError::Eval(message) => {
+            let message_lc = message.to_ascii_lowercase();
+            assert!(
+                message_lc.contains("ambiguous active relationship path"),
+                "unexpected error message: {message}"
+            );
+            assert!(
+                message_lc.contains("sales -> products -> categories"),
+                "expected error to include snowflake path, got: {message}"
+            );
+            assert!(
+                message_lc.contains("sales -> categories"),
+                "expected error to include direct path, got: {message}"
+            );
+        }
+        other => panic!("expected DaxError::Eval, got {other:?}"),
+    }
+}
+
+#[test]
+fn summarize_errors_on_ambiguous_relationship_paths() {
+    let model = build_ambiguous_snowflake_model();
+    let engine = DaxEngine::new();
+
+    let err = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Sales, Categories[CategoryName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+
+    match err {
+        DaxError::Eval(message) => {
+            let message_lc = message.to_ascii_lowercase();
+            assert!(
+                message_lc.contains("ambiguous active relationship path"),
+                "unexpected error message: {message}"
+            );
+            assert!(
+                message_lc.contains("sales -> products -> categories"),
+                "expected error to include snowflake path, got: {message}"
+            );
+            assert!(
+                message_lc.contains("sales -> categories"),
+                "expected error to include direct path, got: {message}"
             );
         }
         other => panic!("expected DaxError::Eval, got {other:?}"),
