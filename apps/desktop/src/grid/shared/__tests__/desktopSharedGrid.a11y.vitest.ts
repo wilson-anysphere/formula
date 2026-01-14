@@ -131,6 +131,10 @@ describe("DesktopSharedGrid a11y", () => {
     grid.destroy();
     expect(container.getAttribute("aria-activedescendant")).toBeNull();
     expect(container.getAttribute("aria-describedby")).toBeNull();
+    expect(container.getAttribute("role")).toBeNull();
+    expect(container.getAttribute("aria-rowcount")).toBeNull();
+    expect(container.getAttribute("aria-colcount")).toBeNull();
+    expect(container.getAttribute("aria-multiselectable")).toBeNull();
     expect(container.querySelector('[data-testid="canvas-grid-a11y-status"]')).toBeNull();
     expect(container.querySelector('[data-testid="canvas-grid-a11y-active-cell"]')).toBeNull();
   });

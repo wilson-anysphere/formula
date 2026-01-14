@@ -339,6 +339,10 @@ export class DesktopSharedGrid {
     this.renderer.destroy();
     this.container.removeAttribute("aria-activedescendant");
     this.container.removeAttribute("aria-describedby");
+    this.container.removeAttribute("aria-multiselectable");
+    this.container.removeAttribute("aria-rowcount");
+    this.container.removeAttribute("aria-colcount");
+    this.container.removeAttribute("role");
     this.a11yStatusEl.remove();
     this.a11yActiveCellEl.remove();
   }
