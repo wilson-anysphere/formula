@@ -40,6 +40,33 @@ fn cli_errors_without_password() {
 }
 
 #[test]
+fn cli_errors_with_wrong_password() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password")
+        .arg("wrong-password")
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit status when password is incorrect\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    assert!(
+        stderr.contains("password") || stderr.contains("decrypt"),
+        "expected error message to mention password/decryption, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn cli_succeeds_with_password() {
     let plain = fixture_path("plaintext.xlsx");
     let encrypted = fixture_path("agile.xlsx");
