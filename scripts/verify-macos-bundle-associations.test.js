@@ -203,6 +203,46 @@ test(
 );
 
 test(
+  "verify_macos_bundle_associations normalizes deep-link schemes like formula:// from config",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bundle: {
+          fileAssociations: [
+            {
+              ext: ["xlsx"],
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+          ],
+        },
+        plugins: {
+          "deep-link": {
+            desktop: {
+              schemes: ["formula://", "formula-extra:"],
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const infoPlistPath = path.join(tmp, "Info.plist");
+    writeFileSync(
+      infoPlistPath,
+      `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n        <string>formula-extra</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>xlsx</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`,
+      "utf8",
+    );
+
+    const proc = runValidator({ configPath, infoPlistPath });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
   "verify_macos_bundle_associations fails when a configured deep-link scheme is missing from Info.plist",
   { skip: !hasPython3 },
   () => {

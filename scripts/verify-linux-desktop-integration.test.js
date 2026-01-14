@@ -170,6 +170,50 @@ test(
 );
 
 test(
+  "verify_linux_desktop_integration normalizes deep-link schemes like formula:// from config",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          identifier: "app.formula.desktop",
+          mainBinaryName: "formula-desktop",
+          plugins: {
+            "deep-link": {
+              desktop: {
+                schemes: ["formula://", "formula-extra/"],
+              },
+            },
+          },
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["xlsx"],
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;x-scheme-handler/formula-extra;",
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
   "verify_linux_desktop_integration fails when a configured deep-link scheme is missing from the app .desktop MimeType=",
   { skip: !hasPython3 },
   () => {

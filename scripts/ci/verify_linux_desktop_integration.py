@@ -28,6 +28,21 @@ def _format_set(items: Iterable[str]) -> str:
     return ", ".join(sorted(set(items)))
 
 
+def _normalize_scheme(value: str) -> str:
+    """
+    Normalize a deep-link scheme string.
+
+    We accept common user-provided inputs like "formula://", "formula:", or "formula/" and normalize
+    them to just "formula" so validations match how OS scheme handlers are actually registered
+    (x-scheme-handler/<scheme>).
+    """
+
+    v = value.strip().lower()
+    # Remove trailing "://", ":" or "/" segments.
+    v = re.sub(r"[:/]+$", "", v)
+    return v
+
+
 def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
     config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
     plugins = config.get("plugins")
@@ -46,14 +61,14 @@ def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
             return
         raw = protocol.get("schemes")
         if isinstance(raw, str):
-            val = raw.strip().lower()
+            val = _normalize_scheme(raw)
             if val:
                 schemes.add(val)
         elif isinstance(raw, list):
             for item in raw:
                 if not isinstance(item, str):
                     continue
-                val = item.strip().lower()
+                val = _normalize_scheme(item)
                 if val:
                     schemes.add(val)
 
@@ -344,7 +359,7 @@ def main() -> int:
     expected_doc_pkg = args.doc_package_name.strip() or default_name
     expected_main_binary = args.expected_main_binary.strip() or default_name
     if not expected_schemes:
-        expected_scheme = args.url_scheme.strip().lower()
+        expected_scheme = _normalize_scheme(args.url_scheme)
         if not expected_scheme:
             raise SystemExit("--url-scheme must be non-empty")
         expected_schemes = {expected_scheme}

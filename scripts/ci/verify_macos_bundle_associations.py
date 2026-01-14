@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import plistlib
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,20 @@ from typing import Any, Iterable
 
 def _normalize_ext(ext: str) -> str:
     return ext.strip().lstrip(".").lower()
+
+
+def _normalize_scheme(value: str) -> str:
+    """
+    Normalize a deep-link scheme string.
+
+    We accept common user-provided inputs like "formula://", "formula:", or "formula/" and normalize
+    them to just "formula" so validations match how schemes are registered in Info.plist
+    (CFBundleURLSchemes expects only the scheme name).
+    """
+
+    v = value.strip().lower()
+    v = re.sub(r"[:/]+$", "", v)
+    return v
 
 
 def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
@@ -40,14 +55,14 @@ def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
             return
         raw = protocol.get("schemes")
         if isinstance(raw, str):
-            val = raw.strip().lower()
+            val = _normalize_scheme(raw)
             if val:
                 schemes.add(val)
         elif isinstance(raw, list):
             for item in raw:
                 if not isinstance(item, str):
                     continue
-                val = item.strip().lower()
+                val = _normalize_scheme(item)
                 if val:
                     schemes.add(val)
 
@@ -183,14 +198,14 @@ def extract_url_schemes(plist: dict[str, Any]) -> set[str]:
             continue
         schemes = entry.get("CFBundleURLSchemes")
         if isinstance(schemes, str):
-            scheme = schemes.strip().lower()
+            scheme = _normalize_scheme(schemes)
             if scheme:
                 out.add(scheme)
         elif isinstance(schemes, list):
             for scheme in schemes:
                 if not isinstance(scheme, str):
                     continue
-                normalized = scheme.strip().lower()
+                normalized = _normalize_scheme(scheme)
                 if normalized:
                     out.add(normalized)
     return out
@@ -224,7 +239,7 @@ def main() -> int:
     expected_exts = load_expected_extensions(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
     if not expected_schemes:
-        expected_scheme = args.url_scheme.strip().lower()
+        expected_scheme = _normalize_scheme(args.url_scheme)
         if not expected_scheme:
             raise SystemExit("--url-scheme must be non-empty")
         expected_schemes = {expected_scheme}
