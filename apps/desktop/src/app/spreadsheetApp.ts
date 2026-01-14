@@ -4143,6 +4143,20 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Returns the user-facing display name for a stable sheet id.
+   */
+  getSheetDisplayNameById(sheetId: string): string {
+    return this.resolveSheetDisplayNameById(sheetId);
+  }
+
+  /**
+   * Returns the user-facing display name for the currently active sheet.
+   */
+  getCurrentSheetDisplayName(): string {
+    return this.resolveSheetDisplayNameById(this.sheetId);
+  }
+
+  /**
    * Replace the workbook-scoped image store.
    *
    * This is currently used by:

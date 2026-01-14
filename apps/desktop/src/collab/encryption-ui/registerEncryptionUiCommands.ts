@@ -84,11 +84,12 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       }
 
       const sheetId = app.getCurrentSheetId();
+      const sheetName = app.getCurrentSheetDisplayName();
       const range = normalizeRange(ranges[0]!);
       const a1 = rangeToA1(range);
 
       const keyId = await showInputBox({
-        prompt: `Encrypt ${sheetId}!${a1} – Key ID`,
+        prompt: `Encrypt ${sheetName}!${a1} – Key ID`,
         value: randomKeyId(),
         placeHolder: "Key ID (for example: team-budget-q1)",
         okLabel: "Next",
@@ -98,7 +99,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const confirmed = await showQuickPick(
         [
           {
-            label: `Encrypt ${sheetId}!${a1}`,
+            label: `Encrypt ${sheetName}!${a1}`,
             description: `Key ID: ${keyId}`,
             value: "encrypt",
           },
@@ -129,7 +130,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
 
       const exportString = serializeEncryptionKeyExportString({ docId, keyId: storedKeyId, keyBytes });
       void tryCopyToClipboard(exportString);
-      showToast(`Encrypted ${sheetId}!${a1}\n${exportString}`, "info", { timeoutMs: 10_000 });
+      showToast(`Encrypted ${sheetName}!${a1}\n${exportString}`, "info", { timeoutMs: 10_000 });
     },
     {
       category: COMMAND_CATEGORY,
@@ -155,11 +156,12 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
 
       const active = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();
+      const sheetName = app.getCurrentSheetDisplayName();
       const docId = session.doc.guid;
       const policy = createEncryptionPolicyFromDoc(session.doc);
       const keyId = policy.keyIdForCell({ sheetId, row: active.row, col: active.col });
       if (!keyId) {
-        showToast("The active cell is not inside an encrypted range.", "warning");
+        showToast(`The active cell is not inside an encrypted range (${sheetName}).`, "warning");
         return;
       }
 
