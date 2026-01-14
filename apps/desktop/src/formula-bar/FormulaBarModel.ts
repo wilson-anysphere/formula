@@ -25,6 +25,7 @@ import type {
   FunctionContext as EngineFunctionContext,
 } from "@formula/engine";
 import { splitSheetQualifier } from "../../../../packages/search/index.js";
+import { normalizeLocaleId } from "../spreadsheet/formulaLocale.js";
 
 type ActiveCellInfo = {
   address: string;
@@ -868,7 +869,7 @@ function parseSheetQualifiedA1Range(text: string): RangeAddress | null {
 const ARG_SEPARATOR_CACHE = new Map<string, string>();
 
 function inferArgSeparator(localeId: string): string {
-  const locale = localeId?.trim?.() || "en-US";
+  const locale = normalizeLocaleId(localeId) || "en-US";
   const cached = ARG_SEPARATOR_CACHE.get(locale);
   if (cached) return cached;
 

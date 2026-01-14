@@ -14,6 +14,7 @@ import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/dat
 import DE_DE_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.errors.tsv?raw";
 import ES_ES_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.errors.tsv?raw";
 import FR_FR_ERRORS_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.errors.tsv?raw";
+import { normalizeFormulaLocaleId } from "./formulaLocale.js";
 
 export type SpreadsheetValue = number | string | boolean | null;
 export const PROVENANCE_REF_SEPARATOR = "\u001f";
@@ -194,7 +195,7 @@ type NumberLocaleConfig = {
 
 function getNumberLocaleConfig(localeId?: string): NumberLocaleConfig {
   // Mirror `formula_engine::LocaleConfig` defaults for locales the WASM engine currently ships.
-  switch (localeId) {
+  switch (normalizeFormulaLocaleId(localeId)) {
     case "de-DE":
     case "es-ES":
       return { decimalSeparator: ",", thousandsSeparator: "." };
@@ -296,7 +297,8 @@ function canonicalizeFunctionNameForLocale(name: string, localeId?: string): str
   const raw = String(name ?? "");
   if (!raw) return raw;
 
-  const map = localeId ? FUNCTION_TRANSLATIONS_BY_LOCALE[localeId] : undefined;
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
+  const map = formulaLocaleId ? FUNCTION_TRANSLATIONS_BY_LOCALE[formulaLocaleId] : undefined;
 
   // Mirror `formula_engine::locale::registry::FormulaLocale::canonical_function_name`.
   const PREFIX = "_xlfn.";
@@ -308,7 +310,7 @@ function canonicalizeFunctionNameForLocale(name: string, localeId?: string): str
 }
 
 function localizedBooleanLiteral(identUpper: string, localeId?: string): boolean | null {
-  switch (localeId) {
+  switch (normalizeFormulaLocaleId(localeId)) {
     case "de-DE": {
       if (identUpper === "WAHR") return true;
       if (identUpper === "FALSCH") return false;
@@ -339,7 +341,8 @@ function canonicalizeErrorCodeForLocale(errorLiteral: string, localeId?: string)
 
   if (isSpreadsheetErrorCode(upper)) return upper;
 
-  const map = localeId ? ERROR_TRANSLATIONS_BY_LOCALE[localeId] : undefined;
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
+  const map = formulaLocaleId ? ERROR_TRANSLATIONS_BY_LOCALE[formulaLocaleId] : undefined;
   const mapped = map?.get(upper) ?? upper;
   return isSpreadsheetErrorCode(mapped) ? mapped : raw;
 }

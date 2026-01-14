@@ -9,6 +9,7 @@ import { createLazyImport } from "../../startup/lazyImport.js";
 import DE_DE_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
 import ES_ES_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
 import FR_FR_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
+import { normalizeFormulaLocaleId } from "../../spreadsheet/formulaLocale.js";
 
 type FunctionParam = { name: string; optional?: boolean };
 
@@ -420,13 +421,16 @@ export function getFunctionSignature(name: string, opts: { localeId?: string } =
     opts.localeId?.trim?.() ||
     (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() ||
     "en-US";
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
 
-  const cacheKey = `${localeId}\0${requested}`;
+  // Cache by the *effective* formula locale ID so language-only / variant locale IDs
+  // can reuse signatures (e.g. `de`, `de_DE.UTF-8`, `de-AT` -> `de-DE`).
+  const cacheKey = `${formulaLocaleId ?? localeId}\0${requested}`;
   if (FUNCTION_SIGNATURE_CACHE.has(cacheKey)) {
     return FUNCTION_SIGNATURE_CACHE.get(cacheKey) ?? null;
   }
 
-  const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  const localeMap = formulaLocaleId ? FUNCTION_TRANSLATIONS_BY_LOCALE[formulaLocaleId] : undefined;
   const canonical = localeMap?.get(lookup) ?? lookup;
 
   const known = FUNCTION_SIGNATURES[canonical] ?? signatureFromCatalog(canonical);

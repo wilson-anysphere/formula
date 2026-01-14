@@ -53,6 +53,16 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=PROMEDIO(1;2;3)", () => null, { localeId: "es-ES" })).toBe(2);
   });
 
+  it("normalizes locale IDs when canonicalizing localized syntax (language-only / POSIX locale IDs)", () => {
+    // Language-only fallbacks (de -> de-DE)
+    expect(evaluateFormula("=SUMME(1;2)", () => null, { localeId: "de" })).toBe(3);
+    expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "de" })).toBe(4);
+
+    // POSIX locale IDs with encoding/modifier suffix.
+    expect(evaluateFormula("=SUMME(1;2)", () => null, { localeId: "de_DE.UTF-8" })).toBe(3);
+    expect(evaluateFormula('=WENNFEHLER(#WERT!; "fallback")', () => null, { localeId: "de_DE@euro" })).toBe("fallback");
+  });
+
   it("treats localized boolean literals as booleans when a localeId is provided", () => {
     expect(evaluateFormula("=WENN(1>0; WAHR; FALSCH)", () => null, { localeId: "de-DE" })).toBe(true);
     expect(evaluateFormula("=SI(1>0; VRAI; FAUX)", () => null, { localeId: "fr-FR" })).toBe(true);

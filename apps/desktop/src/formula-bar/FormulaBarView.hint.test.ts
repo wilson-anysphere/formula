@@ -102,6 +102,63 @@ describe("FormulaBarView function hint UI", () => {
     }
   });
 
+  it("normalizes POSIX locale IDs when inferring argument separators (de_DE.UTF-8)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de_DE.UTF-8";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=ROUND(1,2; 0)";
+
+      const inFirstArg = view.textarea.value.indexOf("1,2") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+
+      expect(getSignatureName(host)).toBe("ROUND(");
+      // Cursor in the first argument; the comma is a decimal separator (1,2), not an argument separator.
+      expect(getActiveParamText(host)).toBe("number");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("normalizes language-only locale IDs when resolving localized function names (de SUMME)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SUMME(A1; B1)";
+
+      const inFirstArg = view.textarea.value.indexOf("A1") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+
+      expect(getSignatureName(host)).toBe("SUMME(");
+      expect(getActiveParamText(host)).toBe("number1");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("shows function hints for localized function names (de-DE SUMME)", async () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "de-DE";
