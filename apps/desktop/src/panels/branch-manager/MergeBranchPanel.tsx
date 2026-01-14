@@ -9,12 +9,14 @@ import { FormulaDiffView } from "../../versioning/ui/FormulaDiffView.js";
 
 export type Cell = { value?: unknown; formula?: string; format?: Record<string, unknown>; enc?: unknown };
 
+export type CellConflictReason = "content" | "format" | "delete-vs-edit" | "move-destination";
+
 export type MergeConflict =
   | {
       type: "cell";
       sheetId: string;
       cell: string;
-      reason: string;
+      reason: CellConflictReason;
       base: Cell | null;
       ours: Cell | null;
       theirs: Cell | null;
