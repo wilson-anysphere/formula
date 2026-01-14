@@ -238,6 +238,52 @@ test("buildWorkbookContext: attachments are redacted under DLP REDACT even when 
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT also drops attachment data for non-heuristic strings (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-attachments-structured",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }]],
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    attachments: [{ type: "chart", reference: "Chart1", data: { note: "TopSecret" } }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+});
+
 test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
   const workbook = {
     id: "wb-dlp-schema-header-noop-redactor",

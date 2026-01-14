@@ -113,6 +113,41 @@ test("buildContext: structured DLP selectors outside the origin window do not af
   assert.doesNotMatch(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildContext: structured DLP REDACT also drops attachment data for non-heuristic strings (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["TopSecret"]],
+    },
+    query: "ignore",
+    attachments: [{ type: "chart", reference: "Chart1", data: { note: "TopSecret" } }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (even when sheet window is public)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,

@@ -315,14 +315,16 @@ function normalizeDlpOptions(dlp) {
  * prompt context. `formula`/`chart` attachments keep their bounded `data` payloads.
  *
  * @param {unknown[] | null | undefined} attachments
+ * @param {{ dropAllData?: boolean }} [options]
  * @returns {unknown[] | null | undefined}
  */
-function compactAttachmentsForPrompt(attachments) {
+function compactAttachmentsForPrompt(attachments, options = {}) {
   if (!Array.isArray(attachments)) return attachments;
+  const dropAllData = options.dropAllData === true;
   return attachments.map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return item;
     const type = item.type;
-    if (type !== "range" && type !== "table") return item;
+    if (!dropAllData && type !== "range" && type !== "table") return item;
     // Drop raw data (can contain copied workbook values).
     const { data: _data, ...rest } = /** @type {any} */ (item);
     return rest;
@@ -790,6 +792,8 @@ export class ContextManager {
     let dlpRedactedCells = 0;
     let dlpSelectionClassification = null;
     let dlpDecision = null;
+    /** @type {ReturnType<typeof evaluatePolicy> | null} */
+    let dlpStructuredDecision = null;
     let dlpHeuristic = null;
     let dlpHeuristicApplied = false;
     let dlpAuditDocumentId = null;
@@ -838,13 +842,14 @@ export class ContextManager {
       const normalizedRange = normalizeRange(rangeRef.range);
       const structuredSelectionClassification = effectiveRangeClassification({ ...rangeRef, range: normalizedRange }, records);
       dlpSelectionClassification = structuredSelectionClassification;
-      let structuredDecision = evaluatePolicy({
-        action: DLP_ACTION.AI_CLOUD_PROCESSING,
-        classification: structuredSelectionClassification,
-        policy: dlp.policy,
-        options: { includeRestrictedContent },
-      });
-      dlpDecision = structuredDecision;
+       let structuredDecision = evaluatePolicy({
+         action: DLP_ACTION.AI_CLOUD_PROCESSING,
+         classification: structuredSelectionClassification,
+         policy: dlp.policy,
+         options: { includeRestrictedContent },
+       });
+       dlpStructuredDecision = structuredDecision;
+       dlpDecision = structuredDecision;
 
       if (structuredDecision.decision === DLP_DECISION.BLOCK) {
         dlp.auditLogger?.log({
@@ -911,8 +916,8 @@ export class ContextManager {
 
       // Only do per-cell enforcement under REDACT decisions; in ALLOW cases the range max
       // classification is within the threshold so every in-range cell must be allowed.
-      let nextValues;
-      if (structuredDecision.decision === DLP_DECISION.REDACT) {
+       let nextValues;
+       if (structuredDecision.decision === DLP_DECISION.REDACT) {
         const maxAllowedRank =
           structuredDecision.maxAllowed === null ? null : classificationRank(structuredDecision.maxAllowed);
         const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records, {
@@ -940,10 +945,10 @@ export class ContextManager {
           }
           nextValues.push(nextRow);
         }
-      } else {
-        // Preserve the previous behavior of returning fresh row arrays (but skip DLP scans).
-        nextValues = valuesForContext.map((row) => (row ?? []).slice());
-      }
+       } else {
+         // Preserve the previous behavior of returning fresh row arrays (but skip DLP scans).
+         nextValues = valuesForContext.map((row) => (row ?? []).slice());
+       }
 
       sheetForContext = { ...rawSheet, values: nextValues };
 
@@ -1046,7 +1051,11 @@ export class ContextManager {
           policyAllowsRestrictedContent,
         })
       : params.attachments;
-    const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe);
+    const shouldDropAllAttachmentData =
+      Boolean(dlp) && dlpStructuredDecision?.decision === DLP_DECISION.REDACT;
+    const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
+      dropAllData: shouldDropAllAttachmentData,
+    });
     const schemaOut = shouldReturnRedactedStructured
       ? redactStructuredValue(schema, this.redactor, {
           signal,
@@ -1466,6 +1475,8 @@ export class ContextManager {
 
     /** @type {{level: string, labels: string[]} } */
     let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+    /** @type {{level: string, labels: string[]} } */
+    let structuredOverallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
     // Structured DLP classifications are scoped to specific selectors (cell/range/etc).
     // When cloud AI processing is fully blocked (redactDisallowed=false), we need to
     // short-circuit even if no chunks are retrieved (e.g. a workbook with a single
@@ -1477,10 +1488,19 @@ export class ContextManager {
         throwIfAborted(signal);
         const classification = record?.classification;
         if (classification && typeof classification === "object") {
+          structuredOverallClassification = maxClassification(structuredOverallClassification, classification);
           overallClassification = maxClassification(overallClassification, classification);
         }
       }
     }
+    const structuredOverallDecision = dlp
+      ? evaluatePolicy({
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          classification: structuredOverallClassification,
+          policy: dlp.policy,
+          options: { includeRestrictedContent },
+        })
+      : null;
     // Attachments can contain user-provided context (e.g. chart annotations) that should
     // influence the overall AI cloud processing decision when DLP is enabled.
     if (dlp && Array.isArray(params.attachments) && params.attachments.length) {
@@ -1685,7 +1705,11 @@ export class ContextManager {
             policyAllowsRestrictedContent,
           })
         : params.attachments;
-      const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe);
+      const shouldDropAllAttachmentData =
+        Boolean(dlp) && structuredOverallDecision?.decision === DLP_DECISION.REDACT;
+      const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
+        dropAllData: shouldDropAllAttachmentData,
+      });
 
       const schemaRestrictedDecision = dlp
         ? evaluatePolicy({
