@@ -151,7 +151,7 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     expect(app.getGridMode()).toBe("shared");
 
     // Move the active cell away from A1 so we can detect selection changes.
@@ -171,7 +171,8 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     };
 
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
-    (app as any).syncSheetDrawings();
+    // Ensure `listDrawingObjectsForSheet()` reflects the newly inserted object (it caches results).
+    (app as any).drawingObjectsCache = null;
 
     // Right-click within the picture bounds. With our drawing interaction controller attached to the
     // shared-grid selection canvas, this should select the drawing but *not* move the active cell.
@@ -185,4 +186,3 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     root.remove();
   });
 });
-
