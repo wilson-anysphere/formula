@@ -465,10 +465,14 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setWorkbookFileMetadata(directory, filename, rpcOptions)),
     setCellStyleId: async (address, styleId, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setCellStyleId(address, styleId, sheet, rpcOptions)),
-    setRowStyleId: async (...args: any[]) => await withEngine((connected) => (connected.setRowStyleId as any)(...args)),
-    setColStyleId: async (...args: any[]) => await withEngine((connected) => (connected.setColStyleId as any)(...args)),
+    // Style-layer RPC methods support multiple call signatures (legacy sheet-last + new sheet-first).
+    // Forward through to EngineWorker which normalizes arguments.
+    setRowStyleId: async (...args: any[]) =>
+      await withEngine((connected) => (connected.setRowStyleId as any).call(connected, ...args)),
+    setColStyleId: async (...args: any[]) =>
+      await withEngine((connected) => (connected.setColStyleId as any).call(connected, ...args)),
     setSheetDefaultStyleId: async (...args: any[]) =>
-      await withEngine((connected) => (connected.setSheetDefaultStyleId as any)(...args)),
+      await withEngine((connected) => (connected.setSheetDefaultStyleId as any).call(connected, ...args)),
     setColWidth: async (col, width, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
     setColHidden: async (col, hidden, sheet, rpcOptions) =>
