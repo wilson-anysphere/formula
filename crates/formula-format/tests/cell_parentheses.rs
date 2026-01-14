@@ -1,6 +1,27 @@
 use formula_format::{cell_format_info, FormatOptions};
 
 #[test]
+fn cell_parentheses_returns_0_for_one_section_formats() {
+    // Excel's CELL("parentheses") is about an *explicit negative section* in the format code.
+    // One-section formats always return 0, even if the lone section contains parentheses
+    // literals.
+    assert_eq!(cell_parentheses_flag(Some("(0)")), 0);
+    assert_eq!(cell_parentheses_flag(Some("[Red](0)")), 0);
+}
+
+#[test]
+fn cell_parentheses_requires_an_explicit_negative_section() {
+    assert_eq!(cell_parentheses_flag(Some("0;(0)")), 1);
+}
+
+#[test]
+fn cell_parentheses_requires_balanced_parentheses() {
+    // Parentheses must be a matched pair in the negative section.
+    assert_eq!(cell_parentheses_flag(Some("0;0)")), 0);
+    assert_eq!(cell_parentheses_flag(Some("0;(0")), 0);
+}
+
+#[test]
 fn cell_parentheses_ignores_underscore_and_fill_operands() {
     let options = FormatOptions::default();
 

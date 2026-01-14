@@ -73,7 +73,13 @@ pub fn cell_parentheses_flag(format_code: Option<&str>) -> u8 {
     let parsed = FormatCode::parse(code).unwrap_or_else(|_| FormatCode::general());
     let negative = parsed.select_section_for_number(-1.0);
 
-    if pattern_contains_parentheses(negative.pattern) {
+    // Excel reports 0 for one-section formats (where negatives reuse the first section and Excel
+    // automatically prefixes a '-' sign).
+    if negative.auto_negative_sign {
+        return 0;
+    }
+
+    if pattern_contains_balanced_parentheses(negative.pattern) {
         1
     } else {
         0
@@ -287,11 +293,13 @@ fn builtin_id_is_common_datetime(id: u16) -> bool {
     matches!(id, 14..=22 | 27..=36 | 45..=47 | 50..=58)
 }
 
-fn pattern_contains_parentheses(pattern: &str) -> bool {
+fn pattern_contains_balanced_parentheses(pattern: &str) -> bool {
     let mut in_quotes = false;
     let mut escape = false;
     let mut in_brackets = false;
     let mut chars = pattern.chars();
+    let mut has_open = false;
+    let mut has_close = false;
 
     while let Some(ch) = chars.next() {
         if escape {
@@ -322,12 +330,13 @@ fn pattern_contains_parentheses(pattern: &str) -> bool {
             '_' | '*' => {
                 let _ = chars.next();
             }
-            '(' | ')' => return true,
+            '(' => has_open = true,
+            ')' => has_close = true,
             _ => {}
         }
     }
 
-    false
+    has_open && has_close
 }
 
 fn count_decimal_places(pattern: &str) -> usize {
