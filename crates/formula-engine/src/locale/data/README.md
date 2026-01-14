@@ -191,8 +191,10 @@ CI/tests also provide guard rails:
 - `crates/formula-engine/tests/locale_de_de_function_sentinels.rs` asserts a small set of core
   German spellings (e.g. `SUM` → `SUMME`, `IF` → `WENN`) to catch regressions.
 - `crates/formula-engine/tests/locale_es_es_function_sentinels.rs` is an explicit regression test
-  for Spanish financial function spellings (including `NPV`/`IRR`), since missing entries otherwise
-  silently fall back to English.
+  for Spanish spellings across core + financial + statistical/forecasting function families
+  (including `NPV`/`IRR`, `FORECAST*`, `CHISQ.*`, `F.*`), since missing entries otherwise silently
+  fall back to English. It also contains coarse “table completeness” guards (identity-rate and
+  cross-locale suspicious-identity checks) to catch partial regressions.
 
 From repo root you can run (optional but recommended when editing locale data):
 
