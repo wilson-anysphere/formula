@@ -377,6 +377,41 @@ fn locale_function_tsv_completeness_function_tsvs_are_complete_and_unique() {
 }
 
 #[test]
+fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
+    // Regression guard: `de-DE.tsv` is generated from `sources/de-DE.json`. If the source mapping is
+    // accidentally replaced with a tiny curated subset, the generator will silently fall back to
+    // identity mappings for most functions (canonical == localized), breaking localized editing and
+    // round-tripping.
+    //
+    // Allow some identity mappings since many functions are not localized in German Excel (e.g.
+    // `ABS`, `COS`, etc) and some functions may be unavailable in a given Excel build. But require
+    // that a majority of functions have a non-identity localized spelling.
+    let tsv = include_str!("../src/locale/data/de-DE.tsv");
+    let mut total = 0usize;
+    let mut identity = 0usize;
+
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("invalid TSV line in de-DE.tsv (expected `Canonical<TAB>Localized`): {line:?}")
+        });
+        total += 1;
+        if canon == loc {
+            identity += 1;
+        }
+    }
+
+    let non_identity = total - identity;
+    assert!(
+        non_identity * 100 >= total * 60,
+        "expected de-DE.tsv to contain many localized function spellings; got {non_identity}/{total} non-identity entries (identity={identity})"
+    );
+}
+
+#[test]
 fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
     let expected: BTreeSet<String> = [
         ErrorKind::Null,
