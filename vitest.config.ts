@@ -32,6 +32,8 @@ const textLayoutEntry = resolve(repoRoot, "packages/text-layout/src/index.js");
 const textLayoutHarfBuzzEntry = resolve(repoRoot, "packages/text-layout/src/harfbuzz.js");
 const graphemeSplitterShimEntry = resolve(repoRoot, "scripts/vitest-shims/grapheme-splitter.ts");
 const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts");
+const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
+const linebreakPackageEntry = resolve(repoRoot, "node_modules/linebreak");
 const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
 const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
 const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
@@ -87,8 +89,13 @@ export default defineConfig({
       // Some cached/stale `node_modules` environments may be missing transitive dependencies of the
       // aliased workspace packages. Provide lightweight shims for pure-JS deps used by
       // `@formula/text-layout` so desktop tests can still run.
-      { find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry },
-      { find: /^linebreak$/, replacement: linebreakShimEntry },
+      //
+      // Prefer the real dependency when it's present; fall back to shims only when the pnpm
+      // workspace/cached install is missing the package.
+      ...(!existsSync(graphemeSplitterPackageEntry)
+        ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
+        : []),
+      ...(!existsSync(linebreakPackageEntry) ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }] : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.
