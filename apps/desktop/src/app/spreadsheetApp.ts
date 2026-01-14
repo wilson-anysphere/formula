@@ -6245,10 +6245,19 @@ export class SpreadsheetApp {
         // ignore
       });
 
+      try {
+        this.imageBytesBinder?.onLocalImageInserted(image);
+      } catch {
+        // Best-effort: never fail insertion due to collab image propagation.
+      }
+
       this.selectedDrawingId = inserted.id;
       this.drawingOverlay.setSelectedId(inserted.id);
-      this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+      if (this.gridMode === "shared") {
+        this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+      }
       this.renderDrawings();
+      this.renderSelection();
       this.focus();
     } catch (err) {
       if (canInsertDrawing) {
@@ -6266,12 +6275,12 @@ export class SpreadsheetApp {
     const existing = this.drawingInteractionController;
     if (existing) return existing;
 
-    const docAny = this.document as any;
-    const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const callbacks: DrawingInteractionCallbacks = {
       getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
       getObjects: () => this.listDrawingObjectsForSheet(),
       setObjects: (next) => {
+        const doc: any = this.document as any;
+        const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
         this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: drawingsGetter };
         this.renderDrawings();
       },
