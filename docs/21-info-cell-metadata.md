@@ -383,6 +383,7 @@ This section documents the “wiring points” for hosts.
 
 - Calculation mode (`INFO("recalc")`): exposed via `EngineClient.getCalcSettings()` / `EngineClient.setCalcSettings()`.
   - Note: the worker protocol typically runs edits in manual mode so JS callers can explicitly request `recalculate()` and receive deterministic value-change deltas.
+  - In practice, most mutating WASM APIs preserve **explicit-recalc semantics even when the workbook calcMode is Automatic** (they are wrapped in `with_manual_calc_mode` in `crates/formula-wasm`), so callers should assume they need to call `recalculate()` to observe updated `INFO()`/`CELL()` results.
 
 - INFO environment metadata (`INFO("system")`, `INFO("directory")`, `INFO("osversion")`, `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`):
   - `EngineClient.setEngineInfo({ system, directory, osversion, release, version, memavail, totmem })`
