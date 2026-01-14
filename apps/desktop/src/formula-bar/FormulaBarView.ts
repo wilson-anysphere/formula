@@ -33,6 +33,8 @@ type FormulaReferenceHighlight = {
   active?: boolean;
 };
 
+type ReferenceHighlightMode = "editing" | "errorPanel" | "none";
+
 type NameBoxMenuItem = {
   /**
    * User-visible label. For named ranges/tables this is typically the workbook-defined name.
@@ -272,6 +274,12 @@ export class FormulaBarView {
   #errorPanelReferenceHighlights: FormulaReferenceHighlight[] | null = null;
   #hoverOverride: RangeAddress | null = null;
   #hoverOverrideText: string | null = null;
+  #lastEmittedHoverRange: { startRow: number; startCol: number; endRow: number; endCol: number } | null = null;
+  #lastEmittedHoverText: string | null = null;
+  #lastEmittedReferenceHighlightsMode: ReferenceHighlightMode = "none";
+  #lastEmittedReferenceHighlightsColoredRefs: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
+  #lastEmittedReferenceHighlightsActiveIndex: number | null = null;
+  #lastEmittedReferenceHighlightsErrorPanel: FormulaReferenceHighlight[] | null = null;
   #selectedReferenceIndex: number | null = null;
   #mouseDownSelectedReferenceIndex: number | null = null;
   #nameBoxValue = "A1";
@@ -2288,11 +2296,79 @@ export class FormulaBarView {
 
   #emitOverlays(): void {
     const range = this.#hoverOverride ?? this.model.hoveredReference();
-    this.#callbacks.onHoverRange?.(range);
     const refText = this.#hoverOverrideText ?? this.model.hoveredReferenceText();
-    this.#callbacks.onHoverRangeWithText?.(range, refText ?? null);
+    const normalizedText = refText ?? null;
 
-    this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+    let hoverChanged = false;
+    if (!range) {
+      hoverChanged = this.#lastEmittedHoverRange !== null;
+    } else {
+      const next = {
+        startRow: range.start.row,
+        startCol: range.start.col,
+        endRow: range.end.row,
+        endCol: range.end.col,
+      };
+      const prev = this.#lastEmittedHoverRange;
+      if (
+        !prev ||
+        prev.startRow !== next.startRow ||
+        prev.startCol !== next.startCol ||
+        prev.endRow !== next.endRow ||
+        prev.endCol !== next.endCol
+      ) {
+        hoverChanged = true;
+      }
+      if (hoverChanged) this.#lastEmittedHoverRange = next;
+    }
+    if (!range && hoverChanged) this.#lastEmittedHoverRange = null;
+    if (this.#lastEmittedHoverText !== normalizedText) hoverChanged = true;
+
+    if (hoverChanged) {
+      this.#lastEmittedHoverText = normalizedText;
+      this.#callbacks.onHoverRange?.(range);
+      this.#callbacks.onHoverRangeWithText?.(range, normalizedText);
+    }
+
+    // Reference highlight overlay updates can be costly (e.g. SpreadsheetApp recomputes/filters highlights).
+    // Only emit when the underlying highlights actually changed.
+    const isFormula = this.model.draft.trim().startsWith("=");
+    const nextMode: ReferenceHighlightMode =
+      this.model.isEditing && isFormula ? "editing" : this.#errorPanelReferenceHighlights ? "errorPanel" : "none";
+    let highlightsChanged = nextMode !== this.#lastEmittedReferenceHighlightsMode;
+
+    if (nextMode === "editing") {
+      const colored = this.model.coloredReferences();
+      const active = this.model.activeReferenceIndex();
+      if (colored !== this.#lastEmittedReferenceHighlightsColoredRefs || active !== this.#lastEmittedReferenceHighlightsActiveIndex) {
+        highlightsChanged = true;
+      }
+      if (highlightsChanged) {
+        this.#lastEmittedReferenceHighlightsColoredRefs = colored;
+        this.#lastEmittedReferenceHighlightsActiveIndex = active;
+        this.#lastEmittedReferenceHighlightsErrorPanel = null;
+      }
+    } else if (nextMode === "errorPanel") {
+      if (this.#errorPanelReferenceHighlights !== this.#lastEmittedReferenceHighlightsErrorPanel) {
+        highlightsChanged = true;
+      }
+      if (highlightsChanged) {
+        this.#lastEmittedReferenceHighlightsColoredRefs = null;
+        this.#lastEmittedReferenceHighlightsActiveIndex = null;
+        this.#lastEmittedReferenceHighlightsErrorPanel = this.#errorPanelReferenceHighlights;
+      }
+    } else {
+      if (highlightsChanged) {
+        this.#lastEmittedReferenceHighlightsColoredRefs = null;
+        this.#lastEmittedReferenceHighlightsActiveIndex = null;
+        this.#lastEmittedReferenceHighlightsErrorPanel = null;
+      }
+    }
+
+    if (highlightsChanged) {
+      this.#lastEmittedReferenceHighlightsMode = nextMode;
+      this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+    }
   }
 
   #onHighlightHover(e: MouseEvent): void {
@@ -2315,6 +2391,17 @@ export class FormulaBarView {
       this.#hoverOverride = this.model.resolveReferenceText(text);
       this.#callbacks.onHoverRange?.(this.#hoverOverride);
       this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
+      // Keep overlay emission caches in sync; hover previews in view mode are emitted directly
+      // (not via `#emitOverlays`) to avoid recomputing reference highlight overlays on every mousemove.
+      this.#lastEmittedHoverText = this.#hoverOverrideText;
+      this.#lastEmittedHoverRange = this.#hoverOverride
+        ? {
+            startRow: this.#hoverOverride.start.row,
+            startCol: this.#hoverOverride.start.col,
+            endRow: this.#hoverOverride.end.row,
+            endCol: this.#hoverOverride.end.col,
+          }
+        : null;
       return;
     }
 
@@ -2329,6 +2416,15 @@ export class FormulaBarView {
         : null;
       this.#callbacks.onHoverRange?.(this.#hoverOverride);
       this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
+      this.#lastEmittedHoverText = this.#hoverOverrideText;
+      this.#lastEmittedHoverRange = this.#hoverOverride
+        ? {
+            startRow: this.#hoverOverride.start.row,
+            startCol: this.#hoverOverride.start.col,
+            endRow: this.#hoverOverride.end.row,
+            endCol: this.#hoverOverride.end.col,
+          }
+        : null;
       return;
     }
 
