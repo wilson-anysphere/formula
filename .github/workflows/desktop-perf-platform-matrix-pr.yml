@@ -9,7 +9,9 @@ permissions:
 
 concurrency:
   # Avoid stacking expensive 3xOS runs if the label is re-applied.
-  group: desktop-perf-platform-matrix-pr-${{ github.event.pull_request.number }}
+  # Note: this workflow triggers on *any* PR label, so include the label name to avoid canceling
+  # an in-flight perf run when maintainers apply unrelated labels.
+  group: desktop-perf-platform-matrix-pr-${{ github.event.pull_request.number }}-${{ github.event.label.name }}
   cancel-in-progress: true
 
 env:
