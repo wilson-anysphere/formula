@@ -75,10 +75,11 @@ export function createRibbonActionsFromCommands(params: {
   /**
    * Some hosts historically invoked `onCommand` immediately after `onToggle` for toggle buttons.
    *
-   * Keep a short-lived suppression set so we can ignore the follow-up `onCommand` call and avoid
+   * Keep a short-lived suppression map so we can ignore the follow-up `onCommand` call(s) and avoid
    * double execution.
    */
-  const pendingToggleSuppress = new Set<string>();
+  const pendingToggleSuppress = new Map<string, { count: number; cleanupToken: number }>();
+  let nextToggleSuppressCleanupToken = 0;
   const scheduleMicrotask =
     typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
   // Prefer a macrotask boundary so the suppression survives follow-up `onCommand` calls that are
@@ -94,9 +95,22 @@ export function createRibbonActionsFromCommands(params: {
     scheduleMicrotask(() => scheduleMicrotask(() => void setTimeout(cb, 0)));
   };
   const markToggleHandled = (commandId: string): void => {
-    pendingToggleSuppress.add(commandId);
+    const token = (nextToggleSuppressCleanupToken += 1);
+    const entry = pendingToggleSuppress.get(commandId);
+    if (entry) {
+      entry.count += 1;
+      entry.cleanupToken = token;
+    } else {
+      pendingToggleSuppress.set(commandId, { count: 1, cleanupToken: token });
+    }
     // Ensure we don't leak memory if the host only calls `onToggle` (tests/custom hosts).
-    scheduleToggleSuppressCleanup(() => pendingToggleSuppress.delete(commandId));
+    scheduleToggleSuppressCleanup(() => {
+      const current = pendingToggleSuppress.get(commandId);
+      if (!current) return;
+      // Ignore stale cleanup callbacks when additional toggles happen before cleanup runs.
+      if (current.cleanupToken !== token) return;
+      pendingToggleSuppress.delete(commandId);
+    });
   };
 
   const run = (commandId: string, fn: () => void | Promise<void>): void => {
@@ -123,8 +137,12 @@ export function createRibbonActionsFromCommands(params: {
 
   return {
     onCommand: (commandId: string) => {
-      if (pendingToggleSuppress.has(commandId)) {
-        pendingToggleSuppress.delete(commandId);
+      const pending = pendingToggleSuppress.get(commandId);
+      if (pending) {
+        pending.count -= 1;
+        if (pending.count <= 0) {
+          pendingToggleSuppress.delete(commandId);
+        }
         return;
       }
 

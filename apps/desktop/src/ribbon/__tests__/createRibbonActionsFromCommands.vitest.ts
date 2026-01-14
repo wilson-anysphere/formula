@@ -120,6 +120,25 @@ describe("createRibbonActionsFromCommands", () => {
     expect(run).toHaveBeenCalledWith(true);
   });
 
+  it("suppresses multiple follow-up onCommand calls when multiple toggles happen before the follow-ups", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("ribbon.toggle.multi", "Toggle", run);
+
+    const actions = createRibbonActionsFromCommands({ commandRegistry: registry });
+    actions.onToggle?.("ribbon.toggle.multi", true);
+    actions.onToggle?.("ribbon.toggle.multi", false);
+    // Legacy: some hosts may still invoke `onCommand` for each toggle event, but can do so
+    // after multiple toggles have already occurred.
+    actions.onCommand?.("ribbon.toggle.multi");
+    actions.onCommand?.("ribbon.toggle.multi");
+    await flushMicrotasks();
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, true);
+    expect(run).toHaveBeenNthCalledWith(2, false);
+  });
+
   it("suppresses follow-up onCommand calls scheduled via a microtask that then queues a timer after onToggle", async () => {
     const registry = new CommandRegistry();
     const run = vi.fn();
