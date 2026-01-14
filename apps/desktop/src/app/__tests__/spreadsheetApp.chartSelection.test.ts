@@ -649,6 +649,69 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("chart resize handles win over overlapping drawings when the chart is selected", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Resizable Chart",
+      position: "A1:H10",
+    });
+    const chart = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(chart).toBeTruthy();
+
+    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    // Select the chart first so resize handles are active.
+    const selectX = originX + rect.left + 10;
+    const selectY = originY + rect.top + 10;
+    dispatchPointerEvent(root, "pointerdown", { clientX: selectX, clientY: selectY, pointerId: 120 });
+    dispatchPointerEvent(window, "pointerup", { clientX: selectX, clientY: selectY, pointerId: 120 });
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+
+    // Add a drawing that overlaps the bottom-right resize handle.
+    const doc = (app as any).document as any;
+    doc.getSheetDrawings = () => [
+      {
+        id: 1,
+        kind: { type: "shape", label: "Overlay" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(2000), cy: pxToEmu(2000) },
+        },
+        zOrder: 0,
+      },
+    ];
+    (app as any).drawingObjectsCache = null;
+
+    const handleX = originX + rect.left + rect.width;
+    const handleY = originY + rect.top + rect.height;
+
+    dispatchPointerEvent(root, "pointerdown", { clientX: handleX, clientY: handleY, pointerId: 121 });
+    expect((app as any).chartDragState?.mode).toBe("resize");
+    dispatchPointerEvent(window, "pointerup", { clientX: handleX, clientY: handleY, pointerId: 121 });
+
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+    expect((app as any).selectedDrawingId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("canvas charts mode: when a drawing overlaps a chart, clicking selects the chart (charts are above drawings)", () => {
     const prior = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "1";

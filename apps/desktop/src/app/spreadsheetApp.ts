@@ -2719,6 +2719,17 @@ export class SpreadsheetApp {
             target === this.presenceCanvas;
           if (!isGridSurface) return false;
 
+          // In non-canvas charts mode, chart selection handles are rendered above workbook drawings.
+          // When a chart is selected, allow resize-handle interactions to win so drawings do not steal
+          // pointerdowns from the chart handles underneath.
+          if (!this.useCanvasCharts && this.selectedChartId != null) {
+            const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+            if (chartHit && chartHit.chart.id === this.selectedChartId) {
+              const handle = this.chartResizeHandleAtPoint(chartHit);
+              if (handle) return false;
+            }
+          }
+
           // In canvas-charts mode, charts are rendered above workbook drawings. If a chart is under the pointer,
           // let chart interactions win so drawings don't steal clicks from charts underneath.
           if (this.useCanvasCharts) {
@@ -10389,10 +10400,13 @@ export class SpreadsheetApp {
     const drawingCursor = this.drawingCursorAtPoint(x, y);
     // Handle precedence: selection handles should win over any underlying objects.
     const drawingHandleCursor = drawingCursor != null && drawingCursor !== "move" ? drawingCursor : null;
+    // Chart selection handles are rendered above drawings, even when charts themselves are under the
+    // drawings overlay. If a chart is selected, we must still compute chart cursor feedback so resize
+    // handles remain interactive/correct when drawings overlap.
     const chartCursor =
-      !this.useCanvasCharts && drawingCursor
-        ? null
-        : this.chartCursorAtPoint(x, y);
+      this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null
+        ? this.chartCursorAtPoint(x, y)
+        : null;
     const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
     const nextCursor =
       drawingHandleCursor ??
@@ -13206,24 +13220,44 @@ export class SpreadsheetApp {
       target === this.presenceCanvas;
     if (!isGridSurface) return;
 
-    // Drawings render above charts; if a drawing is under the pointer, let drawing interactions/selection win.
-    // This is particularly important in legacy mode where drawing interactions rely on bubbling listeners.
-    const drawings = this.listDrawingObjectsForSheet();
-    if (drawings.length > 0) {
-      this.maybeRefreshRootPosition({ force: true });
-      const x = e.clientX - this.rootLeft;
-      const y = e.clientY - this.rootTop;
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
-        const viewport = this.getDrawingInteractionViewport(sharedViewport);
-        const index = this.getDrawingHitTestIndex(drawings);
-        const drawingBounds = this.drawingHitTestScratchRect;
-        const hit = hitTestDrawingsInto(index, viewport, x, y, drawingBounds);
-        if (hit) return;
+    const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+    // Chart selection handles are rendered above drawings, so allow handle interactions even when a drawing overlaps.
+    const wasSelected = hit ? this.selectedChartId === hit.chart.id : false;
+    const resizeHandle = wasSelected && hit ? this.chartResizeHandleAtPoint(hit) : null;
+    const isOnSelectedChartHandle = resizeHandle != null;
+
+    if (hit && !isOnSelectedChartHandle) {
+      // Drawings render above charts; if a drawing is under the pointer, let drawing interactions/selection win.
+      // This is particularly important in legacy mode where drawing interactions rely on bubbling listeners.
+      const drawings = this.listDrawingObjectsForSheet();
+      if (drawings.length > 0) {
+        const x = e.clientX - this.rootLeft;
+        const y = e.clientY - this.rootTop;
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+          const viewport = this.getDrawingInteractionViewport(sharedViewport);
+          const index = this.getDrawingHitTestIndex(drawings);
+          const drawingBounds = this.drawingHitTestScratchRect;
+          const drawingHit = hitTestDrawingsInto(index, viewport, x, y, drawingBounds);
+          if (drawingHit) return;
+
+          // Selected drawing handles can extend outside the drawing bounds; treat those as a hit so chart
+          // interactions do not steal clicks from resize/rotate gestures.
+          const selectedId = this.selectedDrawingId;
+          if (selectedId != null) {
+            const selectedIndex = index.byId.get(selectedId);
+            const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
+            if (selected) {
+              const rect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
+              if (hitTestRotationHandle(rect, x, y, selected.transform)) return;
+              const handle = hitTestResizeHandle(rect, x, y, selected.transform);
+              if (handle) return;
+            }
+          }
+        }
       }
     }
 
-    const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
       // Preserve chart selection on context-click misses so right-clicking the grid can open
       // cell context menus without dropping the existing chart selection (mirrors drawing behavior).
@@ -13248,12 +13282,12 @@ export class SpreadsheetApp {
     // route selection changes through `setSelectedChartId` so it can clear any drawing selection
     // (and repaint the appropriate selection layer) without relying on downstream handlers.
 
-    const wasSelected = this.selectedChartId === hit.chart.id;
+    const wasSelectedAtDown = this.selectedChartId === hit.chart.id;
     this.setSelectedChartId(hit.chart.id);
     this.focus();
 
-    const resizeHandle = wasSelected ? this.chartResizeHandleAtPoint(hit) : null;
-    const mode = resizeHandle ? "resize" : "move";
+    const dragResizeHandle = wasSelectedAtDown ? this.chartResizeHandleAtPoint(hit) : null;
+    const mode = dragResizeHandle ? "resize" : "move";
 
     this.chartDragAbort?.abort();
     this.chartDragAbort = new AbortController();
@@ -13262,7 +13296,7 @@ export class SpreadsheetApp {
       pointerId: e.pointerId,
       chartId: hit.chart.id,
       mode,
-      ...(resizeHandle ? { resizeHandle } : {}),
+      ...(dragResizeHandle ? { resizeHandle: dragResizeHandle } : {}),
       startClientX: e.clientX,
       startClientY: e.clientY,
       startAnchor: { ...(hit.chart.anchor as any) },
@@ -17456,7 +17490,13 @@ export class SpreadsheetApp {
     const drawingCursor = this.drawingCursorAtPoint(x, y);
     // Handle precedence: selection handles should win over any underlying objects.
     const drawingHandleCursor = drawingCursor != null && drawingCursor !== "move" ? drawingCursor : null;
-    const chartCursor = !this.useCanvasCharts && drawingCursor ? null : this.chartCursorAtPoint(x, y);
+    // Chart selection handles are rendered above drawings, even when charts themselves are under the
+    // drawings overlay. If a chart is selected, we must still compute chart cursor feedback so resize
+    // handles remain interactive/correct when drawings overlap.
+    const chartCursor =
+      this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null
+        ? this.chartCursorAtPoint(x, y)
+        : null;
     const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
     const baseCursor =
       drawingHandleCursor ??
