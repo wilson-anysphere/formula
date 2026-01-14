@@ -126,7 +126,7 @@ fn bytecode_indirect_external_cell_ref_falls_back_and_is_ref_error() {
     // external value provider is configured).
     //
     // The bytecode backend currently falls back when an external workbook reference is visible at
-    // compile time (string literal), but the result must still be `#REF!` and must not consult the
+    // compile time (string literal). The result must still be `#REF!` and must not consult the
     // provider.
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
