@@ -116,7 +116,7 @@ import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWork
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "@formula/grid";
+import { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY, MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid";
 import type {
   CanvasGridImageResolver,
   CellRange as GridCellRange,
@@ -4259,7 +4259,7 @@ export class SpreadsheetApp {
     if (!this.sharedGrid) return;
     const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
     const normalized = typeof nextZoom === "number" && Number.isFinite(nextZoom) ? nextZoom : 1;
-    const clamped = clamp(normalized, 0.25, 4);
+    const clamped = clamp(normalized, MIN_GRID_ZOOM, MAX_GRID_ZOOM);
 
     const prev = this.sharedGrid.getZoom();
     if (Math.abs(prev - clamped) < 1e-6) return;

@@ -1,4 +1,5 @@
 import { normalizeLayout } from "./layoutNormalization.js";
+import { clampZoom } from "@formula/grid/node";
 import {
   activateDockedPanel,
   closePanel,
@@ -310,7 +311,7 @@ export class LayoutController {
       if (!existing) return;
 
       const rawZoom = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : 1;
-      const clamped = Math.max(0.25, Math.min(4, rawZoom));
+      const clamped = clampZoom(rawZoom);
       if (existing.zoom === clamped) return;
 
       existing.zoom = clamped;

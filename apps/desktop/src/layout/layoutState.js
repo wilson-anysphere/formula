@@ -9,6 +9,7 @@ import {
   SPLIT_DIRECTIONS,
   SPLIT_PANES,
 } from "./constants.js";
+import { MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid/node";
 
 function clone(value) {
   return structuredClone(value);
@@ -386,7 +387,7 @@ export function setSplitPaneZoom(layout, pane, zoom) {
   ensureSplitPane(pane);
   const existing = layout.splitView.panes[pane];
   const value = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : DEFAULT_PANE_ZOOM;
-  const clamped = clamp(value, 0.25, 4);
+  const clamped = clamp(value, MIN_GRID_ZOOM, MAX_GRID_ZOOM);
   if (existing.zoom === clamped) return layout;
   return {
     ...layout,

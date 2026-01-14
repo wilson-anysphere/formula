@@ -35,6 +35,7 @@ export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker.ts";
 export type { Rect } from "./rendering/DirtyRegionTracker.ts";
 export { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "./rendering/defaultFontFamilies.ts";
 export { LruCache } from "./utils/LruCache.ts";
+export { MAX_GRID_ZOOM, MIN_GRID_ZOOM, clampZoom } from "./utils/zoomMath.ts";
 
 export type { GridTheme } from "./theme/GridTheme.ts";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme.ts";

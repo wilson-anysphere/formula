@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { LayoutController } from "../layoutController.js";
 import { LayoutWorkspaceManager, MemoryStorage } from "../layoutPersistence.js";
+import { MAX_GRID_ZOOM } from "@formula/grid";
 
 describe("LayoutController persistence", () => {
   test("setSplitPaneScroll can be applied without persisting, then flushed with persistNow()", () => {
@@ -156,8 +157,8 @@ describe("LayoutController persistence", () => {
     expect(changeCount).toBe(1);
 
     controller.setSplitPaneZoom("secondary", 10, { persist: false, emit: false });
-    // Should clamp to [0.25, 4] even for silent updates.
-    expect(controller.layout.splitView.panes.secondary.zoom).toBe(4);
+    // Should clamp to the grid zoom bounds even for silent updates.
+    expect(controller.layout.splitView.panes.secondary.zoom).toBe(MAX_GRID_ZOOM);
     expect(storage.getItem(key)).toBe(persistedBefore);
     expect(changeCount).toBe(1);
 
@@ -167,7 +168,7 @@ describe("LayoutController persistence", () => {
     expect(after).not.toBe(persistedBefore);
     expect(after).not.toBeNull();
     const parsed = JSON.parse(after!);
-    expect(parsed.splitView.panes.secondary.zoom).toBe(4);
+    expect(parsed.splitView.panes.secondary.zoom).toBe(MAX_GRID_ZOOM);
   });
 
   test("setSplitPaneScroll can be applied without persisting/emitting, then flushed with persistNow()", () => {

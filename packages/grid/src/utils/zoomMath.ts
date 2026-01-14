@@ -1,4 +1,4 @@
-import type { GridViewportState } from "../virtualization/VirtualScrollManager";
+import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
 
 // Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
 // persist values without "snapping" on reload.

@@ -10,6 +10,7 @@ import {
   SPLIT_PANES,
 } from "./constants.js";
 import { createDefaultLayout } from "./layoutState.js";
+import { MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid/node";
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -121,7 +122,7 @@ function normalizeSplitView(rawSplitView, { primarySheetId }) {
         sheetId: typeof rawPane.sheetId === "string" ? rawPane.sheetId : splitView.panes[paneId].sheetId,
         scrollX: clampNumber(rawPane.scrollX, { min: -1e12, max: 1e12, fallback: splitView.panes[paneId].scrollX }),
         scrollY: clampNumber(rawPane.scrollY, { min: -1e12, max: 1e12, fallback: splitView.panes[paneId].scrollY }),
-        zoom: clampNumber(rawPane.zoom, { min: 0.25, max: 4, fallback: splitView.panes[paneId].zoom }),
+        zoom: clampNumber(rawPane.zoom, { min: MIN_GRID_ZOOM, max: MAX_GRID_ZOOM, fallback: splitView.panes[paneId].zoom }),
       };
     }
   }

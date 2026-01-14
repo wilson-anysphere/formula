@@ -6,6 +6,7 @@ import type {
   FillCommitEvent,
   GridAxisSizeChange
 } from "@formula/grid";
+import { MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
@@ -417,7 +418,7 @@ export class SecondaryGridView {
     // Initial sizing (ResizeObserver will keep it updated).
     this.resizeToContainer();
 
-    const initialZoom = clamp(options.initialZoom ?? 1, 0.25, 4);
+    const initialZoom = clamp(options.initialZoom ?? 1, MIN_GRID_ZOOM, MAX_GRID_ZOOM);
     if (initialZoom !== 1) {
       this.grid.renderer.setZoom(initialZoom);
       this.grid.syncScrollbars();

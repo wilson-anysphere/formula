@@ -48,6 +48,7 @@ export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker";
 export type { Rect } from "./rendering/DirtyRegionTracker";
 export { LruCache } from "./utils/LruCache";
+export { MAX_GRID_ZOOM, MIN_GRID_ZOOM, clampZoom } from "./utils/zoomMath";
 
 export { VariableSizeAxis } from "./virtualization/VariableSizeAxis";
 export type { AxisVisibleRange } from "./virtualization/VariableSizeAxis";
