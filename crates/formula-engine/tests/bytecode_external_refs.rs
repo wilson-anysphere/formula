@@ -138,6 +138,67 @@ fn bytecode_indirect_external_cell_ref_compiles_and_evaluates_via_provider() {
 }
 
 #[test]
+fn bytecode_indirect_path_qualified_external_cell_ref_compiles_and_evaluates_via_provider() {
+    struct PathProvider {
+        calls: AtomicUsize,
+    }
+
+    impl PathProvider {
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ExternalValueProvider for PathProvider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(sheet, "[C:\\path\\Book.xlsx]Sheet1");
+            assert_eq!(addr, CellAddr { row: 0, col: 0 });
+            Some(Value::Number(41.0))
+        }
+    }
+
+    let provider = Arc::new(PathProvider {
+        calls: AtomicUsize::new(0),
+    });
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            // External workbook reference with a path-qualified workbook.
+            r#"=INDIRECT("'C:\path\[Book.xlsx]Sheet1'!A1")"#,
+        )
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT path-qualified external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing path-qualified external workbook refs"
+    );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: "[C:\\path\\Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
+    );
+}
+
+#[test]
 fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provider() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
