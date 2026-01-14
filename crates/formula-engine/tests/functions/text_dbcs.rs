@@ -308,6 +308,49 @@ fn phonetic_metadata_is_cleared_when_move_range_overwrites_cell() {
 }
 
 #[test]
+fn phonetic_metadata_is_removed_when_clear_cell_deletes_record() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    sheet.clear_cell("A1");
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_is_removed_when_clear_range_deletes_record() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    sheet.clear_range("A1:A1");
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_is_removed_when_set_range_values_clears_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    let values = vec![vec![Value::Blank]];
+    sheet.set_range_values("A1", &values);
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
 fn phonetic_propagates_errors() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=1/0");

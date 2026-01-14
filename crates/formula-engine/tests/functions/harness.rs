@@ -52,6 +52,17 @@ impl TestSheet {
             .expect("set range values");
     }
 
+    pub fn clear_cell(&mut self, addr: &str) {
+        self.engine.clear_cell(self.sheet, addr).expect("clear cell");
+    }
+
+    pub fn clear_range(&mut self, range_a1: &str) {
+        let range = Range::from_a1(range_a1).expect("range");
+        self.engine
+            .clear_range(self.sheet, range, true)
+            .expect("clear range");
+    }
+
     pub fn set_phonetic(&mut self, addr: &str, phonetic: Option<&str>) {
         self.engine
             .set_cell_phonetic(self.sheet, addr, phonetic.map(|s| s.to_string()))
