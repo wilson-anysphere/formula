@@ -122,8 +122,8 @@ pnpm perf:desktop-startup
 # Builds the desktop frontend + binary, then measures idle memory (RSS) after TTI.
 pnpm perf:desktop-memory
 
-# Reports size of apps/desktop/dist, the desktop binary, and (if present) Tauri bundle artifacts.
-pnpm perf:desktop-size
+ # Reports size of apps/desktop/dist, the desktop binary, and (if present) Tauri bundle artifacts.
+ pnpm perf:desktop-size
 ```
 
 These scripts are designed to be safe to run locally:
@@ -145,7 +145,7 @@ These scripts are designed to be safe to run locally:
 - **Size**:
   - `apps/desktop/dist` is the Vite-built frontend asset directory embedded/served by Tauri.
   - `target/**/formula-desktop` is the built desktop executable.
-  - Use `python3 scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback) to see which Rust crates/symbols dominate the desktop binary size.
+  - `pnpm perf:desktop-size` also runs `python3 scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback) to show which Rust crates/symbols dominate the desktop binary size.
   - `target/**/release/bundle` contains installer artifacts when you run `cargo tauri build`.
 
 #### CI gating / overrides
@@ -187,10 +187,16 @@ Also reported (installer artifacts) on Linux PRs/main (informational by default)
 which builds the Linux desktop bundles and uploads a JSON size report artifact for debugging.
 
 Lightweight PR size gating (desktop binary + `apps/desktop/dist`; disabled by default):
-
+ 
 - `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
 - `FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB=<budget>`
   (enforced by `scripts/desktop_size_report.py` when set; CI passes these via GitHub Actions Variables)
+
+Rust desktop binary size breakdown (cargo-bloat; informational by default):
+
+- `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
+- `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (or `true`/`yes`/`on`) to make the size breakdown step fail when the binary exceeds the budget
+  (reported by `scripts/desktop_binary_size_report.py`)
 Frontend asset download size gating (web/desktop Vite `dist/assets`):
 
 - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10` (default: 10MB total)
