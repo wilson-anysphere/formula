@@ -755,6 +755,38 @@ mod sheet_format_pr_tests {
     }
 }
 
+#[cfg(test)]
+mod negative_zero_xml_tests {
+    use super::{sheet_xml, SharedStrings};
+    use formula_model::Worksheet;
+    use std::collections::HashMap;
+
+    #[test]
+    fn sheet_xml_does_not_emit_negative_zero_for_row_height_or_col_width() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.set_row_height(0, Some(-0.0));
+        sheet.set_col_width(0, Some(-0.0));
+
+        let shared_strings = SharedStrings {
+            values: crate::shared_strings::SharedStrings::default(),
+            index: HashMap::new(),
+        };
+        let (xml, _rels) = sheet_xml(&sheet, None, &shared_strings, &[], &HashMap::new(), None)
+            .expect("render sheet xml");
+
+        assert!(
+            !xml.contains("width=\"-0\""),
+            "expected column width to avoid -0: {xml}"
+        );
+        assert!(
+            !xml.contains("ht=\"-0\""),
+            "expected row height to avoid -0: {xml}"
+        );
+        assert!(xml.contains("width=\"0\""), "expected width=0: {xml}");
+        assert!(xml.contains("ht=\"0\""), "expected ht=0: {xml}");
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct ColXmlProps {
     width: Option<f32>,
@@ -845,6 +877,8 @@ fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> St
     let mut s = String::new();
     s.push_str(&format!(r#"<col min="{start_col_1}" max="{end_col_1}""#));
     if let Some(width) = props.width {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let width = if width == 0.0 { 0.0 } else { width };
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
     }
@@ -1268,6 +1302,8 @@ fn sheet_xml(
 
         let mut row_attrs = format!(r#" r="{}""#, row_number);
         if let Some(height) = row_props.and_then(|props| props.height) {
+            // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+            let height = if height == 0.0 { 0.0 } else { height };
             row_attrs.push_str(&format!(r#" ht="{height}" customHeight="1""#));
         }
         if let Some(style_id) = row_style_id {
