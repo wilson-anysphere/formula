@@ -1885,6 +1885,91 @@ fn deep_snowflake_values_include_blank_member_across_multiple_hops_columnar_fact
 }
 
 #[test]
+fn related_supports_three_hop_snowflake_navigation() {
+    let mut model = build_three_hop_snowflake_model();
+    model
+        .add_calculated_column(
+            "Sales",
+            "DivisionName",
+            "RELATED(Divisions[DivisionName])",
+        )
+        .unwrap();
+
+    let sales = model.table("Sales").unwrap();
+    let values: Vec<Value> = (0..sales.row_count())
+        .map(|row| sales.value(row, "DivisionName").unwrap())
+        .collect();
+
+    assert_eq!(values, vec![Value::from("D1"), Value::Blank]);
+}
+
+#[test]
+fn related_supports_three_hop_snowflake_navigation_columnar_fact() {
+    let mut model = build_three_hop_snowflake_model_with_columnar_sales();
+    model
+        .add_calculated_column(
+            "Sales",
+            "DivisionName",
+            "RELATED(Divisions[DivisionName])",
+        )
+        .unwrap();
+
+    let sales = model.table("Sales").unwrap();
+    let values: Vec<Value> = (0..sales.row_count())
+        .map(|row| sales.value(row, "DivisionName").unwrap())
+        .collect();
+
+    assert_eq!(values, vec![Value::from("D1"), Value::Blank]);
+}
+
+#[test]
+fn relatedtable_cascades_blank_rows_across_three_hop_snowflake() {
+    // Similar to `relatedtable_cascades_blank_rows_across_snowflake_hops`, but with one more hop:
+    // Divisions -> Categories -> Products -> Sales.
+    //
+    // The Sales row with an unknown ProductId should be visible when navigating from the virtual
+    // blank Divisions member.
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+
+    let mut row_ctx = RowContext::default();
+    let divisions_blank_row = model.table("Divisions").unwrap().row_count();
+    row_ctx.push("Divisions", divisions_blank_row);
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUMX(RELATEDTABLE(Sales), Sales[Amount])",
+            &FilterContext::empty(),
+            &row_ctx,
+        )
+        .unwrap();
+
+    assert_eq!(value, 5.0.into());
+}
+
+#[test]
+fn relatedtable_cascades_blank_rows_across_three_hop_snowflake_columnar_fact() {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+
+    let mut row_ctx = RowContext::default();
+    let divisions_blank_row = model.table("Divisions").unwrap().row_count();
+    row_ctx.push("Divisions", divisions_blank_row);
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUMX(RELATEDTABLE(Sales), Sales[Amount])",
+            &FilterContext::empty(),
+            &row_ctx,
+        )
+        .unwrap();
+
+    assert_eq!(value, 5.0.into());
+}
+
+#[test]
 fn deep_snowflake_filter_excludes_unmatched_fact_rows_when_upstream_dimension_filtered_out() {
     let model = build_three_hop_snowflake_model();
     let engine = DaxEngine::new();
