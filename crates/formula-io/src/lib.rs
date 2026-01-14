@@ -3499,7 +3499,29 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
             path: path.to_path_buf(),
             source,
         })?;
-    let plaintext_len = u64::from_le_bytes(len_bytes);
+    // Some producers treat the 8-byte prefix as `(u32 size, u32 reserved)` and may write a
+    // non-zero reserved high DWORD. Compute ciphertext length for a plausibility check and fall
+    // back to the low DWORD when the combined u64 is not sensible.
+    let base = encrypted_package_stream
+        .seek(SeekFrom::Current(0))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let end = encrypted_package_stream
+        .seek(SeekFrom::End(0))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    encrypted_package_stream
+        .seek(SeekFrom::Start(base))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let ciphertext_len = end.saturating_sub(base);
+    let plaintext_len = parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
 
     // Wrap the OLE stream so offset 0 corresponds to the start of ciphertext (after the length
     // header).
@@ -3554,12 +3576,6 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         }
     }
 
-    let base = encrypted_package_stream
-        .seek(SeekFrom::Current(0))
-        .map_err(|source| Error::OpenIo {
-            path: path.to_path_buf(),
-            source,
-        })?;
     let ciphertext_reader = CiphertextStream {
         inner: encrypted_package_stream,
         base,
