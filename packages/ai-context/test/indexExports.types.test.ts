@@ -150,17 +150,31 @@ await trimMessagesToBudget({
   maxTokens: 128,
   preserveToolCallPairs: false,
 });
-void headSampleRows([1, 2, 3], 2);
-void tailSampleRows([1, 2, 3], 2);
-void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
-void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
-void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
-const cm = new ContextManager();
-void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "systematic" });
-// @ts-expect-error - samplingStrategy must be a supported strategy string.
-void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "bogus" });
- const wbSchema = extractWorkbookSchema({
-   id: "wb1",
+ void headSampleRows([1, 2, 3], 2);
+ void tailSampleRows([1, 2, 3], 2);
+ void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+ void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+ void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
+ const cm = new ContextManager();
+ void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "systematic" });
+ void cm.buildWorkbookContextFromSpreadsheetApi({
+   spreadsheet: { listSheets: () => [] },
+   workbookId: "wb1",
+   query: "hi",
+   skipIndexing: true,
+   includeFormulaValues: true,
+ });
+ void cm.buildWorkbookContextFromSpreadsheetApi({
+   spreadsheet: { listSheets: () => [] },
+   workbookId: "wb1",
+   query: "hi",
+   skipIndexing: true,
+   include_formula_values: true,
+ });
+ // @ts-expect-error - samplingStrategy must be a supported strategy string.
+ void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "bogus" });
+  const wbSchema = extractWorkbookSchema({
+    id: "wb1",
    sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]], id: "sheet-1" }],
    tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 }, id: "tbl-1" }],
    namedRanges: [{ name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 }, id: "nr-1" }],
