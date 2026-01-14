@@ -591,6 +591,33 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
   return { text, end };
 }
 
+function tryReadImplicitStructuredReference(input: string, start: number): { text: string; end: number } | null {
+  if (input[start] !== "[") return null;
+
+  // Implicit structured references only apply in table context. To avoid mis-tokenizing other
+  // bracket constructs (e.g. external workbook prefixes), only recognize:
+  //   [@Column]
+  //   [@[Column Name]]
+  //   [[#This Row],[Column]]
+  // (and related selector-qualified forms).
+  let scan = start + 1;
+  while (scan < input.length && isWhitespace(input[scan] ?? "")) scan += 1;
+  const next = input[scan] ?? "";
+  if (next !== "@" && next !== "[") return null;
+
+  let bestEnd: number | null = null;
+  for (let j = start; j < input.length; j += 1) {
+    if (input[j] !== "]") continue;
+    const end = j + 1;
+    const text = input.slice(start, end);
+    if (!parseStructuredReferenceText(text)) continue;
+    bestEnd = end;
+  }
+
+  if (bestEnd == null) return null;
+  return { text: input.slice(start, bestEnd), end: bestEnd };
+}
+
 export function tokenizeFormula(input: string): FormulaToken[] {
   const tokens: FormulaToken[] = [];
   let i = 0;
@@ -680,6 +707,13 @@ export function tokenizeFormula(input: string): FormulaToken[] {
     if (structured) {
       tokens.push({ type: "reference", text: structured.text, start: i, end: structured.end });
       i = structured.end;
+      continue;
+    }
+
+    const implicitStructured = tryReadImplicitStructuredReference(input, i);
+    if (implicitStructured) {
+      tokens.push({ type: "reference", text: implicitStructured.text, start: i, end: implicitStructured.end });
+      i = implicitStructured.end;
       continue;
     }
 

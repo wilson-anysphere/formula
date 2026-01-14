@@ -3389,7 +3389,10 @@ export class SpreadsheetApp {
       //
       // NOTE: `DocumentWorkbookAdapter.tables` is keyed by normalized names, but the resolver in
       // `@formula/spreadsheet-frontend` matches case-insensitively and also checks `table.name`.
-      this.formulaBar.model.setExtractFormulaReferencesOptions({ tables: this.searchWorkbook.tables as any });
+      this.formulaBar.model.setExtractFormulaReferencesOptions({
+        tables: this.searchWorkbook.tables as any,
+        resolveStructuredRef: (refText) => this.resolveStructuredRefForFormulaBarHighlights(refText),
+      });
       this.formulaBar.model.setNameResolver((name) => {
         const entry: any = this.searchWorkbook.getName(name);
         const range = entry?.range;
@@ -10276,13 +10279,11 @@ export class SpreadsheetApp {
           return `${rawText} (${rangeToA1(r)})`;
         }
 
-        // Structured table refs: show the resolved A1 address for context (similar to named ranges).
-        const bracket = rawText.indexOf("[");
-        if (bracket > 0) {
-          const tableName = rawText.slice(0, bracket).trim();
-          if (tableName && this.searchWorkbook.getTable(tableName)) {
-            return `${rawText} (${rangeToA1({ startRow, endRow, startCol, endCol })})`;
-          }
+        // Structured refs: show the resolved A1 address for context (similar to named ranges).
+        // This includes both table-qualified forms (`Table1[Amount]`) and implicit table refs
+        // used inside calculated columns (e.g. `[@Amount]`).
+        if (rawText.includes("[")) {
+          return `${rawText} (${rangeToA1({ startRow, endRow, startCol, endCol })})`;
         }
       }
       return (
@@ -18350,6 +18351,215 @@ export class SpreadsheetApp {
     return knownSheets.find((id) => id.toLowerCase() === lower) ?? null;
   }
 
+  /**
+   * Resolve structured references that depend on the edited row context (e.g. `#This Row`, `@Column`)
+   * into an A1-style range so formula-bar hover previews and reference highlights remain useful for
+   * calculated-column formulas.
+   *
+   * Most structured refs (e.g. `Table1[Amount]`, `Table1[#All]`) are handled by the shared
+   * `@formula/spreadsheet-frontend` table resolver using `tables:` metadata. This hook exists only
+   * for row-relative forms that require the active edit row/column.
+   */
+  private resolveStructuredRefForFormulaBarHighlights(refText: string): {
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+    sheet?: string;
+  } | null {
+    const trimmed = String(refText ?? "").trim();
+    if (!trimmed) return null;
+    if (!trimmed.includes("[") || trimmed.includes("!")) return null;
+
+    // Fast-path: only handle this-row references. Everything else should fall back to the shared
+    // table resolver (via `tables:` in `ExtractFormulaReferencesOptions`).
+    const lower = trimmed.toLowerCase();
+    const looksLikeThisRow = lower.includes("#this row") || trimmed.includes("[@") || trimmed.startsWith("[@") || trimmed.startsWith("[[");
+    if (!looksLikeThisRow) return null;
+
+    const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
+    const normalizeSelector = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+    // Resolve the sheet/cell currently associated with formula-bar editing.
+    const editTarget = (() => {
+      if (this.formulaEditCell) return this.formulaEditCell;
+      const sheetId = this.sheetId;
+
+      const addr = this.formulaBar?.model?.activeCell?.address ?? "";
+      if (addr) {
+        try {
+          const parsed = fromA1A1(addr);
+          return { sheetId, cell: { row: parsed.row0, col: parsed.col0 } };
+        } catch {
+          // ignore
+        }
+      }
+
+      return { sheetId, cell: { ...this.selection.active } };
+    })();
+
+    const resolveThisRowCell = (tableName: string, columnName: string) => {
+      const name = String(tableName ?? "").trim();
+      const colName = String(columnName ?? "").trim();
+      if (!name || !colName) return null;
+      const table: any = this.searchWorkbook.getTable(name);
+      if (!table) return null;
+
+      const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+      const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+      const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+      const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+      if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+      if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+      const baseStartRow = Math.min(startRow, endRow);
+      const baseEndRow = Math.max(startRow, endRow);
+      const baseStartCol = Math.min(startCol, endCol);
+      const baseEndCol = Math.max(startCol, endCol);
+
+      const columns = Array.isArray(table.columns) ? (table.columns as unknown[]) : [];
+      const targetColName = colName.toUpperCase();
+      let colIdx: number | null = null;
+      for (let i = 0; i < columns.length; i += 1) {
+        const c = String(columns[i] ?? "").trim();
+        if (!c) continue;
+        if (c.toUpperCase() === targetColName) {
+          colIdx = i;
+          break;
+        }
+      }
+      if (colIdx == null) return null;
+
+      const col = baseStartCol + colIdx;
+      if (col < baseStartCol || col > baseEndCol) return null;
+
+      const tableSheet =
+        typeof table.sheetName === "string" && table.sheetName.trim()
+          ? table.sheetName.trim()
+          : typeof table.sheet === "string" && table.sheet.trim()
+            ? table.sheet.trim()
+            : editTarget.sheetId;
+      const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+      if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== editTarget.sheetId.toLowerCase()) return null;
+
+      // Conservative: only resolve this-row refs when the formula cell is inside the table's data rows.
+      const row = editTarget.cell.row;
+      const cellCol = editTarget.cell.col;
+      const dataStartRow = baseStartRow + 1;
+      if (row < dataStartRow || row > baseEndRow) return null;
+      if (cellCol < baseStartCol || cellCol > baseEndCol) return null;
+
+      return {
+        sheet: tableSheet || undefined,
+        startRow: row,
+        endRow: row,
+        startCol: col,
+        endCol: col,
+      };
+    };
+
+    const findContainingTableName = (): string | null => {
+      for (const entry of this.searchWorkbook.tables.values()) {
+        const table: any = entry as any;
+        const name = typeof table?.name === "string" ? table.name.trim() : "";
+        if (!name) continue;
+
+        const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+        const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+        const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+        const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+        if (startRow == null || startCol == null || endRow == null || endCol == null) continue;
+        if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) continue;
+
+        const baseStartRow = Math.min(startRow, endRow);
+        const baseEndRow = Math.max(startRow, endRow);
+        const baseStartCol = Math.min(startCol, endCol);
+        const baseEndCol = Math.max(startCol, endCol);
+
+        const tableSheet =
+          typeof table.sheetName === "string" && table.sheetName.trim()
+            ? table.sheetName.trim()
+            : typeof table.sheet === "string" && table.sheet.trim()
+              ? table.sheet.trim()
+              : editTarget.sheetId;
+        const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+        if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== editTarget.sheetId.toLowerCase()) continue;
+
+        const row = editTarget.cell.row;
+        const col = editTarget.cell.col;
+        const dataStartRow = baseStartRow + 1;
+        if (row < dataStartRow || row > baseEndRow) continue;
+        if (col < baseStartCol || col > baseEndCol) continue;
+
+        return name;
+      }
+      return null;
+    };
+
+    const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
+    const qualifiedRe = new RegExp(
+      `^([A-Za-z_][A-Za-z0-9_.]*)\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`,
+      "i"
+    );
+    const qualifiedImplicitRe = new RegExp(`^\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`, "i");
+    const atRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*${escapedItem}\\s*\\]$`, "i");
+    const atNestedRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+    const implicitAtRe = new RegExp(`^\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
+    const implicitAtNestedRe = new RegExp(`^\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+
+    const qualified = qualifiedRe.exec(trimmed);
+    if (qualified) {
+      const selector = normalizeSelector(unescapeStructuredRefItem(qualified[2]!.trim()));
+      if (selector !== "#this row") return null;
+      const columnName = unescapeStructuredRefItem(qualified[3]!.trim());
+      return resolveThisRowCell(qualified[1]!, columnName);
+    }
+
+    const nested = atNestedRe.exec(trimmed);
+    if (nested) {
+      const columnName = unescapeStructuredRefItem(nested[2]!.trim());
+      return resolveThisRowCell(nested[1]!, columnName);
+    }
+
+    const simple = atRe.exec(trimmed);
+    if (simple) {
+      const item = unescapeStructuredRefItem(simple[2]!.trim());
+      if (!item.startsWith("@")) return null;
+      const columnName = item.slice(1).trim();
+      if (!columnName) return null;
+      return resolveThisRowCell(simple[1]!, columnName);
+    }
+
+    const implicitQualified = qualifiedImplicitRe.exec(trimmed);
+    if (implicitQualified) {
+      const selector = normalizeSelector(unescapeStructuredRefItem(implicitQualified[1]!.trim()));
+      if (selector !== "#this row") return null;
+      const columnName = unescapeStructuredRefItem(implicitQualified[2]!.trim());
+      const tableName = findContainingTableName();
+      if (!tableName) return null;
+      return resolveThisRowCell(tableName, columnName);
+    }
+
+    const implicitNested = implicitAtNestedRe.exec(trimmed);
+    if (implicitNested) {
+      const columnName = unescapeStructuredRefItem(implicitNested[1]!.trim());
+      const tableName = findContainingTableName();
+      if (!tableName) return null;
+      return resolveThisRowCell(tableName, columnName);
+    }
+
+    const implicitSimple = implicitAtRe.exec(trimmed);
+    if (implicitSimple) {
+      const columnName = unescapeStructuredRefItem(implicitSimple[1]!.trim());
+      if (!columnName) return null;
+      const tableName = findContainingTableName();
+      if (!tableName) return null;
+      return resolveThisRowCell(tableName, columnName);
+    }
+
+    return null;
+  }
+
   private evaluateFormulaBarArgumentPreview(expr: string): SpreadsheetValue | string {
     const raw = typeof expr === "string" ? expr : String(expr ?? "");
     const trimmedExpr = raw.trim();
@@ -18644,8 +18854,8 @@ export class SpreadsheetApp {
         if (ch === "[" && input[i + 1] === "@") {
           // `[@Col]` is an implicit-this-row reference. When the user writes the table-qualified
           // form (`Table[@Col]`) we keep it as-is. For the nested-bracket form (`Table[@[Col Name]]`)
-          // we rewrite to `Table[[#This Row],[Col Name]]` because the structured-reference tokenizer
-          // does not currently recognize `@[` syntax.
+          // we rewrite to `Table[[#This Row],[Col Name]]` so downstream structured-reference resolvers
+          // can treat the `@[[...]]` shorthand consistently with the `#This Row` selector form.
           const prev = i > 0 ? (input[i - 1] ?? "") : "";
           const hasExplicitTablePrefix = Boolean(prev && isIdentifierPart(prev));
           const start = i;

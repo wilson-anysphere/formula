@@ -863,6 +863,93 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("renders a preview for #This Row / @Column structured references inside tables", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1:B1 and data rows at A2:B4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Total Amount");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 30);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 100);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 200);
+    doc.setCellValue("Sheet1", { row: 3, col: 1 }, 300);
+
+    app.getSearchWorkbook().addTable({
+      name: "TableThisRow",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 1,
+      columns: ["Amount", "Total Amount"],
+    });
+
+    const bar = (app as any).formulaBar;
+    // Pretend we're in row 3 (0-based row 2) inside the table.
+    bar.setActiveCell({
+      address: "B3",
+      input: "=SUM([@Amount], [@[Total Amount]], TableThisRow[@Amount], TableThisRow[@[Total Amount]])",
+      value: null,
+    });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    expect(refSpans.map((s) => s.textContent)).toEqual([
+      "[@Amount]",
+      "[@[Total Amount]]",
+      "TableThisRow[@Amount]",
+      "TableThisRow[@[Total Amount]]",
+    ]);
+
+    const hover = (text: string) => {
+      const span = refSpans.find((s) => s.textContent === text) ?? null;
+      expect(span?.textContent).toBe(text);
+      span?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+      expect(tooltip).not.toBeNull();
+      expect(tooltip?.hidden).toBe(false);
+      return tooltip!;
+    };
+
+    // [@Amount] resolves to the Amount column in the current row => A3 (20).
+    let tooltip = hover("[@Amount]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[@Amount] (A3)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["20"]);
+
+    // [@[Total Amount]] resolves to the current row's Total Amount column => B3 (200).
+    tooltip = hover("[@[Total Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[@[Total Amount]] (B3)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["200"]);
+
+    // Table-qualified forms resolve the same way.
+    tooltip = hover("TableThisRow[@Amount]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("TableThisRow[@Amount] (A3)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["20"]);
+
+    tooltip = hover("TableThisRow[@[Total Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe(
+      "TableThisRow[@[Total Amount]] (B3)"
+    );
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["200"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("skips structured table previews when the table belongs to a non-active sheet", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");

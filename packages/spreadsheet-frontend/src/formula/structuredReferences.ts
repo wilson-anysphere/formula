@@ -14,6 +14,16 @@ const QUALIFIED_REFERENCE_RE = new RegExp(
   `^\\[\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\s*,\\s*\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\]$`,
   "i"
 );
+// Excel permits "this row" shorthand forms:
+//   TableName[@Column]
+//   TableName[@[Column Name]]
+// and, within the table context, the implicit equivalents:
+//   [@Column]
+//   [@[Column Name]]
+//
+// The nested-bracket form exists because column names can contain spaces/special chars.
+// Column names may still contain escaped closing brackets via doubling: `]` -> `]]`.
+const THIS_ROW_NESTED_REFERENCE_RE = new RegExp(`^\\[\\s*@\\s*\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\s*\\]$`, "i");
 const SIMPLE_REFERENCE_RE = new RegExp(`^\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]$`);
 
 function unescapeStructuredRefItem(text: string): string {
@@ -23,10 +33,20 @@ function unescapeStructuredRefItem(text: string): string {
 
 export function parseStructuredReferenceText(text: string): ParsedStructuredReference | null {
   const firstBracket = text.indexOf("[");
-  if (firstBracket <= 0) return null;
+  if (firstBracket < 0) return null;
   const tableName = text.slice(0, firstBracket);
   const suffix = text.slice(firstBracket);
-  if (!tableName || !suffix) return null;
+  if (!suffix) return null;
+
+  // Avoid treating arbitrary `[X]` bracket groups as structured references when the
+  // table prefix is omitted. Today we only recognize:
+  // - implicit this-row references (`[@...]`)
+  // - implicit selector-qualified references (`[[#...],[...]]`)
+  // This prevents tokenizing fragments like `[Book.xlsx]` (external workbook refs) as tables.
+  if (!tableName) {
+    const trimmed = suffix.trimStart();
+    if (!(trimmed.startsWith("[@") || trimmed.startsWith("[["))) return null;
+  }
 
   // Supported patterns:
   //   TableName[ColumnName]
@@ -44,12 +64,31 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
     return { tableName, selector, columnName };
   }
 
+  // `TableName[@[Column Name]]` (or implicit `[@[Column Name]]`).
+  const thisRowNested = THIS_ROW_NESTED_REFERENCE_RE.exec(suffix);
+  if (thisRowNested) {
+    const columnName = unescapeStructuredRefItem(thisRowNested[1]!.trim());
+    return { tableName, selector: "#This Row", columnName };
+  }
+
   // Avoid mis-parsing nested bracket groups like `[[#All],[Amount]]` as a single item.
   if (suffix.startsWith("[[")) return null;
 
   const simpleMatch = SIMPLE_REFERENCE_RE.exec(suffix);
   if (simpleMatch) {
-    return { tableName, selector: null, columnName: unescapeStructuredRefItem(simpleMatch[1]!.trim()) };
+    const item = unescapeStructuredRefItem(simpleMatch[1]!.trim());
+    // `TableName[@Column]` (or implicit `[@Column]`) is a shorthand for `#This Row`.
+    if (item.startsWith("@")) {
+      const columnName = item.slice(1).trim();
+      if (!columnName) return null;
+      // Shorthand `@Column` does not permit whitespace or nested bracket syntax; column names
+      // that require quoting (spaces, etc) use the `@[[Column Name]]` form handled above.
+      // Keep this strict to avoid accidentally treating `[@[Col]] , ...` tails as a single token
+      // when `]]` sequences appear (which are ambiguous between escapes and nested closes).
+      if (/[\s\[\],;\]]/.test(columnName)) return null;
+      return { tableName, selector: "#This Row", columnName };
+    }
+    return { tableName, selector: null, columnName: item };
   }
 
   return null;

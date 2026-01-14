@@ -142,6 +142,34 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["Table1[[#This Row],[Amount]]"]);
   });
 
+  it("tokenizes structured references with @Column shorthand as single tokens", () => {
+    const input = "=SUM(Table1[@Amount])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[@Amount]"]);
+  });
+
+  it("tokenizes structured references with @[[Column Name]] shorthand as single tokens", () => {
+    const input = "=SUM(Table1[@[Total Amount]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[@[Total Amount]]"]);
+  });
+
+  it("tokenizes implicit this-row structured references ([@Column]) as single tokens", () => {
+    const input = "=SUM([@Amount], 1)";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[@Amount]"]);
+  });
+
+  it("tokenizes implicit this-row structured references with nested bracket column names ([@[Column Name]]) as single tokens", () => {
+    const input = "=SUM([@[Total Amount]], 1)";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[@[Total Amount]]"]);
+  });
+
   it("tokenizes structured references followed by operators (no trailing parens/commas)", () => {
     // Regression: bracket escaping logic should not prevent recognizing structured refs when they
     // are followed by an operator (e.g. `...]]+1`).
