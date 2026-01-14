@@ -13,6 +13,8 @@ use formula_engine::pivot::{
 use formula_model::pivots::ScalarValue;
 use std::collections::HashSet;
 
+use crate::styles::StylesPart;
+
 use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition, PivotTableFieldItem};
 use crate::pivots::slicers::{PivotSlicerParts, SlicerSelectionState, TimelineSelectionState};
@@ -453,6 +455,19 @@ pub fn pivot_table_to_engine_config(
     table: &PivotTableDefinition,
     cache_def: &PivotCacheDefinition,
 ) -> PivotConfig {
+    pivot_table_to_engine_config_with_styles(table, cache_def, None)
+}
+
+/// Convert a parsed pivot table definition into a [`PivotConfig`], optionally resolving number
+/// format ids (`numFmtId`) using a parsed `styles.xml` [`StylesPart`].
+///
+/// When `styles` is `None`, this uses built-in format mappings when available and otherwise
+/// preserves the id using a `__builtin_numFmtId:*` placeholder string.
+pub fn pivot_table_to_engine_config_with_styles(
+    table: &PivotTableDefinition,
+    cache_def: &PivotCacheDefinition,
+    styles: Option<&StylesPart>,
+) -> PivotConfig {
     let row_fields = table
         .row_fields
         .iter()
@@ -515,7 +530,7 @@ pub fn pivot_table_to_engine_config(
                 source_field: PivotFieldRef::CacheFieldName(source_field_name),
                 name,
                 aggregation,
-                number_format: None,
+                number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
                 show_as,
                 base_field: base_field.map(Into::into),
                 base_item,
@@ -592,6 +607,30 @@ pub fn pivot_table_to_engine_config(
         subtotals,
         grand_totals,
     }
+}
+
+fn resolve_pivot_num_fmt_id(num_fmt_id: u32, styles: Option<&StylesPart>) -> Option<String> {
+    if num_fmt_id == 0 {
+        return None;
+    }
+
+    if num_fmt_id <= u16::MAX as u32 {
+        let id_u16 = num_fmt_id as u16;
+        if let Some(styles) = styles {
+            if let Some(code) = styles.num_fmt_code_for_id(id_u16) {
+                return Some(code.to_string());
+            }
+        }
+        if let Some(code) = formula_format::builtin_format_code(id_u16) {
+            return Some(code.to_string());
+        }
+    }
+
+    Some(format!(
+        "{}{}",
+        formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX,
+        num_fmt_id
+    ))
 }
 
 fn pivot_table_field_to_engine(

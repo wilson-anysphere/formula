@@ -1,4 +1,5 @@
 use formula_model::Workbook;
+use formula_xlsx::pivots::engine_bridge::pivot_table_to_engine_config_with_styles;
 use formula_xlsx::pivots::model_bridge::pivot_table_to_model_value_fields;
 use formula_xlsx::{StylesPart, XlsxPackage};
 
@@ -42,3 +43,35 @@ fn imports_pivot_value_field_num_fmt_id_into_model_number_format() {
     );
 }
 
+#[test]
+fn imports_pivot_value_field_num_fmt_id_into_engine_number_format() {
+    let pkg = XlsxPackage::from_bytes(FIXTURE).expect("read package");
+
+    let table = pkg
+        .pivot_table_definition("xl/pivotTables/pivotTable1.xml")
+        .expect("parse pivot table definition");
+
+    let cache_def = pkg
+        .pivot_cache_definition("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("parse cache def")
+        .expect("cache definition exists");
+
+    let mut workbook = Workbook::new();
+    let styles_part = StylesPart::parse_or_default(pkg.part("xl/styles.xml"), &mut workbook.styles)
+        .expect("parse styles");
+
+    let cfg = pivot_table_to_engine_config_with_styles(&table, &cache_def, Some(&styles_part));
+    assert_eq!(cfg.value_fields.len(), 3);
+
+    assert_eq!(cfg.value_fields[0].name, "Sum of Sales");
+    assert_eq!(cfg.value_fields[0].number_format.as_deref(), Some("0.000"));
+
+    assert_eq!(cfg.value_fields[1].name, "Average of Sales");
+    assert_eq!(cfg.value_fields[1].number_format.as_deref(), Some("#,##0.00"));
+
+    assert_eq!(cfg.value_fields[2].name, "Count of Sales");
+    assert_eq!(
+        cfg.value_fields[2].number_format.as_deref(),
+        Some("__builtin_numFmtId:63")
+    );
+}
