@@ -1235,10 +1235,8 @@ pub fn open_workbook_model_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(password) = password {
-        if let Some(workbook) = open_encrypted_ooxml_model_workbook(path, password)? {
-            return Ok(workbook);
-        }
+    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
     }
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
@@ -1304,10 +1302,8 @@ pub fn open_workbook_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(password) = password {
-        if let Some(workbook) = open_encrypted_ooxml_workbook(path, password)? {
-            return Ok(workbook);
-        }
+    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+        return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
     }
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
@@ -1945,6 +1941,19 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             }
         }
     };
+
+    // We can decrypt the `EncryptedPackage` stream regardless of what OOXML format it contains, but
+    // we currently only support opening decrypted packages as `.xlsx`/`.xlsm`. Reject `.xlsb`
+    // payloads so callers can surface an actionable "unsupported kind" error.
+    if matches!(
+        sniff_ooxml_zip_workbook_kind(&decrypted),
+        Some(WorkbookFormat::Xlsb)
+    ) {
+        return Err(Error::UnsupportedEncryptedWorkbookKind {
+            path: path.to_path_buf(),
+            kind: "xlsb",
+        });
+    }
 
     Ok(Some(decrypted))
 }
