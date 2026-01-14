@@ -123,15 +123,115 @@ unary       = ("-"|"+") base ;
 primary     = number | string | boolean | error | reference | function_call | "(" expression ")" | array_literal ;
 function_call = function_name "(" [arg_list] ")" ;
 arg_list    = expression ("," expression)* ;
- // Sheet prefixes may qualify any reference (cells, ranges, structured refs, names):
- //   Sheet1!A1
- //   Sheet1:Sheet3!A1   // 3D sheet span (workbook sheet order)
- //   [Book.xlsx]Sheet1!A1
- sheet_prefix = (sheet_name | sheet_name ":" sheet_name | "[" workbook_name "]" sheet_name) "!" ;
- reference   = [sheet_prefix] (cell_ref | range_ref | named_ref | structured_ref) ;
-array_literal = "{" array_row (";" array_row)* "}" ;
-array_row   = array_element ("," array_element)* ;
-array_element = number | string | boolean | error ;
+  // Sheet prefixes may qualify any reference (cells, ranges, structured refs, names):
+  //   Sheet1!A1
+  //   Sheet1:Sheet3!A1   // 3D sheet span (workbook sheet order)
+  //   [Book.xlsx]Sheet1!A1
+  sheet_prefix = (sheet_name | sheet_name ":" sheet_name | "[" workbook_name "]" sheet_name) "!" ;
+  reference   = [sheet_prefix] (cell_ref | range_ref | named_ref | structured_ref) ;
+  array_literal = "{" array_row (";" array_row)* "}" ;
+  array_row   = array_element ("," array_element)* ;
+  array_element = number | string | boolean | error ;
+```
+
+### External workbook references (`ExternalValueProvider`)
+
+External workbook references like `=[Book.xlsx]Sheet1!A1` are resolved through the host-provided
+[`ExternalValueProvider`](../crates/formula-engine/src/engine.rs) trait.
+
+The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, addr)`:
+
+* **Internal sheet access** (same workbook): `sheet` is the plain worksheet name, e.g. `"Sheet1"`.
+* **External workbook access**: `sheet` is a **path-qualified, workbook-prefixed** key:
+  * **Canonical external sheet key:** `"[workbook]sheet"`
+    * Example: `"[Book.xlsx]Sheet1"`
+    * Example (path-qualified): `"[C:\\path\\Book.xlsx]Sheet1"`
+
+#### External 3D sheet spans (workbook sheet order)
+
+Excel 3D spans inside an external workbook (e.g. `Sheet1:Sheet3`) are represented by the engine as a
+single **span key**:
+
+* **External 3D span key format:** `"[workbook]Sheet1:Sheet3"`
+
+This key is **not** looked up directly via `ExternalValueProvider::get`. Instead, during evaluation the
+engine expands the span into per-sheet keys using workbook sheet order returned by:
+
+* `ExternalValueProvider::sheet_order(workbook) -> Option<Vec<String>>`
+
+Expansion rules:
+
+* `workbook` is the raw string inside the brackets (e.g. `"Book.xlsx"` or `"C:\\path\\Book.xlsx"`).
+* The returned sheet names must be **plain sheet names** (no `[workbook]` prefix).
+* Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
+* If `sheet_order(...)` returns `None` **or** either endpoint is missing from the returned order, the
+  3D span evaluates to `#REF!`.
+* Degenerate spans where start and end are the same sheet (case-insensitive) are canonicalized to a
+  single-sheet key (e.g. `"[Book.xlsx]Sheet1"`), so `sheet_order` is not required.
+
+Example:
+
+```txt
+Formula: =SUM([Book.xlsx]Sheet1:Sheet3!A1)
+
+sheet_order("Book.xlsx") -> ["Sheet1", "Sheet2", "Sheet3", ...]
+
+Expanded lookups via `get(sheet, addr)` (conceptually):
+  get("[Book.xlsx]Sheet1", A1)
+  get("[Book.xlsx]Sheet2", A1)
+  get("[Book.xlsx]Sheet3", A1)
+```
+
+#### Path-qualified external workbook canonicalization
+
+Excel allows quoting a full path + workbook + sheet, e.g.:
+
+```txt
+'C:\path\[Book.xlsx]Sheet1'!A1
+```
+
+The engine canonicalizes the workbook identifier by folding the path into the `[workbook]` portion of
+the external sheet key:
+
+```txt
+'C:\path\[Book.xlsx]Sheet1'!A1  =>  sheet key "[C:\path\Book.xlsx]Sheet1"
+```
+
+#### Current limitations / behavior notes
+
+* **Bytecode backend:** formulas that contain external workbook references currently do **not** compile
+  to bytecode (they fall back to the AST evaluator).
+* **External structured references:** structured refs cannot be workbook/sheet-qualified today
+  (e.g. `[Book.xlsx]Table1[Col]` evaluates to `#REF!`).
+* **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
+  reevaluated on every `Engine::recalculate()` pass). There is not yet a fine-grained “external link
+  invalidation” mechanism—hosts should call `recalculate()` when external values may have changed.
+* **INDIRECT + external 3D spans:** `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")` currently evaluates to
+  `#REF!` (span expansion is only supported for direct references).
+
+#### Minimal provider sketch (including `sheet_order`)
+
+```rust
+use formula_engine::{ExternalValueProvider, Value};
+use formula_engine::eval::CellAddr;
+use std::collections::HashMap;
+
+struct Provider {
+    // Keyed by the engine's canonical sheet key + cell address.
+    cells: HashMap<(String, CellAddr), Value>,
+    // Keyed by workbook string inside `[...]`, e.g. "Book.xlsx" or "C:\\path\\Book.xlsx".
+    orders: HashMap<String, Vec<String>>,
+}
+
+impl ExternalValueProvider for Provider {
+    fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+        self.cells.get(&(sheet.to_string(), addr)).cloned()
+    }
+
+    fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.orders.get(workbook).cloned()
+    }
+}
 ```
 
 ### Operator Precedence
