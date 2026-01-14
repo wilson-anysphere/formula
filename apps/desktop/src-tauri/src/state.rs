@@ -1499,6 +1499,9 @@ impl AppState {
         let tab_color = match tab_color {
             None => None,
             Some(mut color) => {
+                // Normalize `rgb` values to Excel-compatible uppercased ARGB hex (AARRGGBB). Leave
+                // theme/indexed/tint/auto values as-is so we can persist and round-trip workbook
+                // metadata that isn't directly settable via the desktop UI.
                 if let Some(rgb) = color.rgb.as_deref() {
                     let trimmed = rgb.trim();
                     if trimmed.is_empty() {
@@ -1526,7 +1529,6 @@ impl AppState {
                         ));
                     }
                 }
-
                 // Treat an all-empty payload as clearing the tab color.
                 if color.rgb.is_none()
                     && color.theme.is_none()

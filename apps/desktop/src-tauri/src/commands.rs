@@ -2384,9 +2384,12 @@ pub async fn save_workbook(
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
         if ext.eq_ignore_ascii_case("xlsb") {
-            let bytes = crate::file_io::write_xlsx_blocking(&resolved_path, &workbook)
+            crate::file_io::write_xlsb_to_disk_blocking(&resolved_path, &workbook)
                 .map_err(|e| e.to_string())?;
-            return Ok::<_, String>((validated_save_path, bytes));
+            return Ok::<_, String>((
+                validated_save_path,
+                std::sync::Arc::<[u8]>::from(Vec::new()),
+            ));
         }
 
         // Prefer the existing patch-based save path when we have the original XLSX bytes.

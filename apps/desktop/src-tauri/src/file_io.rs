@@ -2230,7 +2230,16 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     Ok(bytes)
 }
 
-fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
+/// Write an XLSB workbook to disk without reading the output file back into memory.
+///
+/// This is useful for the Tauri IPC save path: the app does not keep origin bytes for `.xlsb`
+/// workbooks, so returning `Arc<[u8]>` would force an unnecessary full-file read (and can OOM on
+/// large workbooks).
+pub fn write_xlsb_to_disk_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<()> {
+    write_xlsb_to_disk_impl(path, workbook)
+}
+
+fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<()> {
     let Some(origin_path) = workbook.origin_xlsb_path.as_deref() else {
         return Err(anyhow::anyhow!(
             "Saving as .xlsb is only supported for workbooks opened from an .xlsb file. Save As .xlsx instead."
@@ -2506,12 +2515,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
     }
 
     match res {
-        Ok(()) => {
-            let bytes = Arc::<[u8]>::from(
-                std::fs::read(path).with_context(|| format!("read xlsb {:?}", path))?,
-            );
-            Ok(bytes)
-        }
+        Ok(()) => Ok(()),
         Err(AtomicWriteError::Io(err)) => Err(
             Err::<(), _>(err)
                 .with_context(|| format!("write xlsb {:?}", path))
@@ -2519,6 +2523,13 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
         ),
         Err(AtomicWriteError::Writer(err)) => Err(err),
     }
+}
+
+fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
+    write_xlsb_to_disk_impl(path, workbook)?;
+    let bytes =
+        Arc::<[u8]>::from(std::fs::read(path).with_context(|| format!("read xlsb {:?}", path))?);
+    Ok(bytes)
 }
 
 fn scalar_to_xlsb_value(value: &CellScalar) -> XlsbCellValue {
