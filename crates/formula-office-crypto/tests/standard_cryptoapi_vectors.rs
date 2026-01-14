@@ -1,7 +1,8 @@
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_office_crypto::{decrypt_standard_encrypted_package, OfficeCryptoError};
-use sha1::{Digest as _, Sha1};
+use md5::{Digest as _, Md5};
+use sha1::Sha1;
 
 // Worked example from `docs/offcrypto-standard-cryptoapi.md`.
 const SALT_00_TO_0F: [u8; 16] = [
@@ -91,6 +92,29 @@ fn standard_rc4_spun_password_hash_sha1(password: &str, salt: &[u8]) -> [u8; 20]
 
 fn standard_rc4_derive_block_key_sha1(h: [u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
+    hasher.update(h);
+    hasher.update(block.to_le_bytes());
+    let digest = hasher.finalize();
+    digest[..key_len].to_vec()
+}
+
+fn standard_rc4_spun_password_hash_md5(password: &str, salt: &[u8]) -> [u8; 16] {
+    let pw = password_to_utf16le(password);
+    let mut hasher = Md5::new();
+    hasher.update(salt);
+    hasher.update(&pw);
+    let mut h: [u8; 16] = hasher.finalize().into();
+    for i in 0..50_000u32 {
+        let mut hasher = Md5::new();
+        hasher.update(i.to_le_bytes());
+        hasher.update(h);
+        h = hasher.finalize().into();
+    }
+    h
+}
+
+fn standard_rc4_derive_block_key_md5(h: [u8; 16], block: u32, key_len: usize) -> Vec<u8> {
+    let mut hasher = Md5::new();
     hasher.update(h);
     hasher.update(block.to_le_bytes());
     let digest = hasher.finalize();
@@ -271,6 +295,122 @@ fn standard_cryptoapi_rc4_sha1_vector_decrypts_package() {
         let key = standard_rc4_derive_block_key_sha1(h, block_index as u32, 16);
         rc4_apply(&key, chunk);
     }
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    encrypted_package.extend_from_slice(&ciphertext);
+
+    let decrypted =
+        decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, password)
+            .expect("decrypt");
+    assert_eq!(decrypted.as_slice(), plaintext);
+
+    let err = decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, "wrong-password")
+        .expect_err("wrong password");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
+fn standard_cryptoapi_rc4_md5_vector_decrypts_package() {
+    // Valid OOXML/ZIP payload to satisfy the crate's zip sanity checks.
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let password = "password";
+
+    // Key derivation vector (docs/offcrypto-standard-cryptoapi-rc4.md).
+    let h = standard_rc4_spun_password_hash_md5(password, &SALT_00_TO_0F);
+    assert_eq!(
+        h.to_vec(),
+        hex_decode("2079476089fda784c3a3cfeb98102c7e")
+    );
+    let key0 = standard_rc4_derive_block_key_md5(h, 0, 16);
+    assert_eq!(key0, hex_decode("69badcae244868e209d4e053ccd2a3bc"));
+
+    // Build Standard/CryptoAPI RC4 EncryptionInfo (MD5).
+    let version_major = 3u16;
+    let version_minor = 2u16;
+    let flags = 0x0000_0040u32;
+
+    let header_flags = 0x0000_0004u32; // fCryptoAPI (no fAES)
+    let size_extra = 0u32;
+    let alg_id = 0x0000_6801u32; // CALG_RC4
+    let alg_id_hash = 0x0000_8003u32; // CALG_MD5
+    let key_bits = 128u32;
+    let provider_type = 0x0000_0001u32; // PROV_RSA_FULL
+    let reserved1 = 0u32;
+    let reserved2 = 0u32;
+    let csp_name_utf16_nul = [0u8, 0u8];
+
+    let mut header_bytes = Vec::new();
+    header_bytes.extend_from_slice(&header_flags.to_le_bytes());
+    header_bytes.extend_from_slice(&size_extra.to_le_bytes());
+    header_bytes.extend_from_slice(&alg_id.to_le_bytes());
+    header_bytes.extend_from_slice(&alg_id_hash.to_le_bytes());
+    header_bytes.extend_from_slice(&key_bits.to_le_bytes());
+    header_bytes.extend_from_slice(&provider_type.to_le_bytes());
+    header_bytes.extend_from_slice(&reserved1.to_le_bytes());
+    header_bytes.extend_from_slice(&reserved2.to_le_bytes());
+    header_bytes.extend_from_slice(&csp_name_utf16_nul);
+    let header_size = header_bytes.len() as u32;
+
+    // EncryptionVerifier (RC4 uses unpadded encryptedVerifierHash length; MD5 digest is 16 bytes).
+    let verifier_plain: [u8; 16] = *b"formula-rc4-test";
+    let verifier_hash: [u8; 16] = Md5::digest(&verifier_plain).into();
+    let verifier_hash_size = verifier_hash.len() as u32;
+
+    let mut verifier_buf = Vec::with_capacity(16 + verifier_hash.len());
+    verifier_buf.extend_from_slice(&verifier_plain);
+    verifier_buf.extend_from_slice(&verifier_hash);
+    rc4_apply(&key0, &mut verifier_buf);
+    let encrypted_verifier = &verifier_buf[..16];
+    let encrypted_verifier_hash = &verifier_buf[16..];
+
+    let mut verifier_bytes = Vec::new();
+    verifier_bytes.extend_from_slice(&(SALT_00_TO_0F.len() as u32).to_le_bytes());
+    verifier_bytes.extend_from_slice(&SALT_00_TO_0F);
+    verifier_bytes.extend_from_slice(encrypted_verifier);
+    verifier_bytes.extend_from_slice(&verifier_hash_size.to_le_bytes());
+    verifier_bytes.extend_from_slice(encrypted_verifier_hash);
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&version_major.to_le_bytes());
+    encryption_info.extend_from_slice(&version_minor.to_le_bytes());
+    encryption_info.extend_from_slice(&flags.to_le_bytes());
+    encryption_info.extend_from_slice(&header_size.to_le_bytes());
+    encryption_info.extend_from_slice(&header_bytes);
+    encryption_info.extend_from_slice(&verifier_bytes);
+
+    // Build EncryptedPackage: 8-byte size prefix + RC4 ciphertext (0x200-byte blocks).
+    let mut ciphertext = plaintext.to_vec();
+    for (block_index, chunk) in ciphertext.chunks_mut(0x200).enumerate() {
+        let key = standard_rc4_derive_block_key_md5(h, block_index as u32, 16);
+        rc4_apply(&key, chunk);
+    }
+
+    // Guard: ensure Standard/CryptoAPI uses 0x200-byte re-keying and not the BIFF8 0x400 interval.
+    if plaintext.len() >= 0x400 && ciphertext.len() >= 0x400 {
+        let key0 = standard_rc4_derive_block_key_md5(h, 0, 16);
+        let key1 = standard_rc4_derive_block_key_md5(h, 1, 16);
+
+        let mut block0_400 = plaintext[..0x400].to_vec();
+        rc4_apply(&key0, &mut block0_400);
+
+        let mut expected_block1 = plaintext[0x200..0x400].to_vec();
+        rc4_apply(&key1, &mut expected_block1);
+
+        assert_eq!(
+            &ciphertext[0x200..0x400],
+            expected_block1.as_slice(),
+            "expected Standard RC4 to re-key at 0x200-byte boundary"
+        );
+        assert_ne!(
+            &ciphertext[0x200..0x400],
+            &block0_400[0x200..0x400],
+            "ciphertext suggests incorrect 0x400-byte RC4 re-key interval"
+        );
+    }
+
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     encrypted_package.extend_from_slice(&ciphertext);
