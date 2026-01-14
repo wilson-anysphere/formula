@@ -406,7 +406,7 @@ dialog.print-preview-dialog::backdrop {
 .statusbar-mode {
   padding: calc(var(--space-1) / 2) var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-weight: 600;
@@ -418,7 +418,7 @@ dialog.print-preview-dialog::backdrop {
 .statusbar-readonly {
   padding: var(--space-1) var(--space-4);
   border: 1px solid var(--warning);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-primary);
   color: var(--warning);
   font-weight: 600;

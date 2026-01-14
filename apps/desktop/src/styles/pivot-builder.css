@@ -285,7 +285,7 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   font-size: 12px;
@@ -340,4 +340,3 @@
   gap: 8px;
   flex-wrap: wrap;
 }
-

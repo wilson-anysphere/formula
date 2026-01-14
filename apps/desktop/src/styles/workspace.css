@@ -507,7 +507,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 500;

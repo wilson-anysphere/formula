@@ -102,7 +102,7 @@ function badge(text, { tone = "neutral", title = null } = {}) {
         "display:inline-flex",
         "align-items:center",
         "padding:2px 8px",
-        "border-radius:999px",
+        "border-radius:var(--radius-pill)",
         "font-size:11px",
         "font-weight:600",
         `background:${bgByTone[tone] || bgByTone.neutral}`,

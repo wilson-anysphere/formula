@@ -60,7 +60,7 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
       let pxMatch;
       while ((pxMatch = pxRegex.exec(value))) {
         const px = Number(pxMatch[1]);
-        if (px === 0 || px === 999) continue;
+        if (px === 0) continue;
 
         const absIndex = valueStart + pxMatch.index;
         const line = getLineNumber(stripped, absIndex);
@@ -72,7 +72,7 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius pixel values in desktop UI styles. Use radius tokens (var(--radius*)), except for pills (999px) or 0:\n${violations
+    `Found hardcoded border-radius pixel values in desktop UI styles. Use radius tokens (var(--radius*)), except for 0:\n${violations
       .map((violation) => `- ${violation}`)
       .join("\n")}`,
   );

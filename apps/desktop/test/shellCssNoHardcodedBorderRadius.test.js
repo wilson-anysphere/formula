@@ -12,7 +12,7 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-test("shell.css should not hardcode border-radius pixel values (except 0 and 999px)", () => {
+test("shell.css should not hardcode border-radius pixel values (except 0)", () => {
   const css = fs.readFileSync(shellCssPath, "utf8");
   // Avoid false positives in comments while keeping line numbers stable for error messages.
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
@@ -23,14 +23,14 @@ test("shell.css should not hardcode border-radius pixel values (except 0 and 999
   let match;
   while ((match = regex.exec(stripped))) {
     const value = Number(match[1]);
-    if (value === 0 || value === 999) continue;
+    if (value === 0) continue;
     violations.push(`L${getLineNumber(stripped, match.index)}: border-radius: ${match[1]}px`);
   }
 
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius pixel values in shell.css. Use radius tokens (var(--radius*)), except for pills (999px) or 0:\n${violations
+    `Found hardcoded border-radius pixel values in shell.css. Use radius tokens (var(--radius*)), except for 0:\n${violations
       .map((v) => `- ${v}`)
       .join("\n")}`,
   );

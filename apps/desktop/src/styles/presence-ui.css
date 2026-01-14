@@ -56,7 +56,7 @@
   gap: var(--space-3);
   padding: var(--space-1) var(--space-4);
   border: 1px solid var(--formula-grid-line, var(--border));
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--formula-grid-header-bg, var(--bg-secondary));
   color: var(--formula-grid-header-text, var(--formula-grid-cell-text, var(--text-primary)));
   font-size: 12px;
@@ -74,7 +74,7 @@
 .presence-collaborators__dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: 0 0 auto;
   background: var(--formula-grid-cell-text, var(--text-primary));
 }

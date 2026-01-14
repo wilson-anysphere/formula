@@ -1167,7 +1167,7 @@ a:visited {
   display: inline-flex;
   align-items: center;
   padding: var(--space-1) var(--space-4);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
@@ -1365,7 +1365,7 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
   inset-block: var(--space-1);
   left: calc(var(--space-0) - var(--space-1));
   width: calc(var(--space-3) / 2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
 }
 
@@ -1375,7 +1375,7 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
   inset-block: var(--space-1);
   right: calc(var(--space-0) - var(--space-1));
   width: calc(var(--space-3) / 2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
 }
 
@@ -1417,7 +1417,7 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
   right: var(--space-3);
   bottom: var(--space-1);
   height: calc(var(--space-3) / 2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 #sheet-tabs.sheet-bar .sheet-tab__input {
