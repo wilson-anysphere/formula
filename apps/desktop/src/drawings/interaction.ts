@@ -46,6 +46,7 @@ export class DrawingInteractionController {
   };
   private hitTestIndex: HitTestIndex | null = null;
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private hitTestIndexZoom: number = 1;
   private dragging:
     | { id: number; startX: number; startY: number; startObjects: DrawingObject[] }
     | null = null;
@@ -116,8 +117,9 @@ export class DrawingInteractionController {
     const { x, y } = this.getLocalPoint(e, rect);
 
     const viewport = this.callbacks.getViewport();
+    const zoom = sanitizeZoom(viewport.zoom);
     const objects = this.callbacks.getObjects();
-    const index = this.getHitTestIndex(objects);
+    const index = this.getHitTestIndex(objects, zoom);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
     const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
@@ -312,8 +314,9 @@ export class DrawingInteractionController {
 
   private updateCursor(x: number, y: number): void {
     const viewport = this.callbacks.getViewport();
+    const zoom = sanitizeZoom(viewport.zoom);
     const objects = this.callbacks.getObjects();
-    const index = this.getHitTestIndex(objects);
+    const index = this.getHitTestIndex(objects, zoom);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     if (x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY) {
       this.element.style.cursor = "default";
@@ -356,11 +359,15 @@ export class DrawingInteractionController {
     this.element.style.cursor = "default";
   }
 
-  private getHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
-    if (this.hitTestIndex && this.hitTestIndexObjects === objects) return this.hitTestIndex;
-    const built = buildHitTestIndex(objects, this.geom);
+  private getHitTestIndex(objects: readonly DrawingObject[], zoom: number): HitTestIndex {
+    const z = sanitizeZoom(zoom);
+    if (this.hitTestIndex && this.hitTestIndexObjects === objects && this.hitTestIndexZoom === z) {
+      return this.hitTestIndex;
+    }
+    const built = buildHitTestIndex(objects, this.geom, { zoom: z });
     this.hitTestIndex = built;
     this.hitTestIndexObjects = objects;
+    this.hitTestIndexZoom = z;
     return built;
   }
 }
@@ -827,7 +834,8 @@ function objectToScreenRect(
   sheetRect?: Rect,
   out?: Rect,
 ): Rect {
-  const rect = sheetRect ?? anchorToRectPx(obj.anchor, geom);
+  const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+  const rect = sheetRect ?? anchorToRectPx(obj.anchor, geom, zoom);
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
