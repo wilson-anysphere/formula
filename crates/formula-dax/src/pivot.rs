@@ -1922,8 +1922,8 @@ fn pivot_planned_row_group_by(
 
     let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
 
-    let base_rows = (!filter.is_empty())
-        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
 
     let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
@@ -1947,8 +1947,11 @@ fn pivot_planned_row_group_by(
         Ok(())
     };
 
-    if let Some(rows) = base_rows {
-        for row in rows {
+    if let Some(sets) = row_sets.as_ref() {
+        let allowed = sets
+            .get(base_table)
+            .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+        for row in allowed.iter_ones() {
             process_row(row)?;
         }
     } else {
@@ -1994,8 +1997,8 @@ fn pivot_row_scan(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
-    let base_rows = (!filter.is_empty())
-        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+    let row_sets = (!filter.is_empty())
+        .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
@@ -2009,8 +2012,11 @@ fn pivot_row_scan(
         Ok(())
     };
 
-    if let Some(rows) = base_rows {
-        for row in rows {
+    if let Some(sets) = row_sets.as_ref() {
+        let allowed = sets
+            .get(base_table)
+            .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+        for row in allowed.iter_ones() {
             process_row(row)?;
         }
     } else {

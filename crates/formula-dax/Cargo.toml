@@ -29,3 +29,7 @@ harness = false
 [[bench]]
 name = "relationship_propagation"
 harness = false
+
+[[bench]]
+name = "pivot_scan_filtered"
+harness = false
