@@ -306,12 +306,15 @@ CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for all
 Release assets, including `.sig` signature files).
 To reproduce locally:
 
-```bash
-# Fast path: verify `latest.json` + `latest.json.sig` + referenced assets without hashing installers/bundles.
-GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --tag vX.Y.Z --repo owner/repo
-
-# Generate SHA256SUMS.txt for primary installers/bundles (faster; excludes `.sig` files by default).
-GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
+ ```bash
+ # Fast path: verify `latest.json` + `latest.json.sig` + referenced assets without hashing installers/bundles.
+ GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --tag vX.Y.Z --repo owner/repo
+ 
+ # Optional: also download and cryptographically verify updater payload signatures (slow).
+ GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --verify-assets --tag vX.Y.Z --repo owner/repo
+ 
+ # Generate SHA256SUMS.txt for primary installers/bundles (faster; excludes `.sig` files by default).
+ GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
 
 # Optional (recommended for multi-arch releases): enforce that each expected OS/arch target has at
 # least one installer asset whose filename includes BOTH the version and the arch/universal token,
