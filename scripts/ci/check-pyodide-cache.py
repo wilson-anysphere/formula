@@ -66,11 +66,14 @@ def check_job(
 
     def is_desktop_build_cmd(line: str) -> bool:
         # Match both:
-        # - `run: pnpm build:desktop`
-        # - multiline run blocks that contain `pnpm build:desktop`
+        # - `run: pnpm build:desktop` (desktop frontend build)
+        # - `cargo tauri build` / `tauri build` (Tauri bundles invoke `pnpm build` via beforeBuildCommand)
         if is_comment(line):
             return False
-        return bool(re.search(r"\bpnpm\b.*\bbuild:desktop\b", line))
+        return bool(
+            re.search(r"\bpnpm\b.*\bbuild:desktop\b", line)
+            or re.search(r"\btauri\s+build\b", line)
+        )
 
     build_lines = [ln for ln, line in job_lines if is_desktop_build_cmd(line)]
     if not build_lines:
@@ -92,7 +95,7 @@ def check_job(
         for build_ln in build_lines:
             if restore_line > build_ln:
                 errors.append(
-                    f"- Pyodide cache restore step appears after `pnpm build:desktop` (restore line {restore_line}, build line {build_ln})"
+                    f"- Pyodide cache restore step appears after the desktop build command (restore line {restore_line}, build line {build_ln})"
                 )
 
     # Ensure the cache key includes OS + version + ensure script hash.
@@ -113,7 +116,7 @@ def check_job(
         errors.append("- Pyodide cache config is missing apps/desktop/public/pyodide/ path")
 
     if errors:
-        header = f"{workflow.as_posix()} job `{job_id}` runs pnpm build:desktop but is missing required Pyodide caching:"
+        header = f"{workflow.as_posix()} job `{job_id}` runs a desktop build but is missing required Pyodide caching:"
         return [header, *errors]
 
     return []
