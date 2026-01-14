@@ -45,6 +45,13 @@ impl TestSheet {
             .expect("set cell value");
     }
 
+    pub fn set_range_values(&mut self, range_a1: &str, values: &[Vec<Value>]) {
+        let range = Range::from_a1(range_a1).expect("range");
+        self.engine
+            .set_range_values(self.sheet, range, values, true)
+            .expect("set range values");
+    }
+
     pub fn set_phonetic(&mut self, addr: &str, phonetic: Option<&str>) {
         self.engine
             .set_cell_phonetic(self.sheet, addr, phonetic.map(|s| s.to_string()))

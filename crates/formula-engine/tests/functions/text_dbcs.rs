@@ -1,5 +1,6 @@
 use formula_engine::locale::ValueLocaleConfig;
-use formula_engine::{ErrorKind, Value};
+use formula_engine::{EditOp, ErrorKind, Value};
+use formula_model::{CellRef, Range};
 
 use super::harness::TestSheet;
 
@@ -217,6 +218,43 @@ fn phonetic_metadata_is_cleared_when_cell_input_changes() {
     assert_eq!(
         sheet.eval("=PHONETIC(A1)"),
         Value::Text("大阪".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_is_cleared_when_set_range_values_overwrites_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    let values = vec![vec![Value::Text("東京".to_string())]];
+    sheet.set_range_values("A1", &values);
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_is_cleared_when_copy_range_overwrites_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    sheet.set("B1", "東京");
+
+    sheet.apply_operation(EditOp::CopyRange {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst_top_left: CellRef::from_a1("A1").expect("cell"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
     );
 }
 
