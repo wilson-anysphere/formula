@@ -210,19 +210,6 @@ pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<C
     Ok(Cow::Borrowed(xml))
 }
 
-fn count_non_ascii_whitespace_bytes(s: &str) -> usize {
-    s.as_bytes()
-        .iter()
-        .filter(|b| !b.is_ascii_whitespace())
-        .count()
-}
-
-fn base64_max_decoded_len(stripped_len: usize) -> usize {
-    // Base64 expands by 4/3; the decoded length is at most 3 bytes for every 4 input chars.
-    // Use a conservative upper bound so we can reject huge values before allocating the output.
-    ((stripped_len.saturating_add(3)) / 4).saturating_mul(3)
-}
-
 /// Decode a base64 field from an Agile `EncryptionInfo` XML descriptor, enforcing size limits.
 ///
 /// This function:
@@ -241,16 +228,47 @@ pub fn decode_base64_field_limited(
     opts: &ParseOptions,
 ) -> Result<Vec<u8>> {
     let bytes = value.as_bytes();
-    let stripped_len = count_non_ascii_whitespace_bytes(value);
-    if stripped_len > opts.max_base64_field_len {
-        return Err(OffCryptoError::FieldTooLarge {
-            field: attr,
-            len: stripped_len,
-            max: opts.max_base64_field_len,
-        });
+    let mut stripped_len: usize = 0;
+    let mut has_ws = false;
+    let mut last: Option<u8> = None;
+    let mut second_last: Option<u8> = None;
+
+    for &b in bytes {
+        if b.is_ascii_whitespace() {
+            has_ws = true;
+            continue;
+        }
+        stripped_len = stripped_len.saturating_add(1);
+        if stripped_len > opts.max_base64_field_len {
+            return Err(OffCryptoError::FieldTooLarge {
+                field: attr,
+                len: stripped_len,
+                max: opts.max_base64_field_len,
+            });
+        }
+        second_last = last;
+        last = Some(b);
     }
 
-    let max_decoded = base64_max_decoded_len(stripped_len);
+    // Base64 expands by 4/3; compute a *tight* upper bound for the decoded length so callers can
+    // set `max_base64_decoded_len` to an exact expected value (e.g. 16-byte salts) without false
+    // positives caused by padding.
+    let rem = stripped_len % 4;
+    let quads = stripped_len / 4;
+    let mut max_decoded = quads.checked_mul(3).unwrap_or(usize::MAX);
+    match rem {
+        0 => {
+            let pad = match (second_last, last) {
+                (Some(b'='), Some(b'=')) => 2,
+                (_, Some(b'=')) => 1,
+                _ => 0,
+            };
+            max_decoded = max_decoded.saturating_sub(pad);
+        }
+        2 => max_decoded = max_decoded.saturating_add(1),
+        3 => max_decoded = max_decoded.saturating_add(2),
+        _ => {}
+    }
     if max_decoded > opts.max_base64_decoded_len {
         return Err(OffCryptoError::FieldTooLarge {
             field: attr,
@@ -260,7 +278,7 @@ pub fn decode_base64_field_limited(
     }
 
     // Avoid allocating a stripped copy when the attribute value contains no ASCII whitespace.
-    let decoded = if stripped_len == bytes.len() {
+    let decoded = if !has_ws {
         STANDARD
             .decode(bytes)
             .or_else(|_| STANDARD_NO_PAD.decode(bytes))
@@ -498,7 +516,9 @@ mod tests {
         match &err {
             OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
                 assert!(
-                    available_uris.iter().any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE),
+                    available_uris
+                        .iter()
+                        .any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE),
                     "expected certificate URI to be reported, got {available_uris:?}"
                 );
             }
