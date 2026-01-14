@@ -74,6 +74,58 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("is resilient if onCancel throws (edit mode still exits first)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn(() => {
+      throw new Error("cancel failure");
+    });
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    expect(view.model.isEditing).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    // JSDOM may log uncaught errors to the virtual console even if we prevent the window error event.
+    // Silence console noise for this resilience regression test.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // In browsers, exceptions thrown inside event listeners are reported as window "error"
+    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so Vitest
+    // doesn't treat it as an unhandled exception, while still asserting the view updated its
+    // internal state before calling the callback.
+    const onWindowError = vi.fn((event: ErrorEvent) => {
+      event.preventDefault();
+    });
+    window.addEventListener("error", onWindowError);
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    window.removeEventListener("error", onWindowError);
+    consoleError.mockRestore();
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onWindowError).toHaveBeenCalledTimes(1);
+    const err = onWindowError.mock.calls[0]?.[0]?.error;
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("cancel failure");
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("orig");
+    expect(view.textarea.value).toBe("orig");
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    host.remove();
+  });
+
   it("ignores commit/cancel actions while not editing", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
