@@ -28,7 +28,7 @@ fn decodes_udf_call_via_namex_and_sentinel_funcvar() {
     rgce.extend_from_slice(&ptg_funcvar_udf(3));
 
     let text = decode_rgce(&rgce).expect("decode");
-    assert_eq!(text, "ExternName1:2(1,2)");
+    assert_eq!(text, "ExternName_IXTI1_N2(1,2)");
 }
 
 #[test]
@@ -74,4 +74,3 @@ fn skips_memfunc_and_attrchoose_payloads() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "1+2");
 }
-
