@@ -143,7 +143,7 @@ fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
         match raw.trim().to_lowercase().as_str() {
             "general" => Some(HorizontalAlignment::General),
             "left" => Some(HorizontalAlignment::Left),
-            "center" => Some(HorizontalAlignment::Center),
+            "center" | "centre" => Some(HorizontalAlignment::Center),
             "right" => Some(HorizontalAlignment::Right),
             "fill" => Some(HorizontalAlignment::Fill),
             "justify" => Some(HorizontalAlignment::Justify),
@@ -280,7 +280,23 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
 
     let protection = get_js_prop(&obj, "protection")
         .as_ref()
-        .and_then(parse_protection_from_js);
+        .and_then(parse_protection_from_js)
+        .or_else(|| {
+            // Some UI payloads flatten protection flags at the top level (`{ locked: false }`).
+            // Treat those as an alias for `{ protection: { ... } }`.
+            let locked = get_js_bool(&obj, &["locked"]);
+            let hidden = get_js_bool(&obj, &["hidden"]);
+            if locked.is_none() && hidden.is_none() {
+                return None;
+            }
+            let locked = locked.unwrap_or(true);
+            let hidden = hidden.unwrap_or(false);
+            if locked && !hidden {
+                None
+            } else {
+                Some(Protection { locked, hidden })
+            }
+        });
 
     Ok(Style {
         font,
@@ -290,6 +306,82 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
         protection,
         number_format,
     })
+}
+
+/// Best-effort conversion from UI formatting JSON (typically camelCase) into a `formula_model::Style`.
+///
+/// This helper is used by native (non-wasm) unit tests because `js_sys` object construction is
+/// unavailable on non-wasm targets.
+#[cfg(test)]
+fn style_json_to_model_style(value: &JsonValue) -> Style {
+    // Prefer parsing as a full `Style` first (preserves font/fill/border when the caller supplies
+    // the snake_case schema), but overlay UI-friendly camelCase mappings so callers can provide
+    // `numberFormat`, `{ protection: { locked } }`, etc.
+    let mut out: Style = serde_json::from_value(value.clone()).unwrap_or_default();
+
+    let Some(obj) = value.as_object() else {
+        return out;
+    };
+
+    // --- number_format ---
+    if let Some(fmt) = obj
+        .get("numberFormat")
+        .or_else(|| obj.get("number_format"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        // Excel treats "General" as the default.
+        if fmt.eq_ignore_ascii_case("general") {
+            out.number_format = None;
+        } else {
+            out.number_format = Some(fmt.to_string());
+        }
+    }
+
+    // --- protection ---
+    let protection = obj.get("protection").and_then(|v| v.as_object());
+    let locked = protection
+        .and_then(|p| p.get("locked"))
+        .or_else(|| obj.get("locked"))
+        .and_then(|v| v.as_bool());
+    let hidden = protection
+        .and_then(|p| p.get("hidden"))
+        .or_else(|| obj.get("hidden"))
+        .and_then(|v| v.as_bool());
+    if locked.is_some() || hidden.is_some() {
+        let locked = locked.unwrap_or(true);
+        let hidden = hidden.unwrap_or(false);
+        if locked && !hidden {
+            out.protection = None;
+        } else {
+            out.protection = Some(Protection { locked, hidden });
+        }
+    }
+
+    // --- alignment.horizontal ---
+    if let Some(alignment) = obj.get("alignment").and_then(|v| v.as_object()) {
+        let horizontal = alignment
+            .get("horizontal")
+            .and_then(|v| v.as_str())
+            .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
+                "general" => Some(HorizontalAlignment::General),
+                "left" => Some(HorizontalAlignment::Left),
+                "center" | "centre" => Some(HorizontalAlignment::Center),
+                "right" => Some(HorizontalAlignment::Right),
+                "fill" => Some(HorizontalAlignment::Fill),
+                "justify" => Some(HorizontalAlignment::Justify),
+                _ => None,
+            });
+        if horizontal.is_some() {
+            out.alignment = Some(Alignment {
+                horizontal,
+                ..Default::default()
+            });
+        }
+    }
+
+    out
 }
 
 fn require_formula_locale(locale_id: &str) -> Result<&'static FormulaLocale, JsValue> {
@@ -1846,15 +1938,13 @@ impl WorkbookState {
         }
 
         let sheet = self.ensure_sheet(name);
-
         // Mirror widths into the calc engine so worksheet metadata functions like `CELL("width")`
         // observe the latest values.
         self.engine.set_col_width(&sheet, col, width_chars);
-
         match width_chars {
             Some(width) => {
                 self.col_widths_chars
-                    .entry(sheet)
+                    .entry(sheet.clone())
                     .or_default()
                     .insert(col, width);
             }
@@ -4302,6 +4392,9 @@ impl WasmWorkbook {
             .set_col_width_chars_internal(&sheet_name, col, width_chars)
     }
 
+    /// Set whether a column is user-hidden.
+    ///
+    /// - `col` is 0-based (A=0)
     #[wasm_bindgen(js_name = "setColHidden")]
     pub fn set_col_hidden(
         &mut self,
@@ -4309,11 +4402,22 @@ impl WasmWorkbook {
         col: u32,
         hidden: bool,
     ) -> Result<(), JsValue> {
-        let sheet = self.inner.ensure_sheet(&sheet_name);
+        if col >= EXCEL_MAX_COLS {
+            return Err(js_err(format!("col out of Excel bounds: {col}")));
+        }
+        let sheet_name = sheet_name.trim();
+        let sheet_name = if sheet_name.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet_name
+        };
+        let sheet = self.inner.ensure_sheet(sheet_name);
         self.inner.engine.set_col_hidden(&sheet, col, hidden);
         Ok(())
     }
 
+    /// Update workbook file metadata used by Excel-compatible functions like `CELL("filename")`
+    /// and `INFO("directory")`.
     #[wasm_bindgen(js_name = "setWorkbookFileMetadata")]
     pub fn set_workbook_file_metadata(
         &mut self,
@@ -4345,6 +4449,23 @@ impl WasmWorkbook {
             .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
         Ok(())
     }
+
+    /// Set the style id for a cell.
+    ///
+    /// Note: unlike `setCell`, this does not modify a cell's value/formula.
+    #[wasm_bindgen(js_name = "setCellStyleId")]
+    pub fn set_cell_style_id(
+        &mut self,
+        sheet: String,
+        address: String,
+        style_id: u32,
+    ) -> Result<(), JsValue> {
+        let sheet = sheet.trim();
+        let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
+        self.inner
+            .set_cell_style_id_internal(sheet, &address, style_id)
+    }
+
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]
@@ -4564,21 +4685,6 @@ impl WasmWorkbook {
     ) -> Result<u32, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         self.inner.get_cell_style_id_internal(sheet, &address)
-    }
-
-    /// Sets the per-cell style id.
-    ///
-    /// Style id `0` represents the default style.
-    #[wasm_bindgen(js_name = "setCellStyleId")]
-    pub fn set_cell_style_id(
-        &mut self,
-        address: String,
-        style_id: u32,
-        sheet: Option<String>,
-    ) -> Result<(), JsValue> {
-        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
-        self.inner
-            .set_cell_style_id_internal(sheet, &address, style_id)
     }
 
     #[wasm_bindgen(js_name = "setCell")]
@@ -7204,5 +7310,35 @@ mod tests {
             .as_f64()
             .unwrap_or_else(|| panic!("expected numeric B1 value, got {:?}", b1.value));
         assert!((b1_val - 9.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn style_json_to_model_style_accepts_ui_camel_case_number_format() {
+        let style = style_json_to_model_style(&json!({ "numberFormat": "0.00" }));
+        assert_eq!(style.number_format.as_deref(), Some("0.00"));
+    }
+
+    #[test]
+    fn style_json_to_model_style_accepts_ui_protection_locked() {
+        let style = style_json_to_model_style(&json!({ "protection": { "locked": false } }));
+        assert_eq!(style.protection.as_ref().map(|p| p.locked), Some(false));
+    }
+
+    #[test]
+    fn style_json_to_model_style_accepts_top_level_locked() {
+        let style = style_json_to_model_style(&json!({ "locked": false }));
+        assert_eq!(style.protection.as_ref().map(|p| p.locked), Some(false));
+    }
+
+    #[test]
+    fn style_json_to_model_style_prefers_full_model_style_fields_when_available() {
+        // When the caller provides snake_case `Style`, preserve its fields while still honoring
+        // UI-friendly overlay keys.
+        let style = style_json_to_model_style(&json!({
+            "font": { "bold": true },
+            "number_format": "0.00",
+        }));
+        assert_eq!(style.number_format.as_deref(), Some("0.00"));
+        assert_eq!(style.font.as_ref().map(|f| f.bold), Some(true));
     }
 }

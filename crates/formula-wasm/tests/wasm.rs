@@ -1369,7 +1369,8 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
         .unwrap();
-    wb.set_cell_style_id("A1".to_string(), 42, None).unwrap();
+    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), 42)
+        .unwrap();
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
