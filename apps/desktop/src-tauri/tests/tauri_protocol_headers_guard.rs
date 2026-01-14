@@ -643,9 +643,9 @@ fn extract_tauri_scheme_protocol_asset_success_block<'a>(handler_block: &'a str)
     // Note: production requests hit the `AssetResolver` path, not the `--startup-bench` early return.
     // We therefore extract the `Some(asset)` / `if let Some(asset)` block specifically.
     let if_let_marker = "if let Some(asset)";
-    if let Some(start) = handler_block.find(if_let_marker) {
+    if let Some(start) = find_next_code_substring(handler_block, 0, if_let_marker) {
         let rest = &handler_block[start..];
-        let open = rest.find('{').unwrap_or_else(|| {
+        let open = find_next_code_byte(rest, 0, b'{').unwrap_or_else(|| {
             panic!("failed to find `{{` after `{if_let_marker}` in the `tauri://` handler block")
         });
         let block = extract_brace_block(rest, open);
@@ -654,9 +654,9 @@ fn extract_tauri_scheme_protocol_asset_success_block<'a>(handler_block: &'a str)
 
     // Backwards-compat: older implementations used a `match` arm (`Some(asset) => { ... }`).
     let match_arm_marker = "Some(asset)";
-    if let Some(start) = handler_block.find(match_arm_marker) {
+    if let Some(start) = find_next_code_substring(handler_block, 0, match_arm_marker) {
         let rest = &handler_block[start..];
-        let open = rest.find('{').unwrap_or_else(|| {
+        let open = find_next_code_byte(rest, 0, b'{').unwrap_or_else(|| {
             panic!("failed to find `{{` after `{match_arm_marker}` in the `tauri://` handler block")
         });
         let block = extract_brace_block(rest, open);
