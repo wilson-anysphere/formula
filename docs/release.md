@@ -143,6 +143,10 @@ node scripts/check-desktop-url-scheme.mjs
 # (Fails if cargo would update Cargo.lock during the build.)
 cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null
 
+# (Optional) The desktop build also includes a WASM engine built for wasm32; this checks that
+# Cargo.lock is consistent for that target too.
+cargo metadata --locked --format-version=1 --filter-platform wasm32-unknown-unknown >/dev/null
+
 # Ensures Windows installers will install WebView2 if it is missing.
 node scripts/ci/check-webview2-install-mode.mjs
 

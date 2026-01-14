@@ -349,6 +349,16 @@ jobs:
               >/dev/null
           done
 
+          # The desktop app also bundles a WASM engine (`crates/formula-wasm`), built via wasm-pack.
+          # Validate the workspace lockfile for wasm32 as well so we fail early if `Cargo.lock` is out
+          # of date for the engine dependency graph.
+          echo "Checking Cargo.lock for target: wasm32-unknown-unknown"
+          cargo metadata \
+            --locked \
+            --format-version=1 \
+            --filter-platform wasm32-unknown-unknown \
+            >/dev/null
+
   build:
     name: Build (${{ matrix.label }})
     needs: preflight
