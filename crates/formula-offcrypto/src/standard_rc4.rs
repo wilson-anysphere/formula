@@ -1,7 +1,7 @@
 //! Standard (CryptoAPI) RC4 decryption helpers.
 //!
 //! Standard encryption supports an RC4-CryptoAPI variant (ALG_ID = CALG_RC4). Unlike the AES
-//! variants (which use AES-ECB for verifier fields and AES-CBC for the package stream), RC4 uses:
+//! variants (which use AES-ECB for verifier fields and the package stream), RC4 uses:
 //! - RC4 for verifier fields, encrypted sequentially with the block-0 RC4 key
 //! - RC4 for the package stream, re-keyed per 512-byte block
 //!

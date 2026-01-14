@@ -7,7 +7,11 @@ const SEGMENT_PLAINTEXT_LEN: u64 = 0x1000;
 const SIZE_PREFIX_LEN: u64 = 8;
 const AES_BLOCK_LEN: usize = AES_BLOCK_SIZE;
 
-/// Streaming decryptor for `[MS-OFFCRYPTO]` Standard (CryptoAPI) AES `EncryptedPackage` streams.
+/// Streaming decryptor for a **segmented** `EncryptedPackage` layout (compatibility).
+///
+/// Note: baseline MS-OFFCRYPTO/ECMA-376 **Standard/CryptoAPI AES** `EncryptedPackage` uses
+/// **AES-ECB** (no IV). This reader implements a legacy segmented AES-CBC layout that may be
+/// encountered in some producer/test-fixture combinations.
 ///
 /// The underlying stream contains:
 /// - `orig_size: u64le` (8 bytes)
