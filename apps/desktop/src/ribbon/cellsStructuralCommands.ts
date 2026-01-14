@@ -110,7 +110,10 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
       if (typeof app.insertRows === "function") {
         void Promise.resolve(app.insertRows(row0, count))
           .catch(() => {})
-          .finally(() => app.focus());
+          .finally(() => app.focus())
+          .catch(() => {
+            // Best-effort: avoid unhandled rejections if the focus hook throws.
+          });
       } else {
         try {
           doc.insertRows(sheetId, row0, count, { label: "Insert Rows", source: "ribbon" });
@@ -127,7 +130,10 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
       if (typeof app.insertCols === "function") {
         void Promise.resolve(app.insertCols(col0, count))
           .catch(() => {})
-          .finally(() => app.focus());
+          .finally(() => app.focus())
+          .catch(() => {
+            // Best-effort: avoid unhandled rejections if the focus hook throws.
+          });
       } else {
         try {
           doc.insertCols(sheetId, col0, count, { label: "Insert Columns", source: "ribbon" });
@@ -144,7 +150,10 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
       if (typeof app.deleteRows === "function") {
         void Promise.resolve(app.deleteRows(row0, count))
           .catch(() => {})
-          .finally(() => app.focus());
+          .finally(() => app.focus())
+          .catch(() => {
+            // Best-effort: avoid unhandled rejections if the focus hook throws.
+          });
       } else {
         try {
           doc.deleteRows(sheetId, row0, count, { label: "Delete Rows", source: "ribbon" });
@@ -161,7 +170,10 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
       if (typeof app.deleteCols === "function") {
         void Promise.resolve(app.deleteCols(col0, count))
           .catch(() => {})
-          .finally(() => app.focus());
+          .finally(() => app.focus())
+          .catch(() => {
+            // Best-effort: avoid unhandled rejections if the focus hook throws.
+          });
       } else {
         try {
           doc.deleteCols(sheetId, col0, count, { label: "Delete Columns", source: "ribbon" });

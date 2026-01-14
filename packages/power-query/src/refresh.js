@@ -510,6 +510,9 @@ export class RefreshManager {
           this.stateSaveQueued = false;
           this.persistState();
         }
+      })
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the `.finally` bookkeeping throws.
       });
   }
 

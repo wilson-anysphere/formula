@@ -142,7 +142,11 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
       getSelectionNumberFormat,
       applyFormattingToSelection: deps.applyFormattingToSelection,
       showToast: (message, type) => deps.showToast(message, type),
-    }).finally(() => safeFocusGrid(deps.app));
+    })
+      .finally(() => safeFocusGrid(deps.app))
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the `.finally` bookkeeping throws.
+      });
   };
 
   // Context for ribbon formatting helpers (`ribbon/commandHandlers.ts`).

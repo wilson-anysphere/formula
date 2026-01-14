@@ -12281,4 +12281,7 @@ void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() })
           // Best-effort: split view is optional.
         });
     });
+  })
+  .catch(() => {
+    // Best-effort: avoid unhandled rejections if the `.finally` bookkeeping throws.
   });
