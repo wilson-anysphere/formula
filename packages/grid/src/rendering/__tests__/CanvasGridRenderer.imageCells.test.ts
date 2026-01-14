@@ -572,4 +572,73 @@ describe("CanvasGridRenderer image cells", () => {
 
     vi.useRealTimers();
   });
+
+  it("clearImageCache does not loop indefinitely when requestAnimationFrame is synchronous", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    // Guard against regressions where clearImageCache triggers an infinite loop of
+    // invalidate->requestRender->renderFrame->requestImageBitmap->reinsert while iterating.
+    const rafSpy = vi.fn((cb: FrameRequestCallback) => {
+      if (rafSpy.mock.calls.length > 25) {
+        throw new Error("requestAnimationFrame called too many times (possible clearImageCache loop)");
+      }
+      cb(0);
+      return 0;
+    });
+    vi.stubGlobal("requestAnimationFrame", rafSpy);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    // Sanity: the renderer should have created an entry for the visible image.
+    expect(((renderer as any).imageBitmapCache as Map<string, unknown>).size).toBeGreaterThan(0);
+
+    rafSpy.mockClear();
+    renderer.clearImageCache();
+
+    // Ensure we did not spin the RAF loop excessively.
+    expect(rafSpy.mock.calls.length).toBeLessThan(25);
+  });
 });
