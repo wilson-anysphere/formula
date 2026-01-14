@@ -94,6 +94,22 @@ require_docker() {
   command -v docker >/dev/null 2>&1 || die "docker is required for container validation (install docker or rerun with --no-container)"
 }
 
+detect_docker_platform() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64) echo "linux/amd64" ;;
+    aarch64 | arm64) echo "linux/arm64" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Force Docker to use the host architecture image variant by default. This avoids confusing
+# `exec format error` failures when a mismatched (e.g. ARM) image tag is present locally.
+#
+# Override for debugging by exporting DOCKER_PLATFORM explicitly.
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
+
 require_cmd rpm
 
 rel_path() {
@@ -338,13 +354,20 @@ validate_container() {
   container_cmd+=$'  echo "${ldd_out}" | grep "not found" >&2 || true\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
-  container_cmd+=$'if [ "${ldd_status}" -ne 0 ] && ! echo "${ldd_out}" | grep -q "not a dynamic executable" && ! echo "${ldd_out}" | grep -q "statically linked"; then\n'
+  container_cmd+=$'# Treat any ldd failure as fatal. Note: ldd can print "not a dynamic executable" for non-native-arch\n'
+  container_cmd+=$'# binaries (e.g. ARM on x86_64) and still exit non-zero.\n'
+  container_cmd+=$'if [ "${ldd_status}" -ne 0 ]; then\n'
   container_cmd+=$'  echo "ldd exited with status ${ldd_status}" >&2\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
 
   set +e
-  docker run --rm -v "${mount_dir}:/rpms:ro" "${FEDORA_IMAGE}" bash -lc "${container_cmd}"
+  docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${FEDORA_IMAGE}"
+  docker run --rm \
+    ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
+    -v "${mount_dir}:/rpms:ro" \
+    "${FEDORA_IMAGE}" \
+    bash -lc "${container_cmd}"
   local status=$?
   set -e
   rm -rf "${mount_dir}"
