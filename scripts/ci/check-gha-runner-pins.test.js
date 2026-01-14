@@ -120,3 +120,25 @@ jobs:
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
+
+test("supports scanning directories of workflow files", { skip: !hasBash }, () => {
+  const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-runner-pins-dir-"));
+  writeFileSync(
+    path.join(tmpdir, "pinned.yml"),
+    "jobs:\n  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n",
+    "utf8",
+  );
+  writeFileSync(
+    path.join(tmpdir, "bad.yml"),
+    "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n",
+    "utf8",
+  );
+
+  const proc = spawnSync("bash", [scriptPath, tmpdir], { cwd: repoRoot, encoding: "utf8" });
+  rmSync(tmpdir, { recursive: true, force: true });
+  if (proc.error) throw proc.error;
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /ubuntu-latest/);
+  assert.match(proc.stderr, /bad\.yml/);
+});
