@@ -32,6 +32,9 @@
 .PARAMETER Visible
   Show Excel while running (useful for debugging).
 
+.PARAMETER MaxErrors
+  Optional cap for debugging (extract only the first N canonical error literals).
+
 .NOTES
   - Windows-only (requires Microsoft Excel desktop installed).
   - Excel versions can differ in which error literals they recognize (e.g. #SPILL!).
@@ -48,7 +51,8 @@ param(
   [Alias("LocaleId")]
   [string]$Locale,
   [string]$OutPath,
-  [switch]$Visible
+  [switch]$Visible,
+  [int]$MaxErrors = 0
 )
 
 Set-StrictMode -Version Latest
@@ -322,6 +326,9 @@ if ($OutPath) {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot ".." "..")
 $rustErrorKindPath = Join-Path $repoRoot "crates" "formula-engine" "src" "value" "mod.rs"
 $canonicalCodes = Extract-CanonicalErrorLiterals -RustPath $rustErrorKindPath
+if ($MaxErrors -gt 0) {
+  $canonicalCodes = @($canonicalCodes | Select-Object -First $MaxErrors)
+}
 
 $excel = $null
 $workbook = $null
