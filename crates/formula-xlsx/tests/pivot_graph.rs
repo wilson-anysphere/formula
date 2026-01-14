@@ -186,6 +186,29 @@ fn pivot_graph_resolves_cache_parts_without_workbook_xml() {
     );
 }
 
+#[test]
+fn pivot_graph_tolerates_malformed_pivot_table_xml() {
+    // If a pivot table part exists but its XML is malformed, we should still include it in the
+    // graph (best-effort pivot discovery), just without `cache_id` / cache parts.
+    let bytes = build_synthetic_pivot_package_with_malformed_pivot_table_xml();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let graph = pkg.pivot_graph().expect("resolve pivot graph");
+    assert_eq!(graph.pivot_tables.len(), 1);
+
+    let table = &graph.pivot_tables[0];
+    assert_eq!(table.pivot_table_part, "xl/pivotTables/pivotTable1.xml");
+    assert_eq!(table.sheet_part, None);
+    assert_eq!(table.cache_id, None);
+    assert_eq!(table.cache_definition_part, None);
+    assert_eq!(table.cache_records_part, None);
+
+    let cache_parts = pkg
+        .pivot_cache_parts_for_pivot_table("xl/pivotTables/pivotTable1.xml")
+        .expect("resolve cache parts");
+    assert_eq!(cache_parts, None);
+}
+
 fn build_synthetic_pivot_package() -> Vec<u8> {
     build_synthetic_pivot_package_with_overrides(
         VALID_WORKBOOK_RELS.as_bytes(),
@@ -244,6 +267,19 @@ fn build_synthetic_pivot_package_without_workbook_xml() -> Vec<u8> {
         zip.start_file(name, options).unwrap();
         zip.write_all(bytes).unwrap();
     }
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_synthetic_pivot_package_with_malformed_pivot_table_xml() -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/pivotTables/pivotTable1.xml", options)
+        .unwrap();
+    zip.write_all(b"<pivotTableDefinition").unwrap(); // malformed / truncated XML
 
     zip.finish().unwrap().into_inner()
 }

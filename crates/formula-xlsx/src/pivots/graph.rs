@@ -65,7 +65,7 @@ impl XlsxPackage {
             return Ok(None);
         };
 
-        let Some(cache_id) = parse_pivot_table_cache_id(pivot_xml)? else {
+        let Some(cache_id) = parse_pivot_table_cache_id(pivot_xml).ok().flatten() else {
             return Ok(None);
         };
 
@@ -207,7 +207,7 @@ fn build_pivot_table_instance<'a>(
     cache_parts_by_id: &HashMap<u32, CacheParts>,
 ) -> Result<PivotTableInstance, XlsxError> {
     let cache_id = match part(&pivot_part) {
-        Some(xml) => parse_pivot_table_cache_id(xml)?,
+        Some(xml) => parse_pivot_table_cache_id(xml).ok().flatten(),
         None => None,
     };
 
