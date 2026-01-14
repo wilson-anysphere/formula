@@ -8777,19 +8777,6 @@ function handleRibbonCommand(commandId: string): void {
       }
     }
 
-    // Merge & Center command ids are implemented in the shared ribbon command handlers module.
-    // Keep explicit checks here so ribbon wiring coverage tests can assert these enabled,
-    // non-CommandRegistry ids are still handled by the desktop shell.
-    if (
-      commandId === "home.alignment.mergeCenter.mergeCenter" ||
-      commandId === "home.alignment.mergeCenter.mergeCells" ||
-      commandId === "home.alignment.mergeCenter.mergeAcross" ||
-      commandId === "home.alignment.mergeCenter.unmergeCells"
-    ) {
-      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
-        return;
-      }
-    }
     if (commandId === "home.styles.cellStyles.goodBadNeutral") {
       void (async () => {
         // Formatting actions should never run while the user is editing (primary or split-view secondary editor).

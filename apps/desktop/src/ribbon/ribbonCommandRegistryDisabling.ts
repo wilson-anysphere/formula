@@ -45,6 +45,7 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   // desktop shell. If/when they become real commands, remove them from this list.
 
   // Home → Alignment → Merge & Center.
+  // Implemented by the desktop ribbon fallback handler (`apps/desktop/src/ribbon/commandHandlers.ts`).
   "home.alignment.mergeCenter.mergeCenter",
   "home.alignment.mergeCenter.mergeAcross",
   "home.alignment.mergeCenter.mergeCells",

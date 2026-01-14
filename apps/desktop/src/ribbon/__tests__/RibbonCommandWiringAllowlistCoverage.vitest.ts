@@ -895,17 +895,21 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
   }
 
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-  const source = readFileSync(mainTsPath, "utf8");
+  const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
+
+  const mainTsSource = readFileSync(mainTsPath, "utf8");
+  const handlerSource = readFileSync(handlerPath, "utf8");
+  const combinedSource = `${mainTsSource}\n\n${handlerSource}`;
 
   const addIfSchema = (id: string) => {
     if (schemaCommandIdSet.has(id)) implemented.add(id);
   };
 
-  for (const match of source.matchAll(/case\s+["']([^"']+)["']/g)) {
+  for (const match of combinedSource.matchAll(/case\s+["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
 
-  for (const match of source.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
+  for (const match of combinedSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
 
@@ -934,7 +938,7 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
   }
 
   for (const key of ["commandOverrides", "toggleOverrides"] as const satisfies OverrideKey[]) {
-    const obj = extractObjectLiteral(source, key);
+    const obj = extractObjectLiteral(mainTsSource, key);
     if (!obj) continue;
     for (const overrideId of extractTopLevelStringKeys(obj)) {
       addIfSchema(overrideId);
@@ -943,14 +947,14 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
 
   // Prefix handlers in `handleRibbonCommand`.
   const cellStylesPrefix = "home.styles.cellStyles.";
-  if (source.includes(cellStylesPrefix)) {
+  if (combinedSource.includes(cellStylesPrefix)) {
     for (const id of schemaCommandIdSet) {
       if (id.startsWith(cellStylesPrefix)) implemented.add(id);
     }
   }
 
   const formatAsTablePrefix = "home.styles.formatAsTable.";
-  if (source.includes(formatAsTablePrefix)) {
+  if (combinedSource.includes(formatAsTablePrefix)) {
     for (const id of schemaCommandIdSet) {
       if (!id.startsWith(formatAsTablePrefix)) continue;
       const presetId = id.slice(formatAsTablePrefix.length);
@@ -1021,7 +1025,7 @@ describe("Ribbon command wiring coverage", () => {
     ).toEqual([]);
   });
 
-  it("keeps implementedCommandIds in sync with `apps/desktop/src/main.ts` ribbon wiring", () => {
+  it("keeps implementedCommandIds in sync with desktop ribbon wiring", () => {
     const schemaCommandIdSet = new Set(collectRibbonCommandIds(defaultRibbonSchema));
     const expected = computeImplementedSchemaCommandIds(schemaCommandIdSet);
     expect(implementedCommandIds.slice().sort()).toEqual(expected);
