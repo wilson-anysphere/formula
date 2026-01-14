@@ -4,7 +4,7 @@ use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
-const fn default_true() -> bool {
+fn default_true() -> bool {
     true
 }
 
@@ -318,6 +318,8 @@ impl Default for Layout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubtotalPosition {
+    /// Excel default behavior.
+    Automatic,
     None,
     Top,
     Bottom,
@@ -325,7 +327,7 @@ pub enum SubtotalPosition {
 
 impl Default for SubtotalPosition {
     fn default() -> Self {
-        Self::None
+        Self::Automatic
     }
 }
 

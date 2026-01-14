@@ -27,7 +27,7 @@ dax = ["dep:formula-dax"]
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx" }
-formula-dax = { path = "../formula-dax", optional = true }
+formula-dax = { path = "../formula-dax", optional = true, features = ["pivot-model"] }
 getrandom = { version = "0.2", features = ["js"] }
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }

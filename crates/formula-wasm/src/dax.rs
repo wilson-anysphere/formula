@@ -5,9 +5,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use formula_dax::{
-    pivot, pivot_crosstab, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError,
-    FilterContext, GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
+    dax_value_to_pivot_value, pivot, pivot_crosstab, Cardinality, CrossFilterDirection, DataModel,
+    DaxEngine, DaxError, FilterContext, GroupByColumn, PivotMeasure, Relationship, RowContext, Table,
+    Value,
 };
+use formula_model::pivots::PivotValue;
 
 fn js_error(message: impl AsRef<str>) -> JsValue {
     js_sys::Error::new(message.as_ref()).into()
@@ -395,6 +397,13 @@ pub struct PivotResultDto {
     pub rows: Vec<Vec<JsonValue>>,
 }
 
+/// Pivot output where every cell uses the canonical pivot scalar representation (`{ type, value }`).
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PivotResultPivotValuesDto {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<PivotValue>>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotCrosstabRequestDto {
@@ -407,6 +416,12 @@ pub struct PivotCrosstabRequestDto {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct PivotGridDto {
     pub data: Vec<Vec<JsonValue>>,
+}
+
+/// Crosstab output where every cell uses the canonical pivot scalar representation (`{ type, value }`).
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PivotGridPivotValuesDto {
+    pub data: Vec<Vec<PivotValue>>,
 }
 
 fn json_scalar_to_dax_value(value: &JsonValue) -> Result<Value, JsValue> {
@@ -563,6 +578,51 @@ impl WasmDaxDataModel {
             .map_err(|err| super::js_err(err.to_string()))
     }
 
+    /// Like [`pivot`](Self::pivot), but returns values using the canonical pivot scalar
+    /// representation (tagged `{ type, value }` payloads).
+    #[wasm_bindgen(js_name = "pivotPivotValues")]
+    pub fn pivot_pivot_values(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        let request: PivotRequestDto = serde_wasm_bindgen::from_value(request)
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let group_by: Vec<GroupByColumn> = request
+            .group_by
+            .into_iter()
+            .map(|col| GroupByColumn::new(col.table, col.column))
+            .collect();
+
+        let measures: Vec<PivotMeasure> = request
+            .measures
+            .into_iter()
+            .map(|m| PivotMeasure::new(m.name, m.expression))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let result = formula_dax::pivot(
+            &self.inner,
+            &request.base_table,
+            &group_by,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .map_err(|err| super::js_err(err.to_string()))?;
+
+        let rows = result
+            .rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| dax_value_to_pivot_value(&v)).collect())
+            .collect();
+
+        let out = PivotResultPivotValuesDto {
+            columns: result.columns,
+            rows,
+        };
+
+        use serde::ser::Serialize as _;
+        out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|err| super::js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "pivotCrosstab")]
     pub fn pivot_crosstab(&self, request: JsValue) -> Result<JsValue, JsValue> {
         let request: PivotCrosstabRequestDto = serde_wasm_bindgen::from_value(request)
@@ -603,6 +663,54 @@ impl WasmDaxDataModel {
             .collect();
 
         let out = PivotGridDto { data };
+
+        use serde::ser::Serialize as _;
+        out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|err| super::js_err(err.to_string()))
+    }
+
+    /// Like [`pivot_crosstab`](Self::pivot_crosstab), but returns values using the canonical pivot
+    /// scalar representation (tagged `{ type, value }` payloads).
+    #[wasm_bindgen(js_name = "pivotCrosstabPivotValues")]
+    pub fn pivot_crosstab_pivot_values(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        let request: PivotCrosstabRequestDto = serde_wasm_bindgen::from_value(request)
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let row_fields: Vec<GroupByColumn> = request
+            .row_fields
+            .into_iter()
+            .map(|col| GroupByColumn::new(col.table, col.column))
+            .collect();
+        let column_fields: Vec<GroupByColumn> = request
+            .column_fields
+            .into_iter()
+            .map(|col| GroupByColumn::new(col.table, col.column))
+            .collect();
+
+        let measures: Vec<PivotMeasure> = request
+            .measures
+            .into_iter()
+            .map(|m| PivotMeasure::new(m.name, m.expression))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let grid = pivot_crosstab(
+            &self.inner,
+            &request.base_table,
+            &row_fields,
+            &column_fields,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .map_err(|err| super::js_err(err.to_string()))?;
+
+        let data = grid
+            .data
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| dax_value_to_pivot_value(&v)).collect())
+            .collect();
+
+        let out = PivotGridPivotValuesDto { data };
 
         use serde::ser::Serialize as _;
         out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())

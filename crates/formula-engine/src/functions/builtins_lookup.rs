@@ -1549,26 +1549,23 @@ fn getpivotdata_from_registry(
     }
 
     let mut acc = PivotAccumulator::new();
-
-    let mut pivot_filter_indices = Vec::new();
-    for filter in &pivot.config.filter_fields {
-        let Some(allowed) = &filter.allowed else {
-            continue;
-        };
-        let Some(source_field) = filter.source_field.as_cache_field_name() else {
-            continue;
-        };
-        let key = crate::value::casefold(source_field);
-        let Some(idx) = entry.field_indices.get(&key).copied() else {
-            continue;
-        };
-        pivot_filter_indices.push((idx, allowed));
-    }
+    let pivot_filter_indices: Vec<(usize, &std::collections::HashSet<PivotKeyPart>)> = pivot
+        .config
+        .filter_fields
+        .iter()
+        .filter_map(|filter| {
+            let allowed = filter.allowed.as_ref()?;
+            let source_field = filter.source_field.as_cache_field_name()?;
+            let key = crate::value::casefold(source_field);
+            let idx = entry.field_indices.get(&key).copied()?;
+            Some((idx, allowed))
+        })
+        .collect();
 
     'records: for record in &pivot.cache.records {
         // Apply pivot-config filter fields (report filters / slicers).
-        for (idx, allowed) in &pivot_filter_indices {
-            let pv = record.get(*idx).unwrap_or(&PivotEngineValue::Blank);
+        for &(idx, allowed) in &pivot_filter_indices {
+            let pv = record.get(idx).unwrap_or(&PivotEngineValue::Blank);
             if !allowed.contains(&pivot_engine_value_to_key_part(pv)) {
                 continue 'records;
             }
