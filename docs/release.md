@@ -358,6 +358,7 @@ bash scripts/validate-macos-bundle.sh
 
 # Linux
 bash scripts/validate-linux-appimage.sh
+bash scripts/validate-linux-deb.sh
 bash scripts/validate-linux-rpm.sh
 
 # Windows
