@@ -5532,7 +5532,11 @@ impl WasmWorkbook {
 
         // Preserve sheet tab order so clients can round-trip through `toJson`/`fromJson` without
         // changing 3D reference semantics (`Sheet1:Sheet3!A1`) or worksheet functions like `SHEET()`.
-        let sheet_order = self.inner.engine.sheet_names_in_order();
+        //
+        // Note: `sheetOrder` must reference the same identifiers used as keys in `sheets` (stable
+        // sheet ids), not user-visible display names. Display names may differ when hosts call
+        // `setSheetDisplayName` (e.g. DocumentController stable sheet ids).
+        let sheet_order = self.inner.engine.sheet_keys_in_order();
 
         serde_json::to_string(&WorkbookJson {
             locale_id,
@@ -5559,15 +5563,24 @@ impl WasmWorkbook {
 
         // Prefer the engine's sheet tab order instead of the `BTreeMap` ordering of the sparse input
         // maps so UI clients (and sheet-indexed functions) observe Excel-like semantics.
-        let names_in_order = self.inner.engine.sheet_names_in_order();
+        //
+        // Use stable sheet keys (the identifiers used as keys in `toJson()`/`fromJson()`), not
+        // display names, so we can look up persisted inputs and metadata maps keyed by sheet id.
+        let keys_in_order = self.inner.engine.sheet_keys_in_order();
         let empty_cells: BTreeMap<String, JsonValue> = BTreeMap::new();
 
-        let push_sheet = |sheet_name: &str, cells: &BTreeMap<String, JsonValue>| -> Result<(), JsValue> {
+        let push_sheet = |sheet_key: &str, cells: &BTreeMap<String, JsonValue>| -> Result<(), JsValue> {
             let sheet_obj = Object::new();
-            object_set(&sheet_obj, "id", &JsValue::from_str(sheet_name))?;
-            object_set(&sheet_obj, "name", &JsValue::from_str(sheet_name))?;
+            object_set(&sheet_obj, "id", &JsValue::from_str(sheet_key))?;
+            let display_name = self
+                .inner
+                .engine
+                .sheet_id(sheet_key)
+                .and_then(|id| self.inner.engine.sheet_name(id))
+                .unwrap_or(sheet_key);
+            object_set(&sheet_obj, "name", &JsValue::from_str(display_name))?;
 
-            if let Some(visibility) = self.inner.sheet_visibility.get(sheet_name).copied() {
+            if let Some(visibility) = self.inner.sheet_visibility.get(sheet_key).copied() {
                 let value = match visibility {
                     SheetVisibility::Visible => "visible",
                     SheetVisibility::Hidden => "hidden",
@@ -5576,7 +5589,7 @@ impl WasmWorkbook {
                 object_set(&sheet_obj, "visibility", &JsValue::from_str(value))?;
             }
 
-            if let Some(color) = self.inner.sheet_tab_colors.get(sheet_name) {
+            if let Some(color) = self.inner.sheet_tab_colors.get(sheet_key) {
                 use serde::ser::Serialize as _;
                 let js = color
                     .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
@@ -5588,7 +5601,7 @@ impl WasmWorkbook {
             let (rows, cols) = self
                 .inner
                 .engine
-                .sheet_dimensions(sheet_name)
+                .sheet_dimensions(sheet_key)
                 .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
             if rows != EXCEL_MAX_ROWS {
                 object_set(&sheet_obj, "rowCount", &JsValue::from_f64(rows as f64))?;
@@ -5628,7 +5641,7 @@ impl WasmWorkbook {
                 }
             }
 
-            if let Some(rich_cells) = self.inner.sheets_rich.get(sheet_name) {
+            if let Some(rich_cells) = self.inner.sheets_rich.get(sheet_key) {
                 for (address, input) in rich_cells {
                     if input.is_empty() {
                         continue;
@@ -5678,14 +5691,14 @@ impl WasmWorkbook {
             Ok(())
         };
 
-        if names_in_order.is_empty() {
+        if keys_in_order.is_empty() {
             for (sheet_name, cells) in &self.inner.sheets {
                 push_sheet(sheet_name, cells)?;
             }
         } else {
-            for sheet_name in &names_in_order {
-                let cells = self.inner.sheets.get(sheet_name).unwrap_or(&empty_cells);
-                push_sheet(sheet_name, cells)?;
+            for sheet_key in &keys_in_order {
+                let cells = self.inner.sheets.get(sheet_key).unwrap_or(&empty_cells);
+                push_sheet(sheet_key, cells)?;
             }
         }
 
@@ -7359,6 +7372,25 @@ mod tests {
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
         assert_eq!(parsed2["sheetOrder"], json!(["B", "A", "C"]));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn to_json_uses_stable_sheet_keys_when_display_names_differ() {
+        // Hosts like the desktop DocumentController can assign stable sheet ids (keys) that differ
+        // from the user-visible tab name (display name). The JSON workbook schema uses the stable
+        // keys as sheet map keys; `sheetOrder` must reference those same keys so tab ordering
+        // round-trips correctly through `toJson()`/`fromJson()`.
+        let mut state = WorkbookState::new_empty();
+        state.ensure_sheet("Sheet1");
+        state.ensure_sheet("sheet_2");
+        state.engine.set_sheet_display_name("sheet_2", "Budget");
+
+        let wb = WasmWorkbook { inner: state };
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["sheetOrder"], json!(["Sheet1", "sheet_2"]));
     }
 
     #[test]

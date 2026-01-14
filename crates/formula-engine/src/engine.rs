@@ -1136,6 +1136,19 @@ impl Engine {
         self.workbook.sheet_ids_in_order().to_vec()
     }
 
+    /// Returns worksheet stable keys (sheet identifiers) in the current workbook tab order.
+    ///
+    /// This differs from [`Engine::sheet_names_in_order`], which returns user-visible worksheet
+    /// display names (tab names). Sheet keys remain stable across renames and are used by hosts
+    /// (like the desktop DocumentController) to address worksheets consistently.
+    pub fn sheet_keys_in_order(&self) -> Vec<String> {
+        self.workbook
+            .sheet_ids_in_order()
+            .iter()
+            .filter_map(|&id| self.workbook.sheet_key_name(id).map(|name| name.to_string()))
+            .collect()
+    }
+
     /// Returns worksheet display names in the current workbook tab order.
     pub fn sheet_names_in_order(&self) -> Vec<String> {
         self.workbook

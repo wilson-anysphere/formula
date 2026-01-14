@@ -220,6 +220,32 @@ describeWasm("EngineWorker getWorkbookInfo (wasm)", () => {
     expect(byId.get("VeryHidden")?.visibility).toBe("veryHidden");
   });
 
+  it("keeps sheetOrder stable sheet ids even when display names differ", async () => {
+    const wasm = await loadFormulaWasm();
+    const workbook = wasm.WasmWorkbook.fromJson(
+      JSON.stringify({
+        sheetOrder: ["Sheet1", "sheet_2"],
+        sheets: {
+          Sheet1: { cells: {} },
+          sheet_2: { cells: {} },
+        },
+      })
+    );
+
+    // Assign a user-visible tab name without changing the stable sheet id/key.
+    workbook.setSheetDisplayName("sheet_2", "Budget");
+
+    // getWorkbookInfo should return stable ids and the display name separately.
+    const info = workbook.getWorkbookInfo() as WorkbookInfoDto;
+    expect(info.sheets.map((s) => s.id)).toEqual(["Sheet1", "sheet_2"]);
+    const byId = new Map(info.sheets.map((sheet) => [sheet.id, sheet]));
+    expect(byId.get("sheet_2")?.name).toBe("Budget");
+
+    // toJson must use stable sheet ids for sheetOrder so the JSON schema round-trips correctly.
+    const parsed = JSON.parse(workbook.toJson()) as any;
+    expect(parsed.sheetOrder).toEqual(["Sheet1", "sheet_2"]);
+  });
+
   it("returns sheet list, dimensions, and best-effort used ranges (including rich inputs)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
