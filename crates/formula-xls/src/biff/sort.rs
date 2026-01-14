@@ -902,6 +902,68 @@ mod tests {
     }
 
     #[test]
+    fn parses_sort12_frt_record_when_embedded_sort_payload_starts_at_offset_2() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Prepend 2 bytes so the embedded SORT payload begins at offset 2. This exercises the
+        // offset-scanning fallback in `parse_sort12_like_payload_best_effort`.
+        let mut payload = vec![5u8, 0u8];
+        payload.extend_from_slice(&canonical_sort_payload_one_key_b_desc_with_header());
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORT12, RT_SORT12, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_sort12_frt_record_uses_frt_header_rt_even_when_record_id_differs() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Use an arbitrary record id in the FRT range that does not equal the `FrtHeader.rt`
+        // (Excel writers typically set them equal, but we key off `rt` for robustness).
+        let record_id = 0x0850;
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(
+                record_id,
+                RT_SORT12,
+                &canonical_sort_payload_one_key_b_desc_with_header(),
+            ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
     fn parses_sortdata12_frt_record_with_embedded_canonical_sort() {
         // AutoFilter range: A1:C5.
         let af = Range::from_a1("A1:C5").unwrap();
