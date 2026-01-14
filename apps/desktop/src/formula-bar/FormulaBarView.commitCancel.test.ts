@@ -161,8 +161,7 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     view.setReadOnly(true);
     expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
-
-    view.textarea.focus();
+    expect(view.textarea.readOnly).toBe(true);
 
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
@@ -170,11 +169,19 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(cancel.hidden).toBe(true);
     expect(commit.hidden).toBe(true);
 
-    // Click-to-edit via the highlight pre should also be blocked in read-only mode.
+    // Click-to-edit via the highlight <pre> should still focus the textarea so the user can
+    // select/copy the formula, but must not enter edit mode or show commit/cancel controls.
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]')!;
-    highlight.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    const e = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    highlight.dispatchEvent(e);
 
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(view.textarea);
     expect(view.model.isEditing).toBe(false);
+    // The view uses the `formula-bar--editing` class as a *visibility* toggle for the textarea
+    // (it's `display: none` in view mode). Even in read-only mode we still expect focus to
+    // show the textarea for copy UX.
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
     expect(onBeginEdit).not.toHaveBeenCalled();
     expect(cancel.hidden).toBe(true);
     expect(commit.hidden).toBe(true);
@@ -205,6 +212,8 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+    expect(view.textarea.readOnly).toBe(true);
     expect(cancel.hidden).toBe(true);
     expect(commit.hidden).toBe(true);
     expect(view.textarea.value).toBe("orig");
