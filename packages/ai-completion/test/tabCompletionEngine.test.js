@@ -5184,6 +5184,29 @@ test("Sheet names that require quotes are not suggested as identifiers (=My Shee
   );
 });
 
+test("Quoted sheet names are suggested as prefixes when the user starts a quote (=\'my → =\'my Sheet\'!)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "='my";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "='my Sheet'!"),
+    `Expected a quoted sheet-name completion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("getSuggestions never throws when cellRef is malformed", async () => {
   const engine = new TabCompletionEngine();
   const invalidRefs = [null, { row: "x" }, "not-a1"];

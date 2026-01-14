@@ -241,6 +241,9 @@ export class TabCompletionEngine {
     if (!parsed.inFunctionCall && !parsed.functionNamePrefix) {
       const topLevel = this.suggestTopLevelFunctions(context);
       if (topLevel.length > 0) return topLevel;
+
+      const topLevelQuotedSheetPrefixes = await this.suggestTopLevelQuotedSheetPrefixes(context);
+      if (topLevelQuotedSheetPrefixes.length > 0) return topLevelQuotedSheetPrefixes;
     }
 
     // 1) Function name completion
@@ -774,6 +777,55 @@ export class TabCompletionEngine {
         displayText: insertedSuffix,
         type: "range",
         confidence: clamp01(0.55 + ratioBoost(prefix, sheetName) * 0.35),
+      });
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
+  }
+
+  /**
+   * Suggest quoted sheet-name prefixes when the user starts a single-quoted sheet reference
+   * outside of a function call (e.g. `='My` → `='My Sheet'!`).
+   *
+   * We only suggest sheet names that *require* quoting so these completions remain representable
+   * as pure insertions (we never need to remove a leading quote).
+   *
+   * @param {CompletionContext} context
+   * @returns {Promise<Suggestion[]>}
+   */
+  async suggestTopLevelQuotedSheetPrefixes(context) {
+    const provider = this.schemaProvider;
+    if (!provider) return [];
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const prefix = input.slice(0, cursor);
+
+    const quoteStart = findUnclosedSheetQuoteStart(prefix);
+    if (quoteStart === null) return [];
+    // Must be preceded by '=' or an operator/whitespace (similar to function-name tokens).
+    const before = quoteStart - 1 >= 0 ? prefix[quoteStart - 1] : "";
+    if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return [];
+
+    const typedPrefix = prefix.slice(quoteStart);
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+    const sheetNames = await safeProviderCall(provider.getSheetNames);
+    for (const sheetName of sheetNames) {
+      if (typeof sheetName !== "string" || sheetName.length === 0) continue;
+      if (!needsSheetQuotes(sheetName)) continue;
+
+      const formatted = formatSheetPrefix(sheetName);
+      if (!startsWithIgnoreCase(formatted, typedPrefix)) continue;
+
+      const replacement = completeIdentifier(formatted, typedPrefix);
+      const insertedSuffix = replacement.slice(typedPrefix.length);
+      const newText = replaceSpan(input, quoteStart, cursor, replacement);
+      suggestions.push({
+        text: newText,
+        displayText: insertedSuffix,
+        type: "range",
+        confidence: clamp01(0.55 + ratioBoost(typedPrefix, formatted) * 0.35),
       });
     }
 
@@ -2223,6 +2275,75 @@ function isInUnclosedDoubleQuotedString(text) {
     inString = !inString;
   }
   return inString;
+}
+
+/**
+ * Returns the start index of an unterminated single-quoted sheet-name reference
+ * (e.g. `='My Sh`), or null if the cursor is not currently inside a quoted sheet name.
+ *
+ * This intentionally ignores `'` characters inside double-quoted string literals and
+ * structured references (`[...]`).
+ *
+ * @param {string} textPrefix
+ * @returns {number | null}
+ */
+function findUnclosedSheetQuoteStart(textPrefix) {
+  const text = typeof textPrefix === "string" ? textPrefix : "";
+  if (!text.includes("'")) return null;
+
+  let inString = false;
+  let inSheetQuote = false;
+  let bracketDepth = 0;
+  let start = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes quotes inside sheet names via doubled quotes: ''.
+        if (text[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+        start = -1;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (ch === "'" && bracketDepth === 0) {
+      inSheetQuote = true;
+      start = i;
+    }
+  }
+
+  return inSheetQuote ? start : null;
 }
 
 function ratioBoost(prefix, full) {
