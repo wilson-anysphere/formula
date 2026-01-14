@@ -621,18 +621,34 @@ fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<Str
         .ok_or_else(|| XlsxError::Invalid(format!("sheet {sheet_name:?} not found in workbook")))?;
 
     let rels_part = rels_part_name("xl/workbook.xml");
-    let rels_bytes = package
-        .part(&rels_part)
-        .ok_or_else(|| XlsxError::MissingPart(rels_part.clone()))?;
-    let rels = parse_relationships(rels_bytes)?;
-    let rel = rels.iter().find(|r| r.id == sheet.rel_id).ok_or_else(|| {
-        XlsxError::Invalid(format!(
-            "missing workbook relationship {rid:?} for sheet {sheet_name:?}",
-            rid = sheet.rel_id
-        ))
-    })?;
+    let guess = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
 
-    Ok(resolve_target("xl/workbook.xml", &rel.target))
+    // Primary: resolve the sheet part through `/xl/_rels/workbook.xml.rels`.
+    //
+    // Some producers omit/mangle the relationship part; in that case fall back to the conventional
+    // `xl/worksheets/sheet{sheetId}.xml` naming pattern when that part exists.
+    if let Some(rels_bytes) = package.part(&rels_part) {
+        if let Ok(rels) = parse_relationships(rels_bytes) {
+            if let Some(rel) = rels.iter().find(|r| r.id == sheet.rel_id) {
+                if !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                {
+                    return Ok(resolve_target("xl/workbook.xml", &rel.target));
+                }
+            }
+        }
+    }
+
+    if package.part(&guess).is_some() {
+        return Ok(guess);
+    }
+
+    Err(XlsxError::Invalid(format!(
+        "unable to resolve worksheet part for sheet {sheet_name:?}: expected workbook relationship {rid:?} in {rels_part:?} or fallback worksheet part {guess:?}",
+        rid = sheet.rel_id
+    )))
 }
 
 fn resolve_cache_records_part(
@@ -1830,6 +1846,113 @@ mod tests {
                     ("s".to_string(), "Bob".to_string()),
                     ("n".to_string(), "25".to_string()),
                 ],
+            ]
+        );
+    }
+
+    #[test]
+    fn refresh_pivot_cache_falls_back_to_conventional_sheet_part_when_workbook_rels_missing() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Source range is A1:B2 (header + 1 record).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Header1</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Header2</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>1</v></c>
+      <c r="B2" t="inlineStr"><is><t>Alpha</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource sheet="Sheet1" ref="A1:B2"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
+        let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
+</Relationships>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        // Intentionally omit `xl/_rels/workbook.xml.rels` to exercise the worksheet part fallback.
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
+            .unwrap();
+        zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_def =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheDefinition1.xml").unwrap())
+                .unwrap();
+        let doc = Document::parse(updated_def).expect("parse updated cache definition");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("recordCount"), Some("1"));
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("1"));
+
+        let record = root
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "r")
+            .expect("record row");
+
+        let values: Vec<(String, String)> = record
+            .children()
+            .filter(|n| n.is_element())
+            .map(|n| {
+                (
+                    n.tag_name().name().to_string(),
+                    n.attribute("v").unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("n".to_string(), "1".to_string()),
+                ("s".to_string(), "Alpha".to_string())
             ]
         );
     }
