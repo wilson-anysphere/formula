@@ -3,7 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 use zip::ZipArchive;
 
 use crate::path::{rels_for_part, resolve_target};
@@ -263,16 +263,23 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         let doc = Document::parse(sheet_xml_str)
             .map_err(|e| ChartExtractionError::XmlParse(sheet.part_name.clone(), e))?;
 
-        let drawing_rids: Vec<String> = doc
-            .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
-            .filter_map(|n| {
-                n.attribute((REL_NS, "id"))
-                    .or_else(|| n.attribute("r:id"))
-                    .or_else(|| n.attribute("id"))
-            })
-            .map(|s| s.to_string())
-            .collect();
+        fn is_drawing_node(node: Node<'_, '_>) -> bool {
+            node.is_element() && node.tag_name().name() == "drawing"
+        }
+
+        let drawing_rids: Vec<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
+            doc.root_element(),
+            is_drawing_node,
+            is_drawing_node,
+        )
+        .into_iter()
+        .filter_map(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(|s| s.to_string())
+        .collect();
 
         let picture_node = doc
             .descendants()
@@ -578,16 +585,23 @@ impl XlsxPackage {
             let doc = Document::parse(sheet_xml_str)
                 .map_err(|e| ChartExtractionError::XmlParse(sheet.part_name.clone(), e))?;
 
-            let drawing_rids: Vec<String> = doc
-                .descendants()
-                .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
-                .filter_map(|n| {
-                    n.attribute((REL_NS, "id"))
-                        .or_else(|| n.attribute("r:id"))
-                        .or_else(|| n.attribute("id"))
-                })
-                .map(|s| s.to_string())
-                .collect();
+            fn is_drawing_node(node: Node<'_, '_>) -> bool {
+                node.is_element() && node.tag_name().name() == "drawing"
+            }
+
+            let drawing_rids: Vec<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
+                doc.root_element(),
+                is_drawing_node,
+                is_drawing_node,
+            )
+            .into_iter()
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+            .map(|s| s.to_string())
+            .collect();
 
             let picture_node = doc
                 .descendants()
@@ -1496,16 +1510,23 @@ fn ensure_sheet_xml_has_drawings(
         .map(|n| n.range().start)
         .unwrap_or(close_idx);
 
-    let existing: HashSet<String> = root
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
-        .filter_map(|n| {
-            n.attribute((REL_NS, "id"))
-                .or_else(|| n.attribute("r:id"))
-                .or_else(|| n.attribute("id"))
-        })
-        .map(|s| s.to_string())
-        .collect();
+    fn is_drawing_node(node: Node<'_, '_>) -> bool {
+        node.is_element() && node.tag_name().name() == "drawing"
+    }
+
+    let existing: HashSet<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
+        root,
+        is_drawing_node,
+        is_drawing_node,
+    )
+    .into_iter()
+    .filter_map(|n| {
+        n.attribute((REL_NS, "id"))
+            .or_else(|| n.attribute("r:id"))
+            .or_else(|| n.attribute("id"))
+    })
+    .map(|s| s.to_string())
+    .collect();
 
     let drawing_tag = crate::xml::prefixed_tag(root_prefix, "drawing");
     let mut inserted: HashSet<String> = HashSet::new();
