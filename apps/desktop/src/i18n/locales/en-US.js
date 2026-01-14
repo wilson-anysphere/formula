@@ -231,6 +231,7 @@ export const enUS = {
   "command.comments.togglePanel": "Toggle Comments Panel",
   "command.comments.addComment": "Add Comment",
   "command.view.insertPivotTable": "Insert Pivot Table…",
+  "command.insert.tables.pivotTable.fromTableRange": "Insert Pivot Table from Table/Range…",
   "command.view.theme.light": "Theme: Light",
   "command.view.theme.dark": "Theme: Dark",
   "command.view.theme.system": "Theme: System",

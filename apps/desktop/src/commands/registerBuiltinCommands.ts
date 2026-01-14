@@ -682,6 +682,24 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  // Alias used by the Ribbon schema (Insert → PivotTable → From Table/Range…).
+  //
+  // Keep this wired through `CommandRegistry` so generic ribbon enable/disable logic works
+  // (and we don't have to special-case it via `createRibbonActionsFromCommands` overrides).
+  commandRegistry.registerBuiltinCommand(
+    "insert.tables.pivotTable.fromTableRange",
+    t("command.insert.tables.pivotTable.fromTableRange"),
+    async () => {
+      await commandRegistry.executeCommand("view.insertPivotTable");
+    },
+    {
+      category: t("commandCategory.data"),
+      icon: null,
+      description: t("commandDescription.view.insertPivotTable"),
+      keywords: ["pivot", "pivot table", "table", "range"],
+    },
+  );
+
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.aiChat",
     t("command.view.togglePanel.aiChat"),

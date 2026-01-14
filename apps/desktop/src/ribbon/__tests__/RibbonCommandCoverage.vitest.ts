@@ -84,6 +84,12 @@ const REQUIRED_PAGE_LAYOUT_COMMAND_IDS = [
 ];
 
 const REQUIRED_DEVELOPER_CODE_COMMAND_IDS = RIBBON_MACRO_COMMAND_IDS.filter((id) => id.startsWith("developer.code."));
+// Non-canonical ribbon ids that should still be registered as commands (so they are enabled and
+// executable via the standard ribbon → CommandRegistry bridge).
+const REQUIRED_NON_CANONICAL_RIBBON_COMMAND_IDS = [
+  // Insert → PivotTable → From Table/Range…
+  "insert.tables.pivotTable.fromTableRange",
+];
 
 function collectRibbonCommandIds(): string[] {
   const ids = new Set<string>();
@@ -135,6 +141,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       // through CommandRegistry so it can appear in the command palette and avoid ribbon-only
       // dispatch logic.
       .concat(REQUIRED_DEVELOPER_CODE_COMMAND_IDS.filter((id) => ribbonIds.includes(id)))
+      .concat(REQUIRED_NON_CANONICAL_RIBBON_COMMAND_IDS.filter((id) => ribbonIds.includes(id)))
       .sort((a, b) => a.localeCompare(b));
 
     const commandRegistry = new CommandRegistry();
