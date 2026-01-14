@@ -2192,6 +2192,7 @@ impl Engine {
         }
     }
 
+    #[allow(dead_code)]
     fn effective_style_id_at(&self, key: CellKey) -> u32 {
         // If this cell is part of a spilled array, use the spill origin's formatting (Excel
         // displays spilled outputs using the origin cell's formatting).
