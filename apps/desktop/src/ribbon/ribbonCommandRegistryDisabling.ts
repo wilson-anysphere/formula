@@ -91,14 +91,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "home.styles.cellStyles.numberFormat",
   "home.styles.cellStyles.newStyle",
 
-  // Data → Forecast / What-If Analysis.
-  "data.forecast.whatIfAnalysis.scenarioManager",
-  "data.forecast.whatIfAnalysis.goalSeek",
-  "data.forecast.whatIfAnalysis.monteCarlo",
-
-  // Formulas → Solutions.
-  "formulas.solutions.solver",
-
   // Insert → Pictures.
   "insert.illustrations.pictures.thisDevice",
   "insert.illustrations.pictures.stockImages",

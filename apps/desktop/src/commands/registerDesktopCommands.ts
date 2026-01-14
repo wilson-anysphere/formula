@@ -78,6 +78,10 @@ export function registerDesktopCommands(params: {
    * overridden to invoke this handler (instead of the built-in no-op registration).
    */
   openCommandPalette?: (() => void) | null;
+  /**
+   * Optional host hook to open the Goal Seek dialog (What-If Analysis).
+   */
+  openGoalSeekDialog?: (() => void) | null;
 }): void {
   const {
     commandRegistry,
@@ -102,6 +106,7 @@ export function registerDesktopCommands(params: {
     dataQueriesHandlers = null,
     pageLayoutHandlers = null,
     openCommandPalette = null,
+    openGoalSeekDialog = null,
   } = params;
 
   const commandCategoryFormat = t("commandCategory.format");
@@ -155,6 +160,7 @@ export function registerDesktopCommands(params: {
       onExtensionsLoaded,
       themeController,
       refreshRibbonUiState,
+      openGoalSeekDialog,
     });
 
     // Home → Font dropdown actions are registered as canonical `format.*` commands so

@@ -7631,6 +7631,7 @@ registerDesktopCommands({
     },
   },
   openCommandPalette: () => openCommandPalette?.(),
+  openGoalSeekDialog: () => showGoalSeekDialogModal(),
 });
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
@@ -9048,36 +9049,21 @@ function handleRibbonCommand(commandId: string): void {
           app.focus();
         })();
         return;
-      case "data.forecast.whatIfAnalysis.scenarioManager": {
-        const controller = ribbonLayoutController;
-        if (!controller) {
-          showToast("Scenario Manager is not available in this build yet.");
-          return;
-        }
-        controller.openPanel(PanelIds.SCENARIO_MANAGER);
+      case "edit.find":
+        executeBuiltinCommand("edit.find");
         return;
-      }
-      case "data.forecast.whatIfAnalysis.goalSeek":
-        showGoalSeekDialogModal();
+      case "edit.replace":
+        executeBuiltinCommand("edit.replace");
         return;
-      case "data.forecast.whatIfAnalysis.monteCarlo": {
-        const controller = ribbonLayoutController;
-        if (!controller) {
-          showToast("Monte Carlo is not available in this build yet.");
-          return;
-        }
-        controller.openPanel(PanelIds.MONTE_CARLO);
+      case "navigation.goTo":
+        executeBuiltinCommand("navigation.goTo");
         return;
-      }
-      case "formulas.solutions.solver": {
-        const controller = ribbonLayoutController;
-        if (!controller) {
-          showToast("Solver is not available in this build yet.");
-          return;
-        }
-        controller.openPanel(PanelIds.SOLVER);
+      case "view.freezePanes":
+      case "view.freezeTopRow":
+      case "view.freezeFirstColumn":
+      case "view.unfreezePanes":
+        executeBuiltinCommand(commandId);
         return;
-      }
       default:
         if (commandId.startsWith("file.")) {
           showToast(`File command not implemented: ${commandId}`);

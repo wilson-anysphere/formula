@@ -53,6 +53,13 @@ export function registerBuiltinCommands(params: {
    * or extensions.
    */
   refreshRibbonUiState?: (() => void) | null;
+  /**
+   * Optional hook to open the Goal Seek dialog (What-If Analysis).
+   *
+   * The desktop shell owns modal dialog mounting in `main.ts`, so the command
+   * catalog accepts a host callback rather than embedding portal/DOM wiring here.
+   */
+  openGoalSeekDialog?: (() => void) | null;
 }): void {
   const {
     commandRegistry,
@@ -64,9 +71,11 @@ export function registerBuiltinCommands(params: {
     onExtensionsLoaded = null,
     themeController = null,
     refreshRibbonUiState = null,
+    openGoalSeekDialog = null,
   } = params;
 
   const commandCategoryFormat = t("commandCategory.format");
+  const commandCategoryData = t("commandCategory.data");
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
@@ -83,6 +92,20 @@ export function registerBuiltinCommands(params: {
     }
 
     layoutController.closePanel(panelId);
+  };
+
+  const openDockPanel = (panelId: string) => {
+    const placement = getPanelPlacement(layoutController.layout, panelId);
+    if (placement.kind === "closed") {
+      layoutController.openPanel(panelId);
+      return;
+    }
+
+    // Floating panels can be minimized. Treat a minimized floating panel as "closed" for open
+    // purposes so open commands restore the panel instead of leaving it minimized.
+    if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[panelId]?.minimized) {
+      layoutController.setFloatingPanelMinimized(panelId, false);
+    }
   };
 
   const listVisibleSheetIds = (): string[] => {
@@ -708,6 +731,64 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.view.insertPivotTable"),
       keywords: ["pivot", "pivot table", "table", "range"],
+    },
+  );
+
+  // --- What-If Analysis / Solver (ribbon ids) ---------------------------------
+  // Register the ribbon ids directly so:
+  // - the ribbon doesn't have to rely on `main.ts` fallbacks to stay enabled
+  // - commands are available via the command palette/keybindings
+  commandRegistry.registerBuiltinCommand(
+    "data.forecast.whatIfAnalysis.scenarioManager",
+    `${t("whatIf.scenario.title")}…`,
+    () => openDockPanel(PanelIds.SCENARIO_MANAGER),
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Open Scenario Manager (What-If Analysis)",
+      keywords: ["what-if", "what if", "scenario", "manager"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "data.forecast.whatIfAnalysis.monteCarlo",
+    `${t("whatIf.monteCarlo.title")}…`,
+    () => openDockPanel(PanelIds.MONTE_CARLO),
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Open Monte Carlo simulation (What-If Analysis)",
+      keywords: ["what-if", "what if", "monte carlo", "simulation"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "data.forecast.whatIfAnalysis.goalSeek",
+    `${t("whatIf.goalSeek.title")}…`,
+    () => {
+      if (openGoalSeekDialog) {
+        openGoalSeekDialog();
+        return;
+      }
+      showToast("Goal Seek is not available in this build.", "error");
+    },
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Open Goal Seek (What-If Analysis)",
+      keywords: ["what-if", "what if", "goal seek"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "formulas.solutions.solver",
+    t("panels.solver.title"),
+    () => openDockPanel(PanelIds.SOLVER),
+    {
+      category: commandCategoryData,
+      icon: null,
+      description: "Open Solver",
+      keywords: ["solver", "optimization"],
     },
   );
 
