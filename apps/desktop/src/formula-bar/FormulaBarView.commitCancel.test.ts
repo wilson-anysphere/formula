@@ -167,7 +167,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(onBeginEdit).not.toHaveBeenCalled();
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
 
     // Click-to-edit via the highlight <pre> should still focus the textarea so the user can
     // select/copy the formula, but must not enter edit mode or show commit/cancel controls.
@@ -184,7 +186,36 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
     expect(onBeginEdit).not.toHaveBeenCalled();
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
+
+    host.remove();
+  });
+
+  it("allows programmatic focus() in read-only mode for copy/selection without entering edit mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+
+    view.setReadOnly(true);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(view.textarea.readOnly).toBe(true);
+
+    view.focus({ cursor: "end" });
+
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
+    expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
 
     host.remove();
   });
@@ -215,7 +246,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.readOnly).toBe(true);
     expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
     expect(view.textarea.value).toBe("orig");
 
     expect(onCommit).not.toHaveBeenCalled();
