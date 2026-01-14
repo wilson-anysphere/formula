@@ -260,6 +260,14 @@ impl XlsxLazyPackage {
     pub fn enforce_workbook_kind(&mut self, kind: WorkbookKind) -> Result<(), XlsxError> {
         self.workbook_kind = Some(kind);
 
+        // When macro stripping is enabled, `[Content_Types].xml` will be rewritten as part of the
+        // macro-strip streaming pass (using `self.workbook_kind`). Persisting an explicit override
+        // here would force the slower two-pass `strip -> temp file -> apply overrides` path even
+        // when there are otherwise no non-macro overrides.
+        if self.strip_macros.is_some() {
+            return Ok(());
+        }
+
         let Some(existing) = self.read_part("[Content_Types].xml")? else {
             // Match `XlsxPackage` semantics: don't synthesize a missing content types file.
             return Ok(());
