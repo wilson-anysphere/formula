@@ -189,14 +189,14 @@ Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`),
       Note: for many-to-many relationships, physical `BLANK` keys do not participate in relationship
       joins and are skipped (they are not stored in the index), to avoid materializing a potentially
       huge, never-used row list.
-    - `ToIndex::KeySet { keys: HashSet<Value>, has_duplicates }`  
-      Scalable representation for **columnar many-to-many** relationships where the `to_table` side may
-      contain a very large number of duplicate keys. Instead of storing `Vec<usize>` row lists per key,
-      the engine stores only the **distinct key set** and relies on backend primitives like
-      `filter_eq` / `filter_in` to retrieve matching row indices on demand. `BLANK` keys are excluded
-      (they do not participate in relationship joins).
-      - `KeySet` is currently used when `cardinality == ManyToMany` and the `to_table` is backed by the
-        columnar backend (`TableStorage::Columnar`).
+  - `ToIndex::KeySet { keys: HashSet<Value>, has_duplicates }`  
+    Scalable representation for **columnar many-to-many** relationships where the `to_table` side may
+    contain a very large number of duplicate keys. Instead of storing `Vec<usize>` row lists per key,
+    the engine stores only the **distinct key set** and relies on backend primitives like
+    `filter_eq` / `filter_in` to retrieve matching row indices on demand. `BLANK` keys are excluded
+    (they do not participate in relationship joins).
+    - `KeySet` is currently used when `cardinality == ManyToMany` and the `to_table` is backed by the
+      columnar backend (`TableStorage::Columnar`).
 - `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**  
   Materialized only for in-memory fact tables. For columnar fact tables it stays `None` and the engine
   relies on backend primitives like `filter_eq` / `filter_in` instead.
