@@ -1213,7 +1213,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload debug symbol archives to draft release (macOS)
-        if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true' && vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1'
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true' && (vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1' || vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == 'true')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1463,7 +1463,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload debug symbol archives to draft release (Windows)
-        if: runner.os == 'Windows' && needs.preflight.outputs.upload == 'true' && vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1'
+        if: runner.os == 'Windows' && needs.preflight.outputs.upload == 'true' && (vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == '1' || vars.FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE == 'true')
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
