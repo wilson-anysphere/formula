@@ -45,7 +45,7 @@ jobs:
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
         with:
           version: 9.0.0
 
@@ -79,7 +79,7 @@ jobs:
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Install Linux dependencies (Tauri/WebView + headless display)
         if: matrix.os == 'ubuntu-24.04'
