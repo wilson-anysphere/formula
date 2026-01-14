@@ -1646,7 +1646,10 @@ jobs:
               in_dep==1 {
                 # Stop when the next control field begins. Debian control field names begin with a letter
                 # (e.g. "Description:"), so avoid treating dependency version epochs like "1:1.2.3" as fields.
-                if ($0 ~ /^[[:space:]]+[A-Za-z][A-Za-z0-9-]*:/) { exit }
+                #
+                # Require a space after the colon so we don't confuse dependency arch qualifiers like
+                # "libc6:amd64" (colon not followed by whitespace) with a new control field.
+                if ($0 ~ /^[[:space:]]+[A-Za-z][A-Za-z0-9-]*:[[:space:]]/) { exit }
                 sub(/^[[:space:]]+/, "", $0)
                 if (out == "") out=$0; else out=out " " $0
               }
