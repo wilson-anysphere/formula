@@ -20,8 +20,7 @@ High-level behavior in `formula-io`:
     - Decrypted packages containing `xl/workbook.bin` are routed to the XLSB open path and returned as
       `Workbook::Xlsb`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload;
-    Standard AES may return `Workbook::Model`).
+    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
     - This is used for some compatibility fallbacks (for example Agile files that omit
