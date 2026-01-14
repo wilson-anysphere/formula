@@ -572,9 +572,9 @@ fn patch_or_copy_cell<W: Write>(
             }
             *desired_idx += 1;
 
-            if desired_semantics == original {
-                write_events(writer, cell_events)?;
-            } else {
+             if desired_semantics == original {
+                 write_events(writer, cell_events)?;
+             } else {
                 // `vm="..."` is a value-metadata pointer into `xl/metadata.xml` (rich values /
                 // images-in-cell).
                 //
@@ -583,11 +583,11 @@ fn patch_or_copy_cell<W: Write>(
                 //
                 // The exception is the rich-value placeholder semantics used by in-cell images:
                 //
-                // Excel stores the image itself in `xl/richData/*` and represents the cell's
-                // cached value as a placeholder (commonly the error `#VALUE!`, but some producers
-                // use a numeric value like `0`) with a `vm` pointer. When the cell is edited away
-                // from that placeholder value, we must drop `vm` to avoid leaving dangling
-                // rich-value metadata pointers.
+                // Excel stores the image itself in `xl/richData/*` and represents the cell's cached
+                // value as a placeholder (commonly the error `#VALUE!`, but some producers use a
+                // numeric value like `0`) with a `vm` pointer. When the cell is edited away from that
+                // placeholder value, we must drop `vm` to avoid leaving dangling rich-value metadata
+                // pointers.
                 let original_is_rich_placeholder =
                     matches!(&original.value, CellValue::Error(ErrorValue::Value))
                         || matches!(&original.value, CellValue::Number(n) if *n == 0.0);
@@ -595,6 +595,23 @@ fn patch_or_copy_cell<W: Write>(
                     matches!(&desired_semantics.value, CellValue::Error(ErrorValue::Value))
                         || matches!(&desired_semantics.value, CellValue::Number(n) if *n == 0.0);
                 let preserve_vm = !(original_is_rich_placeholder && !desired_is_rich_placeholder);
+
+                // When rewriting an inline string cell without changing the visible text, preserve
+                // the original `<is>...</is>` subtree byte-for-byte so we don't drop unsupported
+                // structures like phonetic runs (`<rPh>`) or rich run formatting.
+                let original_cell_type = cell_type_from_cell_events(&cell_events)?;
+                let meta = super::lookup_cell_meta(
+                    doc,
+                    cell_meta_sheet_ids,
+                    sheet_meta.worksheet_id,
+                    cell_ref,
+                );
+                let desired_value_kind = super::effective_value_kind(meta, desired_cell);
+                let preserved_inline_is = (original_cell_type.as_deref() == Some("inlineStr")
+                    && desired_semantics.value == original.value
+                    && matches!(desired_value_kind, CellValueKind::InlineString))
+                .then(|| extract_is_subtree(&cell_events))
+                .flatten();
                 write_updated_cell(
                     doc,
                     sheet_meta,
@@ -609,11 +626,12 @@ fn patch_or_copy_cell<W: Write>(
                     desired_cell,
                     preserve_vm,
                     cell_events.first(),
+                    preserved_inline_is,
                     extract_preserved_cell_children(&cell_events),
                 )?;
-            }
-            Ok(true)
-        }
+              }
+              Ok(true)
+          }
         None => {
             // Cell not represented in the model.
             if original.is_truly_empty() {
@@ -805,6 +823,7 @@ fn write_missing_cells_before_col<W: Write>(
             cell,
             true,
             None,
+            None,
             Vec::new(),
         )?;
         *desired_idx += 1;
@@ -844,6 +863,7 @@ fn write_remaining_cells_in_row<W: Write>(
             cell,
             true,
             None,
+            None,
             Vec::new(),
         )?;
         *desired_idx += 1;
@@ -865,6 +885,7 @@ fn write_updated_cell<W: Write>(
     cell: &formula_model::Cell,
     preserve_vm: bool,
     original_cell_event: Option<&Event<'static>>,
+    preserved_inline_is: Option<Vec<Event<'static>>>,
     preserved_children: Vec<Event<'static>>,
 ) -> Result<(), WriteError> {
     let original_start = original_cell_event.and_then(|ev| match ev {
@@ -1097,6 +1118,8 @@ fn write_updated_cell<W: Write>(
         }
     }
 
+    let mut preserved_inline_is = preserved_inline_is;
+
     if !clear_cached_value {
         match &cell.value {
             CellValue::Empty => {}
@@ -1132,15 +1155,21 @@ fn write_updated_cell<W: Write>(
                     writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
                 }
                 CellValueKind::InlineString => {
-                    writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-                    let mut t_start = BytesStart::new(t_tag);
-                    if super::needs_space_preserve(s) {
-                        t_start.push_attribute(("xml:space", "preserve"));
+                    if let Some(is_events) = preserved_inline_is.take() {
+                        for ev in is_events {
+                            writer.write_event(ev)?;
+                        }
+                    } else {
+                        writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                        let mut t_start = BytesStart::new(t_tag);
+                        if super::needs_space_preserve(s) {
+                            t_start.push_attribute(("xml:space", "preserve"));
+                        }
+                        writer.write_event(Event::Start(t_start))?;
+                        writer.write_event(Event::Text(BytesText::new(s)))?;
+                        writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                        writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                     }
-                    writer.write_event(Event::Start(t_start))?;
-                    writer.write_event(Event::Text(BytesText::new(s)))?;
-                    writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
-                    writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                 }
                 CellValueKind::Str => {
                     writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
@@ -1165,15 +1194,21 @@ fn write_updated_cell<W: Write>(
                         writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
                     }
                     CellValueKind::InlineString => {
-                        writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-                        let mut t_start = BytesStart::new(t_tag);
-                        if super::needs_space_preserve(s) {
-                            t_start.push_attribute(("xml:space", "preserve"));
+                        if let Some(is_events) = preserved_inline_is.take() {
+                            for ev in is_events {
+                                writer.write_event(ev)?;
+                            }
+                        } else {
+                            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                            let mut t_start = BytesStart::new(t_tag);
+                            if super::needs_space_preserve(s) {
+                                t_start.push_attribute(("xml:space", "preserve"));
+                            }
+                            writer.write_event(Event::Start(t_start))?;
+                            writer.write_event(Event::Text(BytesText::new(s)))?;
+                            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                         }
-                        writer.write_event(Event::Start(t_start))?;
-                        writer.write_event(Event::Text(BytesText::new(s)))?;
-                        writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
-                        writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                     }
                     CellValueKind::Str => {
                         writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
@@ -1200,15 +1235,21 @@ fn write_updated_cell<W: Write>(
                         writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
                     }
                     CellValueKind::InlineString => {
-                        writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-                        let mut t_start = BytesStart::new(t_tag);
-                        if super::needs_space_preserve(s) {
-                            t_start.push_attribute(("xml:space", "preserve"));
+                        if let Some(is_events) = preserved_inline_is.take() {
+                            for ev in is_events {
+                                writer.write_event(ev)?;
+                            }
+                        } else {
+                            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                            let mut t_start = BytesStart::new(t_tag);
+                            if super::needs_space_preserve(s) {
+                                t_start.push_attribute(("xml:space", "preserve"));
+                            }
+                            writer.write_event(Event::Start(t_start))?;
+                            writer.write_event(Event::Text(BytesText::new(s)))?;
+                            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                         }
-                        writer.write_event(Event::Start(t_start))?;
-                        writer.write_event(Event::Text(BytesText::new(s)))?;
-                        writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
-                        writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                     }
                     CellValueKind::Str => {
                         writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
@@ -1234,15 +1275,21 @@ fn write_updated_cell<W: Write>(
                             writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
                         }
                         CellValueKind::InlineString => {
-                            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-                            let mut t_start = BytesStart::new(t_tag);
-                            if super::needs_space_preserve(s) {
-                                t_start.push_attribute(("xml:space", "preserve"));
+                            if let Some(is_events) = preserved_inline_is.take() {
+                                for ev in is_events {
+                                    writer.write_event(ev)?;
+                                }
+                            } else {
+                                writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                                let mut t_start = BytesStart::new(t_tag);
+                                if super::needs_space_preserve(s) {
+                                    t_start.push_attribute(("xml:space", "preserve"));
+                                }
+                                writer.write_event(Event::Start(t_start))?;
+                                writer.write_event(Event::Text(BytesText::new(s)))?;
+                                writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                                writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                             }
-                            writer.write_event(Event::Start(t_start))?;
-                            writer.write_event(Event::Text(BytesText::new(s)))?;
-                            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
-                            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                         }
                         CellValueKind::Str => {
                             writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
@@ -1489,21 +1536,53 @@ fn parse_cell_semantics(
     let mut in_v = false;
     let mut in_f = false;
     let mut in_inline_t = false;
+    let is_inline_str = cell_type.as_deref() == Some("inlineStr");
+
+    // Track the local-name path so we only treat `<t>` as visible text when:
+    // - `<is><t>...` (direct child of `<is>`), or
+    // - `<is><r>...<t>` (rich text runs).
+    //
+    // This intentionally ignores `<rPh><t>` phonetic runs and any other `<t>` elements in
+    // non-visible subtrees.
+    let mut tag_stack: Vec<Vec<u8>> = Vec::new();
 
     for ev in events {
         match ev {
-            Event::Start(e) => match super::local_name(e.name().as_ref()) {
-                b"v" => in_v = true,
-                b"f" => in_f = true,
-                b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = true,
-                _ => {}
-            },
-            Event::End(e) => match super::local_name(e.name().as_ref()) {
-                b"v" => in_v = false,
-                b"f" => in_f = false,
-                b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = false,
-                _ => {}
-            },
+            Event::Start(e) => {
+                let name = e.name();
+                let local = super::local_name(name.as_ref());
+                match local {
+                    b"v" => in_v = true,
+                    b"f" => in_f = true,
+                    b"t" if is_inline_str => {
+                        let visible = match tag_stack.as_slice() {
+                            // `<is><t>`
+                            [.., parent] if parent.as_slice() == b"is" => true,
+                            // `<is><r><t>`
+                            [.., grandparent, parent]
+                                if grandparent.as_slice() == b"is" && parent.as_slice() == b"r" =>
+                            {
+                                true
+                            }
+                            _ => false,
+                        };
+                        in_inline_t = visible;
+                    }
+                    _ => {}
+                }
+                tag_stack.push(local.to_vec());
+            }
+            Event::End(e) => {
+                let name = e.name();
+                let local = super::local_name(name.as_ref());
+                match local {
+                    b"v" => in_v = false,
+                    b"f" => in_f = false,
+                    b"t" if is_inline_str => in_inline_t = false,
+                    _ => {}
+                }
+                tag_stack.pop();
+            }
             Event::Empty(e) => {
                 if super::local_name(e.name().as_ref()) == b"f" {
                     // Shared formulas may be represented as <f .../> with no text.
@@ -1557,6 +1636,66 @@ fn parse_cell_semantics(
         formula,
         value,
     })
+}
+
+fn cell_type_from_cell_events(events: &[Event<'static>]) -> Result<Option<String>, WriteError> {
+    let start = match events.first() {
+        Some(Event::Start(e)) => e,
+        Some(Event::Empty(e)) => e,
+        _ => return Ok(None),
+    };
+
+    for attr in start.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"t" {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn extract_is_subtree(events: &[Event<'static>]) -> Option<Vec<Event<'static>>> {
+    let mut depth: usize = 0;
+
+    // Walk the event stream and find an `<is>` element that is a direct child of the cell.
+    for (idx, ev) in events.iter().enumerate() {
+        match ev {
+            Event::Start(e) => {
+                let name = e.name();
+                let local = super::local_name(name.as_ref());
+                if depth == 1 && local == b"is" {
+                    let mut out = Vec::new();
+                    let mut sub_depth: usize = 0;
+                    for sub_ev in &events[idx..] {
+                        out.push(sub_ev.clone());
+                        match sub_ev {
+                            Event::Start(_) => sub_depth += 1,
+                            Event::End(_) => {
+                                sub_depth = sub_depth.saturating_sub(1);
+                                if sub_depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Some(out);
+                }
+                depth += 1;
+            }
+            Event::Empty(e) => {
+                let name = e.name();
+                let local = super::local_name(name.as_ref());
+                if depth == 1 && local == b"is" {
+                    return Some(vec![ev.clone()]);
+                }
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn interpret_cell_value(
