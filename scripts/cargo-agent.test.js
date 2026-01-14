@@ -5,6 +5,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const cargoTargetDir = resolve(repoRoot, 'target', 'cargo-agent-test');
+const bashEnv = { ...process.env, CARGO_TARGET_DIR: cargoTargetDir };
 
 const hasBash = (() => {
   if (process.platform === 'win32') return false;
@@ -30,6 +32,7 @@ function runBash(command) {
   const proc = spawnSync('bash', ['-lc', command], {
     encoding: 'utf8',
     cwd: repoRoot,
+    env: bashEnv,
   });
   if (proc.error) throw proc.error;
   assert.equal(proc.status, 0, proc.stderr);
@@ -99,7 +102,7 @@ test(
         // Force cargo to emit logs on stderr while still writing JSON to stdout.
         'export CARGO_LOG=trace && bash scripts/cargo_agent.sh metadata --format-version 1 --no-deps',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.equal(proc.status, 0, proc.stderr);
@@ -125,7 +128,7 @@ test(
         // Should fail fast before invoking cargo.
         'export FORMULA_LLD_THREADS=not-a-number && bash scripts/cargo_agent.sh check -h',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_LLD_THREADS');
@@ -147,7 +150,7 @@ test(
         // Use `-h` so cargo prints help and does not attempt a real build for the target.
         'export FORMULA_LLD_THREADS=not-a-number && bash scripts/cargo_agent.sh check -h --target wasm32-unknown-unknown',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_LLD_THREADS');
@@ -202,7 +205,7 @@ test(
         '-lc',
         'unset RAYON_NUM_THREADS && export FORMULA_RAYON_NUM_THREADS=not-a-number && bash scripts/cargo_agent.sh check -h',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_RAYON_NUM_THREADS');
@@ -223,7 +226,7 @@ test(
         '-lc',
         'unset RUST_TEST_THREADS FORMULA_RUST_TEST_THREADS && export FORMULA_RUST_TEST_THREADS=0 && bash scripts/cargo_agent.sh test -h',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_RUST_TEST_THREADS');
@@ -244,7 +247,7 @@ test(
         '-lc',
         'export FORMULA_CARGO_TEST_JOBS=0 && unset FORMULA_CARGO_JOBS && bash scripts/cargo_agent.sh test -h',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_TEST_JOBS');
@@ -265,7 +268,7 @@ test(
         '-lc',
         'export FORMULA_CARGO_RETRY_ATTEMPTS=0 && bash scripts/cargo_agent.sh check -h',
       ],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_RETRY_ATTEMPTS');
@@ -283,7 +286,7 @@ test(
     const proc = spawnSync(
       'bash',
       ['-lc', 'export FORMULA_CARGO_JOBS=not-a-number && bash scripts/cargo_agent.sh check -h'],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_JOBS');
@@ -301,7 +304,7 @@ test(
     const proc = spawnSync(
       'bash',
       ['-lc', 'export FORMULA_CARGO_LIMIT_AS=not-a-size && bash scripts/cargo_agent.sh check -h'],
-      { encoding: 'utf8', cwd: repoRoot },
+      { encoding: 'utf8', cwd: repoRoot, env: bashEnv },
     );
     if (proc.error) throw proc.error;
     assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_LIMIT_AS');
