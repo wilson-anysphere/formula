@@ -840,29 +840,11 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                     })?;
-                    let mut func_name_text = func_name.text;
-                    // When the function name is an `ExternName_IXTI*_N*` placeholder (from
-                    // `PtgNameX`), preserve the historical `ExternName{ixti}:{nameIndex}` display
-                    // used by older rgce decoders.
-                    //
-                    // Note: This is not guaranteed to be parseable as an Excel identifier, but it
-                    // keeps decode output stable for UDF/add-in call patterns.
-                    let convert_namex_udf = |name: &str| -> Option<String> {
-                        let (at, name) = if let Some(rest) = name.strip_prefix('@') {
-                            ("@", rest)
-                        } else {
-                            ("", name)
-                        };
-                        let rest = name.strip_prefix("ExternName_IXTI")?;
-                        let (ixti_str, idx_str) = rest.split_once("_N")?;
-                        let ixti: u16 = ixti_str.parse().ok()?;
-                        let idx: u16 = idx_str.parse().ok()?;
-                        Some(format!("{at}ExternName{ixti}:{idx}"))
-                    };
-
-                    if let Some(converted) = convert_namex_udf(&func_name_text) {
-                        func_name_text = converted;
-                    }
+                    // Use the decoded name token text as the function name. When we don't have
+                    // workbook context for `PtgNameX`, we emit a stable placeholder identifier
+                    // (`ExternName_IXTI<ixti>_N<idx>`) that remains parseable by Excel formula
+                    // parsers (avoid `:` / `{}`).
+                    let func_name_text = func_name.text;
                     let mut args = Vec::with_capacity(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
                         args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
