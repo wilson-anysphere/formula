@@ -37,8 +37,11 @@ export function buildDrawingContextMenuItems(params: {
       label: cutLabel,
       enabled,
       onSelect: () => {
-        app.cut();
+        // Ensure clipboard commands treat the grid as the active focus target (so
+        // they don't early-return due to focus being in an input, and so Cut doesn't
+        // restore focus back into the now-closed context menu).
         app.focus();
+        app.cut();
       },
     },
     {
@@ -46,8 +49,8 @@ export function buildDrawingContextMenuItems(params: {
       label: copyLabel,
       enabled,
       onSelect: () => {
-        app.copy();
         app.focus();
+        app.copy();
       },
     },
     {

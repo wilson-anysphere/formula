@@ -6630,7 +6630,11 @@ export class SpreadsheetApp {
    * the active selection without changing the active cell.
    */
   selectDrawingById(id: DrawingObjectId | null): void {
+    const prev = this.selectedDrawingId;
     this.selectedDrawingId = id;
+    if (prev !== id) {
+      this.dispatchDrawingSelectionChanged();
+    }
 
     // Drawings and charts are mutually exclusive selections; selecting a drawing should clear
     // any active chart selection so selection handles don't double-render.
