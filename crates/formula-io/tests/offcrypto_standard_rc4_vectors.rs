@@ -208,6 +208,25 @@ fn standard_cryptoapi_rc4_derivation_vector() {
     assert_eq!(key0_40, hex_decode("6ad7dedf2d0000000000000000000000"));
     assert_eq!(key0_40.len(), 16);
     assert!(key0_40[5..].iter().all(|b| *b == 0));
+
+    // 56-bit RC4 uses 7 bytes of key material (no CryptoAPI padding to 16 bytes).
+    let key0_56 = standard_rc4_derive_block_key(h, 0, 7);
+    assert_eq!(key0_56, hex_decode("6ad7dedf2da351"));
+    assert_eq!(key0_56.len(), 7);
+    let ciphertext_56 = rc4_apply(&key0_56, plaintext);
+    assert_eq!(
+        ciphertext_56,
+        hex_decode("883dbf39789abb12c0245ad562f13dd69da9b44660")
+    );
+    assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
+
+    // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
+    let mut key0_56_padded = key0_56.clone();
+    key0_56_padded.resize(16, 0);
+    assert_eq!(
+        rc4_apply(&key0_56_padded, plaintext),
+        hex_decode("e2ee114e2de13f90931900fdfd524642357df6a3fe")
+    );
 }
 
 #[test]
@@ -246,6 +265,25 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key0_40, hex_decode("69badcae240000000000000000000000"));
     assert_eq!(key0_40.len(), 16);
     assert!(key0_40[5..].iter().all(|b| *b == 0));
+
+    // 56-bit RC4 uses 7 bytes of key material (no CryptoAPI padding to 16 bytes).
+    let key0_56 = standard_rc4_derive_block_key_md5(h, 0, 7);
+    assert_eq!(key0_56, hex_decode("69badcae244868"));
+    assert_eq!(key0_56.len(), 7);
+    let ciphertext_56 = rc4_apply(&key0_56, plaintext);
+    assert_eq!(
+        ciphertext_56,
+        hex_decode("acdabc88ff665d0454d32d952b18e05e8331dfb44e")
+    );
+    assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
+
+    // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
+    let mut key0_56_padded = key0_56.clone();
+    key0_56_padded.resize(16, 0);
+    assert_eq!(
+        rc4_apply(&key0_56_padded, plaintext),
+        hex_decode("8240cfc192e7380beabb4b5f825fb117023e620b98")
+    );
 }
 
 #[test]
