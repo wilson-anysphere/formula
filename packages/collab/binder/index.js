@@ -2517,6 +2517,19 @@ export function bindYjsToDocumentController(options) {
   const handleDocumentChange = (payload) => {
     if (applyingRemote) return;
 
+    // Desktop wires multiple binders to the same DocumentController (e.g. a lightweight sheet-view
+    // binder for drawings/merged ranges alongside this full binder). Those other binders may apply
+    // remote Yjs updates into the DocumentController using `applyExternal*` methods, which emit
+    // `change` events tagged with `payload.source === "collab"`.
+    //
+    // Treat those as remote/external and do not write them back into Yjs (avoids redundant Yjs
+    // updates and prevents collaborative undo from incorrectly tracking remote edits as local).
+    //
+    // Similarly, snapshot restores (`applyState`) should not implicitly overwrite the shared Yjs
+    // state through the binder.
+    const source = typeof payload?.source === "string" ? payload.source : null;
+    if (source === "collab" || source === "applyState") return;
+
     const allowSharedStateWrites = canWriteSharedState();
 
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
