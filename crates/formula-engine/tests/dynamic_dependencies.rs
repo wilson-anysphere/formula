@@ -428,7 +428,7 @@ fn indirect_dependency_switching_updates_graph_edges() {
 }
 
 #[test]
-fn cell_width_records_dynamic_dependencies_for_indirect_reference_arg() {
+fn cell_width_does_not_record_dynamic_dependencies_for_indirect_reference_arg() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
     engine
@@ -440,16 +440,10 @@ fn cell_width_records_dynamic_dependencies_for_indirect_reference_arg() {
     let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
     assert_eq!(
         precedents_a1,
-        vec![
-            PrecedentNode::Cell {
-                sheet: 0,
-                addr: CellAddr { row: 0, col: 0 }, // A1
-            },
-            PrecedentNode::Cell {
-                sheet: 0,
-                addr: CellAddr { row: 0, col: 3 }, // D1
-            },
-        ]
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
     );
 
     // Switch the target.
@@ -459,26 +453,14 @@ fn cell_width_records_dynamic_dependencies_for_indirect_reference_arg() {
     let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
     assert_eq!(
         precedents_a2,
-        vec![
-            PrecedentNode::Cell {
-                sheet: 0,
-                addr: CellAddr { row: 0, col: 3 }, // D1
-            },
-            PrecedentNode::Cell {
-                sheet: 0,
-                addr: CellAddr { row: 1, col: 0 }, // A2
-            },
-        ]
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 3 }, // D1
+        }]
     );
 
     assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
-    assert_eq!(
-        engine.dependents("Sheet1", "A2").unwrap(),
-        vec![PrecedentNode::Cell {
-            sheet: 0,
-            addr: CellAddr { row: 0, col: 2 } // C1
-        }]
-    );
+    assert!(engine.dependents("Sheet1", "A2").unwrap().is_empty());
 }
 
 #[test]
