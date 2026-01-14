@@ -27,6 +27,13 @@ serde-wasm-bindgen = "0.6"
 serde_json = "1"
 wasm-bindgen = "0.2"
 
+[package.metadata.wasm-pack.profile.release]
+#
+# wasm-pack runs wasm-opt (Binaryen) in release builds. Our generated WASM uses
+# post-MVP instructions (e.g. bulk memory ops / saturating float-to-int) that
+# require feature flags in older wasm-opt versions. Enable all features so the
+# optimizer can validate and process the module across environments.
+wasm-opt = ["-O", "--all-features"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
