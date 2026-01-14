@@ -8379,7 +8379,7 @@ const ribbonCommandHandlersCtx = {
       app.focus();
     });
   },
-  clearAutoFilter: () => clearRibbonAutoFiltersForActiveSheet(),
+  clearAutoFilter: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
   reapplyAutoFilter: () => reapplyRibbonAutoFiltersForActiveSheet(),
   openCustomSort: (commandId: string) => {
     handleCustomSortCommand(commandId, {
@@ -8641,6 +8641,29 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   // Reapply all stored filters so row hidden state stays consistent even if multiple filter ranges overlap.
   reapplyRibbonAutoFiltersForActiveSheet();
   return true;
+}
+
+function clearRibbonAutoFilterCriteriaForActiveSheet(): void {
+  if (app.getGridMode() !== "legacy") {
+    app.focus();
+    return;
+  }
+  if (isSpreadsheetEditing()) return;
+
+  const sheetId = app.getCurrentSheetId();
+  const filters = ribbonAutoFilterStore.list(sheetId);
+  if (filters.length === 0) {
+    app.focus();
+    return;
+  }
+
+  // Keep the filter ranges (so the ribbon toggle remains pressed), but clear any column criteria.
+  for (const filter of filters) {
+    ribbonAutoFilterStore.set(sheetId, { rangeA1: filter.rangeA1, headerRows: filter.headerRows, filterColumns: [] });
+  }
+
+  // Apply the updated (empty) criteria by clearing any existing filter-hidden rows.
+  reapplyRibbonAutoFiltersForActiveSheet();
 }
 
 function clearRibbonAutoFiltersForActiveSheet(): void {
