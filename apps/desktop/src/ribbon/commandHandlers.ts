@@ -423,59 +423,8 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
-  const clearPrefix = "home.font.clearFormatting.";
-  if (commandId.startsWith(clearPrefix)) {
-    const kind = commandId.slice(clearPrefix.length);
-    if (kind === "clearFormats") {
-      ctx.applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
-        let applied = true;
-        for (const range of ranges) {
-          const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
-          if (ok === false) applied = false;
-        }
-        return applied;
-      });
-      return true;
-    }
-    if (kind === "clearContents") {
-      ctx.applyFormattingToSelection(
-        "Clear contents",
-        (doc, sheetId, ranges) => {
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear contents" });
-          }
-        },
-        // Clearing cell contents is a workbook mutation and must remain blocked for read-only collab roles.
-        { allowReadOnlyBandSelection: false },
-      );
-      return true;
-    }
-    if (kind === "clearAll") {
-      ctx.applyFormattingToSelection(
-        "Clear all",
-        (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear all" });
-            const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        },
-        // Clearing contents is a workbook mutation and must remain blocked for read-only collab roles.
-        { forceBatch: true, allowReadOnlyBandSelection: false },
-      );
-      return true;
-    }
-    return true;
-  }
-
-  const bordersPrefix = commandId.startsWith("home.font.borders.")
-    ? "home.font.borders."
-    : commandId.startsWith("format.borders.")
-      ? "format.borders."
-      : null;
-  if (bordersPrefix) {
+  const bordersPrefix = "format.borders.";
+  if (commandId.startsWith(bordersPrefix)) {
     const kind = commandId.slice(bordersPrefix.length);
     const defaultBorderColor = ["#", "FF", "000000"].join("");
     if (kind === "none") {
