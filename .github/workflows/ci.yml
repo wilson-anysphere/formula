@@ -45,6 +45,8 @@ jobs:
         run: python3 -m unittest scripts/test_desktop_bundle_size_report_json.py
       - name: "Guard: lightweight desktop size reporter JSON output"
         run: python3 -m unittest scripts/test_desktop_size_report_json.py
+      - name: "Guard: desktop binary size reporter JSON output"
+        run: python3 -m unittest scripts/test_desktop_binary_size_report_json.py
 
   release-manifest-tests:
     name: Desktop release manifest scripts (node:test)
