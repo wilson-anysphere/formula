@@ -941,19 +941,20 @@ See: [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-s
 
 ## Sheet view state storage and syncing
 
-Per-sheet view state (frozen panes + row/col size overrides, plus additional shared sheet-level UI metadata like merged ranges and drawings) is stored on each sheet entry in the `sheets` array:
+Per-sheet view state (frozen panes + row/col size overrides, plus additional shared sheet-level UI metadata like merged ranges, drawings, and background images) is stored on each sheet entry in the `sheets` array:
 
 - `doc.getArray("sheets").get(i).get("view")`
 
 The `view` object is BranchService-compatible (some snapshots may include
 additional keys like layered formatting defaults), but the desktop
 binder/`DocumentController` currently consume the subset of fields related to
-frozen panes + row/col size overrides (and, in desktop, merged ranges + drawings metadata):
+frozen panes + row/col size overrides (and, in desktop, merged ranges + drawings + background image metadata):
 
 ```ts
 {
   frozenRows: 2,
   frozenCols: 1,
+  backgroundImageId: "img-bg-1",
   colWidths: { "0": 120 },
   rowHeights: { "1": 40 },
   // Optional shared metadata:
@@ -967,7 +968,7 @@ frozen panes + row/col size overrides (and, in desktop, merged ranges + drawings
 Compatibility note:
 
 - Some historical/experimental docs stored `frozenRows` / `frozenCols` as **top-level** fields directly on the sheet map.
-- The desktop sheet view binder also mirrors `drawings` to a top-level `sheet.drawings` field for backwards compatibility with older clients that do not read `view.drawings`.
+- The desktop sheet view binder also mirrors `drawings` and `backgroundImageId` to top-level `sheet.drawings` / `sheet.backgroundImageId` fields for backwards compatibility with older clients that do not read `view.*`.
 - BranchService’s Yjs adapter explicitly supports both shapes (see `branchStateFromYjsDoc` in [`packages/versioning/branches/src/yjs/branchStateAdapter.js`](../packages/versioning/branches/src/yjs/branchStateAdapter.js)), but **new writes should use `view`**.
 
 Because `sheets` is part of the shared Y.Doc, any edits to `view` will sync like any other Yjs update (subject to your provider/persistence).
