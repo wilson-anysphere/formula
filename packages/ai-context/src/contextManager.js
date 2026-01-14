@@ -821,14 +821,17 @@ export class ContextManager {
       const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
       const attachmentsHeuristic = classifyStructuredForDlp(params.attachments ?? [], { signal });
       const attachmentsPolicyClassification = heuristicToPolicyClassification(attachmentsHeuristic);
+      const sheetNameHeuristic = classifyTextForDlp(String(rawSheet?.name ?? ""));
+      const sheetNamePolicyClassification = heuristicToPolicyClassification(sheetNameHeuristic);
       const combinedClassification = maxClassification(
-        maxClassification(structuredSelectionClassification, heuristicPolicyClassification),
-        attachmentsPolicyClassification,
+        maxClassification(maxClassification(structuredSelectionClassification, heuristicPolicyClassification), attachmentsPolicyClassification),
+        sheetNamePolicyClassification,
       );
       dlpSelectionClassification = combinedClassification;
       if (
         heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC ||
-        attachmentsPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC
+        attachmentsPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC ||
+        sheetNamePolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC
       ) {
         dlpHeuristicApplied = true;
         dlpDecision = evaluatePolicy({

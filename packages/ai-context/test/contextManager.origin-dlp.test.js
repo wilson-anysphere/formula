@@ -185,6 +185,70 @@ test("buildContext: attachment-only sensitive patterns inside a cyclic Map still
   assert.equal(auditEvents[0]?.decision?.decision, "redact");
 });
 
+test("buildContext: heuristic DLP also considers sheet name and redacts it when policy requires (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "alice@example.com",
+      values: [["Header"], ["Value"]],
+    },
+    query: "value",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "sheet-1",
+      policy: makePolicy(),
+      classificationRecords: [],
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## dlp/i);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /alice@example\.com/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /alice@example\.com/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "redact");
+});
+
+test("buildContext: heuristic DLP sheet-name findings can block when policy requires", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  /** @type {any[]} */
+  const auditEvents = [];
+
+  await assert.rejects(
+    cm.buildContext({
+      sheet: {
+        name: "alice@example.com",
+        values: [["Header"], ["Value"]],
+      },
+      query: "value",
+      dlp: {
+        documentId: "doc-1",
+        sheetId: "sheet-1",
+        policy: makeBlockingPolicy(),
+        classificationRecords: [],
+        auditLogger: { log: (e) => auditEvents.push(e) },
+      },
+    }),
+    (err) => err instanceof DlpViolationError,
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "block");
+  assert.equal(cm.ragIndex.store.size, 0);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP BLOCK when policy requires", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
