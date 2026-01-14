@@ -60,12 +60,13 @@ Like Tabular / Power Pivot, `formula-dax` resolves identifiers **case-insensitiv
 Internally, schema and filter lookups normalize identifiers via `normalize_ident` (see
 `crates/formula-dax/src/model.rs`):
 
+- Identifiers are trimmed (`s.trim()`) before normalization (leading/trailing whitespace is ignored).
 - ASCII identifiers are uppercased (`orders` → `ORDERS`)
 - non-ASCII identifiers use Unicode-aware uppercasing (e.g. `ß` → `SS`) to approximate Excel/Tabular
   matching
 
-As a consequence, duplicates that differ only by case are rejected up-front (e.g. two columns named
-`Col` and `col`, two measures named `Total` and `[TOTAL]`, or two tables named `Straße` and
+As a consequence, duplicates that collide after normalization are rejected up-front (e.g. two columns
+named `Col` and `col`, two measures named `Total` and `[TOTAL]`, or two tables named `Straße` and
 `STRASSE`).
 
 ### `Table` and `TableBackend`
@@ -368,7 +369,7 @@ model.add_measure("Total Sales", "SUM(Fact[Amount])")?;
 
 Measure name normalization notes:
 
-- Measure names are stored/looked up case-insensitively via `normalize_ident`.
+- Measure names are stored/looked up via `normalize_ident` (trimmed + case-insensitive).
 - `DataModel::add_measure` / `DataModel::evaluate_measure` normalize names by stripping a single outer
   bracket pair and trimming whitespace (`[Total]` and `Total` refer to the same measure).
 
@@ -423,7 +424,7 @@ into the in-memory table (note: `insert_row` is not supported for columnar table
 `FilterContext` (`engine.rs`) currently contains:
 
 - `column_filters: HashMap<(table, column), HashSet<Value>>`  
-  Allowed values per column. Keys are normalized via `normalize_ident` (case-insensitive).
+  Allowed values per column. Keys are normalized via `normalize_ident` (trimmed + case-insensitive).
 - `row_filters: HashMap<table, RowFilter>`  
   Allowed physical rows per table (usually produced by table expressions like `FILTER(...)`). The
   internal `RowFilter` representation is:
@@ -827,7 +828,7 @@ Supported expression forms:
   - `VAR Name = <expr> ... RETURN <expr>` (one or more `VAR` bindings)
   - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
     **table** valued.
-  - Variable names are resolved case-insensitively via `normalize_ident` (same rules as tables/columns/measures).
+  - Variable names are resolved via `normalize_ident` (trimmed + case-insensitive; same rules as tables/columns/measures).
 - Table constructors: `{ 1, 2, 3 }` (one column) and `{ (1, 2), (3, 4) }` (multi-column row tuples)  
   Separators may be `,` or `;`. Nested table constructors are not supported, and all rows must have the
   same number of values.
