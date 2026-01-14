@@ -7659,6 +7659,122 @@ fn parse_marketplace_base_url(base_url: &str) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn marketplace_reqwest_client() -> Result<reqwest::Client, String> {
+    let debug_assertions = cfg!(debug_assertions);
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            match ensure_ipc_network_url_allowed(
+                attempt.url(),
+                "Marketplace redirect",
+                debug_assertions,
+            ) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
+async fn marketplace_get_response(url: reqwest::Url) -> Result<reqwest::Response, String> {
+    // The marketplace base URL is treated as untrusted input coming from the WebView. Apply the
+    // same scheme allowlist as `network_fetch`, then enforce it again for redirects.
+    ensure_ipc_network_url_allowed(&url, "Marketplace request", cfg!(debug_assertions))?;
+
+    let client = marketplace_reqwest_client()?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+
+    // If the redirect policy stopped following redirects (e.g. because a hop violates the IPC URL
+    // policy), make that explicit rather than returning the raw 3xx response.
+    if response.status().is_redirection() {
+        if let Some(location) = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Ok(target) = response.url().join(location) {
+                ensure_ipc_network_url_allowed(
+                    &target,
+                    "Marketplace redirect",
+                    cfg!(debug_assertions),
+                )?;
+            }
+        }
+    }
+
+    Ok(response)
+}
+
+#[cfg(any(feature = "desktop", test))]
+async fn marketplace_fetch_json_with_limit(
+    url: reqwest::Url,
+    limit_bytes: usize,
+    limit_context: &'static str,
+    status_err_prefix: &'static str,
+) -> Result<JsonValue, String> {
+    let mut response = marketplace_get_response(url).await?;
+    if !response.status().is_success() {
+        return Err(format!("{status_err_prefix} ({})", response.status()));
+    }
+
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        limit_bytes,
+        limit_context,
+    )
+    .await?;
+    serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
+async fn marketplace_fetch_optional_json_with_limit(
+    url: reqwest::Url,
+    limit_bytes: usize,
+    limit_context: &'static str,
+    status_err_prefix: &'static str,
+) -> Result<Option<JsonValue>, String> {
+    let mut response = marketplace_get_response(url).await?;
+
+    if response.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("{status_err_prefix} ({})", response.status()));
+    }
+
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        limit_bytes,
+        limit_context,
+    )
+    .await?;
+    let json = serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())?;
+    Ok(Some(json))
+}
+
+#[cfg(any(feature = "desktop", test))]
+async fn marketplace_fetch_optional_download_payload(
+    url: reqwest::Url,
+    status_err_prefix: &'static str,
+) -> Result<Option<MarketplaceDownloadPayload>, String> {
+    let response = marketplace_get_response(url).await?;
+    if response.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("{status_err_prefix} ({})", response.status()));
+    }
+
+    marketplace_download_payload_from_response(response)
+        .await
+        .map(Some)
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_search(
@@ -7709,46 +7825,13 @@ pub async fn marketplace_search(
         }
     }
 
-    let debug_assertions = cfg!(debug_assertions);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= 10 {
-                return attempt.stop();
-            }
-            match ensure_ipc_network_url_allowed(
-                attempt.url(),
-                "Marketplace redirect",
-                debug_assertions,
-            ) {
-                Ok(()) => attempt.follow(),
-                Err(_) => attempt.stop(),
-            }
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
-    if response.status().is_redirection() {
-        if let Some(location) = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|v| v.to_str().ok())
-        {
-            if let Ok(target) = response.url().join(location) {
-                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
-            }
-        }
-    }
-    if !response.status().is_success() {
-        return Err(format!("Marketplace search failed ({})", response.status()));
-    }
-
-    let bytes = crate::network_limits::read_response_body_with_limit(
-        &mut response,
+    marketplace_fetch_json_with_limit(
+        url,
         crate::network_limits::MARKETPLACE_JSON_MAX_BODY_BYTES,
         "marketplace_search",
+        "Marketplace search failed",
     )
-    .await?;
-    serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())
+    .await
 }
 
 #[cfg(feature = "desktop")]
@@ -7779,52 +7862,13 @@ pub async fn marketplace_get_extension(
         segments.push(args.id.trim());
     }
 
-    let debug_assertions = cfg!(debug_assertions);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= 10 {
-                return attempt.stop();
-            }
-            match ensure_ipc_network_url_allowed(
-                attempt.url(),
-                "Marketplace redirect",
-                debug_assertions,
-            ) {
-                Ok(()) => attempt.follow(),
-                Err(_) => attempt.stop(),
-            }
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
-    if response.status().is_redirection() {
-        if let Some(location) = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|v| v.to_str().ok())
-        {
-            if let Ok(target) = response.url().join(location) {
-                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
-            }
-        }
-    }
-    if response.status().as_u16() == 404 {
-        return Ok(None);
-    }
-    if !response.status().is_success() {
-        return Err(format!(
-            "Marketplace getExtension failed ({})",
-            response.status()
-        ));
-    }
-    let bytes = crate::network_limits::read_response_body_with_limit(
-        &mut response,
+    marketplace_fetch_optional_json_with_limit(
+        url,
         crate::network_limits::MARKETPLACE_JSON_MAX_BODY_BYTES,
         "marketplace_get_extension",
+        "Marketplace getExtension failed",
     )
-    .await?;
-    let json = serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())?;
-    Ok(Some(json))
+    .await
 }
 
 #[cfg(feature = "desktop")]
@@ -7947,48 +7991,7 @@ pub async fn marketplace_download_package(
         segments.push(args.version.trim());
     }
 
-    let debug_assertions = cfg!(debug_assertions);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= 10 {
-                return attempt.stop();
-            }
-            match ensure_ipc_network_url_allowed(
-                attempt.url(),
-                "Marketplace redirect",
-                debug_assertions,
-            ) {
-                Ok(()) => attempt.follow(),
-                Err(_) => attempt.stop(),
-            }
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
-    if response.status().is_redirection() {
-        if let Some(location) = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|v| v.to_str().ok())
-        {
-            if let Ok(target) = response.url().join(location) {
-                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
-            }
-        }
-    }
-    if response.status().as_u16() == 404 {
-        return Ok(None);
-    }
-    if !response.status().is_success() {
-        return Err(format!(
-            "Marketplace download failed ({})",
-            response.status()
-        ));
-    }
-
-    marketplace_download_payload_from_response(response)
-        .await
-        .map(Some)
+    marketplace_fetch_optional_download_payload(url, "Marketplace download failed").await
 }
 #[cfg(test)]
 mod tests {
@@ -8132,14 +8135,8 @@ mod tests {
             let _ = stream.shutdown().await;
         });
 
-        let url = format!("http://{addr}/download");
-        let response = reqwest::Client::new()
-            .get(url)
-            .send()
-            .await
-            .expect("client request");
-
-        let err = marketplace_download_payload_from_response(response)
+        let url = reqwest::Url::parse(&format!("http://{addr}/download")).expect("parse url");
+        let err = marketplace_fetch_optional_download_payload(url, "Marketplace download failed")
             .await
             .expect_err("expected package byte limit error");
         assert!(
@@ -8181,14 +8178,8 @@ mod tests {
             let _ = stream.shutdown().await;
         });
 
-        let url = format!("http://{addr}/download");
-        let response = reqwest::Client::new()
-            .get(url)
-            .send()
-            .await
-            .expect("client request");
-
-        let err = marketplace_download_payload_from_response(response)
+        let url = reqwest::Url::parse(&format!("http://{addr}/download")).expect("parse url");
+        let err = marketplace_fetch_optional_download_payload(url, "Marketplace download failed")
             .await
             .expect_err("expected header byte limit error");
         assert!(
@@ -8230,16 +8221,11 @@ mod tests {
             let _ = stream.shutdown().await;
         });
 
-        let url = format!("http://{addr}/download");
-        let response = reqwest::Client::new()
-            .get(url)
-            .send()
+        let url = reqwest::Url::parse(&format!("http://{addr}/download")).expect("parse url");
+        let payload = marketplace_fetch_optional_download_payload(url, "Marketplace download failed")
             .await
-            .expect("client request");
-
-        let payload = marketplace_download_payload_from_response(response)
-            .await
-            .expect("expected download payload");
+            .expect("expected download payload")
+            .expect("expected payload");
         assert_eq!(payload.signature_base64, Some("sig".to_string()));
 
         let decoded = STANDARD
@@ -8276,18 +8262,15 @@ mod tests {
             let _ = stream.shutdown().await;
         });
 
-        let url = format!("http://{addr}/search");
-        let mut response = reqwest::Client::new()
-            .get(url)
-            .send()
-            .await
-            .expect("client request");
-
-        let bytes =
-            crate::network_limits::read_response_body_with_limit(&mut response, 1024, "test")
-                .await
-                .expect("expected JSON body to be within limit");
-        let parsed = serde_json::from_slice::<JsonValue>(&bytes).expect("parse JSON");
+        let url = reqwest::Url::parse(&format!("http://{addr}/search")).expect("parse url");
+        let parsed = marketplace_fetch_json_with_limit(
+            url,
+            1024,
+            "marketplace_json_test",
+            "Marketplace json test failed",
+        )
+        .await
+        .expect("expected JSON body to be within limit");
         assert_eq!(parsed, serde_json::json!({ "ok": true }));
 
         server.await.expect("server task");
@@ -8324,17 +8307,12 @@ mod tests {
             let _ = stream.shutdown().await;
         });
 
-        let url = format!("http://{addr}/search");
-        let mut response = reqwest::Client::new()
-            .get(url)
-            .send()
-            .await
-            .expect("client request");
-
-        let err = crate::network_limits::read_response_body_with_limit(
-            &mut response,
+        let url = reqwest::Url::parse(&format!("http://{addr}/search")).expect("parse url");
+        let err = marketplace_fetch_json_with_limit(
+            url,
             limit_bytes,
             "marketplace_json_test",
+            "Marketplace json test failed",
         )
         .await
         .expect_err("expected JSON body size to be rejected");
