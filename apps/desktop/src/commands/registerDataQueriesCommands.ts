@@ -70,7 +70,18 @@ export function registerDataQueriesCommands(params: {
       }
 
       const placement = getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES);
-      const open = () => layoutController.openPanel(PanelIds.DATA_QUERIES);
+      const open = () => {
+        layoutController.openPanel(PanelIds.DATA_QUERIES);
+        // Floating panels can be minimized; opening should restore them (Excel-style behavior).
+        try {
+          const floating = (layoutController.layout as any)?.floating?.[PanelIds.DATA_QUERIES];
+          if (floating?.minimized) {
+            layoutController.setFloatingPanelMinimized(PanelIds.DATA_QUERIES, false);
+          }
+        } catch {
+          // Best-effort: ignore layout shape mismatches.
+        }
+      };
       const close = () => layoutController.closePanel(PanelIds.DATA_QUERIES);
 
       if (typeof next === "boolean") {
@@ -81,7 +92,15 @@ export function registerDataQueriesCommands(params: {
       }
 
       // Toggle when no explicit state was provided (command palette / programmatic use).
-      if (placement.kind === "closed") open();
+      const isMinimizedFloating = (() => {
+        if (placement.kind !== "floating") return false;
+        try {
+          return Boolean((layoutController.layout as any)?.floating?.[PanelIds.DATA_QUERIES]?.minimized);
+        } catch {
+          return false;
+        }
+      })();
+      if (placement.kind === "closed" || isMinimizedFloating) open();
       else close();
 
       focusAfterExecute?.();

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
-import { createDefaultLayout, getPanelPlacement, openPanel, closePanel } from "../layout/layoutState.js";
+import { createDefaultLayout, getPanelPlacement, openPanel, closePanel, floatPanel, setFloatingPanelMinimized } from "../layout/layoutState.js";
 import { PanelIds, panelRegistry } from "../panels/panelRegistry.js";
 
 import { DATA_QUERIES_RIBBON_COMMANDS, registerDataQueriesCommands } from "./registerDataQueriesCommands.js";
@@ -15,6 +15,9 @@ describe("registerDataQueriesCommands", () => {
       },
       closePanel(panelId: string) {
         this.layout = closePanel(this.layout, panelId);
+      },
+      setFloatingPanelMinimized(panelId: string, minimized: boolean) {
+        this.layout = setFloatingPanelMinimized(this.layout, panelId, minimized);
       },
     } as any;
     return layoutController;
@@ -57,6 +60,35 @@ describe("registerDataQueriesCommands", () => {
 
     await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections, false);
     expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("closed");
+  });
+
+  it("restores minimized floating panels when opening the Data Queries panel", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = createLayoutHarness();
+
+    // Place the panel in floating+minimized state.
+    layoutController.layout = floatPanel(layoutController.layout, PanelIds.DATA_QUERIES, { x: 10, y: 10, width: 300, height: 200 });
+    layoutController.layout = setFloatingPanelMinimized(layoutController.layout, PanelIds.DATA_QUERIES, true);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(true);
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController,
+      getPowerQueryService: () => null,
+      showToast: () => {},
+      notify: () => {},
+    });
+
+    // Explicit open (ribbon toggle pressed = true).
+    await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections, true);
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(false);
+
+    // Command palette toggle should also treat minimized panels as "closed" and restore them.
+    layoutController.layout = setFloatingPanelMinimized(layoutController.layout, PanelIds.DATA_QUERIES, true);
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(true);
+    await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections);
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(false);
   });
 
   it("syncs ribbon state + restores focus when the toggle command cannot run (missing layout controller)", async () => {
