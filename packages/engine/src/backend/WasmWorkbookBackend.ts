@@ -43,6 +43,7 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
 }
 
 type EngineWorkbookJson = {
+  textCodepage?: unknown;
   sheetOrder?: unknown;
   sheets?: Record<
     string,
