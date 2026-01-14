@@ -138,6 +138,8 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       };
 
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      app.activateCell({ row: 5, col: 7 }, { scrollIntoView: false, focus: false });
+      const activeBefore = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
 
@@ -161,11 +163,14 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       expect(updated.anchor.type).toBe("oneCell");
       expect(updated.anchor.from.offset.xEmu).toBe(pxToEmu(1));
       expect(updated.anchor.from.offset.yEmu).toBe(0);
+      expect(app.getActiveCell()).toEqual(activeBefore);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
       expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
+      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
+      expect(app.getActiveCell()).toEqual(activeBefore);
 
       app.destroy();
       root.remove();
@@ -188,6 +193,8 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
 
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       app.setZoom(2);
+      app.activateCell({ row: 3, col: 4 }, { scrollIntoView: false, focus: false });
+      const activeBefore = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
 
@@ -208,10 +215,13 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       // Moving by 1 screen px at 2x zoom shifts the underlying sheet position by 0.5px.
       expect(updated.anchor.pos.xEmu).toBeCloseTo(pxToEmu(0.5));
       expect(updated.anchor.pos.yEmu).toBe(0);
+      expect(app.getActiveCell()).toEqual(activeBefore);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
+      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
+      expect(app.getActiveCell()).toEqual(activeBefore);
 
       app.destroy();
       root.remove();
