@@ -224,4 +224,77 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     app.destroy();
     root.remove();
   });
+
+  it("can reload and render a previously inserted picture using IndexedDB bytes (no snapshot bytes)", async () => {
+    const workbookId = `wb_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const bytes = new Uint8Array([11, 22, 33, 44]);
+    const file = {
+      name: "reloaded.png",
+      type: "image/png",
+      arrayBuffer: async () => bytes.buffer.slice(0),
+    } as unknown as File;
+
+    const root1 = createRoot();
+    const status1 = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app1 = new SpreadsheetApp(root1, status1, { workbookId });
+    await app1.insertPicturesFromFiles([file]);
+
+    const sheetId = app1.getCurrentSheetId();
+    const drawings = app1.getDocument().getSheetDrawings(sheetId) as any[];
+    expect(drawings.length).toBeGreaterThan(0);
+    const imageId = String(drawings[drawings.length - 1]?.kind?.imageId ?? "");
+    expect(imageId).toBeTruthy();
+
+    const snapshotBytes = app1.getDocument().encodeState();
+    const snapshot = JSON.parse(new TextDecoder().decode(snapshotBytes));
+    expect(snapshot.images).toBeUndefined();
+
+    // Ensure the bytes actually made it to IndexedDB before simulating reload.
+    const seedStore = new IndexedDbImageStore(workbookId);
+    let loaded: any = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      loaded = await seedStore.getAsync(imageId);
+      if (loaded) break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(loaded).toBeTruthy();
+
+    app1.destroy();
+    root1.remove();
+
+    const root2 = createRoot();
+    const status2 = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app2 = new SpreadsheetApp(root2, status2, { workbookId });
+    // Simulate reloading the workbook from a snapshot that does not include image bytes.
+    app2.getDocument().applyState(snapshotBytes);
+
+    const images2 = (app2 as any).drawingImages as { get: (id: string) => any };
+    expect(images2.get(imageId)).toBeUndefined();
+
+    const overlay = (app2 as any).drawingOverlay as { render: (...args: any[]) => Promise<void> };
+    const viewport = (app2 as any).getDrawingRenderViewport();
+    const objects = (app2 as any).listDrawingObjectsForSheet();
+    await overlay.render(objects, viewport);
+
+    const hydrated = images2.get(imageId);
+    expect(hydrated).toBeTruthy();
+    expect(Array.from(hydrated.bytes)).toEqual(Array.from(bytes));
+
+    const drawingCanvas = root2.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
+    const ctx = contexts.get(drawingCanvas) as any;
+    expect(ctx.drawImage).toHaveBeenCalled();
+
+    app2.destroy();
+    root2.remove();
+  });
 });
