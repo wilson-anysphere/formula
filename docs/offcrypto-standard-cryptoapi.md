@@ -692,22 +692,30 @@ function decrypt_standard_ooxml(ole, password):
   if algId is AES:
     out = []
     offset = 0
-    segmentIndex = 0
-    while len(out) < origSize:
-      // Read 0x1000-byte ciphertext chunks (except final chunk), but only as much as needed to
-      // reach origSize. Ciphertext lengths are always multiples of 16.
-      remainingCipher = len(ciphertext) - offset
-      if remainingCipher <= 0:
-        error("truncated ciphertext")
+    if origSize == 0:
+      return []
 
-      // decrypt a whole chunk or the remaining ciphertext; then truncate to origSize at the end
-      segCipherLen = min(0x1000, remainingCipher)
+    // Plaintext is segmented into 0x1000-byte chunks. Ciphertext is block-aligned (16) and the
+    // final segment can be larger than 0x1000 due to a full padding block; treat the *final*
+    // segment as “the remainder of the stream”.
+    // ceil_div(x, y) = (x + y - 1) // y  (integer division)
+    nSegments = ceil_div(origSize, 0x1000)
+    for segmentIndex in 0 .. nSegments-1:
+      if segmentIndex < nSegments-1:
+        segCipherLen = 0x1000
+      else:
+        segCipherLen = len(ciphertext) - offset  // final segment: all remaining bytes
+
+      if segCipherLen <= 0 or segCipherLen % 16 != 0:
+        error("invalid ciphertext length")
+
       iv = Hash(salt || LE32(segmentIndex))[0:16]
       segPlain = AES_CBC_Decrypt_NoPadding(fileKey, iv, ciphertext[offset : offset+segCipherLen])
       out += segPlain
       offset += segCipherLen
-      segmentIndex += 1
 
+    if len(out) < origSize:
+      error("truncated ciphertext")
     return out[0:origSize]
 
   else if algId == CALG_RC4:
