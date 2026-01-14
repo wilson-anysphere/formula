@@ -1946,6 +1946,10 @@ export class SpreadsheetApp {
       const value = state?.value ?? null;
       return isRichTextValue(value) ? value.text : value;
     };
+
+    // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
+    // chart models only when the chart count decreases to avoid allocating on every drag tick.
+    let chartCountForCanvasModelPrune = 0;
     this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
@@ -1958,17 +1962,22 @@ export class SpreadsheetApp {
         // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
         // (Without this, deleting many charts over a long session can leave their cached models alive
         // indefinitely because the adapter is only queried for charts that are still rendered.)
-        try {
-          const keep = new Set(this.chartStore.listCharts().map((chart) => chart.id));
-          this.chartCanvasStoreAdapter.pruneEntries(keep);
-        } catch {
-          // Best-effort: ignore pruning failures.
+        const charts = this.chartStore.listCharts();
+        if (charts.length < chartCountForCanvasModelPrune) {
+          try {
+            const keep = new Set(charts.map((chart) => chart.id));
+            this.chartCanvasStoreAdapter.pruneEntries(keep);
+          } catch {
+            // Best-effort: ignore pruning failures.
+          }
         }
+        chartCountForCanvasModelPrune = charts.length;
 
         if (this.useCanvasCharts) this.renderDrawings();
         else this.renderCharts(false);
       }
     });
+    chartCountForCanvasModelPrune = this.chartStore.listCharts().length;
 
     this.chartCanvasStoreAdapter = new ChartCanvasStoreAdapter({
       getChart: (chartId) => this.getChartRecordById(chartId),
