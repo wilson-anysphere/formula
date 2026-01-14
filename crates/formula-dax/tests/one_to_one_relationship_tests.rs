@@ -1,8 +1,10 @@
+use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
     Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
     RowContext, Table, Value,
 };
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 
 #[test]
 fn can_add_one_to_one_relationship_with_unique_keys() {
@@ -496,4 +498,78 @@ fn one_to_one_single_direction_does_not_propagate_filters_from_from_side_to_to_s
     // The default single-direction relationship only propagates People -> Passports.
     // Filtering the fact-side (Passports) should not restrict the dimension-side (People).
     assert_eq!(value, 2.into());
+}
+
+#[test]
+fn one_to_one_columnar_fact_supports_filter_propagation_and_related() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let schema = vec![
+        ColumnSchema {
+            name: "PersonId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "PassportNo".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut builder = ColumnarTableBuilder::new(schema, options);
+    builder.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("P1")),
+    ]);
+    builder.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("P2")),
+    ]);
+
+    let mut model = DataModel::new();
+
+    let mut people = Table::new("People", vec!["PersonId", "Name"]);
+    people.push_row(vec![1.into(), "Alice".into()]).unwrap();
+    people.push_row(vec![2.into(), "Bob".into()]).unwrap();
+    model.add_table(people).unwrap();
+
+    model
+        .add_table(Table::from_columnar("Passports", builder.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Passports_People".into(),
+            from_table: "Passports".into(),
+            from_column: "PersonId".into(),
+            to_table: "People".into(),
+            to_column: "PersonId".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Passport Count", "COUNTROWS(Passports)")
+        .unwrap();
+
+    let filtered = FilterContext::empty().with_column_equals("People", "PersonId", 1.into());
+    assert_eq!(
+        model.evaluate_measure("Passport Count", &filtered).unwrap(),
+        1.into()
+    );
+
+    // Also exercise row-context navigation over the columnar fact table.
+    model
+        .add_calculated_column("Passports", "PersonName", "RELATED(People[Name])")
+        .unwrap();
+
+    let passports = model.table("Passports").unwrap();
+    let values: Vec<Value> = (0..passports.row_count())
+        .map(|row| passports.value(row, "PersonName").unwrap())
+        .collect();
+    assert_eq!(values, vec![Value::from("Alice"), Value::from("Bob")]);
 }
