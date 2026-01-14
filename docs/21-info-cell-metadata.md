@@ -345,7 +345,7 @@ This section documents the “wiring points” for hosts.
 
 - Sheet count (`INFO("numfile")`): create all sheets up-front when loading a workbook
   - `WasmWorkbook.fromJson({ sheets: { Sheet1: …, Sheet2: … } })`
-  - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX model)
+  - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX/XLSM model)
  
 - Sheet display names (affects `CELL("address")` and the sheet component of `CELL("filename")`):
   - `EngineClient.setSheetDisplayName(sheetId, name)`
