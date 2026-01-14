@@ -129,5 +129,49 @@ describe("registerEncryptionUiCommands", () => {
     expect(parsed.keyId).toBe("k1");
     expect(parsed.keyBytes).toEqual(storedBytes);
   });
-});
 
+  it("encryptSelectedRange warns when it cannot verify whether a key id already exists", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => {
+        throw new Error("backend unavailable");
+      }),
+      set: vi.fn(async (_docId: string, keyId: string) => ({ keyId })),
+    };
+
+    const manager = {
+      add: vi.fn(() => "r1"),
+      list: () => [],
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({
+        doc: { guid: "doc-1" },
+        getRole: () => "editor",
+        getPermissions: () => ({ userId: "u1" }),
+      }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("k1");
+    vi.mocked(showQuickPick).mockResolvedValue("encrypt");
+
+    await commandRegistry.executeCommand("collab.encryptSelectedRange");
+
+    const items = vi.mocked(showQuickPick).mock.calls[0]?.[0] as any[];
+    expect(items?.[0]?.description ?? "").toMatch(/could not verify existing key/i);
+
+    expect(keyStore.set).toHaveBeenCalledTimes(1);
+    expect(manager.add).toHaveBeenCalledWith(expect.objectContaining({ keyId: "k1" }));
+  });
+});

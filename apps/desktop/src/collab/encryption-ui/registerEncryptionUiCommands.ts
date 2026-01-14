@@ -168,6 +168,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       // them (overwriting would make previously-encrypted cells unrecoverable).
       let existingKeyBytes: Uint8Array | null = null;
       let existingStoredKeyId: string | null = null;
+      let existingKeyLookupFailed = false;
       try {
         const cached = keyStore.getCachedKey(docId, keyId);
         if (cached?.keyBytes instanceof Uint8Array) {
@@ -181,7 +182,10 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
           }
         }
       } catch {
-        // Best-effort: if key lookup fails, proceed as if missing (fallback to new key generation).
+        // Best-effort: if key lookup fails, proceed as if missing. This can happen when the
+        // persistent key store is unavailable; warn the user in the confirmation prompt since
+        // proceeding could overwrite an existing key id.
+        existingKeyLookupFailed = true;
       }
       const isReusingKey = existingKeyBytes != null;
       const displayKeyId = existingStoredKeyId ?? keyId;
@@ -190,7 +194,11 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         [
           {
             label: `Encrypt ${sheetName}!${a1}`,
-            description: isReusingKey ? `Key ID: ${displayKeyId} (reuse existing key)` : `Key ID: ${displayKeyId} (new key)`,
+            description: isReusingKey
+              ? `Key ID: ${displayKeyId} (reuse existing key)`
+              : existingKeyLookupFailed
+                ? `Key ID: ${displayKeyId} (could not verify existing key; will create new key)`
+                : `Key ID: ${displayKeyId} (new key)`,
             value: "encrypt",
           },
         ],
@@ -455,6 +463,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       // Guard against accidentally overwriting an existing key id with different bytes
       // (which would make previously-encrypted cells unreadable).
       let existing: Uint8Array | null = null;
+      let existingLookupFailed = false;
       try {
         const cached = keyStore.getCachedKey(parsed.docId, parsed.keyId);
         existing = cached?.keyBytes ?? null;
@@ -463,7 +472,24 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
           if (entry) existing = base64ToBytes(entry.keyBytesBase64);
         }
       } catch {
-        // Best-effort: treat lookup failure as "missing key" and continue.
+        // Best-effort: treat lookup failure as "missing key" but prompt before importing since
+        // we cannot guarantee we won't overwrite an existing key id.
+        existingLookupFailed = true;
+      }
+
+      if (!existing && existingLookupFailed) {
+        const proceed = await showQuickPick(
+          [
+            {
+              label: `Import key "${parsed.keyId}"`,
+              description: "Could not verify whether this key id already exists. Importing may overwrite an existing key.",
+              value: "import",
+            },
+            { label: "Cancel", value: "cancel" },
+          ],
+          { placeHolder: "Unable to verify existing key" },
+        );
+        if (proceed !== "import") return;
       }
 
       if (existing && !bytesEqual(existing, parsed.keyBytes)) {

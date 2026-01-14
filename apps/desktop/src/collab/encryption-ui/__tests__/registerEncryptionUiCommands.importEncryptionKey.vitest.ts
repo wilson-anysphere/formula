@@ -112,5 +112,43 @@ describe("registerEncryptionUiCommands", () => {
     expect(app.rehydrateCollabBinder).toHaveBeenCalledTimes(1);
     expect(showToast).toHaveBeenCalledWith('Overwrote encryption key "k1".', "warning");
   });
-});
 
+  it("importEncryptionKey prompts when it cannot verify whether a key id already exists", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyBytes = new Uint8Array(32).fill(5);
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => {
+        throw new Error("backend unavailable");
+      }),
+      set: vi.fn(async () => ({ keyId: "k1" })),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc: { guid: "doc-1" } }),
+      getCollabEncryptionKeyStore: () => keyStore,
+      rehydrateCollabBinder: vi.fn(),
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    const exportString = serializeEncryptionKeyExportString({ docId: "doc-1", keyId: "k1", keyBytes });
+    vi.mocked(showInputBox).mockResolvedValue(exportString);
+
+    vi.mocked(showQuickPick).mockResolvedValue("cancel");
+    await commandRegistry.executeCommand("collab.importEncryptionKey");
+    expect(keyStore.set).not.toHaveBeenCalled();
+    expect(app.rehydrateCollabBinder).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    registerEncryptionUiCommands({ commandRegistry, app });
+    vi.mocked(showInputBox).mockResolvedValue(exportString);
+    vi.mocked(showQuickPick).mockResolvedValue("import");
+
+    await commandRegistry.executeCommand("collab.importEncryptionKey");
+    expect(keyStore.set).toHaveBeenCalledTimes(1);
+    expect(app.rehydrateCollabBinder).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith('Imported encryption key "k1".', "info");
+  });
+});
