@@ -111,6 +111,13 @@ fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
     );
 }
 
+fn webview_url_for_window<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<Url, String> {
+    let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
+        return Err("webview window not available".to_string());
+    };
+    webview.url().map_err(|err| err.to_string())
+}
+
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
@@ -840,6 +847,9 @@ async fn oauth_loopback_listen(
         let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
         let listener = (|| -> std::io::Result<TcpListener> {
             let socket = TcpSocket::new_v6()?;
+            // Bind as IPv6-only so we can also bind an IPv4 listener on the same port
+            // (`localhost` redirect URIs may resolve to either 127.0.0.1 or ::1).
+            socket2::SockRef::from(&socket).set_only_v6(true)?;
             socket.bind(addr)?;
             socket.listen(1024)
         })();
@@ -1854,7 +1864,9 @@ fn main() {
                         .ok()
                         .map(|url| url.to_string())
                         .unwrap_or_else(|| "<unknown>".to_string());
-                    eprintln!("[close] blocked close-requested flow from untrusted origin: {url_for_log} ({err})");
+                    eprintln!(
+                        "[close] blocked close-requested flow from untrusted origin: {url_for_log} ({err})"
+                    );
 
                     // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
@@ -2093,9 +2105,7 @@ fn main() {
                             .ok()
                             .map(|u| u.to_string())
                             .unwrap_or_else(|| "<unknown>".to_string());
-                        eprintln!(
-                            "[file-dropped] blocked drop event for untrusted origin: {url} ({err})"
-                        );
+                        eprintln!("[file-dropped] blocked drop event for untrusted origin: {url} ({err})");
                         return;
                     }
 

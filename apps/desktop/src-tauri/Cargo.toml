@@ -76,6 +76,7 @@ formula-xlsx = { path = "../../../crates/formula-xlsx" }
 pkcs8 = { version = "0.10", features = ["pem"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+socket2 = "0.5"
 sysinfo = { version = "0.30", optional = true }
 tempfile = "3.10"
 tokio = { version = "1.38", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

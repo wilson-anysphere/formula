@@ -207,6 +207,25 @@ pub fn ensure_stable_origin(
     Ok(())
 }
 
+/// Same as [`ensure_stable_origin`], but accepts a [`tauri::Window`] handle.
+///
+/// Window events are reported against `tauri::Window` even when that window hosts a webview; this
+/// helper resolves the corresponding [`tauri::WebviewWindow`] so we can read the current URL.
+#[cfg(feature = "desktop")]
+pub fn ensure_stable_origin_for_window(
+    window: &tauri::Window,
+    subject: &str,
+    verb: Verb,
+) -> Result<(), String> {
+    let Some(webview_window) = window.app_handle().get_webview_window(window.label()) else {
+        return Err(format!(
+            "{subject} {} not allowed from this origin",
+            verb.as_str()
+        ));
+    };
+    ensure_stable_origin(&webview_window, subject, verb)
+}
+
 #[cfg(feature = "desktop")]
 pub fn ensure_main_window_and_stable_origin(
     window: &tauri::WebviewWindow,

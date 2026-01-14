@@ -6681,7 +6681,7 @@ pub async fn open_external_url(
         ipc_origin::ensure_stable_origin(&webview, "external URL opening", ipc_origin::Verb::Is)?;
     }
 
-    let parsed = crate::external_url::validate_external_url(&url)?;
+    let parsed = crate::external_url::validate_external_url(url.as_ref())?;
 
     window
         .shell()
@@ -6885,7 +6885,7 @@ pub async fn network_fetch(
     ipc_origin::ensure_trusted_origin(&origin_url, "network access", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "network access", ipc_origin::Verb::Is)?;
 
-    let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
+    let parsed_url = reqwest::Url::parse(url.as_ref()).map_err(|e| format!("Invalid url: {e}"))?;
     ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
 
     let url = url.into_inner();
