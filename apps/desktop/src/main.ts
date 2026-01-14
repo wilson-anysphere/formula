@@ -8285,6 +8285,11 @@ function handleRibbonCommand(commandId: string): void {
         applyFormatAsTable(presetId);
         return;
       }
+      if (presetId === "newStyle") {
+        showToast("New Table Style is not implemented yet.");
+        app.focus();
+        return;
+      }
     }
 
     switch (commandId) {
