@@ -367,6 +367,9 @@ export class DrawingOverlay {
   async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
     this.renderSeq += 1;
     const seq = this.renderSeq;
+    let completed = false;
+    let shapeCount = 0;
+    const drawObjects = options?.drawObjects !== false;
 
     // Cancel any prior render pass so we don't draw stale content after a newer
     // render begins (e.g. rapid scroll/zoom updates). This also lets callers
@@ -376,15 +379,6 @@ export class DrawingOverlay {
     this.renderAbort = abort;
     const signal = abort?.signal;
 
-    const liveIds =
-      this.shapeTextCache.size > 0
-        ? (() => {
-            const ids = new Set<number>();
-            for (const obj of objects) ids.add(obj.id);
-            return ids;
-          })()
-        : null;
-
     try {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
@@ -392,7 +386,6 @@ export class DrawingOverlay {
     const cssVarStyle = this.getCssVarStyle();
     const colors = this.colorTokens ?? (this.colorTokens = resolveOverlayColorTokens(cssVarStyle));
     const ordered = this.getOrderedObjects(objects);
-    const drawObjects = options?.drawObjects !== false;
     const zoom = viewport.zoom ?? 1;
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
@@ -443,6 +436,7 @@ export class DrawingOverlay {
 
       for (const obj of ordered) {
         if (seq !== this.renderSeq || signal?.aborted) return;
+        if (obj.kind.type === "shape") shapeCount += 1;
         const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
@@ -752,14 +746,31 @@ export class DrawingOverlay {
         }
       }
     }
+    completed = true;
     } finally {
-      // Prune cached shape text layouts for objects that no longer exist.
-      //
-      // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
-      // delete/undo/redo sessions.
-      if (liveIds) {
-        for (const id of this.shapeTextCache.keys()) {
-          if (!liveIds.has(id)) this.shapeTextCache.delete(id);
+      if (completed && this.shapeTextCache.size > 0) {
+        // Prune cached shape text layouts for shapes that no longer exist.
+        //
+        // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
+        // delete/undo/redo sessions. We only do the (allocating) prune when it's likely stale.
+        const liveShapeCount = drawObjects
+          ? shapeCount
+          : (() => {
+              let count = 0;
+              for (const obj of objects) {
+                if (obj.kind.type === "shape") count += 1;
+              }
+              return count;
+            })();
+
+        if (this.shapeTextCache.size > liveShapeCount) {
+          const liveShapeIds = new Set<number>();
+          for (const obj of objects) {
+            if (obj.kind.type === "shape") liveShapeIds.add(obj.id);
+          }
+          for (const id of this.shapeTextCache.keys()) {
+            if (!liveShapeIds.has(id)) this.shapeTextCache.delete(id);
+          }
         }
       }
     }
