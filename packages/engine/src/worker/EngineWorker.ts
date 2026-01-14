@@ -482,9 +482,14 @@ export class EngineWorker {
     return (await this.invoke("getRangeCompact", { range, sheet }, options)) as CellDataCompact[][];
   }
 
-  async setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
+  setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
     this.pendingCellUpdates.push({ address, value: normalizeCellScalar(value), sheet });
-    await this.scheduleFlush();
+    const promise = this.scheduleFlush();
+    // `setCell` batching is sometimes fire-and-forget. Attach a no-op rejection handler so a
+    // failed flush doesn't surface as an unhandled rejection when callers don't await.
+    // (Awaiting the returned promise still observes the rejection.)
+    void promise.catch(() => {});
+    return promise;
   }
 
   async setCellRich(address: string, value: CellValueRich | null, sheet?: string, options?: RpcOptions): Promise<void> {
