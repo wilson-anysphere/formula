@@ -4,7 +4,8 @@ set -euo pipefail
 # Ensure WASM_PACK_VERSION pins are consistent across workflows.
 #
 # Rationale:
-# - We install wasm-pack in CI, release builds, bundle-size checks, and Windows ARM64 smoke.
+# - We install wasm-pack in CI, release builds, dry-run packaging, bundle-size checks,
+#   perf runs, and Windows ARM64 smoke.
 # - wasm-pack upgrades can change build output or break compatibility; we pin for determinism.
 # - This script fails fast when the pins diverge.
 

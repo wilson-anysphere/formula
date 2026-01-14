@@ -128,6 +128,16 @@ jobs:
           restore-keys: |
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
+      - name: Cache wasm-pack tool downloads (Linux)
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
+          path: ~/.cache/.wasm-pack
+          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          restore-keys: |
+            wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install wasm-pack (required for @formula/engine WASM build)
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.wasm-pack-cache.outputs.cache-hit != 'true'
         # Pinned to match the tagged release workflow so perf runs don't break
