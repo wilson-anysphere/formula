@@ -1025,9 +1025,9 @@ mod filepass_tests {
         // - block=0
         // - plaintext="Hello, RC4 CryptoAPI!"
         //
-        // This mirrors `docs/offcrypto-standard-cryptoapi-rc4.md` and catches regressions where a
-        // 40-bit key is incorrectly treated as a raw 5-byte RC4 key (instead of a 16-byte key with
-        // the remaining bytes zero).
+        // This uses the same deterministic MD5 derivation values as
+        // `docs/offcrypto-standard-cryptoapi-rc4.md`, and locks down the BIFF8 CryptoAPI 40-bit
+        // padded-to-16-byte RC4 key quirk described in `docs/office-encryption.md`.
         let password = "password";
         let salt: [u8; 16] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
