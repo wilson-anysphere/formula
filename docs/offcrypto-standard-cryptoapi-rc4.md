@@ -145,15 +145,6 @@ else:
 
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
 
-**40-bit note:** CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit RC4 key with the low
-40 bits set and the remaining 88 bits zero. Concretely, when `keySize == 0` (interpreted as 40) or
-`keySize == 40` (`key_size_bytes == 5`), the RC4 key bytes passed into the RC4 KSA are:
-
-```text
-key_material = h_block[0..5]
-rc4_key = key_material || 0x00 * 11   // 16 bytes total
-```
-
 ## Password verification (EncryptionVerifier)
 
 Standard CryptoAPI stores a verifier to check whether the derived key is correct before attempting
@@ -254,6 +245,7 @@ Parameters:
 - password: `"password"`
 - salt (hex): `00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f`
 - spinCount: `50000` (`0x0000C350`)
+- algIdHash: `CALG_MD5` (`0x00008003`)
 - keySize: `16` bytes (128-bit RC4)
 
 Expected values:
@@ -280,6 +272,38 @@ block 0 rc4_key =
 
 block 1 rc4_key =
   6f4d502ab37700
+```
+
+#### MD5 + 40-bit (padding rule) vector
+
+This vector covers the CryptoAPI `CALG_MD5` variant and the **40-bit key padding** behavior. For
+MD5, note that `EncryptionVerifier.verifierHashSize` is **16** bytes.
+
+Parameters:
+
+- password: `"password"`
+- salt (hex): `00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f`
+- spinCount: `50000` (`0x0000C350`)
+- algIdHash: `CALG_MD5` (`0x00008003`)
+- keySize: `40` bits (5 bytes of key material, but **16 bytes used for RC4**; see above)
+
+Expected values:
+
+```text
+block 0 hash (Hb0 = MD5(H || LE32(0))) =
+  69badcae244868e209d4e053ccd2a3bc
+
+key_material (40-bit) =
+  69badcae24
+
+padded key (CryptoAPI RC4 key bytes, 16 bytes) =
+  69badcae240000000000000000000000
+
+RC4(key=padded_key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+  565016a3d8158632bb36ce1d76996628512061bfa3
+
+RC4(key=key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+  db037cd60d38c882019b5f5d8c43382373f476da28
 ```
 
 ## CryptoAPI constants (for parsing `EncryptionHeader`)

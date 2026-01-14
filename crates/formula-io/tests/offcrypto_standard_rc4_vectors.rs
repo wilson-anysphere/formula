@@ -343,3 +343,42 @@ fn standard_cryptoapi_rc4_40_bit_key_padding_vector() {
     reader.read_to_end(&mut decrypted).unwrap();
     assert_eq!(decrypted, plaintext);
 }
+
+#[test]
+fn standard_cryptoapi_rc4_md5_40bit_padding_vector() {
+    let password = "password";
+    let salt: Vec<u8> = (0u8..=0x0F).collect();
+    let spin_count = 50_000u32;
+
+    // H = MD5(salt || UTF16LE(password)), spun 50k times.
+    let h = standard_rc4_spun_password_hash_md5(password, &salt, spin_count);
+    // Hb0 = MD5(H || LE32(0)).
+    let hb0 = standard_rc4_derive_block_key_md5(h, 0, 16);
+    assert_eq!(hb0, hex_decode("69badcae244868e209d4e053ccd2a3bc"));
+
+    // CryptoAPI 40-bit rule: treat the key as 16 bytes by padding the remaining bytes with zeros.
+    let key_material = &hb0[..5];
+    assert_eq!(key_material, hex_decode("69badcae24"));
+
+    let mut padded_key = Vec::with_capacity(16);
+    padded_key.extend_from_slice(key_material);
+    padded_key.resize(16, 0);
+    assert_eq!(padded_key, hex_decode("69badcae240000000000000000000000"));
+
+    let plaintext = b"Hello, RC4 CryptoAPI!";
+
+    // Expected ciphertext when the 40-bit key material is padded to 16 bytes (CryptoAPI behavior).
+    let ciphertext_padded = rc4_apply(&padded_key, plaintext);
+    assert_eq!(
+        ciphertext_padded,
+        hex_decode("565016a3d8158632bb36ce1d76996628512061bfa3")
+    );
+
+    // Sanity: feeding RC4 the raw 5-byte key material produces different ciphertext.
+    let ciphertext_raw = rc4_apply(key_material, plaintext);
+    assert_eq!(
+        ciphertext_raw,
+        hex_decode("db037cd60d38c882019b5f5d8c43382373f476da28")
+    );
+    assert_ne!(ciphertext_raw, ciphertext_padded);
+}

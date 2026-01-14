@@ -298,6 +298,26 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
+    if let Some(node) = find_chart_type_node(doc) {
+        let name = node.tag_name().name();
+        let hint = format!("typeNode={name}");
+        if seen.insert(hint.clone()) {
+            out.push(hint);
+            if out.len() >= MAX_HINTS {
+                return out;
+            }
+        }
+        if let Some(kind) = normalize_chart_ex_kind_hint(name) {
+            let hint = format!("typeHint={kind}");
+            if seen.insert(hint.clone()) {
+                out.push(hint);
+                if out.len() >= MAX_HINTS {
+                    return out;
+                }
+            }
+        }
+    }
+
     for node in doc.descendants().filter(|n| n.is_element()) {
         for attr in ["layoutId", "chartType"] {
             let Some(raw) = attribute_case_insensitive(node, attr) else {

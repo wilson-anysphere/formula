@@ -565,6 +565,7 @@ pub enum OffcryptoError {
     #[error("Agile spinCount too large: {spin_count} (max {max})")]
     SpinCountTooLarge { spin_count: u32, max: u32 },
 }
+
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
