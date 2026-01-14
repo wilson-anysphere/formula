@@ -224,7 +224,7 @@ function main() {
   // (Some developers temporarily comment out `<key>...</key>` blocks during debugging.)
   const xmlForScan = xml.replace(/<!--[\s\S]*?-->/g, "");
 
-  if (!xml.includes("<plist") || !xml.includes("<dict")) {
+  if (!xmlForScan.includes("<plist") || !xmlForScan.includes("<dict")) {
     errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
       `File does not look like a plist (<plist>/<dict> tags not found).`,
       `Expected an XML plist file containing the macOS code signing entitlements.`,
