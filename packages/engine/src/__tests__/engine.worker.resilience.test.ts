@@ -1,0 +1,181 @@
+import { afterAll, describe, expect, it } from "vitest";
+
+import type {
+  InitMessage,
+  RpcCancel,
+  RpcRequest,
+  RpcResponseErr,
+  RpcResponseOk,
+  WorkerOutboundMessage
+} from "../protocol.ts";
+
+class MockWorkerGlobal {
+  private readonly listeners = new Set<(event: MessageEvent<unknown>) => void>();
+
+  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.add(listener);
+  }
+
+  dispatchMessage(data: unknown): void {
+    const event = { data } as MessageEvent<unknown>;
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+}
+
+class MockMessagePort {
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  private listeners = new Set<(event: MessageEvent<unknown>) => void>();
+  private other: MockMessagePort | null = null;
+
+  connect(other: MockMessagePort) {
+    this.other = other;
+  }
+
+  postMessage(message: unknown): void {
+    queueMicrotask(() => {
+      this.other?.dispatchMessage(message);
+    });
+  }
+
+  start(): void {}
+
+  close(): void {
+    this.listeners.clear();
+    this.onmessage = null;
+    this.other = null;
+  }
+
+  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.delete(listener);
+  }
+
+  private dispatchMessage(data: unknown): void {
+    const event = { data } as MessageEvent<unknown>;
+    this.onmessage?.(event);
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+}
+
+function createMockChannel(): { port1: MockMessagePort; port2: MockMessagePort } {
+  const port1 = new MockMessagePort();
+  const port2 = new MockMessagePort();
+  port1.connect(port2);
+  port2.connect(port1);
+  return { port1, port2 };
+}
+
+async function waitForMessage(
+  port: MockMessagePort,
+  predicate: (msg: WorkerOutboundMessage) => boolean
+): Promise<WorkerOutboundMessage> {
+  return await new Promise((resolve) => {
+    const handler = (event: MessageEvent<unknown>) => {
+      const msg = event.data as WorkerOutboundMessage;
+      if (msg && typeof msg === "object" && predicate(msg)) {
+        port.removeEventListener("message", handler);
+        resolve(msg);
+      }
+    };
+    port.addEventListener("message", handler);
+  });
+}
+
+async function sendRequest(port: MockMessagePort, req: RpcRequest): Promise<RpcResponseOk | RpcResponseErr> {
+  const responsePromise = waitForMessage(port, (msg) => msg.type === "response" && msg.id === req.id) as Promise<
+    RpcResponseOk | RpcResponseErr
+  >;
+  port.postMessage(req);
+  return await responsePromise;
+}
+
+async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+describe("engine.worker resilience", () => {
+  afterAll(() => {
+    (globalThis as any).self = previousSelf;
+  });
+
+  it("does not leak cancellation state when posting a response throws", async () => {
+    await loadWorkerModule();
+
+    const channel = createMockChannel();
+    let responseAttempts = 0;
+    const originalPostMessage = channel.port2.postMessage.bind(channel.port2);
+    channel.port2.postMessage = (message: unknown) => {
+      const msgType = (message as any)?.type;
+      if (msgType === "response") {
+        responseAttempts += 1;
+        // First response attempt throws (simulating a closed port). Subsequent responses deliver normally.
+        if (responseAttempts === 1) {
+          throw new Error("postMessage boom");
+        }
+      }
+      originalPostMessage(message);
+    };
+
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const init: InitMessage = {
+      type: "init",
+      port: channel.port2 as unknown as MessagePort,
+      wasmModuleUrl,
+    };
+    workerGlobal.dispatchMessage(init);
+
+    await waitForMessage(channel.port1, (msg) => msg.type === "ready");
+
+    // First request: the worker will attempt to post a response and throw. We don't wait for the response
+    // (it won't arrive), but we do wait until the worker attempted to post it so we know request handling
+    // reached the response stage.
+    channel.port1.postMessage({ type: "request", id: 1, method: "ping", params: {} });
+    await waitFor(() => responseAttempts === 1);
+
+    // Cancel after the request finishes. If the worker failed to mark the request as completed (e.g. it
+    // threw before cleanup), this cancel could poison future requests with the same id by leaving the id
+    // in `cancelledRequests`.
+    const cancel: RpcCancel = { type: "cancel", id: 1 };
+    channel.port1.postMessage(cancel);
+
+    // Second request (id reused for test determinism): should still get a response now that `postMessage`
+    // is working again.
+    const response = await Promise.race([
+      sendRequest(channel.port1, { type: "request", id: 1, method: "ping", params: {} }),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 250)),
+    ]);
+
+    expect(response).not.toBe("timeout");
+    expect((response as RpcResponseOk).ok).toBe(true);
+    expect((response as RpcResponseOk).result).toBe("pong");
+
+    channel.port1.close();
+  });
+});
+
+const previousSelf = (globalThis as any).self;
+const workerGlobal = new MockWorkerGlobal();
+// `engine.worker.ts` expects a WebWorker-like `self`.
+(globalThis as any).self = workerGlobal;
+
+let workerModulePromise: Promise<unknown> | null = null;
+function loadWorkerModule(): Promise<unknown> {
+  if (!workerModulePromise) {
+    workerModulePromise = import("../engine.worker.ts");
+  }
+  return workerModulePromise;
+}
+

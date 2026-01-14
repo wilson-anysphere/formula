@@ -253,6 +253,13 @@ function markRequestCompleted(id: number): void {
   cancelledRequests.delete(id);
   preCancelledRequestIds.delete(id);
 
+  // Defensive: a misbehaving caller (or test harness) can reuse request ids. Ensure this helper is
+  // idempotent so we don't push duplicate ids into the completion queue, which would cause the
+  // eviction logic to delete ids prematurely (and re-enable late cancellation tracking).
+  if (completedRequestIds.has(id)) {
+    return;
+  }
+
   completedRequestIds.add(id);
   completedRequestQueue.push(id);
   if (completedRequestQueue.length > MAX_COMPLETED_REQUEST_IDS) {
@@ -349,7 +356,12 @@ async function ensureWorkbook(moduleUrl: string): Promise<WasmWorkbookInstance> 
 }
 
 function postMessageToMain(msg: WorkerOutboundMessage): void {
-  port?.postMessage(msg);
+  try {
+    port?.postMessage(msg);
+  } catch {
+    // Ignore; the port can be closed/terminated while requests are in-flight, and we still need to
+    // clean up request tracking state (pending/cancelled/completed ids) to avoid leaks.
+  }
 }
 
 function isCancelled(id: number): boolean {
@@ -1107,7 +1119,12 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
       .then(() => handleRequest(inbound))
       .catch(() => {
         // `handleRequest` should catch and respond to all errors, but if something
-        // escapes we don't want to wedge the queue.
+        // escapes we don't want to wedge the queue (or leak pending request ids).
+        try {
+          markRequestCompleted((inbound as any).id);
+        } catch {
+          // ignore
+        }
       });
   });
   port.start?.();
