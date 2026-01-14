@@ -265,7 +265,11 @@ async function getProcessRssMbLinux(pid: number): Promise<number | null> {
 
 function getRssMbViaPs(pid: number): number | null {
   try {
-    const proc = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' });
+    const proc = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+    });
     if (proc.status !== 0) return null;
     const kb = Number(proc.stdout.trim());
     if (!Number.isFinite(kb)) return null;
@@ -280,7 +284,7 @@ function getRssMbViaPowerShell(pid: number): number | null {
     const proc = spawnSync(
       'powershell.exe',
       ['-NoProfile', '-Command', `(Get-Process -Id ${pid}).WorkingSet64`],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true },
     );
     if (proc.status !== 0) return null;
     const bytes = Number(proc.stdout.trim());
