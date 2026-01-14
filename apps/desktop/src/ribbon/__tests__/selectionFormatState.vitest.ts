@@ -127,16 +127,18 @@ describe("computeSelectionFormatState", () => {
     expect(state.align).toBe("center");
   });
 
-  it("reads snake_case formula-model keys for wrapText, number_format, and font size_100pt", () => {
+  it("reads snake_case formula-model keys for wrapText, alignment, number_format, and font size_100pt", () => {
     const doc = new DocumentController();
     doc.setRangeFormat("Sheet1", "A1", {
-      alignment: { wrap_text: true },
+      alignment: { wrap_text: true, horizontal_alignment: "center", vertical_alignment: "top" },
       font: { size_100pt: 1200 },
       number_format: "0%",
     });
 
     const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
     expect(state.wrapText).toBe(true);
+    expect(state.align).toBe("center");
+    expect(state.verticalAlign).toBe("top");
     expect(state.fontSize).toBe(12);
     expect(state.numberFormat).toBe("0%");
   });

@@ -172,6 +172,10 @@ export function computeSelectionFormatState(
   };
 
   const visited = new Set<string>();
+  const hasOwn = (obj: unknown, key: string): boolean => {
+    if (!obj || typeof obj !== "object") return false;
+    return Object.prototype.hasOwnProperty.call(obj, key);
+  };
 
   const mergeAlign = (raw: unknown) => {
     const value = raw === "center" || raw === "right" || raw === "left" ? (raw as "left" | "center" | "right") : "left";
@@ -299,21 +303,37 @@ export function computeSelectionFormatState(
 
     mergeFontSize(getStyleFontSizePt(style));
 
-    const horizontal =
-      alignment?.horizontal ??
-      style?.horizontalAlign ??
-      style?.horizontal_align ??
-      style?.horizontalAlignment ??
-      style?.horizontal_alignment;
-    mergeAlign(horizontal);
+    // Alignment keys may exist in camelCase or snake_case forms depending on provenance.
+    // Treat an explicit `alignment.horizontal` (including null) as authoritative so callers can
+    // clear imported `horizontal_alignment` values.
+    let horizontalRaw: unknown = undefined;
+    if (hasOwn(alignment, "horizontal")) horizontalRaw = (alignment as any).horizontal;
+    else if (hasOwn(alignment, "horizontal_align")) horizontalRaw = (alignment as any).horizontal_align;
+    else if (hasOwn(alignment, "horizontal_alignment")) horizontalRaw = (alignment as any).horizontal_alignment;
+    else if (hasOwn(alignment, "horizontalAlign")) horizontalRaw = (alignment as any).horizontalAlign;
+    else if (hasOwn(alignment, "horizontalAlignment")) horizontalRaw = (alignment as any).horizontalAlignment;
+    else if (hasOwn(style, "horizontalAlign")) horizontalRaw = (style as any).horizontalAlign;
+    else if (hasOwn(style, "horizontal_align")) horizontalRaw = (style as any).horizontal_align;
+    else if (hasOwn(style, "horizontalAlignment")) horizontalRaw = (style as any).horizontalAlignment;
+    else if (hasOwn(style, "horizontal_alignment")) horizontalRaw = (style as any).horizontal_alignment;
+    else horizontalRaw = (alignment as any)?.horizontal;
+    mergeAlign(horizontalRaw);
 
-    const vertical =
-      alignment?.vertical ??
-      style?.verticalAlign ??
-      style?.vertical_align ??
-      style?.verticalAlignment ??
-      style?.vertical_alignment;
-    mergeVerticalAlign(vertical);
+    // Like horizontal alignment, vertical alignment may arrive in camelCase or snake_case forms.
+    // Treat an explicit `alignment.vertical` (including null) as authoritative so callers can
+    // clear imported `vertical_alignment` values.
+    let verticalRaw: unknown = undefined;
+    if (hasOwn(alignment, "vertical")) verticalRaw = (alignment as any).vertical;
+    else if (hasOwn(alignment, "vertical_align")) verticalRaw = (alignment as any).vertical_align;
+    else if (hasOwn(alignment, "vertical_alignment")) verticalRaw = (alignment as any).vertical_alignment;
+    else if (hasOwn(alignment, "verticalAlign")) verticalRaw = (alignment as any).verticalAlign;
+    else if (hasOwn(alignment, "verticalAlignment")) verticalRaw = (alignment as any).verticalAlignment;
+    else if (hasOwn(style, "verticalAlign")) verticalRaw = (style as any).verticalAlign;
+    else if (hasOwn(style, "vertical_align")) verticalRaw = (style as any).vertical_align;
+    else if (hasOwn(style, "verticalAlignment")) verticalRaw = (style as any).verticalAlignment;
+    else if (hasOwn(style, "vertical_alignment")) verticalRaw = (style as any).vertical_alignment;
+    else verticalRaw = (alignment as any)?.vertical;
+    mergeVerticalAlign(verticalRaw);
     mergeNumberFormat(getStyleNumberFormat(style));
   };
 
