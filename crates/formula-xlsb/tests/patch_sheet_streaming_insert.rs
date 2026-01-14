@@ -1155,6 +1155,41 @@ fn patch_sheet_bin_streaming_insert_formula_with_rgcb_matches_in_memory() {
 }
 
 #[test]
+fn patch_sheet_bin_streaming_rejects_inserting_formula_that_requires_rgcb_without_rgcb() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let rgce = fixture_builder::rgce::array_placeholder();
+    let edits = [CellEdit {
+        row: 4,
+        col: 2,
+        new_value: CellValue::Number(6.0),
+        new_formula: Some(rgce),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+        new_style: None,
+        clear_formula: false,
+    }];
+
+    let mut patched_stream = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect_err("expected InvalidInput when inserting formula without rgcb");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "expected error to instruct caller to set CellEdit.new_rgcb, got: {io_err}"
+            );
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
 fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
     const FORMULA_FLOAT: u32 = 0x0009;
 
