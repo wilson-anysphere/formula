@@ -4310,6 +4310,8 @@ impl WasmWorkbook {
         struct WorkbookJson<'a> {
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "localeId")]
             locale_id: Option<&'a str>,
+            #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "sheetOrder")]
+            sheet_order: Vec<String>,
             sheets: BTreeMap<String, SheetJson>,
         }
 
@@ -4358,7 +4360,15 @@ impl WasmWorkbook {
             Some(self.inner.formula_locale.id)
         };
 
-        serde_json::to_string(&WorkbookJson { locale_id, sheets })
+        // Preserve sheet tab order so clients can round-trip through `toJson`/`fromJson` without
+        // changing 3D reference semantics (`Sheet1:Sheet3!A1`) or worksheet functions like `SHEET()`.
+        let sheet_order = self.inner.engine.sheet_names_in_order();
+
+        serde_json::to_string(&WorkbookJson {
+            locale_id,
+            sheet_order,
+            sheets,
+        })
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))
     }
 
@@ -4375,7 +4385,12 @@ impl WasmWorkbook {
 
         let sheets_out = Array::new();
 
-        for (sheet_name, cells) in &self.inner.sheets {
+        // Prefer the engine's sheet tab order instead of the `BTreeMap` ordering of the sparse input
+        // maps so UI clients (and sheet-indexed functions) observe Excel-like semantics.
+        let names_in_order = self.inner.engine.sheet_names_in_order();
+        let empty_cells: BTreeMap<String, JsonValue> = BTreeMap::new();
+
+        let push_sheet = |sheet_name: &str, cells: &BTreeMap<String, JsonValue>| -> Result<(), JsValue> {
             let sheet_obj = Object::new();
             object_set(&sheet_obj, "id", &JsValue::from_str(sheet_name))?;
             object_set(&sheet_obj, "name", &JsValue::from_str(sheet_name))?;
@@ -4471,6 +4486,18 @@ impl WasmWorkbook {
             }
 
             sheets_out.push(&sheet_obj);
+            Ok(())
+        };
+
+        if names_in_order.is_empty() {
+            for (sheet_name, cells) in &self.inner.sheets {
+                push_sheet(sheet_name, cells)?;
+            }
+        } else {
+            for sheet_name in &names_in_order {
+                let cells = self.inner.sheets.get(sheet_name).unwrap_or(&empty_cells);
+                push_sheet(sheet_name, cells)?;
+            }
         }
 
         object_set(&obj, "sheets", &sheets_out.into())?;
@@ -5849,12 +5876,15 @@ mod tests {
         let json_str = wb.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
+        // `toJson()` should include sheet tab order so `fromJson` can preserve 3D reference semantics.
+        assert_eq!(parsed["sheetOrder"], json!(["Sheet1"]));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(1.0));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("=A1*2"));
 
         let wb2 = WasmWorkbook::from_json(&json_str).unwrap();
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
+        assert_eq!(parsed2["sheetOrder"], json!(["Sheet1"]));
         assert_eq!(parsed2["sheets"]["Sheet1"]["cells"]["A2"], json!("=A1*2"));
     }
 
