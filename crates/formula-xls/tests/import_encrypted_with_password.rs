@@ -5,11 +5,9 @@ use formula_model::CellValue;
 const PASSWORD: &str = "correct horse battery staple";
 
 fn fixture_path() -> PathBuf {
+    // Use the top-level fixture so other crates/tests can share the same encrypted workbook corpus.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("encrypted")
-        .join("biff8_rc4_cryptoapi_pw_open.xls")
+        .join("../../fixtures/encryption/biff8_rc4_cryptoapi_pw_open.xls")
 }
 
 #[test]
