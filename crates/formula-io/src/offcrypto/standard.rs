@@ -19,6 +19,16 @@ use aes::{Aes128, Aes192, Aes256};
 use md5::Md5;
 use sha1::Sha1;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+// Unit tests run in parallel by default. Use a thread-local counter so tests that reset/inspect
+// the counter don't race each other.
+#[cfg(test)]
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
+
 use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError, AES_BLOCK_SIZE};
 
 /// CALG constants used by MS-OFFCRYPTO Standard (CryptoAPI) encryption.
@@ -511,6 +521,9 @@ fn digest_len(alg_id_hash: u32) -> Result<usize, OffcryptoError> {
 ///
 /// Use this for password verifier digests to avoid timing side channels.
 pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
     let mut diff = 0u8;
     let max_len = a.len().max(b.len());
     for idx in 0..max_len {
@@ -519,6 +532,16 @@ pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= av ^ bv;
     }
     diff == 0 && a.len() == b.len()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 /// Verify a password against the Standard (CryptoAPI) `EncryptionVerifier` structure.
@@ -1177,6 +1200,25 @@ mod tests {
 
         assert!(verify_password_standard(&parsed, password).unwrap());
         assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
+    }
+
+    #[test]
+    fn verify_password_standard_with_key_uses_constant_time_compare() {
+        // Minimal fixture: the ciphertext bytes are arbitrary; we only care that the verifier path
+        // reaches the digest comparison logic, which should use `ct_eq` (not `==` / `!=`).
+        let bytes = build_minimal_valid_encryption_info();
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+
+        // 40-bit RC4 => 5-byte key. Any non-empty key should exercise the verifier flow.
+        let key = [0u8; 5];
+
+        reset_ct_eq_calls();
+        let ok = verify_password_standard_with_key(&parsed, &key).expect("verify");
+        assert!(!ok, "expected arbitrary key to fail verification");
+        assert!(
+            ct_eq_call_count() >= 1,
+            "expected ct_eq to be used for verifier digest comparison"
+        );
     }
 
     #[test]
