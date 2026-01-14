@@ -344,8 +344,16 @@ export interface PivotConfig {
   grandTotals: PivotGrandTotals;
 }
 
+export interface PivotCellWrite {
+  sheet: string;
+  address: string;
+  value: CellScalar;
+  /** Optional Excel-compatible number format code (e.g. "m/d/yyyy", "$#,##0.00"). */
+  numberFormat?: string;
+}
+
 export interface PivotCalculationResult {
-  writes: CellChange[];
+  writes: PivotCellWrite[];
 }
 
 export type PivotFieldItems = PivotValue[];

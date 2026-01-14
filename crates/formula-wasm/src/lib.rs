@@ -57,6 +57,16 @@ pub struct CellChange {
     pub value: JsonValue,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotCellWrite {
+    pub sheet: String,
+    pub address: String,
+    pub value: JsonValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number_format: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GoalSeekRequestDto {
@@ -1233,7 +1243,7 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
-fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
+fn pivot_value_to_json(value: pivot_engine::PivotValue, date_system: formula_engine::date::ExcelDateSystem) -> JsonValue {
     match value {
         pivot_engine::PivotValue::Blank => JsonValue::Null,
         pivot_engine::PivotValue::Bool(b) => JsonValue::Bool(b),
@@ -1241,9 +1251,31 @@ fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
         pivot_engine::PivotValue::Number(n) => serde_json::Number::from_f64(n)
             .map(JsonValue::Number)
             .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
-        // The scalar WASM protocol has no first-class date type today; represent dates using their
-        // ISO string form (YYYY-MM-DD).
-        pivot_engine::PivotValue::Date(d) => JsonValue::String(d.to_string()),
+        // Cell values in the engine are stored using Excel serial numbers (with styling carrying the
+        // number format). Represent pivot dates the same way so callers can apply the accompanying
+        // date number format and formulas see Excel-like underlying values.
+        pivot_engine::PivotValue::Date(d) => {
+            // Avoid pulling in `chrono` as a direct dependency: `NaiveDate`'s component accessors
+            // live on the `Datelike` trait. The ISO-8601 `Display` form is stable (`YYYY-MM-DD`),
+            // so parse that into an `ExcelDate`.
+            let s = d.to_string();
+            let mut parts = s.split('-');
+            let year = parts.next().and_then(|v| v.parse::<i32>().ok());
+            let month = parts.next().and_then(|v| v.parse::<u8>().ok());
+            let day = parts.next().and_then(|v| v.parse::<u8>().ok());
+            let excel_date = match (year, month, day, parts.next()) {
+                (Some(year), Some(month), Some(day), None) => {
+                    formula_engine::date::ExcelDate::new(year, month, day)
+                }
+                _ => return JsonValue::Null,
+            };
+            match formula_engine::date::ymd_to_serial(excel_date, date_system) {
+                Ok(serial) => serde_json::Number::from_f64(serial as f64)
+                    .map(JsonValue::Number)
+                    .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
+                Err(_) => JsonValue::Null,
+            }
+        }
     }
 }
 
@@ -2184,7 +2216,7 @@ impl WorkbookState {
         source_range_a1: &str,
         destination_top_left_a1: &str,
         config: &pivot_engine::PivotConfig,
-    ) -> Result<Vec<CellChange>, JsValue> {
+    ) -> Result<Vec<PivotCellWrite>, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
         let range = Self::parse_range(source_range_a1)?;
         let destination = Self::parse_address(destination_top_left_a1)?;
@@ -2194,17 +2226,23 @@ impl WorkbookState {
             .calculate_pivot_from_range(&sheet, range, config)
             .map_err(|err| js_err(err.to_string()))?;
 
-        let writes = result.to_cell_writes(pivot_engine::CellRef {
+        let writes = result.to_cell_writes_with_formats(
+            pivot_engine::CellRef {
             row: destination.row,
             col: destination.col,
-        });
+            },
+            config,
+            &pivot_engine::PivotApplyOptions::default(),
+        );
 
+        let date_system = self.engine.date_system();
         let mut out = Vec::with_capacity(writes.len());
         for write in writes {
-            out.push(CellChange {
+            out.push(PivotCellWrite {
                 sheet: sheet.clone(),
                 address: CellRef::new(write.row, write.col).to_a1(),
-                value: pivot_value_to_json(write.value),
+                value: pivot_value_to_json(write.value, date_system),
+                number_format: write.number_format,
             });
         }
         Ok(out)
@@ -5323,7 +5361,7 @@ impl WasmWorkbook {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct PivotCalculationResultDto {
-            writes: Vec<CellChange>,
+            writes: Vec<PivotCellWrite>,
         }
 
         serde_wasm_bindgen::to_value(&PivotCalculationResultDto { writes })
@@ -7844,6 +7882,175 @@ mod tests {
                 "unexpected value for {addr}: got {got:?}, expected {expected_value:?}"
             );
         }
+    }
+
+    #[test]
+    fn calculate_pivot_writes_dates_as_serial_numbers_and_includes_date_number_format() {
+        // Pivot source dates are represented in the worksheet as Excel serial numbers + a date
+        // number format. Ensure `calculatePivot` emits the same underlying values and includes a
+        // date number-format hint for the output label cell.
+        let date = formula_engine::date::ExcelDate::new(1904, 1, 1);
+
+        for system in [
+            formula_engine::date::ExcelDateSystem::EXCEL_1900,
+            formula_engine::date::ExcelDateSystem::Excel1904,
+        ] {
+            let mut wb = WorkbookState::new_with_default_sheet();
+            wb.engine.set_date_system(system);
+
+            wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Date")).unwrap();
+            wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
+
+            let serial = formula_engine::date::ymd_to_serial(
+                date,
+                system,
+            )
+            .unwrap() as f64;
+            wb.set_cell_internal(DEFAULT_SHEET, "A2", json!(serial)).unwrap();
+            wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0)).unwrap();
+
+            let date_style = wb.engine.intern_style(Style {
+                number_format: Some("m/d/yyyy".to_string()),
+                ..Style::default()
+            });
+            wb.engine
+                .set_cell_style_id(DEFAULT_SHEET, "A2", date_style)
+                .unwrap();
+
+            wb.recalculate_internal(None).unwrap();
+
+            let config = formula_model::pivots::PivotConfig {
+                row_fields: vec![formula_model::pivots::PivotField::new("Date")],
+                column_fields: vec![],
+                value_fields: vec![formula_model::pivots::ValueField {
+                    source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                    name: "Sum of Sales".to_string(),
+                    aggregation: formula_model::pivots::AggregationType::Sum,
+                    number_format: None,
+                    show_as: None,
+                    base_field: None,
+                    base_item: None,
+                }],
+                filter_fields: vec![],
+                calculated_fields: vec![],
+                calculated_items: vec![],
+                layout: formula_model::pivots::Layout::Tabular,
+                subtotals: formula_model::pivots::SubtotalPosition::None,
+                grand_totals: formula_model::pivots::GrandTotals {
+                    rows: false,
+                    columns: false,
+                },
+            };
+
+            let engine_config = pivot_config_model_to_engine(&config);
+            let writes = wb
+                .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B2", "D1", &engine_config)
+                .unwrap();
+
+            let date_write = writes
+                .iter()
+                .find(|w| w.address == "D2")
+                .unwrap_or_else(|| panic!("missing date label write, got {writes:?}"));
+            assert_eq!(date_write.value, json!(serial));
+            assert_eq!(date_write.number_format.as_deref(), Some("m/d/yyyy"));
+        }
+    }
+
+    #[test]
+    fn calculate_pivot_includes_value_field_number_format_hints() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(100.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("East")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(150.0)).unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+
+        let config = formula_model::pivots::PivotConfig {
+            row_fields: vec![formula_model::pivots::PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![formula_model::pivots::ValueField {
+                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: formula_model::pivots::AggregationType::Sum,
+                number_format: Some("$#,##0.00".to_string()),
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: formula_model::pivots::Layout::Tabular,
+            subtotals: formula_model::pivots::SubtotalPosition::None,
+            grand_totals: formula_model::pivots::GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let engine_config = pivot_config_model_to_engine(&config);
+        let writes = wb
+            .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B3", "D1", &engine_config)
+            .unwrap();
+
+        let value_write = writes
+            .iter()
+            .find(|w| w.address == "E2")
+            .unwrap_or_else(|| panic!("missing value write, got {writes:?}"));
+        assert_eq!(value_write.value, json!(250.0));
+        assert_eq!(value_write.number_format.as_deref(), Some("$#,##0.00"));
+    }
+
+    #[test]
+    fn calculate_pivot_includes_default_percent_format_for_percent_show_as() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("West")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(3.0)).unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+
+        let config = formula_model::pivots::PivotConfig {
+            row_fields: vec![formula_model::pivots::PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![formula_model::pivots::ValueField {
+                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: formula_model::pivots::AggregationType::Sum,
+                number_format: None,
+                show_as: Some(formula_model::pivots::ShowAsType::PercentOfGrandTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: formula_model::pivots::Layout::Tabular,
+            subtotals: formula_model::pivots::SubtotalPosition::None,
+            grand_totals: formula_model::pivots::GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let engine_config = pivot_config_model_to_engine(&config);
+        let writes = wb
+            .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B3", "D1", &engine_config)
+            .unwrap();
+
+        let value_write = writes
+            .iter()
+            .find(|w| w.address == "E2")
+            .unwrap_or_else(|| panic!("missing value write, got {writes:?}"));
+        // 1 / (1 + 3) = 0.25
+        assert_eq!(value_write.value, json!(0.25));
+        assert_eq!(value_write.number_format.as_deref(), Some("0.00%"));
     }
 
     #[test]
