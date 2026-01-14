@@ -10644,6 +10644,26 @@ export class SpreadsheetApp {
         if ("y_emu" in offset) (offset as any).y_emu = yEmuInt;
         if ("xEmu" in offset) (offset as any).xEmu = xEmu;
         if ("yEmu" in offset) (offset as any).yEmu = yEmu;
+        // Support DocumentController offset key variants too.
+        if ("dxEmu" in offset) (offset as any).dxEmu = xEmu;
+        if ("dyEmu" in offset) (offset as any).dyEmu = yEmu;
+        if ("offsetXEmu" in offset) (offset as any).offsetXEmu = xEmu;
+        if ("offsetYEmu" in offset) (offset as any).offsetYEmu = yEmu;
+        if ("offset_x_emu" in offset) (offset as any).offset_x_emu = xEmu;
+        if ("offset_y_emu" in offset) (offset as any).offset_y_emu = yEmu;
+
+        const xPx = Math.round(emuToPx(xEmu));
+        const yPx = Math.round(emuToPx(yEmu));
+        if ("x" in offset) (offset as any).x = xPx;
+        if ("y" in offset) (offset as any).y = yPx;
+        if ("dx" in offset) (offset as any).dx = xPx;
+        if ("dy" in offset) (offset as any).dy = yPx;
+        if ("offsetX" in offset) (offset as any).offsetX = xPx;
+        if ("offsetY" in offset) (offset as any).offsetY = yPx;
+        if ("offsetXPx" in offset) (offset as any).offsetXPx = xPx;
+        if ("offsetYPx" in offset) (offset as any).offsetYPx = yPx;
+        if ("offset_x" in offset) (offset as any).offset_x = xPx;
+        if ("offset_y" in offset) (offset as any).offset_y = yPx;
       };
 
       const patchAnchorPoint = (point: any, next: { cell: { row: number; col: number }; offset: { xEmu: number; yEmu: number } }): void => {
@@ -10688,8 +10708,11 @@ export class SpreadsheetApp {
             }
             if (normalized === "absolute" && uiType === "absolute") {
               patchCellOffset((value as any).pos, uiAnchor.pos);
+              // Some schemas store absolute offsets directly on the anchor payload.
+              patchCellOffset(value, uiAnchor.pos);
               patchEmuSize((value as any).ext, uiAnchor.size, true);
               patchEmuSize((value as any).size, uiAnchor.size, true);
+              patchEmuSize(value, uiAnchor.size, true);
               return rawAnchor;
             }
           }
@@ -10723,8 +10746,12 @@ export class SpreadsheetApp {
             }
             if (normalized === "absolute" && uiType === "absolute") {
               patchCellOffset((payload as any).pos, uiAnchor.pos);
+              // DocumentController absolute anchors can store offsets directly on the anchor
+              // object (`{ type: "absolute", xEmu, yEmu, ... }`) instead of under `pos`.
+              patchCellOffset(payload, uiAnchor.pos);
               patchEmuSize((payload as any).ext, uiAnchor.size, true);
               patchEmuSize((payload as any).size, uiAnchor.size, false);
+              patchEmuSize(payload, uiAnchor.size, true);
               return rawAnchor;
             }
           }
