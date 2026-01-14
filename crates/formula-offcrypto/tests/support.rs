@@ -15,7 +15,6 @@ use formula_offcrypto::{
     StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionInfo,
     StandardEncryptionVerifier,
 };
-
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 4096;
 
 // CryptoAPI algorithm identifiers used by Standard encryption.
@@ -173,17 +172,14 @@ pub fn encrypt_standard(
     encryption_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
     encryption_info.extend_from_slice(&verifier_hash_padded);
 
-    // Build `EncryptedPackage`: u64 original size + CBC-encrypted 4096-byte segments.
+    // Build `EncryptedPackage`: u64 original size + AES-ECB encrypted bytes (block-aligned, zero
+    // padding).
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext_zip.len() as u64).to_le_bytes());
 
-    for (idx, chunk) in plaintext_zip.chunks(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
-        let block_index = idx as u32;
-        let padded = pad16_zero(chunk);
-        let iv = derive_iv_sha1(&salt, block_index);
-        let ct = aes128_cbc_encrypt(&key, &iv, &padded);
-        encrypted_package.extend_from_slice(&ct);
-    }
+    let mut padded = pad16_zero(plaintext_zip);
+    aes_ecb_encrypt_in_place(&key, &mut padded);
+    encrypted_package.extend_from_slice(&padded);
 
     (encryption_info, encrypted_package)
 }
