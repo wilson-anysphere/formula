@@ -51,6 +51,19 @@ fn ipc_pivot_field_ref_parses_quoted_dax_column_strings() {
 }
 
 #[test]
+fn ipc_pivot_field_ref_parses_escaped_quote_in_quoted_table_name() {
+    let ipc: IpcPivotFieldRef = serde_json::from_str("\"'O''Reilly'[Name]\"").unwrap();
+    let core: PivotFieldRef = ipc.into();
+    assert_eq!(
+        core,
+        PivotFieldRef::DataModelColumn {
+            table: "O'Reilly".to_string(),
+            column: "Name".to_string()
+        }
+    );
+}
+
+#[test]
 fn ipc_pivot_field_ref_parses_escaped_bracket_measure_strings() {
     let ipc: IpcPivotFieldRef = serde_json::from_str("\"[A]]B]\"").unwrap();
     let core: PivotFieldRef = ipc.into();
