@@ -21,6 +21,7 @@ This doc describes:
 
 **Desktop integration:**
 - `apps/desktop/src/ai/completion/formulaBarTabCompletion.ts` — connects the engine to the formula bar
+- `apps/desktop/src/ai/completion/parsePartialFormula.ts` — locale-aware partial formula parser adapter (WASM engine + JS fallback + localized function-name canonicalization)
 - `apps/desktop/src/formula-bar/FormulaBarModel.ts` — accepts suggestions + derives ghost text
 - `apps/desktop/src/formula-bar/FormulaBarView.ts` — renders ghost text + preview
 
@@ -29,6 +30,17 @@ This doc describes:
 ## 1) Completion pipeline (`TabCompletionEngine`)
 
 `TabCompletionEngine.getSuggestions(context, { previewEvaluator? })` is the single entrypoint used by UI surfaces.
+
+### Locale-aware partial parsing (desktop)
+
+The core engine’s built-in `parsePartialFormula()` is intentionally lightweight and ASCII-oriented.
+
+Desktop wires a locale-aware parser by injecting `parsePartialFormula` when constructing `TabCompletionEngine`:
+- Baseline span calculation comes from the JS parser (`@formula/ai-completion`).
+- When available, the desktop adapter calls the WASM engine’s `engine.parseFormulaPartial(...)` (with a small timeout budget) to recover accurate function/arg context in non-en-US locales.
+- Localized function names (e.g. `SUMME`, `ZÄHLENWENN`) are canonicalized back to the engine’s canonical (English) names so range-arg metadata lookup works against the `FunctionRegistry`.
+
+See: `apps/desktop/src/ai/completion/parsePartialFormula.ts`.
 
 ### Inputs
 
