@@ -1,37 +1,13 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 // Include explicit `.ts` import specifiers so the repo's node:test runner can
 // automatically skip this suite when TypeScript execution isn't available.
 //
-// Note: `@formula/marketplace-shared` is a workspace package that can be missing in
-// some cached/stale installs (agent sandboxes, CI caches). When it's not resolvable,
-// importing `WebExtensionManager` will fail with `ERR_MODULE_NOT_FOUND`.
-//
-// Check resolvability relative to the `packages/extension-marketplace` package boundary
-// (where pnpm links workspace deps), rather than relative to this test file.
-const require = createRequire(import.meta.url);
-const extensionMarketplaceDir = fileURLToPath(new URL("../packages/extension-marketplace", import.meta.url));
-let hasWorkspaceDeps = true;
-for (const specifier of [
-  // extension-host uses an `exports` map and does not expose `./package.json`,
-  // so probe the public entrypoint instead.
-  "@formula/extension-host",
-  // marketplace-shared is a workspace package (at `./shared/`) that is not always linked
-  // into `node_modules` in cached/stale installs. Probe a concrete file that
-  // WebExtensionManager imports.
-  "@formula/marketplace-shared/extension-package/v2-browser.mjs",
-  "@formula/marketplace-shared/extension-manifest/index.mjs",
-]) {
-  try {
-    require.resolve(specifier, { paths: [extensionMarketplaceDir] });
-  } catch {
-    hasWorkspaceDeps = false;
-    break;
-  }
-}
+// Note: `@formula/marketplace-shared` is a workspace package (at `./shared/`) that can be
+// missing from cached/stale `node_modules` installs. The repo's node:test runner installs
+// an ESM loader that resolves missing `@formula/*` imports directly from workspace source
+// so this suite can still run in those environments.
 
 test(
   "extension-marketplace MarketplaceClient TS source is importable under Node ESM when executing TS sources directly",
@@ -51,7 +27,6 @@ test(
 
 test(
   "extension-marketplace full TS sources are importable under Node ESM when executing TS sources directly",
-  { skip: !hasWorkspaceDeps },
   async () => {
     const { MarketplaceClient, WebExtensionManager, normalizeMarketplaceBaseUrl: normalizeFromIndex } = await import(
       "../packages/extension-marketplace/src/index.ts"
