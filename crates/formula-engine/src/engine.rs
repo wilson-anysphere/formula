@@ -19248,6 +19248,45 @@ mod tests {
     }
 
     #[test]
+    fn workbook_reorder_sheet_semantics_match_engine_contract() {
+        // Exercise `Workbook::reorder_sheet` directly so we cover its contract independently of
+        // the engine wrapper (which may rebuild graphs, etc).
+        let mut workbook = Workbook::default();
+        let sheet1 = workbook.ensure_sheet("Sheet1");
+        let sheet2 = workbook.ensure_sheet("Sheet2");
+        let sheet3 = workbook.ensure_sheet("Sheet3");
+
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+
+        // Unknown sheet id should fail.
+        assert!(!workbook.reorder_sheet(usize::MAX, 0));
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+
+        // Out-of-range index should fail.
+        assert!(!workbook.reorder_sheet(sheet1, 3));
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+
+        // No-op reorder should succeed and keep order unchanged.
+        assert!(workbook.reorder_sheet(sheet1, 0));
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+
+        // Move forward (lower -> higher index).
+        assert!(workbook.reorder_sheet(sheet1, 2));
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet2, sheet3, sheet1]);
+
+        // Move backward (higher -> lower index).
+        assert!(workbook.reorder_sheet(sheet1, 0));
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+
+        // Simulate an inconsistent state where a live sheet is missing from `sheet_order`; this
+        // should fail without mutating the remaining order.
+        workbook.sheet_order.retain(|&id| id != sheet1);
+        let before = workbook.sheet_order.clone();
+        assert!(!workbook.reorder_sheet(sheet1, 0));
+        assert_eq!(workbook.sheet_order, before);
+    }
+
+    #[test]
     fn bytecode_concat_over_sheet_span_uses_tab_order_after_reorder() {
         fn setup(engine: &mut Engine) {
             for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
