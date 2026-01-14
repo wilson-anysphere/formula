@@ -166,4 +166,95 @@ describe("FormulaBarView error panel", () => {
 
     host.remove();
   });
+
+  it("traps focus with Tab/Shift+Tab inside the error panel (skipping disabled buttons)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    // No onFixFormulaErrorWithAi callback → Fix button should be disabled.
+    new FormulaBarView(host, { onCommit: () => {} }).setActiveCell({ address: "A1", input: "=A1/0", value: "#DIV/0!" });
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const panel = host.querySelector<HTMLElement>('[data-testid="formula-error-panel"]')!;
+    expect(panel.hidden).toBe(false);
+
+    const fixButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-fix-ai"]')!;
+    const showRanges = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-show-ranges"]')!;
+    const closeButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-close"]')!;
+
+    expect(fixButton.disabled).toBe(true);
+    expect(showRanges.disabled).toBe(false);
+
+    // Opening should focus the first enabled action (Show referenced ranges).
+    expect(document.activeElement).toBe(showRanges);
+
+    const tabForward = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    showRanges.dispatchEvent(tabForward);
+    expect(tabForward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(closeButton);
+
+    const tabForwardWrap = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    closeButton.dispatchEvent(tabForwardWrap);
+    expect(tabForwardWrap.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(showRanges);
+
+    const tabBack = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    showRanges.dispatchEvent(tabBack);
+    expect(tabBack.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(closeButton);
+
+    host.remove();
+  });
+
+  it("toggles referenced range highlights from the error panel and clears them on close", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let lastHighlights: any[] = [];
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onReferenceHighlights: (highlights) => {
+        lastHighlights = highlights;
+      },
+    });
+    view.setActiveCell({ address: "A1", input: "=A1/0", value: "#DIV/0!" });
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const panel = host.querySelector<HTMLElement>('[data-testid="formula-error-panel"]')!;
+    const showRanges = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-show-ranges"]')!;
+    expect(panel.hidden).toBe(false);
+
+    showRanges.click();
+    expect(showRanges.getAttribute("aria-pressed")).toBe("true");
+    expect(showRanges.textContent).toContain("Hide");
+    expect(lastHighlights.length).toBeGreaterThan(0);
+    expect(lastHighlights[0]).toMatchObject({
+      text: "A1",
+      color: FORMULA_REFERENCE_PALETTE[0],
+      index: 0,
+      active: false,
+    });
+
+    // Toggle off.
+    showRanges.click();
+    expect(showRanges.getAttribute("aria-pressed")).toBe("false");
+    expect(showRanges.textContent).toContain("Show");
+    expect(lastHighlights).toEqual([]);
+
+    // Toggle on again, then close the panel via Escape; highlights should clear.
+    showRanges.click();
+    expect(lastHighlights.length).toBeGreaterThan(0);
+
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    panel.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(lastHighlights).toEqual([]);
+
+    host.remove();
+  });
 });
