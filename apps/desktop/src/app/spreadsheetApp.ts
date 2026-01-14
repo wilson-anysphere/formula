@@ -8501,13 +8501,23 @@ export class SpreadsheetApp {
     if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
     if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return;
 
-    const prevSelected = this.selectedDrawingId;
+    // Split-view shares a single "active object" selection model between drawings and charts.
+    // Use the unified accessor here so we treat canvas-chart selection (selectedChartId) as a
+    // selected drawing for hit-testing/selection stability.
+    const prevSelected = this.getSelectedDrawingId();
 
     const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
-      // Clicking anywhere outside a drawing clears the drawing selection, but still allows the
+      // Clicking anywhere outside a drawing clears any object selection (drawings/charts), but still allows the
       // grid to handle the pointerdown (e.g. row/column header selection in the secondary pane).
-      if (prevSelected != null) this.selectDrawingById(null);
+      if (prevSelected != null) {
+        if (this.selectedChartId != null) {
+          this.setSelectedChartId(null);
+        }
+        if (this.selectedDrawingId != null) {
+          this.selectDrawingById(null);
+        }
+      }
       return;
     }
 
@@ -8522,9 +8532,9 @@ export class SpreadsheetApp {
     // (common when opening context menus).
     if (hit.id !== prevSelected) {
       this.selectDrawingById(hit.id);
-    } else if (this.selectedChartId != null) {
-      // Drawings and charts are mutually exclusive selections. If the state is ever out of sync,
-      // prefer keeping the drawing selected when the user clicks it again.
+    } else if (this.selectedDrawingId === hit.id && this.selectedChartId != null) {
+      // Drawings and charts are mutually exclusive selections. If the state is ever out of sync
+      // (both selected), prefer keeping the drawing selected when the user clicks it again.
       this.setSelectedChartId(null);
     }
 
@@ -8614,7 +8624,8 @@ export class SpreadsheetApp {
     width: number,
     height: number,
   ): string | null {
-    const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    const baseObjects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
     if (objects.length === 0) return null;
 
     const scroll = secondary.grid.getScroll();
@@ -8669,7 +8680,7 @@ export class SpreadsheetApp {
 
     const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
     const bounds = this.drawingHitTestScratchRect;
-    const selectedId = this.selectedDrawingId;
+    const selectedId = this.getSelectedDrawingId();
     const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
 
     const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx)
