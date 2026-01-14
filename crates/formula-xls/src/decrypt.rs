@@ -83,25 +83,24 @@ fn map_biff_decrypt_error(err: crate::biff::encryption::DecryptError) -> Decrypt
 
 /// Decrypt an in-memory BIFF workbook stream for any supported `FILEPASS` scheme.
 ///
-/// The returned workbook stream has the `FILEPASS` record id *masked* (replaced with `0xFFFF`) so
-/// downstream BIFF parsers (and `calamine`) treat the stream as plaintext without shifting any
-/// record offsets (e.g. `BoundSheet8.lbPlyPos`).
+/// The workbook stream is decrypted **in place** and the `FILEPASS` record id is *masked*
+/// (replaced with `0xFFFF`) so downstream BIFF parsers (and `calamine`) treat the stream as
+/// plaintext without shifting any record offsets (e.g. `BoundSheet8.lbPlyPos`).
 pub(crate) fn decrypt_biff_workbook_stream(
-    workbook_stream: &[u8],
+    workbook_stream: &mut Vec<u8>,
     password: &str,
-) -> Result<Vec<u8>, DecryptError> {
+) -> Result<(), DecryptError> {
     let biff_version = crate::biff::detect_biff_version(workbook_stream);
     if biff_version != crate::biff::BiffVersion::Biff8 {
         // Legacy BIFF5 XOR (and any future non-BIFF8 schemes) are handled by the BIFF decryptor.
-        let mut out = workbook_stream.to_vec();
-        crate::biff::encryption::decrypt_workbook_stream(&mut out, password)
+        crate::biff::encryption::decrypt_workbook_stream(workbook_stream, password)
             .map_err(map_biff_decrypt_error)?;
-        crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut out);
-        return Ok(out);
+        crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
+        return Ok(());
     }
 
-    // For BIFF8, dispatch CryptoAPI RC4 decryption to the existing implementation (it returns a
-    // new Vec and masks FILEPASS), but use the BIFF decryptor for XOR + legacy RC4.
+    // For BIFF8, decide whether this is CryptoAPI RC4 (handled here) or legacy RC4/XOR (handled by
+    // the BIFF decryptor).
     let (filepass_offset, filepass_len) = find_filepass_record_offset(workbook_stream)?;
     let filepass_data_start = filepass_offset + 4;
     let filepass_data_end = filepass_data_start
@@ -124,8 +123,13 @@ pub(crate) fn decrypt_biff_workbook_stream(
         let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
             DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
         })?;
-        if matches!(second_field, ENCRYPTION_SUBTYPE_CRYPTOAPI | ENCRYPTION_INFO_CRYPTOAPI_LEGACY) {
-            return decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password);
+        if matches!(
+            second_field,
+            ENCRYPTION_SUBTYPE_CRYPTOAPI | ENCRYPTION_INFO_CRYPTOAPI_LEGACY
+        ) {
+            decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password)?;
+            crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
+            return Ok(());
         }
         if second_field != ENCRYPTION_SUBTYPE_STANDARD {
             return Err(DecryptError::UnsupportedEncryption(format!(
@@ -138,11 +142,10 @@ pub(crate) fn decrypt_biff_workbook_stream(
         )));
     }
 
-    let mut out = workbook_stream.to_vec();
-    crate::biff::encryption::decrypt_workbook_stream(&mut out, password)
+    crate::biff::encryption::decrypt_workbook_stream(workbook_stream, password)
         .map_err(map_biff_decrypt_error)?;
-    crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut out);
-    Ok(out)
+    crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -919,15 +922,14 @@ mod filepass_tests {
             offset = data_end;
         }
 
-        // Decrypt using the implementation under test.
-        let decrypted =
-            decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted_stream, password).expect("decrypt");
+        // Decrypt using the implementation under test (in place).
+        decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password)
+            .expect("decrypt");
 
         // The decryptor masks the FILEPASS record id but otherwise yields the original plaintext.
         let mut expected = plaintext_stream;
-        expected[filepass_offset..filepass_offset + 2]
-            .copy_from_slice(&RECORD_MASKED.to_le_bytes());
-        assert_eq!(decrypted, expected);
+        expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        assert_eq!(encrypted_stream, expected);
     }
 
     #[test]
@@ -1031,15 +1033,14 @@ mod filepass_tests {
             offset = data_end;
         }
 
-        // Decrypt using the implementation under test.
-        let decrypted =
-            decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted_stream, password).expect("decrypt");
+        // Decrypt using the implementation under test (in place).
+        decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password)
+            .expect("decrypt");
 
         // The decryptor masks the FILEPASS record id but otherwise yields the original plaintext.
         let mut expected = plaintext_stream;
-        expected[filepass_offset..filepass_offset + 2]
-            .copy_from_slice(&RECORD_MASKED.to_le_bytes());
-        assert_eq!(decrypted, expected);
+        expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        assert_eq!(encrypted_stream, expected);
     }
 
     #[test]
@@ -1061,14 +1062,13 @@ mod filepass_tests {
             .join("encrypted")
             .join("biff8_rc4_cryptoapi_pw_open.xls");
 
-        let workbook_stream =
+        let mut workbook_stream =
             crate::biff::read_workbook_stream_from_xls(&path).expect("read Workbook stream");
-        let decrypted = decrypt_biff8_workbook_stream_rc4_cryptoapi(&workbook_stream, PASSWORD)
-            .expect("decrypt");
+        decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut workbook_stream, PASSWORD).expect("decrypt");
 
         // The decryptor masks FILEPASS so parsers do not treat it as an encryption terminator.
         assert!(
-            !crate::biff::records::workbook_globals_has_filepass_record(&decrypted),
+            !crate::biff::records::workbook_globals_has_filepass_record(&workbook_stream),
             "expected FILEPASS record to be masked after decryption"
         );
 
@@ -1077,7 +1077,7 @@ mod filepass_tests {
         let mut font_count = 0usize;
         let mut boundsheet_count = 0usize;
 
-        let mut iter = crate::biff::records::BiffRecordIter::from_offset(&decrypted, 0)
+        let mut iter = crate::biff::records::BiffRecordIter::from_offset(&workbook_stream, 0)
             .expect("record iter");
         while let Some(next) = iter.next() {
             let record = next.expect("record");
@@ -1099,24 +1099,29 @@ mod filepass_tests {
 
         // Sanity-check that BIFF global/style parsing sees at least one non-default cell style on
         // the fixture (Sheet1!A1 uses a non-default vertical alignment in the source workbook).
-        let biff_version = crate::biff::detect_biff_version(&decrypted);
-        let codepage = crate::biff::parse_biff_codepage(&decrypted);
+        let biff_version = crate::biff::detect_biff_version(&workbook_stream);
+        let codepage = crate::biff::parse_biff_codepage(&workbook_stream);
 
-        let globals = crate::biff::parse_biff_workbook_globals(&decrypted, biff_version, codepage)
-            .expect("parse workbook globals");
+        let globals =
+            crate::biff::parse_biff_workbook_globals(&workbook_stream, biff_version, codepage)
+                .expect("parse workbook globals");
         assert!(
             globals.xf_count() != 0,
             "expected XF records to be parsed from decrypted workbook globals"
         );
 
-        let bound_sheets = crate::biff::parse_biff_bound_sheets(&decrypted, biff_version, codepage)
-            .expect("parse bound sheets");
+        let bound_sheets =
+            crate::biff::parse_biff_bound_sheets(&workbook_stream, biff_version, codepage)
+                .expect("parse bound sheets");
         assert!(!bound_sheets.is_empty(), "expected at least one bound sheet");
         let sheet0_offset = bound_sheets[0].offset;
 
-        let cell_xfs =
-            crate::biff::parse_biff_sheet_cell_xf_indices_filtered(&decrypted, sheet0_offset, None)
-                .expect("parse cell xfs");
+        let cell_xfs = crate::biff::parse_biff_sheet_cell_xf_indices_filtered(
+            &workbook_stream,
+            sheet0_offset,
+            None,
+        )
+        .expect("parse cell xfs");
         let xf_idx = *cell_xfs
             .get(&CellRef::new(0, 0))
             .expect("expected A1 xf index in sheet stream");
@@ -1125,7 +1130,7 @@ mod filepass_tests {
         {
             let mut found = None;
             for record in crate::biff::records::BestEffortSubstreamIter::from_offset(
-                &decrypted,
+                &workbook_stream,
                 sheet0_offset,
             )
             .expect("sheet record iter")
@@ -1168,7 +1173,10 @@ mod filepass_tests {
             let mut seen = 0u16;
             let mut alignment_byte = None;
             let mut used_attr = None;
-            for record in crate::biff::records::BestEffortSubstreamIter::from_offset(&decrypted, 0)
+            for record in crate::biff::records::BestEffortSubstreamIter::from_offset(
+                &workbook_stream,
+                0,
+            )
                 .expect("globals record iter")
             {
                 if record.record_id == 0x00E0 {
@@ -1572,56 +1580,75 @@ fn find_filepass_record_offset(workbook_stream: &[u8]) -> Result<(usize, usize),
 /// - `FILEPASS` `wEncryptionSubType = 0x0002` (length-prefixed CryptoAPI `EncryptionInfo`)
 /// - legacy `FILEPASS` `wEncryptionInfo = 0x0004` (embedded `EncryptionHeader` + `EncryptionVerifier`)
 ///
-/// The returned workbook stream has the `FILEPASS` record *masked* (record id replaced with
-/// `0xFFFF`) so downstream parsers that do not implement BIFF encryption treat the stream as
-/// plaintext without shifting any record offsets (e.g. `BoundSheet8.lbPlyPos`).
+/// The workbook stream is decrypted **in place** and the `FILEPASS` record id is *masked* (record
+/// id replaced with `0xFFFF`) so downstream parsers that do not implement BIFF encryption treat the
+/// stream as plaintext without shifting any record offsets (e.g. `BoundSheet8.lbPlyPos`).
 pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
-    workbook_stream: &[u8],
+    workbook_stream: &mut [u8],
     password: &str,
-) -> Result<Vec<u8>, DecryptError> {
+) -> Result<(), DecryptError> {
+    #[derive(Clone, Copy)]
+    enum CryptoApiMode {
+        Modern,
+        Legacy,
+    }
+
     let (filepass_offset, filepass_len) = find_filepass_record_offset(workbook_stream)?;
     let filepass_data_start = filepass_offset + 4;
     let filepass_data_end = filepass_data_start
         .checked_add(filepass_len)
         .ok_or_else(|| DecryptError::InvalidFormat("FILEPASS length overflow".to_string()))?;
-    let filepass_payload = workbook_stream
-        .get(filepass_data_start..filepass_data_end)
-        .ok_or_else(|| {
-            DecryptError::InvalidFormat("FILEPASS payload out of bounds".to_string())
+
+    let (mode, hash_alg, key_material, key_len) = {
+        let filepass_payload = workbook_stream
+            .get(filepass_data_start..filepass_data_end)
+            .ok_or_else(|| DecryptError::InvalidFormat("FILEPASS payload out of bounds".to_string()))?;
+
+        let encryption_type = read_u16_le(filepass_payload, 0).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
+        })?;
+        if encryption_type != ENCRYPTION_TYPE_RC4 {
+            return Err(DecryptError::UnsupportedEncryption(format!(
+                "FILEPASS wEncryptionType=0x{encryption_type:04X}"
+            )));
+        }
+
+        let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
         })?;
 
-    let encryption_type = read_u16_le(filepass_payload, 0).ok_or_else(|| {
-        DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
-    })?;
-    if encryption_type != ENCRYPTION_TYPE_RC4 {
-        return Err(DecryptError::UnsupportedEncryption(format!(
-            "FILEPASS wEncryptionType=0x{encryption_type:04X}"
-        )));
-    }
-    let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
-        DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
-    })?;
+        match second_field {
+            ENCRYPTION_SUBTYPE_CRYPTOAPI => {
+                let info = parse_filepass_record_payload(filepass_payload)?;
+                let (hash_alg, key_material) = verify_password(&info, password)?;
+                let key_len = (info.header.key_size_bits / 8) as usize;
+                (CryptoApiMode::Modern, hash_alg, key_material, key_len)
+            }
+            ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+                let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
+                let (hash_alg, key_material) = verify_password_legacy(&info, password)?;
+                let key_len = (info.header.key_size_bits / 8) as usize;
+                (CryptoApiMode::Legacy, hash_alg, key_material, key_len)
+            }
+            _ => {
+                return Err(DecryptError::UnsupportedEncryption(format!(
+                    "FILEPASS RC4 wEncryptionSubType/wEncryptionInfo=0x{second_field:04X}"
+                )))
+            }
+        }
+    };
 
-    match second_field {
-        // Modern BIFF8 RC4 CryptoAPI FILEPASS layout: `wEncryptionSubType == 0x0002` followed by a
-        // length-prefixed EncryptionInfo blob.
-        ENCRYPTION_SUBTYPE_CRYPTOAPI => {
-            let info = parse_filepass_record_payload(filepass_payload)?;
-            let (hash_alg, key_material) = verify_password(&info, password)?;
+    workbook_stream[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
 
-            let key_size_bits = info.header.key_size_bits;
-            let key_len = (key_size_bits / 8) as usize;
-
-            let mut out = workbook_stream.to_vec();
-            out[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
-
+    match mode {
+        CryptoApiMode::Modern => {
             // Decrypt all subsequent record payloads in-place using the record-payload-only stream
             // model.
             let mut cipher = PayloadRc4::new(hash_alg, key_material.as_slice(), key_len);
 
             let mut offset = filepass_data_end;
-            while offset < out.len() {
-                let remaining = out.len().saturating_sub(offset);
+            while offset < workbook_stream.len() {
+                let remaining = workbook_stream.len().saturating_sub(offset);
                 if remaining < 4 {
                     // Some writers may include trailing padding bytes after the final EOF record.
                     // Those bytes are not part of any record payload and should be ignored rather
@@ -1629,47 +1656,27 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
                     break;
                 }
 
-                if offset + 4 > out.len() {
-                    return Err(DecryptError::InvalidFormat(
-                        "truncated BIFF record header".to_string(),
-                    ));
-                }
-
-                let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
+                let len = u16::from_le_bytes([
+                    workbook_stream[offset + 2],
+                    workbook_stream[offset + 3],
+                ]) as usize;
                 let data_start = offset + 4;
                 let data_end = data_start.checked_add(len).ok_or_else(|| {
                     DecryptError::InvalidFormat("BIFF record length overflow".to_string())
                 })?;
-                if data_end > out.len() {
+                if data_end > workbook_stream.len() {
                     return Err(DecryptError::InvalidFormat(format!(
                         "BIFF record at offset {offset} extends past end of stream (len={}, end={data_end})",
-                        out.len()
+                        workbook_stream.len()
                     )));
                 }
 
-                cipher.apply_keystream(&mut out[data_start..data_end]);
+                cipher.apply_keystream(&mut workbook_stream[data_start..data_end]);
                 offset = data_end;
             }
-
-            Ok(out)
         }
-        // Legacy BIFF8 RC4 CryptoAPI FILEPASS layout (`wEncryptionInfo == 0x0004`): no
-        // length-prefixed EncryptionInfo blob; the EncryptionHeader + Verifier are embedded
-        // directly in the FILEPASS payload.
-        //
-        // Excel derives per-1024-byte block keys based on an absolute stream position that includes
-        // record headers and unencrypted bytes.
-        ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+        CryptoApiMode::Legacy => {
             const RECORD_BOUNDSHEET8: u16 = 0x0085;
-
-            let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
-            let (hash_alg, key_material) = verify_password_legacy(&info, password)?;
-
-            let key_size_bits = info.header.key_size_bits;
-            let key_len = (key_size_bits / 8) as usize;
-
-            let mut out = workbook_stream.to_vec();
-            out[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
 
             let mut offset = filepass_data_end;
             // "Encryption stream position" is keyed by the *absolute* offset within the workbook
@@ -1677,22 +1684,26 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             // discard) still incorporate the preceding plaintext bytes.
             let mut stream_pos: usize = filepass_data_end;
 
-            while offset < out.len() {
-                let remaining = out.len().saturating_sub(offset);
+            while offset < workbook_stream.len() {
+                let remaining = workbook_stream.len().saturating_sub(offset);
                 if remaining < 4 {
                     break;
                 }
 
-                let record_id = u16::from_le_bytes([out[offset], out[offset + 1]]);
-                let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
+                let record_id =
+                    u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+                let len = u16::from_le_bytes([
+                    workbook_stream[offset + 2],
+                    workbook_stream[offset + 3],
+                ]) as usize;
                 let data_start = offset + 4;
                 let data_end = data_start.checked_add(len).ok_or_else(|| {
                     DecryptError::InvalidFormat("BIFF record length overflow".to_string())
                 })?;
-                if data_end > out.len() {
+                if data_end > workbook_stream.len() {
                     return Err(DecryptError::InvalidFormat(format!(
                         "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream (len={}, end={data_end})",
-                        out.len()
+                        workbook_stream.len()
                     )));
                 }
 
@@ -1713,7 +1724,7 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
                                     DecryptError::InvalidFormat("stream position overflow".to_string())
                                 })?;
                                 decrypt_range_by_offset(
-                                    &mut out[data_start + 4..data_end],
+                                    &mut workbook_stream[data_start + 4..data_end],
                                     decrypt_start,
                                     hash_alg,
                                     key_material.as_slice(),
@@ -1722,7 +1733,7 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
                             }
                         }
                         _ => decrypt_range_by_offset(
-                            &mut out[data_start..data_end],
+                            &mut workbook_stream[data_start..data_end],
                             stream_pos,
                             hash_alg,
                             key_material.as_slice(),
@@ -1737,13 +1748,10 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
                 })?;
                 offset = data_end;
             }
-
-            Ok(out)
         }
-        _ => Err(DecryptError::UnsupportedEncryption(format!(
-            "FILEPASS RC4 wEncryptionSubType/wEncryptionInfo=0x{second_field:04X}"
-        ))),
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1816,7 +1824,8 @@ mod tests {
 
         #[test]
         fn decryptor_handles_truncated_stream(prefix in proptest::collection::vec(any::<u8>(), 0..4)) {
-            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&prefix, "pw");
+            let mut prefix = prefix;
+            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut prefix, "pw");
             prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
         }
 
@@ -1825,7 +1834,7 @@ mod tests {
             let mut stream = record(RECORD_BOF_BIFF8, &BOF_GLOBALS);
             stream.extend_from_slice(&trailing);
 
-            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&stream, "pw");
+            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut stream, "pw");
             prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
         }
 
@@ -1847,7 +1856,8 @@ mod tests {
                 record(RECORD_EOF, &[]),
             ].concat();
 
-            let res = decrypt_biff_workbook_stream(&stream, "pw");
+            let mut stream = stream;
+            let res = decrypt_biff_workbook_stream(&mut stream, "pw");
             prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
         }
 
@@ -1866,7 +1876,8 @@ mod tests {
                 record(RECORD_EOF, &[]),
             ].concat();
 
-            let res = decrypt_biff_workbook_stream(&stream, "pw");
+            let mut stream = stream;
+            let res = decrypt_biff_workbook_stream(&mut stream, "pw");
             prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
         }
     }
@@ -1880,7 +1891,8 @@ mod tests {
         bogus.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // truncated payload
 
         let stream = [record(RECORD_BOF_BIFF8, &BOF_GLOBALS), bogus].concat();
-        let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&stream, "pw");
+        let mut stream = stream;
+        let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut stream, "pw");
         assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
     }
 
@@ -1898,7 +1910,8 @@ mod tests {
         ]
         .concat();
 
-        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
         assert!(
             matches!(&res, Err(DecryptError::UnsupportedEncryption(_))),
             "res={res:?}"
@@ -1931,7 +1944,8 @@ mod tests {
         ]
         .concat();
 
-        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
         assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
     }
 
@@ -1967,7 +1981,8 @@ mod tests {
         ]
         .concat();
 
-        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
         assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
     }
 
@@ -1989,7 +2004,8 @@ mod tests {
         ]
         .concat();
 
-        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
         assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
     }
 
@@ -2005,7 +2021,8 @@ mod tests {
         fn decryptor_is_panic_free_on_arbitrary_input(buf in proptest::collection::vec(any::<u8>(), 0..=4096)) {
             prop_assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _ = decrypt_biff_workbook_stream(&buf, "pw");
+                    let mut buf = buf;
+                    let _ = decrypt_biff_workbook_stream(&mut buf, "pw");
                 }))
                 .is_ok(),
                 "decrypt_biff_workbook_stream panicked"

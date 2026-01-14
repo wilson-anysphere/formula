@@ -406,20 +406,19 @@ fn import_xls_with_biff_reader(
             return Err(ImportError::EncryptedWorkbook);
         };
 
-        let encrypted_stream = workbook_stream
-            .as_deref()
-            .expect("checked Some via needs_decrypt");
-        let mut decrypted = catch_calamine_panic_with_context("decrypting `.xls` workbook stream", || {
-            decrypt::decrypt_biff_workbook_stream(encrypted_stream, password)
-        })??;
-        // Decryption returns a plaintext workbook stream, but the `FILEPASS` record header remains.
-        // Mask it so downstream BIFF parsers (and `calamine`) don't treat the stream as encrypted
-        // and stop scanning at `FILEPASS`.
-        //
-        // Note: `decrypt_biff_workbook_stream` already masks `FILEPASS`, but keep this call here as
-        // a safety net so future decryptors don't regress this requirement.
-        biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut decrypted);
-        workbook_stream = Some(decrypted);
+        if let Some(workbook_stream) = workbook_stream.as_mut() {
+            catch_calamine_panic_with_context("decrypting `.xls` workbook stream", || {
+                decrypt::decrypt_biff_workbook_stream(workbook_stream, password)
+            })??;
+
+            // Decryption produces a plaintext workbook stream, but the `FILEPASS` record header
+            // remains. Mask it so downstream BIFF parsers (and `calamine`) don't treat the stream
+            // as encrypted and stop scanning at `FILEPASS`.
+            //
+            // Note: `decrypt_biff_workbook_stream` already masks `FILEPASS`, but keep this call
+            // here as a safety net so future decryptors don't regress this requirement.
+            biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
+        }
     }
 
     let mut biff_version: Option<biff::BiffVersion> = None;

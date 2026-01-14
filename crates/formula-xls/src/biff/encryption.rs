@@ -2292,10 +2292,9 @@ mod tests {
         let filepass_offset = range.start - 4;
         plain[filepass_offset..filepass_offset + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
 
-        let decrypted =
-            crate::decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted, password)
-                .expect("decrypt");
-        assert_eq!(decrypted, plain);
+        crate::decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted, password)
+            .expect("decrypt");
+        assert_eq!(encrypted, plain);
     }
 
     #[test]
