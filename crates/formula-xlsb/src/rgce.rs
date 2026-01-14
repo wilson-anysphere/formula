@@ -828,20 +828,45 @@ fn decode_rgce_impl(
                         // wild. We decode in a best-effort way by trying a handful of plausible
                         // interpretations and preferring the one that matches available workbook
                         // context (table/column name lookups).
-                        if rgce.len().saturating_sub(i) < 12 {
+                        // Some XLSB producers appear to insert extra prefix bytes before the
+                        // canonical 12-byte payload. Use the same best-effort alignment heuristic
+                        // as shared-formula materialization so we can skip the token correctly and
+                        // keep the rgce stream aligned.
+                        // When no workbook context is provided, still apply the column/table-id
+                        // plausibility heuristic by scoring candidates against an empty context.
+                        // This improves decoding robustness for "weird" payload alignments even
+                        // when table metadata is unavailable.
+                        let default_ctx = WorkbookContext::default();
+                        let ctx_for_scoring = Some(ctx.unwrap_or(&default_ctx));
+
+                        let remaining = rgce.len().saturating_sub(i);
+                        let Some(payload_len) =
+                            ptg_list_payload_len_best_effort(&rgce[i..], ctx_for_scoring)
+                        else {
                             return Err(DecodeError::UnexpectedEof {
                                 offset: ptg_offset,
                                 ptg,
                                 needed: 12,
-                                remaining: rgce.len().saturating_sub(i),
+                                remaining,
+                            });
+                        };
+                        let offset = payload_len.checked_sub(12).unwrap_or(0);
+                        if remaining < payload_len {
+                            return Err(DecodeError::UnexpectedEof {
+                                offset: ptg_offset,
+                                ptg,
+                                needed: payload_len,
+                                remaining,
                             });
                         }
 
+                        let core_start = i + offset;
+                        let core_end = core_start + 12;
                         let mut payload = [0u8; 12];
-                        payload.copy_from_slice(&rgce[i..i + 12]);
-                        i += 12;
+                        payload.copy_from_slice(&rgce[core_start..core_end]);
+                        i += payload_len;
 
-                        let decoded = decode_ptg_list_payload_best_effort(&payload, ctx);
+                        let decoded = decode_ptg_list_payload_best_effort(&payload, ctx_for_scoring);
 
                         // Interpret row/item flags. We intentionally accept unknown bits and
                         // continue decoding.

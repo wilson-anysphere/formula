@@ -28,6 +28,17 @@ fn rgce_ptg_list_with_payload(payload: [u8; 12]) -> Vec<u8> {
     out
 }
 
+/// Build a minimal `rgce` stream containing a single `PtgExtend` token with `etpg=0x19` (PtgList),
+/// with extra prefix bytes inserted before the canonical 12-byte payload.
+fn rgce_ptg_list_with_prefixed_payload(prefix: &[u8], payload: [u8; 12]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(0x18); // PtgExtend (reference class)
+    out.push(0x19); // etpg=0x19 (PtgList / structured ref)
+    out.extend_from_slice(prefix);
+    out.extend_from_slice(&payload);
+    out
+}
+
 /// Payload layout B (observed in the wild):
 /// `[table_id: u32][col_first_raw: u32][col_last_raw: u32]`
 /// where `col_first_raw` packs `[col_first: u16][flags: u16]` (little endian), and `col_last_raw`
@@ -80,3 +91,24 @@ fn decodes_structured_ref_payload_layout_c_uses_context_column_names() {
     assert_parses_and_roundtrips(&text);
 }
 
+#[test]
+fn decodes_structured_ref_payload_layout_b_with_2_byte_prefix_padding() {
+    let ctx = ctx_table();
+    let payload = ptg_list_payload_layout_b(1, 0x0010, 2, 2);
+    let rgce = rgce_ptg_list_with_prefixed_payload(&[0, 0], payload);
+
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "[@Qty]");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn decodes_structured_ref_payload_layout_b_with_4_byte_prefix_padding() {
+    let ctx = ctx_table();
+    let payload = ptg_list_payload_layout_b(1, 0x0010, 2, 2);
+    let rgce = rgce_ptg_list_with_prefixed_payload(&[0, 0, 0, 0], payload);
+
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "[@Qty]");
+    assert_parses_and_roundtrips(&text);
+}
