@@ -8033,7 +8033,7 @@ export class SpreadsheetApp {
         await this.enqueueWasmSync(async (engine) => {
           const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
             workbookFileMetadata: this.workbookFileMetadata,
-            localeId: getLocale(),
+            localeId: this.currentFormulaLocaleId(),
           });
           this.applyComputedChanges(changes);
         });
@@ -8160,7 +8160,7 @@ export class SpreadsheetApp {
               this.clearComputedValuesByCoord();
               const changes = await awaitWithAbort(engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
                 workbookFileMetadata: this.workbookFileMetadata,
-                localeId: getLocale(),
+                localeId: this.currentFormulaLocaleId(),
               }));
               if (this.disposed) {
                 engine.terminate();
@@ -8190,7 +8190,7 @@ export class SpreadsheetApp {
               void this.enqueueWasmSync(async (worker) => {
                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
                   workbookFileMetadata: this.workbookFileMetadata,
-                  localeId: getLocale(),
+                  localeId: this.currentFormulaLocaleId(),
                 });
                 this.applyComputedChanges(changes);
               });
@@ -8214,7 +8214,7 @@ export class SpreadsheetApp {
               void this.enqueueWasmSync(async (worker) => {
                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
                   workbookFileMetadata: this.workbookFileMetadata,
-                  localeId: getLocale(),
+                  localeId: this.currentFormulaLocaleId(),
                 });
                 this.applyComputedChanges(changes);
               });
@@ -8271,11 +8271,11 @@ export class SpreadsheetApp {
             postInitHydrate = this.enqueueWasmSync(async (worker) => {
               const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
                 workbookFileMetadata: this.workbookFileMetadata,
-                localeId: getLocale(),
+                localeId: this.currentFormulaLocaleId(),
               });
               this.applyComputedChanges(changes);
             });
- 
+  
             // The worker is now hydrated; sync the active sheet origin so `INFO("origin")` matches the UI view.
             this.wasmSheetOriginA1BySheetId.clear();
             this.syncWasmSheetOrigin();
@@ -12224,7 +12224,7 @@ export class SpreadsheetApp {
         try {
           const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
             workbookFileMetadata: this.workbookFileMetadata,
-            localeId: getLocale(),
+            localeId: this.currentFormulaLocaleId(),
           });
           this.applyComputedChanges(changes);
         } catch (err) {
@@ -12446,6 +12446,17 @@ export class SpreadsheetApp {
     this.autoSumSelection("SUM");
     this.refresh();
     this.focus();
+  }
+
+  private currentFormulaLocaleId(): string {
+    // Prefer the formula bar's locale getter when available (it can be wired to engine/tooling locale),
+    // then fall back to the document language (set by the shell) and finally `en-US`.
+    const raw =
+      this.formulaBar?.currentLocaleId?.() ??
+      (typeof document !== "undefined" ? document.documentElement?.lang : "") ??
+      "en-US";
+    const trimmed = String(raw ?? "").trim();
+    return trimmed || "en-US";
   }
 
   openCellEditorAtActiveCell(): void {
@@ -22695,18 +22706,7 @@ export class SpreadsheetApp {
 
   private autoSumSelection(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): void {
     const sheetId = this.sheetId;
-    const localeId = (() => {
-      try {
-        return (
-          this.formulaBar?.currentLocaleId?.() ||
-          (typeof document !== "undefined" ? document.documentElement?.lang : "") ||
-          "en-US"
-        );
-      } catch {
-        return "en-US";
-      }
-    })();
-    const localizedFn = localizeFunctionNameForLocale(fn, localeId);
+    const localizedFn = localizeFunctionNameForLocale(fn, this.currentFormulaLocaleId());
     const coordScratch = { row: 0, col: 0 };
 
     const normalizeRange = (range: Range): Range => ({
@@ -25573,17 +25573,17 @@ export class SpreadsheetApp {
           : (this.document.getCell(targetSheet, normalizedAddr) as { value: unknown; formula: string | null });
       let value: SpreadsheetValue;
       if (state?.formula) {
-        value = evaluateFormula(state.formula, getCellValue, {
-          cellAddress: `${targetSheet}!${normalizedAddr}`,
-          resolveNameToReference,
-          workbookFileMetadata: this.workbookFileMetadata,
-          currentSheetName: this.resolveSheetDisplayNameById(targetSheet),
-          localeId: getLocale(),
-          maxRangeCells: MAX_CELL_READS,
-        });
-      } else {
-        const rawValue = state?.value ?? null;
-        value =
+          value = evaluateFormula(state.formula, getCellValue, {
+            cellAddress: `${targetSheet}!${normalizedAddr}`,
+            resolveNameToReference,
+            workbookFileMetadata: this.workbookFileMetadata,
+            currentSheetName: this.resolveSheetDisplayNameById(targetSheet),
+            localeId: this.currentFormulaLocaleId(),
+            maxRangeCells: MAX_CELL_READS,
+          });
+        } else {
+          const rawValue = state?.value ?? null;
+          value =
           rawValue == null || typeof rawValue === "number" || typeof rawValue === "string" || typeof rawValue === "boolean"
             ? (rawValue as SpreadsheetValue)
             : isRichTextValue(rawValue)
@@ -25603,7 +25603,7 @@ export class SpreadsheetApp {
         resolveStructuredRefToReference,
         workbookFileMetadata: this.workbookFileMetadata,
         currentSheetName: this.resolveSheetDisplayNameById(sheetId),
-        localeId: getLocale(),
+        localeId: this.currentFormulaLocaleId(),
         maxRangeCells: MAX_CELL_READS,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax / functions.
@@ -26257,7 +26257,7 @@ export class SpreadsheetApp {
       resolveStructuredRefToReference,
       workbookFileMetadata: this.workbookFileMetadata,
       currentSheetName: this.resolveSheetDisplayNameById(sheetId),
-      localeId: getLocale(),
+      localeId: this.currentFormulaLocaleId(),
     });
 
     sheetStack.delete(key);
