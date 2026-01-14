@@ -43,6 +43,15 @@ describe("evaluateFormula workbook metadata functions", () => {
     expect(value).toBe("/tmp/[book.xlsx]Sheet1");
   });
 
+  it("uses currentSheetName even when cellAddress uses an internal sheet id", () => {
+    const value = evaluateFormula('=CELL("filename",A1)', () => null, {
+      workbookFileMetadata: { directory: "/tmp/", filename: "book.xlsx" },
+      cellAddress: "sheet_123!B2",
+      currentSheetName: "Sheet1",
+    });
+    expect(value).toBe("/tmp/[book.xlsx]Sheet1");
+  });
+
   it("infers a trailing path separator when directory is missing one", () => {
     const value = evaluateFormula('=CELL("filename")', () => null, {
       workbookFileMetadata: { directory: "C:\\tmp", filename: "book.xlsx" },
@@ -64,4 +73,3 @@ describe("evaluateFormula workbook metadata functions", () => {
     expect(value).toBe("file=/tmp/[book.xlsx]Sheet1");
   });
 });
-

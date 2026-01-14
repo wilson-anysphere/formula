@@ -640,6 +640,7 @@ function evalFunction(
       return inferred ? inferred.trim() : "";
     })();
 
+    const defaultSheetToken = sheetIdFromCellAddress(options.cellAddress)?.trim() ?? "";
     const refSheetName = (() => {
       const refArg = args[1] ?? null;
       if (refArg == null) return currentSheetName;
@@ -648,7 +649,16 @@ function evalFunction(
       const firstRef = refs[0] ?? "";
       if (!firstRef) return currentSheetName;
       const split = splitSheetQualifier(firstRef);
-      return split.sheetName ?? currentSheetName;
+      const sheetToken = split.sheetName;
+      if (!sheetToken) return currentSheetName;
+      // `readReference` uses `cellAddress` as the default sheet for unqualified references,
+      // but SpreadsheetApp may pass a stable internal sheet id there. When the reference
+      // resolves to that same token, treat it as the current sheet and use the caller-supplied
+      // display name (Excel output uses display names, not stable ids).
+      if (defaultSheetToken && sheetToken.toLowerCase() === defaultSheetToken.toLowerCase()) {
+        return currentSheetName;
+      }
+      return sheetToken;
     })();
 
     const value = dir ? `${dir}[${filename}]${refSheetName}` : `[${filename}]${refSheetName}`;
