@@ -2651,6 +2651,15 @@ export class FormulaBarView {
       if (this.#lastEmittedHoverText === text && sameRange) {
         this.#hoverOverrideText = text;
         this.#hoverOverride = nextRange;
+        // Even when the hovered token/range hasn't changed, allow consumers to refresh any
+        // value-dependent UI (e.g. SpreadsheetApp's range preview tooltip, which keys off a
+        // monotonic document version). Avoid re-emitting the range-outline preview unless the
+        // embedding app doesn't provide the richer `onHoverRangeWithText` callback.
+        if (typeof this.#callbacks.onHoverRangeWithText === "function") {
+          this.#callbacks.onHoverRangeWithText(this.#hoverOverride, this.#hoverOverrideText);
+        } else {
+          this.#callbacks.onHoverRange?.(this.#hoverOverride);
+        }
         return;
       }
 
@@ -2695,6 +2704,11 @@ export class FormulaBarView {
       if (this.#lastEmittedHoverText === text && sameRange) {
         this.#hoverOverrideText = text;
         this.#hoverOverride = nextRange;
+        if (typeof this.#callbacks.onHoverRangeWithText === "function") {
+          this.#callbacks.onHoverRangeWithText(this.#hoverOverride, this.#hoverOverrideText);
+        } else {
+          this.#callbacks.onHoverRange?.(this.#hoverOverride);
+        }
         return;
       }
 
