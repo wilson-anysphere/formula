@@ -151,9 +151,8 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provid
         .set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)+1")
         .unwrap();
 
-    // `INDIRECT` does not resolve references into other workbooks, even when an external value
-    // provider is configured. Because the external workbook reference is not visible at compile
-    // time, this formula should still compile to bytecode.
+    // The external workbook reference is produced at runtime (from `B1`), so the bytecode backend
+    // must support dynamic external dereferencing without requiring AST fallback.
     assert_eq!(
         engine.bytecode_program_count(),
         1,

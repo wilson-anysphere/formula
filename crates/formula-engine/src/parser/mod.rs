@@ -3897,9 +3897,14 @@ fn parse_row_number_literal(raw: &str) -> Option<u32> {
 }
 
 fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
-    // Excel external workbook prefixes:
-    // - are not nested (workbook names may contain `[` characters)
-    // - escape literal `]` characters by doubling them (`]]`)
+    // Canonical external sheet keys are encoded as `"[{workbook}]{sheet}"`. Workbook ids can
+    // include path prefixes from quoted external references (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`)
+    // and those prefixes may themselves contain `[` / `]`. To avoid ambiguity, we split workbook
+    // ids on the **last** `]` (matching `eval::split_external_sheet_key`).
+    //
+    // Note: Excel's raw formula syntax escapes literal `]` characters inside workbook names by
+    // doubling them (`]]`). The canonical form preserves those characters, so `]]` may appear in
+    // the workbook id. We treat it as plain text here.
     //
     // Sheet references can also be path-qualified inside a quoted sheet identifier, e.g.
     // `'C:\path\[Book.xlsx]Sheet1'!A1`.
@@ -3908,6 +3913,19 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     // `[workbook]sheet` segment. Canonicalize these by folding the path prefix into the workbook
     // id so external sheet keys remain unique:
     // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
+    if name.starts_with('[') {
+        // Fast path for canonical sheet keys: `"[{workbook}]{sheet}"`.
+        if let Some(end) = name.rfind(']') {
+            // `end` is the index of the closing `]`; split after it.
+            let book = &name[1..end];
+            let sheet = &name[end + 1..];
+            if !book.is_empty() && !sheet.is_empty() {
+                return (Some(book.to_string()), sheet.to_string());
+            }
+        }
+        return (None, name.to_string());
+    }
+
     let bytes = name.as_bytes();
     let mut i = 0usize;
     let mut best: Option<(usize, usize)> = None; // (start, end) where end is exclusive of the closing `]`
