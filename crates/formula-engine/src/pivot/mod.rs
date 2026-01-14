@@ -46,7 +46,7 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
         // table names (e.g. `Dim Product[Category]` vs `'Dim Product'[Category]`). Prefer the
         // unquoted `{table}[{column}]` form and fall back to the quoted DAX form elsewhere.
         PivotFieldRef::DataModelColumn { table, column } => {
-            let column = column.replace(']', "]]");
+            let column = escape_dax_bracket_identifier(column);
             Cow::Owned(format!("{table}[{column}]"))
         }
     }
@@ -3375,11 +3375,11 @@ impl FieldIndices {
                     }
                 }
                 PivotFieldRef::DataModelColumn { table, column } => {
-                    let unquoted = format!("{table}[{column}]");
+                    let column_escaped = escape_dax_bracket_identifier(column);
+                    let unquoted = format!("{table}[{column_escaped}]");
                     if let Some(idx) = source.field_index(&unquoted) {
                         return Ok(idx);
                     }
-
                     let quoted = dax_quoted_column_ref(table, column);
                     if let Some(idx) = source.field_index(&quoted) {
                         return Ok(idx);
