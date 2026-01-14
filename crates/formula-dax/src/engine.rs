@@ -4371,19 +4371,21 @@ impl DaxEngine {
                             .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
                         let mut rows = Vec::new();
-                        if key.is_blank() {
+                        if is_virtual_blank_row {
                             // The relationship-generated blank/unknown member is distinct from a
                             // *physical* BLANK key on the dimension side. Only the virtual blank
                             // member should expose unmatched fact rows.
-                            if is_virtual_blank_row {
-                                if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
-                                    unmatched.for_each_row(|row| {
-                                        if row < allowed.len() && allowed.get(row) {
-                                            rows.push(row);
-                                        }
-                                    });
-                                }
+                            if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
+                                unmatched.for_each_row(|row| {
+                                    if row < allowed.len() && allowed.get(row) {
+                                        rows.push(row);
+                                    }
+                                });
                             }
+                        } else if key.is_blank() {
+                            // A physical BLANK key on the dimension side is *not* the
+                            // relationship-generated blank member. Rows with BLANK foreign keys
+                            // belong to the virtual blank member, and should not match this row.
                         } else if let Some(from_index) = rel.from_index.as_ref() {
                             if let Some(candidates) = from_index.get(&key) {
                                 for &row in candidates {
@@ -4442,9 +4444,9 @@ impl DaxEngine {
                         let mut key_set: HashSet<Value> = HashSet::new();
                         let mut keys: Vec<Value> = Vec::new();
                         let mut include_blank = false;
-                        let blank_row = to_table_ref.row_count();
+                        let to_row_count = to_table_ref.row_count();
                         for &to_row in &current_rows {
-                            if to_row >= blank_row {
+                            if to_row >= to_row_count {
                                 include_blank = true;
                                 continue;
                             }

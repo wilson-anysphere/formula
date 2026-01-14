@@ -333,6 +333,50 @@ fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m
 }
 
 #[test]
+fn relatedtable_does_not_match_blank_facts_to_physical_blank_dimension_keys() {
+    // Same regression as `blank_foreign_keys_do_not_match_physical_blank_dimension_keys`, but for
+    // row-context navigation via RELATEDTABLE.
+    //
+    // Facts with BLANK foreign keys belong to the relationship-generated blank member, not a
+    // physical Dim row whose key is BLANK.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank, 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Dim", "Related Fact Count", "COUNTROWS(RELATEDTABLE(Fact))")
+        .unwrap();
+
+    let dim = model.table("Dim").unwrap();
+    assert_eq!(dim.value(0, "Related Fact Count").unwrap(), 1.into());
+    assert_eq!(dim.value(1, "Related Fact Count").unwrap(), 0.into());
+}
+
+#[test]
 fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m_for_columnar_fact() {
     let mut model = DataModel::new();
 

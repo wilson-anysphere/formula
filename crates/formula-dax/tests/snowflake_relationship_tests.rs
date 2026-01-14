@@ -457,6 +457,81 @@ fn relatedtable_cascades_blank_rows_across_snowflake_hops() {
 }
 
 #[test]
+fn relatedtable_does_not_treat_physical_blank_dimension_rows_as_virtual_blank_members() {
+    // Regression: the relationship-generated blank member is distinct from a physical BLANK key
+    // row on the dimension side. RELATEDTABLE should only include unmatched rows when navigating
+    // from the *virtual* blank member (row_count), not when the current physical row happens to
+    // have a BLANK key value.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories
+        .push_row(vec![1.into(), Value::from("A")])
+        .unwrap();
+    // Physical row whose key is BLANK.
+    categories
+        .push_row(vec![Value::Blank, Value::from("PhysicalBlank")])
+        .unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales
+        .push_row(vec![100.into(), 10.into(), 10.0.into()])
+        .unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let mut row_ctx = RowContext::default();
+    // Physical blank-key Categories row.
+    row_ctx.push("Categories", 1);
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(RELATEDTABLE(Sales))",
+            &FilterContext::empty(),
+            &row_ctx,
+        )
+        .unwrap();
+
+    assert_eq!(value, 0.into());
+}
+
+#[test]
 fn relatedtable_cascades_blank_rows_across_snowflake_hops_columnar_fact() {
     // Same scenario as `relatedtable_cascades_blank_rows_across_snowflake_hops`, but with a
     // columnar fact table (no `from_index`, relies on `unmatched_fact_rows`).
