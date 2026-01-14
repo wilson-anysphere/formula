@@ -2,8 +2,6 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import type { QuickPickItem } from "../extensions/ui.js";
 import { showToast } from "../extensions/ui.js";
-import type { GridLimits, Range } from "../selection/types";
-import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "../formatting/selectionSizeGuard.js";
 import {
   applyGoodBadNeutralCellStyle,
@@ -17,6 +15,8 @@ import {
   FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS,
   type FormatAsTablePresetId,
 } from "../formatting/formatAsTablePresets.js";
+import type { GridLimits, Range } from "../selection/types";
+import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 
 import type { ApplyFormattingToSelection } from "./registerDesktopCommands.js";
 
@@ -60,12 +60,18 @@ export function registerHomeStylesCommands(params: {
     }
   };
 
+  const safeShowToast = (message: string, type: Parameters<typeof showToast>[1] = "info"): void => {
+    try {
+      showToast(message, type);
+    } catch {
+      // ignore (toast root missing in tests/headless)
+    }
+  };
+
   const getGridLimitsForFormatting = (): GridLimits => {
     const raw = typeof (app as any)?.getGridLimits === "function" ? (app as any).getGridLimits() : null;
-    const maxRows =
-      Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : DEFAULT_DESKTOP_LOAD_MAX_ROWS;
-    const maxCols =
-      Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : DEFAULT_DESKTOP_LOAD_MAX_COLS;
+    const maxRows = Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : DEFAULT_DESKTOP_LOAD_MAX_ROWS;
+    const maxCols = Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : DEFAULT_DESKTOP_LOAD_MAX_COLS;
     return { maxRows, maxCols };
   };
 
@@ -82,21 +88,15 @@ export function registerHomeStylesCommands(params: {
       const limits = getGridLimitsForFormatting();
       const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
       if (!decision.allowed) {
-        try {
-          showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
-        } catch {
-          // ignore (toast root missing in tests/headless)
-        }
+        safeShowToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
         focusGrid();
         return;
       }
 
+      // `applyFormattingToSelection` enforces the same read-only band-selection restrictions. Guard
+      // early here so users don't pick a style only to be blocked on apply.
       if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true && !decision.allRangesBand) {
-        try {
-          showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-        } catch {
-          // ignore (toast root missing in tests/headless)
-        }
+        safeShowToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
         focusGrid();
         return;
       }
@@ -114,7 +114,11 @@ export function registerHomeStylesCommands(params: {
         applyGoodBadNeutralCellStyle(doc, sheetId, ranges, presetId),
       );
     },
-    { category },
+    {
+      category,
+      icon: null,
+      keywords: ["cell styles", "cell style", "good", "bad", "neutral", "formatting"],
+    },
   );
 
   const registerFormatAsTableCommand = (presetId: FormatAsTablePresetId): void => {
@@ -130,11 +134,7 @@ export function registerHomeStylesCommands(params: {
           "Format as Table",
           (doc, sheetId, ranges) => {
             if (ranges.length !== 1) {
-              try {
-                showToast("Format as Table currently supports a single rectangular selection.", "warning");
-              } catch {
-                // ignore (e.g. toast root missing in tests)
-              }
+              safeShowToast("Format as Table currently supports a single rectangular selection.", "warning");
               return true;
             }
 
@@ -147,19 +147,20 @@ export function registerHomeStylesCommands(params: {
             const cellCount = rowCount * colCount;
             const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
             if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
-              try {
-                showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
-              } catch {
-                // ignore
-              }
+              safeShowToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
               return true;
             }
-            return applyFormatAsTablePreset(doc, sheetId, ranges[0], presetId);
+
+            return applyFormatAsTablePreset(doc, sheetId, range, presetId);
           },
           { forceBatch: true },
         );
       },
-      { category },
+      {
+        category,
+        icon: null,
+        keywords: ["format as table", "table", presetId],
+      },
     );
   };
 
