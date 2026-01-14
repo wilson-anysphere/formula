@@ -13964,6 +13964,15 @@ fn bytecode_expr_within_grid_limits_inner(
                                     }
 
                                     let (sheet_rows, sheet_cols) = origin_sheet_bounds;
+                                    // Out-of-bounds ranges return `#REF!` without allocating, so do
+                                    // not reject them based on dense materialization limits.
+                                    if resolved.row_end >= sheet_rows
+                                        || resolved.col_end >= sheet_cols
+                                        || sheet_rows <= 0
+                                        || sheet_cols <= 0
+                                    {
+                                        continue;
+                                    }
                                     let spans_all_cols = resolved.col_start == 0
                                         && resolved.col_end == sheet_cols.saturating_sub(1);
                                     let spans_all_rows = resolved.row_start == 0

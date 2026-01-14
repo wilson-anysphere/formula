@@ -286,6 +286,36 @@ fn bytecode_custom_sheet_dims_column_sheet_prefixed_column_range_does_not_trigge
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_row_out_of_bounds_whole_column_does_not_trigger_range_cell_limit() {
+    // Regression test: out-of-bounds whole-column references evaluate to `#REF!` without allocating
+    // large arrays. The bytecode compiler should not reject these formulas based on the
+    // referenced sheet row count.
+    let mut engine = Engine::new();
+    // Make the sheet very tall so `ROW(G:G)` would exceed the materialization cap if treated as a
+    // valid whole-column reference.
+    engine
+        .set_sheet_dimensions("Sheet1", 6_000_000, 5)
+        .expect("set Sheet1 dimensions");
+
+    // Column G is out-of-bounds for Sheet1 (only 5 columns), so the formula should return `#REF!`.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROW(G:G)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit()
 {
     // Regression test: `ROW(Sheet2!1:1000)` spans an entire *row range* (all columns), but the
