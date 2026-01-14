@@ -570,6 +570,116 @@ fn relatedtable_respects_userelationship_overrides_with_m2m_for_columnar_fact() 
 }
 
 #[test]
+fn relatedtable_errors_on_ambiguous_relationship_paths_with_m2m() {
+    // Build a model where Dim -> Fact has two active relationship paths:
+    //   Dim -> Fact (direct)
+    //   Dim -> Bridge -> Fact
+    // `RELATEDTABLE(Fact)` should error with an "ambiguous relationship path" message. Disabling one
+    // relationship via CROSSFILTER should make navigation deterministic again.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), "B".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut bridge = Table::new("Bridge", vec!["Key"]);
+    bridge.push_row(vec![1.into()]).unwrap();
+    bridge.push_row(vec![2.into()]).unwrap();
+    model.add_table(bridge).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "BridgeKey"]);
+    // Direct Dim-Key relationship would include both facts; BridgeKey path only includes the first.
+    fact.push_row(vec![1.into(), 1.into(), 1.into()]).unwrap();
+    fact.push_row(vec![2.into(), 1.into(), 2.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Bridge_Dim".into(),
+            from_table: "Bridge".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Bridge".into(),
+            from_table: "Fact".into(),
+            from_column: "BridgeKey".into(),
+            to_table: "Bridge".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", 0);
+
+    let err = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(RELATEDTABLE(Fact))",
+            &FilterContext::empty(),
+            &ctx,
+        )
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambiguous") && msg.contains("relationship path"),
+        "unexpected error: {err}"
+    );
+
+    // Disable the Bridge->Dim relationship: only the direct path remains.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), CROSSFILTER(Bridge[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    // Disable the direct Fact->Dim relationship: only the Bridge path remains.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), CROSSFILTER(Fact[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn insert_row_updates_m2m_from_index() {
     let mut model = DataModel::new();
 
