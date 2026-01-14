@@ -90,14 +90,15 @@ function dispatchPointerEvent(
     button,
     shiftKey: opts.shiftKey ?? false,
   };
-  const event =
-    typeof (globalThis as any).PointerEvent === "function"
-      ? new (globalThis as any).PointerEvent(type, base)
-      : (() => {
-          const e = new MouseEvent(type, base);
-          Object.assign(e, { pointerId });
-          return e;
-        })();
+  const event = (() => {
+    const PointerEventCtor = (globalThis as any).PointerEvent;
+    if (typeof PointerEventCtor === "function") {
+      return new PointerEventCtor(type, base);
+    }
+    return new MouseEvent(type, base);
+  })();
+  // Ensure pointer-only fields exist even when the environment shims PointerEvent with MouseEvent.
+  Object.assign(event, { pointerId });
   target.dispatchEvent(event);
 }
 
