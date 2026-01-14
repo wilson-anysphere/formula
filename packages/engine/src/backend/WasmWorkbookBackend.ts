@@ -44,7 +44,16 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
 
 type EngineWorkbookJson = {
   sheetOrder?: unknown;
-  sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
+  sheets?: Record<
+    string,
+    {
+      cells?: Record<string, unknown>;
+      rowCount?: number;
+      colCount?: number;
+      visibility?: unknown;
+      tabColor?: unknown;
+    }
+  >;
 };
 
 type EngineWorkbookInfo = {
@@ -195,7 +204,26 @@ export class WasmWorkbookBackend implements WorkbookBackend {
       }
     }
 
-    const sheets: SheetInfo[] = sheetIds.length > 0 ? sheetIds.map((id) => ({ id, name: id })) : [DEFAULT_SHEET];
+    const sheets: SheetInfo[] = [];
+    if (sheetIds.length > 0) {
+      for (const id of sheetIds) {
+        const next: SheetInfo = { id, name: id };
+        const sheetMeta = parsed?.sheets?.[id];
+        if (sheetMeta && typeof sheetMeta === "object") {
+          const visibility = (sheetMeta as any).visibility as unknown;
+          if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") {
+            next.visibility = visibility;
+          }
+          const tabColor = (sheetMeta as any).tabColor as unknown;
+          if (tabColor && typeof tabColor === "object" && !Array.isArray(tabColor)) {
+            next.tabColor = tabColor as any;
+          }
+        }
+        sheets.push(next);
+      }
+    } else {
+      sheets.push(DEFAULT_SHEET);
+    }
 
     const info: WorkbookInfo = {
       path: null,

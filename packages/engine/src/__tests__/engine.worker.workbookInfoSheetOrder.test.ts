@@ -120,6 +120,12 @@ describe("engine.worker getWorkbookInfo fallback respects sheetOrder", () => {
       expect(resp.ok).toBe(true);
       const sheets = (resp as any).result?.sheets ?? [];
       expect(sheets.map((s: any) => s.id)).toEqual(["Sheet2", "Sheet1", "Empty"]);
+
+      const byId = new Map(sheets.map((s: any) => [s.id, s]));
+      expect(byId.get("Sheet1")?.visibility).toBe("hidden");
+      expect(byId.get("Sheet1")?.tabColor).toEqual({ rgb: "FFFF0000" });
+      expect(byId.get("Sheet2")?.visibility).toBe("veryHidden");
+      expect(byId.get("Empty")?.tabColor).toEqual({ theme: 1, tint: 0.5 });
     } finally {
       dispose();
     }
@@ -138,4 +144,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-

@@ -78,7 +78,16 @@ type UsedRangeState = SheetUsedRangeDto;
 
 type EngineWorkbookJson = {
   sheetOrder?: unknown;
-  sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
+  sheets?: Record<
+    string,
+    {
+      cells?: Record<string, unknown>;
+      rowCount?: number;
+      colCount?: number;
+      visibility?: string;
+      tabColor?: unknown;
+    }
+  >;
 };
 
 function colNameToIndex(colName: string): number {
@@ -654,6 +663,18 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                           }
                           if (typeof sheetMeta.colCount === "number") {
                             sheet.colCount = sheetMeta.colCount;
+                          }
+                          if (
+                            typeof (sheetMeta as any).visibility === "string" &&
+                            ((sheetMeta as any).visibility === "visible" ||
+                              (sheetMeta as any).visibility === "hidden" ||
+                              (sheetMeta as any).visibility === "veryHidden")
+                          ) {
+                            sheet.visibility = (sheetMeta as any).visibility;
+                          }
+                          const tabColor = (sheetMeta as any).tabColor as unknown;
+                          if (tabColor && typeof tabColor === "object" && !Array.isArray(tabColor)) {
+                            sheet.tabColor = tabColor;
                           }
                         }
 

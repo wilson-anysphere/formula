@@ -460,6 +460,8 @@ describe("WasmWorkbookBackend", () => {
     const workbookJson = JSON.stringify({
       sheets: {
         Sheet1: {
+          visibility: "hidden",
+          tabColor: { rgb: "FFFF0000" },
           cells: {
             A1: 1,
             B2: 2,
@@ -467,6 +469,7 @@ describe("WasmWorkbookBackend", () => {
           },
         },
         Sheet2: {
+          visibility: "veryHidden",
           cells: {
             D4: "Hello",
           },
@@ -531,8 +534,8 @@ describe("WasmWorkbookBackend", () => {
       path: null,
       origin_path: null,
       sheets: [
-        { id: "Sheet1", name: "Sheet1" },
-        { id: "Sheet2", name: "Sheet2" },
+        { id: "Sheet1", name: "Sheet1", visibility: "hidden", tabColor: { rgb: "FFFF0000" } },
+        { id: "Sheet2", name: "Sheet2", visibility: "veryHidden" },
         { id: "Empty", name: "Empty" },
       ],
     });

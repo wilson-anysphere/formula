@@ -18,9 +18,9 @@ export class WasmWorkbook {
       sheetOrder: ["Sheet2", "Sheet1", "Empty"],
       sheets: {
         // Deliberately out of order to ensure consumers don't rely on Object.keys() ordering.
-        Empty: { cells: {} },
-        Sheet1: { cells: { A1: 1 } },
-        Sheet2: { cells: { B2: 2 } }
+        Empty: { cells: {}, tabColor: { theme: 1, tint: 0.5 } },
+        Sheet1: { cells: { A1: 1 }, visibility: "hidden", tabColor: { rgb: "FFFF0000" } },
+        Sheet2: { cells: { B2: 2 }, visibility: "veryHidden" }
       }
     });
   }
@@ -54,4 +54,3 @@ export function parseFormulaPartial() {
 export function rewriteFormulasForCopyDelta({ requests }) {
   return (requests ?? []).map((r) => r.formula ?? "");
 }
-
