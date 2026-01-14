@@ -6,6 +6,7 @@ use std::io::Write;
 
 const PASSWORD: &str = "password";
 const UNICODE_PASSWORD: &str = "pässwörd";
+const UNICODE_PASSWORD_WITH_EMOJI: &str = "pässwörd🔒";
 
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -157,6 +158,42 @@ fn cli_succeeds_with_unicode_password_file() {
         stdout.contains("No differences."),
         "expected output to indicate no differences, got:\n{stdout}"
     );
+}
+
+#[test]
+fn cli_succeeds_with_unicode_emoji_password_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let pw_path = tmp.path().join("password.txt");
+    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD_WITH_EMOJI}\n")).expect("write password file");
+
+    for (plain_name, encrypted_name) in [
+        ("plaintext.xlsx", "standard-unicode.xlsx"),
+        ("plaintext-excel.xlsx", "agile-unicode-excel.xlsx"),
+    ] {
+        let plain = fixture_path(plain_name);
+        let encrypted = fixture_path(encrypted_name);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+            .arg(&plain)
+            .arg(&encrypted)
+            .arg("--password-file")
+            .arg(&pw_path)
+            .output()
+            .unwrap_or_else(|err| panic!("run xlsx-diff ({encrypted_name}): {err}"));
+
+        assert!(
+            output.status.success(),
+            "{encrypted_name}: expected exit 0\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("No differences."),
+            "{encrypted_name}: expected output to indicate no differences, got:\n{stdout}"
+        );
+    }
 }
 
 #[test]
