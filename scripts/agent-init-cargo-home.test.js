@@ -259,3 +259,43 @@ test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !h
   assert.equal(stderr, '');
   assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
 });
+
+test('agent-init does not enable errexit in /bin/sh when it was previously disabled', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'set +e',
+      'export DISPLAY=:99',
+      'before=$-',
+      '. scripts/agent-init.sh >/dev/null',
+      'after=$-',
+      'printf "before=%s\\nafter=%s" "$before" "$after"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  const [beforeLine, afterLine] = stdout.split('\n');
+  const before = beforeLine.replace(/^before=/, '');
+  const after = afterLine.replace(/^after=/, '');
+  assert.ok(!before.includes('e'), `expected errexit disabled before sourcing; got $-=${before}`);
+  assert.ok(!after.includes('e'), `expected errexit disabled after sourcing; got $-=${after}`);
+});
+
+test('agent-init preserves errexit in /bin/sh when it was previously enabled', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'set -e',
+      'export DISPLAY=:99',
+      'before=$-',
+      '. scripts/agent-init.sh >/dev/null',
+      'after=$-',
+      'printf "before=%s\\nafter=%s" "$before" "$after"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  const [beforeLine, afterLine] = stdout.split('\n');
+  const before = beforeLine.replace(/^before=/, '');
+  const after = afterLine.replace(/^after=/, '');
+  assert.ok(before.includes('e'), `expected errexit enabled before sourcing; got $-=${before}`);
+  assert.ok(after.includes('e'), `expected errexit enabled after sourcing; got $-=${after}`);
+});
