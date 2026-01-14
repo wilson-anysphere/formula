@@ -2,10 +2,9 @@
 
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::io::{self, Write};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-#[cfg(not(target_arch = "wasm32"))]
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use formula_xlsx::{openxml, XlsxPackage};
