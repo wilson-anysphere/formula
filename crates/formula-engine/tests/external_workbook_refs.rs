@@ -328,6 +328,66 @@ fn external_refs_are_volatile() {
 }
 
 #[test]
+fn external_refs_can_be_non_volatile_with_explicit_invalidation() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+
+    // Mutate the provider without invalidation: the cell should not change because external refs
+    // are treated as non-volatile.
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 2.0);
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn external_sheet_invalidation_only_dirties_dependents_of_that_sheet() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 10.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=[Book.xlsx]Sheet2!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(10.0));
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 2.0);
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 20.0);
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    // A2 should not be refreshed because Sheet2 was not invalidated.
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(10.0));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet2");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(20.0));
+}
+
+#[test]
 fn degenerate_external_3d_sheet_range_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(

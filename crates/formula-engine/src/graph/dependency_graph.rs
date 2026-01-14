@@ -321,6 +321,24 @@ impl DependencyGraph {
         self.volatile_closure_valid = false;
     }
 
+    /// Update the volatility flag for an existing formula cell without changing its precedents.
+    ///
+    /// If `cell` is not a tracked formula cell, this is a no-op.
+    pub fn set_cell_volatile(&mut self, cell: CellId, is_volatile: bool) {
+        if !self.cells.contains_key(&cell) {
+            return;
+        }
+
+        let changed = if is_volatile {
+            self.volatile_roots.insert(cell)
+        } else {
+            self.volatile_roots.remove(&cell)
+        };
+        if changed {
+            self.volatile_closure_valid = false;
+        }
+    }
+
     /// Returns the direct precedents for a formula cell, including range nodes.
     ///
     /// Non-formula cells return an empty list.

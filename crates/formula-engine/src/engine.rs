@@ -589,11 +589,29 @@ pub struct Engine {
     workbook: Workbook,
     bytecode_cache: bytecode::BytecodeCache,
     bytecode_enabled: bool,
+    /// Controls whether external workbook references (e.g. `[Book.xlsx]Sheet1!A1`) are treated as
+    /// volatile roots.
+    ///
+    /// When enabled (the default), formulas containing any external reference are automatically
+    /// re-evaluated on every recalculation pass. When disabled, external references are treated as
+    /// non-volatile and will only refresh when explicitly invalidated via
+    /// [`Engine::mark_external_sheet_dirty`] / [`Engine::mark_external_workbook_dirty`] or when the
+    /// formula is otherwise marked dirty.
+    external_refs_volatile: bool,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
     pivot_registry: crate::pivot_registry::PivotRegistry,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
+    /// Reverse index: external sheet key -> local formula cells that reference it.
+    external_sheet_dependents: HashMap<String, HashSet<CellKey>>,
+    /// Forward index: local formula cell -> external sheet keys referenced by its formula.
+    cell_external_sheet_refs: HashMap<CellKey, HashSet<String>>,
+    /// Reverse index: external workbook identifier (e.g. `Book.xlsx`) -> local formula cells that
+    /// reference any sheet within that workbook.
+    external_workbook_dependents: HashMap<String, HashSet<CellKey>>,
+    /// Forward index: local formula cell -> external workbook identifiers referenced by its formula.
+    cell_external_workbook_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
     calc_graph: CalcGraph,
     dirty: HashSet<CellKey>,
@@ -677,11 +695,16 @@ impl Engine {
             workbook: Workbook::default(),
             bytecode_cache: bytecode::BytecodeCache::new(),
             bytecode_enabled: true,
+            external_refs_volatile: true,
             external_value_provider: None,
             external_data_provider: None,
             pivot_registry: crate::pivot_registry::PivotRegistry::default(),
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
+            external_sheet_dependents: HashMap::new(),
+            cell_external_sheet_refs: HashMap::new(),
+            external_workbook_dependents: HashMap::new(),
+            cell_external_workbook_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
             dirty: HashSet::new(),
             dirty_reasons: HashMap::new(),
@@ -1515,6 +1538,132 @@ impl Engine {
         self.external_data_provider = provider;
     }
 
+    /// Returns whether external workbook references are treated as volatile roots.
+    ///
+    /// See [`Engine::set_external_refs_volatile`] for details.
+    pub fn external_refs_volatile(&self) -> bool {
+        self.external_refs_volatile
+    }
+
+    /// Configure whether external workbook references (e.g. `[Book.xlsx]Sheet1!A1`) are treated as
+    /// volatile.
+    ///
+    /// - When enabled (the default), formulas containing external references are re-evaluated on
+    ///   every recalculation pass (Excel-compatible behavior).
+    /// - When disabled, external references are considered non-volatile and will only refresh after
+    ///   explicit invalidation via [`Engine::mark_external_sheet_dirty`] /
+    ///   [`Engine::mark_external_workbook_dirty`] or when the formula is otherwise marked dirty.
+    pub fn set_external_refs_volatile(&mut self, volatile: bool) {
+        if self.external_refs_volatile == volatile {
+            return;
+        }
+        self.external_refs_volatile = volatile;
+
+        // Refresh per-cell volatile flags and dependency-graph volatile roots. This is a rare,
+        // engine-wide configuration knob, so scanning formula cells is acceptable.
+        let tables_by_sheet: Vec<Vec<Table>> = self
+            .workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if self.workbook.sheet_exists(sheet_id) {
+                    s.tables.clone()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+
+        let mut updates: Vec<(CellKey, bool)> = Vec::new();
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
+            for (addr, cell) in &sheet.cells {
+                let Some(compiled) = cell.compiled.as_ref() else {
+                    continue;
+                };
+                let key = CellKey {
+                    sheet: sheet_id,
+                    addr: *addr,
+                };
+                let (_, is_volatile, _, _) = analyze_expr_flags(
+                    compiled.ast(),
+                    key,
+                    &tables_by_sheet,
+                    &self.workbook,
+                    self.external_refs_volatile,
+                );
+                if is_volatile != cell.volatile {
+                    updates.push((key, is_volatile));
+                }
+            }
+        }
+
+        for (key, is_volatile) in updates {
+            if let Some(cell) = self
+                .workbook
+                .sheets
+                .get_mut(key.sheet)
+                .and_then(|s| s.cells.get_mut(&key.addr))
+            {
+                cell.volatile = is_volatile;
+            }
+            self.calc_graph
+                .set_cell_volatile(cell_id_from_key(key), is_volatile);
+        }
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Explicitly mark all formulas that reference the given external sheet key as dirty.
+    ///
+    /// `sheet_key` must be in canonical external sheet form, e.g. `"[Book.xlsx]Sheet1"`.
+    pub fn mark_external_sheet_dirty(&mut self, sheet_key: &str) {
+        let sheet_key = sheet_key.trim();
+        let Some(cells) = self.external_sheet_dependents.get(sheet_key).cloned() else {
+            return;
+        };
+
+        for key in cells {
+            self.dirty_reasons.remove(&key);
+            self.calc_graph.mark_dirty(cell_id_from_key(key));
+        }
+        self.sync_dirty_from_calc_graph();
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Explicitly mark all formulas that reference any sheet within `workbook` as dirty.
+    ///
+    /// `workbook` should match the workbook component of an external sheet key, e.g. `"Book.xlsx"`
+    /// for the sheet key `"[Book.xlsx]Sheet1"`.
+    pub fn mark_external_workbook_dirty(&mut self, workbook: &str) {
+        let mut workbook = workbook.trim();
+        if let Some(stripped) = workbook.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            workbook = stripped;
+        }
+
+        let Some(cells) = self.external_workbook_dependents.get(workbook).cloned() else {
+            return;
+        };
+
+        for key in cells {
+            self.dirty_reasons.remove(&key);
+            self.calc_graph.mark_dirty(cell_id_from_key(key));
+        }
+        self.sync_dirty_from_calc_graph();
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
     pub fn bytecode_program_count(&self) -> usize {
         self.bytecode_cache.program_count()
     }
@@ -1875,6 +2024,7 @@ impl Engine {
         // Replace any existing formula and dependencies.
         self.calc_graph.remove_cell(cell_id);
         self.clear_cell_name_refs(key);
+        self.clear_cell_external_refs(key);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -2031,6 +2181,7 @@ impl Engine {
         // Remove any existing formula and dependencies.
         self.calc_graph.remove_cell(cell_id);
         self.clear_cell_name_refs(key);
+        self.clear_cell_external_refs(key);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -2133,8 +2284,11 @@ impl Engine {
         for (key, formula, ast) in formulas {
             let cell_id = cell_id_from_key(key);
             let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook, self.external_refs_volatile);
             self.set_cell_name_refs(key, names);
+            let (external_sheets, external_workbooks) =
+                analyze_external_dependencies(&ast, key, &self.workbook);
+            self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
@@ -2402,8 +2556,17 @@ impl Engine {
             );
 
             let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(&compiled_ast, key, &tables_by_sheet, &self.workbook);
+                analyze_expr_flags(
+                    &compiled_ast,
+                    key,
+                    &tables_by_sheet,
+                    &self.workbook,
+                    self.external_refs_volatile,
+                );
             self.set_cell_name_refs(key, names);
+            let (external_sheets, external_workbooks) =
+                analyze_external_dependencies(&compiled_ast, key, &self.workbook);
+            self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents = analyze_calc_precedents(
                 &compiled_ast,
@@ -2684,9 +2847,18 @@ impl Engine {
             .iter()
             .map(|s| s.tables.clone())
             .collect();
-        let (names, volatile, thread_safe, dynamic_deps) =
-            analyze_expr_flags(&compiled, key, &tables_by_sheet, &self.workbook);
+            let (names, volatile, thread_safe, dynamic_deps) =
+            analyze_expr_flags(
+                &compiled,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
         self.set_cell_name_refs(key, names);
+        let (external_sheets, external_workbooks) =
+            analyze_external_dependencies(&compiled, key, &self.workbook);
+        self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
         // Optimized precedents for calculation ordering (range nodes are not expanded).
         let calc_precedents = analyze_calc_precedents(
@@ -6188,6 +6360,68 @@ impl Engine {
         }
     }
 
+    fn clear_cell_external_refs(&mut self, cell: CellKey) {
+        if let Some(keys) = self.cell_external_sheet_refs.remove(&cell) {
+            for key in keys {
+                let should_remove = self
+                    .external_sheet_dependents
+                    .get_mut(&key)
+                    .map(|deps| {
+                        deps.remove(&cell);
+                        deps.is_empty()
+                    })
+                    .unwrap_or(false);
+                if should_remove {
+                    self.external_sheet_dependents.remove(&key);
+                }
+            }
+        }
+
+        if let Some(workbooks) = self.cell_external_workbook_refs.remove(&cell) {
+            for workbook in workbooks {
+                let should_remove = self
+                    .external_workbook_dependents
+                    .get_mut(&workbook)
+                    .map(|deps| {
+                        deps.remove(&cell);
+                        deps.is_empty()
+                    })
+                    .unwrap_or(false);
+                if should_remove {
+                    self.external_workbook_dependents.remove(&workbook);
+                }
+            }
+        }
+    }
+
+    fn set_cell_external_refs(
+        &mut self,
+        cell: CellKey,
+        sheet_keys: HashSet<String>,
+        workbook_keys: HashSet<String>,
+    ) {
+        self.clear_cell_external_refs(cell);
+
+        if !sheet_keys.is_empty() {
+            self.cell_external_sheet_refs
+                .insert(cell, sheet_keys.clone());
+            for key in sheet_keys {
+                self.external_sheet_dependents.entry(key).or_default().insert(cell);
+            }
+        }
+
+        if !workbook_keys.is_empty() {
+            self.cell_external_workbook_refs
+                .insert(cell, workbook_keys.clone());
+            for workbook in workbook_keys {
+                self.external_workbook_dependents
+                    .entry(workbook)
+                    .or_default()
+                    .insert(cell);
+            }
+        }
+    }
+
     fn refresh_cells_after_name_change(&mut self, name: &str) {
         let Some(cells) = self.name_dependents.get(name).cloned() else {
             return;
@@ -6213,8 +6447,11 @@ impl Engine {
             let cell_id = cell_id_from_key(key);
 
             let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook, self.external_refs_volatile);
             self.set_cell_name_refs(key, names);
+            let (external_sheets, external_workbooks) =
+                analyze_external_dependencies(&ast, key, &self.workbook);
+            self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
@@ -6297,6 +6534,10 @@ impl Engine {
         self.calc_graph = CalcGraph::new();
         self.name_dependents.clear();
         self.cell_name_refs.clear();
+        self.external_sheet_dependents.clear();
+        self.cell_external_sheet_refs.clear();
+        self.external_workbook_dependents.clear();
+        self.cell_external_workbook_refs.clear();
         self.dirty.clear();
         self.dirty_reasons.clear();
         self.spills = SpillState::default();
@@ -12021,6 +12262,7 @@ fn analyze_expr_flags(
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
+    external_refs_volatile: bool,
 ) -> (HashSet<String>, bool, bool, bool) {
     let mut names = HashSet::new();
     let mut volatile = false;
@@ -12039,6 +12281,7 @@ fn analyze_expr_flags(
         &mut dynamic_deps,
         &mut visiting_names,
         &mut lexical_scopes,
+        external_refs_volatile,
     );
     (names, volatile, thread_safe, dynamic_deps)
 }
@@ -12054,6 +12297,7 @@ fn walk_expr_flags(
     dynamic_deps: &mut bool,
     visiting_names: &mut HashSet<(SheetId, String)>,
     lexical_scopes: &mut Vec<HashSet<String>>,
+    external_refs_volatile: bool,
 ) {
     fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
         scopes.iter().rev().any(|scope| scope.contains(name_key))
@@ -12127,6 +12371,7 @@ fn walk_expr_flags(
                         dynamic_deps,
                         visiting_names,
                         lexical_scopes,
+                        external_refs_volatile,
                     );
                 }
             }
@@ -12145,6 +12390,7 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
         }
         Expr::FieldAccess { base, .. } => {
@@ -12159,6 +12405,7 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
@@ -12173,6 +12420,7 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
             walk_expr_flags(
                 right,
@@ -12185,6 +12433,7 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
         }
         Expr::FunctionCall { name, args, .. } => {
@@ -12239,6 +12488,7 @@ fn walk_expr_flags(
                                 dynamic_deps,
                                 visiting_names,
                                 lexical_scopes,
+                                external_refs_volatile,
                             );
                             lexical_scopes
                                 .last_mut()
@@ -12257,6 +12507,7 @@ fn walk_expr_flags(
                             dynamic_deps,
                             visiting_names,
                             lexical_scopes,
+                            external_refs_volatile,
                         );
                         lexical_scopes.pop();
                         return;
@@ -12288,6 +12539,7 @@ fn walk_expr_flags(
                             dynamic_deps,
                             visiting_names,
                             lexical_scopes,
+                            external_refs_volatile,
                         );
                         lexical_scopes.pop();
                         return;
@@ -12321,6 +12573,7 @@ fn walk_expr_flags(
                                     dynamic_deps,
                                     visiting_names,
                                     lexical_scopes,
+                                    external_refs_volatile,
                                 );
                             }
                         }
@@ -12345,6 +12598,7 @@ fn walk_expr_flags(
                     dynamic_deps,
                     visiting_names,
                     lexical_scopes,
+                    external_refs_volatile,
                 );
             }
         }
@@ -12360,6 +12614,7 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
             for a in args {
                 walk_expr_flags(
@@ -12373,6 +12628,7 @@ fn walk_expr_flags(
                     dynamic_deps,
                     visiting_names,
                     lexical_scopes,
+                    external_refs_volatile,
                 );
             }
         }
@@ -12389,6 +12645,7 @@ fn walk_expr_flags(
                     dynamic_deps,
                     visiting_names,
                     lexical_scopes,
+                    external_refs_volatile,
                 );
             }
         }
@@ -12404,19 +12661,24 @@ fn walk_expr_flags(
                 dynamic_deps,
                 visiting_names,
                 lexical_scopes,
+                external_refs_volatile,
             );
         }
         Expr::CellRef(r) => {
-            if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::split_external_sheet_key(key).is_some() {
-                    *volatile = true;
+            if external_refs_volatile {
+                if let SheetReference::External(key) = &r.sheet {
+                    if crate::eval::split_external_sheet_key(key).is_some() {
+                        *volatile = true;
+                    }
                 }
             }
         }
         Expr::RangeRef(r) => {
-            if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::split_external_sheet_key(key).is_some() {
-                    *volatile = true;
+            if external_refs_volatile {
+                if let SheetReference::External(key) = &r.sheet {
+                    if crate::eval::split_external_sheet_key(key).is_some() {
+                        *volatile = true;
+                    }
                 }
             }
         }
@@ -12518,6 +12780,307 @@ fn expand_external_sheet_span_key(
             .map(|name| format!("[{workbook}]{name}"))
             .collect(),
     )
+}
+
+fn analyze_external_dependencies(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    workbook: &Workbook,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut external_sheets: HashSet<String> = HashSet::new();
+    let mut external_workbooks: HashSet<String> = HashSet::new();
+    let mut visiting_names = HashSet::new();
+    let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
+    walk_external_dependencies(
+        expr,
+        current_cell,
+        workbook,
+        &mut external_sheets,
+        &mut external_workbooks,
+        &mut visiting_names,
+        &mut lexical_scopes,
+    );
+    (external_sheets, external_workbooks)
+}
+
+fn walk_external_dependencies(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    workbook: &Workbook,
+    external_sheets: &mut HashSet<String>,
+    external_workbooks: &mut HashSet<String>,
+    visiting_names: &mut HashSet<(SheetId, String)>,
+    lexical_scopes: &mut Vec<HashSet<String>>,
+) {
+    fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name_key))
+    }
+
+    fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
+        match expr {
+            Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
+                Some(normalize_defined_name(&nref.name))
+            }
+            _ => None,
+        }
+    }
+
+    match expr {
+        Expr::CellRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key(key) {
+                    external_workbooks.insert(workbook.to_string());
+                }
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    external_sheets.insert(key.clone());
+                }
+            }
+        }
+        Expr::RangeRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key(key) {
+                    external_workbooks.insert(workbook.to_string());
+                }
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    external_sheets.insert(key.clone());
+                }
+            }
+        }
+        Expr::NameRef(nref) => {
+            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+                return;
+            };
+            let name_key = normalize_defined_name(&nref.name);
+            if name_key.is_empty() {
+                return;
+            }
+
+            // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+            // Explicit sheet-qualified names should still resolve as defined names.
+            if matches!(nref.sheet, SheetReference::Current)
+                && name_is_local(lexical_scopes, &name_key)
+            {
+                return;
+            }
+
+            let visit_key = (sheet, name_key.clone());
+            if !visiting_names.insert(visit_key.clone()) {
+                return;
+            }
+            if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                if let Some(expr) = def.compiled.as_ref() {
+                    walk_external_dependencies(
+                        expr,
+                        CellKey {
+                            sheet,
+                            addr: current_cell.addr,
+                        },
+                        workbook,
+                        external_sheets,
+                        external_workbooks,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                }
+            }
+            visiting_names.remove(&visit_key);
+        }
+        Expr::FieldAccess { base, .. } => walk_external_dependencies(
+            base,
+            current_cell,
+            workbook,
+            external_sheets,
+            external_workbooks,
+            visiting_names,
+            lexical_scopes,
+        ),
+        Expr::Unary { expr, .. }
+        | Expr::Postfix { expr, .. }
+        | Expr::ImplicitIntersection(expr)
+        | Expr::SpillRange(expr) => walk_external_dependencies(
+            expr,
+            current_cell,
+            workbook,
+            external_sheets,
+            external_workbooks,
+            visiting_names,
+            lexical_scopes,
+        ),
+        Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
+            walk_external_dependencies(
+                left,
+                current_cell,
+                workbook,
+                external_sheets,
+                external_workbooks,
+                visiting_names,
+                lexical_scopes,
+            );
+            walk_external_dependencies(
+                right,
+                current_cell,
+                workbook,
+                external_sheets,
+                external_workbooks,
+                visiting_names,
+                lexical_scopes,
+            );
+        }
+        Expr::FunctionCall { name, args, .. } => {
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                match spec.name {
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
+
+                        lexical_scopes.push(HashSet::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Some(name_key) = bare_identifier(&pair[0]) else {
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            walk_external_dependencies(
+                                &pair[1],
+                                current_cell,
+                                workbook,
+                                external_sheets,
+                                external_workbooks,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                            lexical_scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name_key);
+                        }
+
+                        walk_external_dependencies(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            external_sheets,
+                            external_workbooks,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    "LAMBDA" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        let mut scope = HashSet::new();
+                        for param in &args[..args.len() - 1] {
+                            let Some(name_key) = bare_identifier(param) else {
+                                return;
+                            };
+                            if !scope.insert(name_key) {
+                                return;
+                            }
+                        }
+
+                        lexical_scopes.push(scope);
+                        walk_external_dependencies(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            external_sheets,
+                            external_workbooks,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    _ => {}
+                }
+            } else {
+                // Unknown function name: treat it as a potential defined name (UDF) and expand the
+                // definition if present.
+                let name_key = normalize_defined_name(name);
+                let is_local = !name_key.is_empty() && name_is_local(lexical_scopes, &name_key);
+                if !name_key.is_empty() && !is_local {
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.clone());
+                    if visiting_names.insert(visit_key.clone()) {
+                        if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                            if let Some(expr) = def.compiled.as_ref() {
+                                walk_external_dependencies(
+                                    expr,
+                                    CellKey {
+                                        sheet,
+                                        addr: current_cell.addr,
+                                    },
+                                    workbook,
+                                    external_sheets,
+                                    external_workbooks,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                        }
+                        visiting_names.remove(&visit_key);
+                    }
+                }
+            }
+
+            for a in args {
+                walk_external_dependencies(
+                    a,
+                    current_cell,
+                    workbook,
+                    external_sheets,
+                    external_workbooks,
+                    visiting_names,
+                    lexical_scopes,
+                );
+            }
+        }
+        Expr::Call { callee, args } => {
+            walk_external_dependencies(
+                callee,
+                current_cell,
+                workbook,
+                external_sheets,
+                external_workbooks,
+                visiting_names,
+                lexical_scopes,
+            );
+            for a in args {
+                walk_external_dependencies(
+                    a,
+                    current_cell,
+                    workbook,
+                    external_sheets,
+                    external_workbooks,
+                    visiting_names,
+                    lexical_scopes,
+                );
+            }
+        }
+        Expr::ArrayLiteral { values, .. } => {
+            for el in values.iter() {
+                walk_external_dependencies(
+                    el,
+                    current_cell,
+                    workbook,
+                    external_sheets,
+                    external_workbooks,
+                    visiting_names,
+                    lexical_scopes,
+                );
+            }
+        }
+        Expr::StructuredRef(_)
+        | Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Bool(_)
+        | Expr::Blank
+        | Expr::Error(_) => {}
+    }
 }
 
 fn walk_external_expr(
