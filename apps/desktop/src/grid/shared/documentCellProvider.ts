@@ -1034,7 +1034,11 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   getMergedRangeAt(row: number, col: number): CellRange | null {
-    const { headerRows, headerCols } = this.options;
+    const { rowCount, colCount, headerRows, headerCols } = this.options;
+    if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
+    // Never treat header cells as merged.
+    if (row < headerRows || col < headerCols) return null;
+
     const sheetId = this.options.getSheetId();
     const docRow = row - headerRows;
     const docCol = col - headerCols;
