@@ -42,11 +42,6 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `standard-large.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
    - Decrypts to `plaintext-large.xlsx` with password `password`
-   - Note: Standard/CryptoAPI AES has multiple real-world `EncryptedPackage` variants (ECB vs CBC).
-     This is a *non-standard* “Standard-like” fixture (reduced iteration count + AES-CBC segmented
-     decryption) used to exercise multi-segment Standard decryption paths. In this repo,
-     `standard.xlsx` is the ECMA-376/MS-OFFCRYPTO AES-ECB fixture; see
-     `docs/offcrypto-standard-encryptedpackage.md` (and `docs/office-encryption.md`) for details.
 
 ### Why the `*-large.xlsx` fixtures exist
 
@@ -55,9 +50,9 @@ Agile encryption processes the plaintext package in **4096-byte segments**. Sinc
 sure we cover **multi-segment** decryption.
 
 Note: ECMA-376/MS-OFFCRYPTO Standard encryption uses AES-ECB (no IV), so multi-segment decryption is
-not a meaningful distinction for the Standard algorithm itself. `standard-large.xlsx` exists to
-exercise the multi-segment code path in `crates/formula-xlsx::offcrypto`, which implements a
-Standard-like AES-CBC segmented scheme for compatibility/testing.
+not a meaningful distinction for the Standard algorithm itself. `standard-large.xlsx` still exists
+as a regression fixture to ensure we cover Standard decryption against a **larger** package (and
+therefore more realistic ciphertext sizes + truncation behavior).
 
 - `plaintext-basic.xlsm` – unencrypted ZIP-based macro-enabled workbook (starts with `PK`).
   - Copied from `fixtures/xlsx/macros/basic.xlsm`.
@@ -94,7 +89,7 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   `standard.xlsx`, `agile-unicode.xlsx`, and the macro-enabled `.xlsm` fixtures.
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:
   end-to-end decryption for `agile-large.xlsx` + `standard-large.xlsx` against `plaintext-large.xlsx`
-  (exercises multi-segment decryption).
+  (exercises multi-segment decryption for Agile, and larger-package coverage for Standard).
 - `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs`:
   decrypts `agile-empty-password.xlsx` and asserts empty password `""` is distinct from a missing password.
 
