@@ -241,6 +241,47 @@ fn filter_not_comparison_does_not_match_nulls() {
 }
 
 #[test]
+fn filter_not_with_or_and_nulls_uses_three_valued_logic() {
+    let schema = vec![ColumnSchema {
+        name: "n".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    builder.append_row(&[Value::Number(1.0)]);
+    builder.append_row(&[Value::Number(2.0)]);
+    builder.append_row(&[Value::Null]);
+    let table = builder.finalize();
+
+    // NOT (n = 1 OR n = 2) should be unknown for NULL and therefore not select it.
+    let expr = FilterExpr::Not(Box::new(FilterExpr::Or(
+        Box::new(FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(1.0),
+        }),
+        Box::new(FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(2.0),
+        }),
+    )));
+    let mask = table.filter_mask(&expr).unwrap();
+    assert_eq!(mask_to_bools(&mask), vec![false, false, false]);
+
+    // NOT (n = 1 OR n IS NULL) should select only the row where n=2.
+    let expr = FilterExpr::Not(Box::new(FilterExpr::Or(
+        Box::new(FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(1.0),
+        }),
+        Box::new(FilterExpr::IsNull { col: 0 }),
+    )));
+    let mask = table.filter_mask(&expr).unwrap();
+    assert_eq!(mask_to_bools(&mask), vec![false, true, false]);
+}
+
+#[test]
 fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
     let schema = vec![ColumnSchema {
         name: "n".to_owned(),
