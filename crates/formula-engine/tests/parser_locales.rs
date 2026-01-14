@@ -203,6 +203,55 @@ fn lex_array_literals_disambiguate_function_arg_separators_in_comma_decimal_loca
 }
 
 #[test]
+fn lex_comma_decimal_locales_disambiguate_union_and_arg_separators() {
+    // In comma-decimal locales, the list separator `;` is overloaded:
+    // - function argument separator inside `NAME(...)`
+    // - union operator between references/expressions
+    //
+    // Ensure we correctly classify `;` based on paren context.
+    for locale in [
+        LocaleConfig::de_de(),
+        LocaleConfig::fr_fr(),
+        LocaleConfig::es_es(),
+    ] {
+        let mut opts = ParseOptions::default();
+        opts.locale = locale;
+
+        let tokens = lex("SUM(A1;B1)", &opts).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+        assert!(matches!(tokens[1].kind, TokenKind::LParen));
+        assert!(matches!(tokens[2].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[3].kind, TokenKind::ArgSep));
+        assert!(matches!(tokens[4].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[5].kind, TokenKind::RParen));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+
+        let tokens = lex("(A1;B1)", &opts).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::LParen));
+        assert!(matches!(tokens[1].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[2].kind, TokenKind::Union));
+        assert!(matches!(tokens[3].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[4].kind, TokenKind::RParen));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+
+        // Union inside a function argument must be parenthesized so the inner `;` is treated as
+        // `Union`, while the outer `;` remains an `ArgSep`.
+        let tokens = lex("SUM((A1;B1);C1)", &opts).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+        assert!(matches!(tokens[1].kind, TokenKind::LParen));
+        assert!(matches!(tokens[2].kind, TokenKind::LParen));
+        assert!(matches!(tokens[3].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[4].kind, TokenKind::Union));
+        assert!(matches!(tokens[5].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[6].kind, TokenKind::RParen));
+        assert!(matches!(tokens[7].kind, TokenKind::ArgSep));
+        assert!(matches!(tokens[8].kind, TokenKind::Cell(_)));
+        assert!(matches!(tokens[9].kind, TokenKind::RParen));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+    }
+}
+
+#[test]
 fn lex_localized_error_literal_inverted_exclamation() {
     let mut opts = ParseOptions::default();
     opts.locale = LocaleConfig::en_us();
