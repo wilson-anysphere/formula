@@ -23,6 +23,10 @@ export type {
   CanvasGridImageResolver,
   CanvasGridImageSource,
   CanvasGridRendererOptions,
+  GridViewportChangeEvent,
+  GridViewportChangeListener,
+  GridViewportChangeReason,
+  GridViewportSubscriptionOptions,
   GridPerfStats,
   ScrollToCellAlign
 } from "./rendering/CanvasGridRenderer.ts";

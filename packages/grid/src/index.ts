@@ -24,7 +24,16 @@ export type { FillMode } from "./interaction/fillHandle";
 
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
 
-export type { CanvasGridImageResolver, CanvasGridImageSource, CanvasGridRendererOptions, GridPerfStats } from "./rendering/CanvasGridRenderer";
+export type {
+  CanvasGridImageResolver,
+  CanvasGridImageSource,
+  CanvasGridRendererOptions,
+  GridPerfStats,
+  GridViewportChangeEvent,
+  GridViewportChangeListener,
+  GridViewportChangeReason,
+  GridViewportSubscriptionOptions
+} from "./rendering/CanvasGridRenderer";
 export type { GridTheme } from "./theme/GridTheme";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme";
 export { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "./rendering/defaultFontFamilies";
