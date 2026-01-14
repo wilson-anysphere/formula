@@ -74,7 +74,9 @@ export type {
 export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula.ts";
 export {
   isMissingGetLocaleInfoError,
+  isMissingGetCellPhoneticError,
   isMissingGetRangeCompactError,
+  isMissingSetCellPhoneticError,
   isMissingSupportedLocaleIdsError,
 } from "./compat.ts";
 

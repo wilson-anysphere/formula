@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { isMissingGetLocaleInfoError, isMissingGetRangeCompactError, isMissingSupportedLocaleIdsError } from "../compat.ts";
+import {
+  isMissingGetCellPhoneticError,
+  isMissingGetLocaleInfoError,
+  isMissingGetRangeCompactError,
+  isMissingSetCellPhoneticError,
+  isMissingSupportedLocaleIdsError
+} from "../compat.ts";
 
 describe("isMissingGetRangeCompactError", () => {
   it("matches unknown RPC method errors", () => {
@@ -50,5 +56,43 @@ describe("isMissingGetLocaleInfoError", () => {
   it("does not match unrelated errors", () => {
     expect(isMissingGetLocaleInfoError(new Error("boom"))).toBe(false);
     expect(isMissingGetLocaleInfoError("boom")).toBe(false);
+  });
+});
+
+describe("isMissingGetCellPhoneticError", () => {
+  it("matches unknown RPC method errors", () => {
+    expect(isMissingGetCellPhoneticError(new Error("unknown method: getCellPhonetic"))).toBe(true);
+  });
+
+  it("matches missing WASM export errors", () => {
+    expect(
+      isMissingGetCellPhoneticError(
+        new Error("getCellPhonetic: WasmWorkbook.getCellPhonetic is not available in this WASM build")
+      )
+    ).toBe(true);
+  });
+
+  it("does not match unrelated errors", () => {
+    expect(isMissingGetCellPhoneticError(new Error("boom"))).toBe(false);
+    expect(isMissingGetCellPhoneticError("boom")).toBe(false);
+  });
+});
+
+describe("isMissingSetCellPhoneticError", () => {
+  it("matches unknown RPC method errors", () => {
+    expect(isMissingSetCellPhoneticError(new Error("unknown method: setCellPhonetic"))).toBe(true);
+  });
+
+  it("matches missing WASM export errors", () => {
+    expect(
+      isMissingSetCellPhoneticError(
+        new Error("setCellPhonetic: WasmWorkbook.setCellPhonetic is not available in this WASM build")
+      )
+    ).toBe(true);
+  });
+
+  it("does not match unrelated errors", () => {
+    expect(isMissingSetCellPhoneticError(new Error("boom"))).toBe(false);
+    expect(isMissingSetCellPhoneticError("boom")).toBe(false);
   });
 });
