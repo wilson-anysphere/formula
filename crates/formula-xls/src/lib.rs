@@ -461,6 +461,9 @@ fn import_xls_path_with_biff_reader(
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
+    // Cache workbook-global EXTERNSHEET entries so worksheet formula fallbacks can decode 3D refs
+    // even after the larger BIFF globals cache is dropped.
+    let mut biff_externsheet_entries: Vec<biff::externsheet::ExternSheetEntry> = Vec::new();
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
@@ -523,6 +526,7 @@ fn import_xls_path_with_biff_reader(
                 push_import_warning(&mut warnings, warning, &mut warnings_suppressed);
             }
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
+            biff_externsheet_entries = std::mem::take(&mut globals.extern_sheets);
 
             let interesting = globals.xf_is_interesting_mask();
             xf_style_ids = Some(vec![0; interesting.len()]);
@@ -1685,16 +1689,12 @@ fn import_xls_path_with_biff_reader(
                     // defined-name metadata are left empty for best-effort decoding.
                     let sheet_names_by_biff_idx: Vec<String> =
                         biff_sheets.iter().map(|s| s.name.clone()).collect();
-                    let externsheet_entries = biff_globals
-                        .as_ref()
-                        .map(|g| g.extern_sheets.as_slice())
-                        .unwrap_or(&[]);
                     let supbooks: &[biff::supbook::SupBookInfo] = &[];
                     let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
                     let ctx = biff::rgce::RgceDecodeContext {
                         codepage,
                         sheet_names: &sheet_names_by_biff_idx,
-                        externsheet: externsheet_entries,
+                        externsheet: &biff_externsheet_entries,
                         supbooks,
                         defined_names,
                     };

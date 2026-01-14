@@ -116,3 +116,54 @@ fn warns_and_skips_malformed_file_moniker_hyperlinks() {
         result.warnings
     );
 }
+
+#[test]
+fn imports_url_moniker_when_length_is_char_count() {
+    let bytes = xls_fixture_builder::build_url_hyperlink_char_count_len_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("UrlLenChars")
+        .expect("UrlLenChars missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::ExternalUrl {
+            uri: "https://example.com".to_string()
+        }
+    );
+    assert_eq!(link.display.as_deref(), Some("Example"));
+    assert_eq!(link.tooltip.as_deref(), Some("Tooltip"));
+    assert!(result.warnings.is_empty(), "warnings={:?}", result.warnings);
+}
+
+#[test]
+fn imports_hyperlink_strings_encoded_as_biff8_unicode_string() {
+    let bytes = xls_fixture_builder::build_biff8_unicode_string_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("Biff8Display")
+        .expect("Biff8Display missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::Internal {
+            sheet: "Biff8Display".to_string(),
+            cell: CellRef::from_a1("B2").unwrap(),
+        }
+    );
+
+    // Display string includes an embedded NUL; importer should truncate and still import.
+    assert_eq!(link.display.as_deref(), Some("Foo"));
+    assert_eq!(link.tooltip.as_deref(), Some("Tip"));
+    assert!(result.warnings.is_empty(), "warnings={:?}", result.warnings);
+}

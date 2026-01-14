@@ -2187,6 +2187,28 @@ pub fn build_url_hyperlink_embedded_nul_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a URL hyperlink whose URL moniker length field stores a
+/// *character count* (UTF-16 code units) rather than a byte length.
+///
+/// Some producers are inconsistent about whether moniker string lengths are in bytes or chars. The
+/// importer should accept both.
+pub fn build_url_hyperlink_char_count_len_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "UrlLenChars",
+        hlink_external_url_len_as_char_count(0, 0, 0, 0, "https://example.com", "Example", "Tooltip"),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing an AutoFilter range with an active filter state
 /// (`FILTERMODE`).
 ///
@@ -9106,6 +9128,35 @@ pub fn build_internal_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a hyperlink whose display string is encoded as a BIFF8
+/// `XLUnicodeString` (u16 length + flags) rather than the standard hyperlink u32-length prefix.
+///
+/// `parse_hyperlink_string` should fall back to BIFF8 string decoding and still import the link.
+pub fn build_biff8_unicode_string_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "Biff8Display",
+        hlink_internal_location_biff8_unicode_display(
+            0,
+            0,
+            0,
+            0,
+            "Biff8Display!B2",
+            "Foo\u{0}Bar",
+            "Tip",
+        ),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where the worksheet name is invalid and will be sanitized by the
 /// importer, but an internal hyperlink still references the original name.
 pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
@@ -9563,6 +9614,41 @@ fn hlink_internal_location(
     out
 }
 
+fn hlink_internal_location_biff8_unicode_display(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    location: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    // Like `hlink_internal_location`, but encodes the display string as a BIFF8 XLUnicodeString
+    // (u16 length + flags) so the importer exercises the fallback string decoding path.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_LOCATION: u32 = 0x0000_0008;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    let link_opts = LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string_biff8_unicode(&mut out, display);
+    write_hyperlink_string(&mut out, location);
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
 fn hlink_external_url(
     rw_first: u16,
     rw_last: u16,
@@ -9606,6 +9692,55 @@ fn hlink_external_url(
     url_utf16.push(0); // NUL terminator
     let url_bytes_len: u32 = (url_utf16.len() * 2) as u32;
     out.extend_from_slice(&url_bytes_len.to_le_bytes());
+    for code_unit in url_utf16 {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
+fn hlink_external_url_len_as_char_count(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    url: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    // Like `hlink_external_url`, but stores the URL moniker length as a UTF-16 character count
+    // rather than a byte count.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    const CLSID_URL_MONIKER: [u8; 16] = [
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9,
+        0x0B,
+    ];
+
+    let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+
+    out.extend_from_slice(&CLSID_URL_MONIKER);
+    let mut url_utf16: Vec<u16> = url.encode_utf16().collect();
+    url_utf16.push(0); // NUL terminator
+    // Length field stored as code unit count rather than byte length.
+    out.extend_from_slice(&(url_utf16.len() as u32).to_le_bytes());
     for code_unit in url_utf16 {
         out.extend_from_slice(&code_unit.to_le_bytes());
     }
@@ -9896,6 +10031,26 @@ fn write_hyperlink_string(out: &mut Vec<u8>, s: &str) {
     let mut u16s: Vec<u16> = s.encode_utf16().collect();
     u16s.push(0);
     out.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+    for code_unit in u16s {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+}
+
+fn write_hyperlink_string_biff8_unicode(out: &mut Vec<u8>, s: &str) {
+    // Intentionally encode a hyperlink string field as a BIFF8 XLUnicodeString:
+    // [cch:u16][flags:u8][chars...]
+    //
+    // Some producers appear to store hyperlink strings in this form. The importer’s
+    // `parse_hyperlink_string` should fall back to BIFF8 string decoding when the u32
+    // HyperlinkString layout doesn’t fit.
+    let mut u16s: Vec<u16> = s.encode_utf16().collect();
+    u16s.push(0);
+    let cch: u16 = u16s
+        .len()
+        .try_into()
+        .expect("fixture strings should fit in u16");
+    out.extend_from_slice(&cch.to_le_bytes());
+    out.push(0x01); // fHighByte=1 (UTF-16LE)
     for code_unit in u16s {
         out.extend_from_slice(&code_unit.to_le_bytes());
     }
