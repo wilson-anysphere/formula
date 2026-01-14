@@ -2895,6 +2895,23 @@ fn engine_value_to_js_scalar(value: EngineValue) -> JsValue {
     }
 }
 
+fn push_a1_col_name(col: u32, out: &mut String) {
+    // Excel columns are 1-based in A1 notation. We store 0-based internally.
+    let mut n = u64::from(col) + 1;
+    // A u32 column index fits in at most 7 A1 letters (26^7 > u32::MAX).
+    let mut buf = [0u8; 8];
+    let mut len = 0usize;
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        buf[len] = b'A' + rem as u8;
+        len += 1;
+        n = (n - 1) / 26;
+    }
+    for b in buf[..len].iter().rev() {
+        out.push(*b as char);
+    }
+}
+
 fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
     Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
 }
@@ -4360,14 +4377,25 @@ impl WasmWorkbook {
             .map_err(|err| js_err(err.to_string()))?;
 
         let outer = Array::new();
+        // Reuse buffers to avoid per-cell string allocations while looking up sparse inputs.
+        let mut addr_buf = String::with_capacity(16);
+        let mut row_buf = String::with_capacity(16);
         for (row_off, row_values) in values.into_iter().enumerate() {
             let row = start_row + row_off as u32;
+            row_buf.clear();
+            use std::fmt::Write as _;
+            write!(&mut row_buf, "{}", u64::from(row).saturating_add(1)).expect("write to string");
             let inner = Array::new();
             for (col_off, engine_value) in row_values.into_iter().enumerate() {
                 let col = start_col + col_off as u32;
                 let input = if let Some(cells) = sheet_cells {
-                    let addr = CellRef::new(row, col).to_a1();
-                    cells.get(&addr).map(json_scalar_to_js).unwrap_or(JsValue::NULL)
+                    addr_buf.clear();
+                    push_a1_col_name(col, &mut addr_buf);
+                    addr_buf.push_str(&row_buf);
+                    cells
+                        .get(addr_buf.as_str())
+                        .map(json_scalar_to_js)
+                        .unwrap_or(JsValue::NULL)
                 } else {
                     JsValue::NULL
                 };
