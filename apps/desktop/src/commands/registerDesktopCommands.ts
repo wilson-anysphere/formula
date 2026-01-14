@@ -441,21 +441,43 @@ export function registerDesktopCommands(params: {
   // Ribbon schema uses `insert.illustrations.pictures.*` ids for Insert → Pictures.
   // Register them so the ribbon does not need to exempt them from CommandRegistry disabling.
   const commandCategoryInsert = "Insert";
-  const registerInsertPicturesCommand = (commandId: string, title: string): void => {
+  const registerInsertPicturesCommand = (
+    commandId: string,
+    title: string,
+    options: { when?: string | null; run?: (() => void | Promise<void>) | null } = {},
+  ): void => {
     commandRegistry.registerBuiltinCommand(
       commandId,
       title,
       async () => {
+        if (typeof options.run === "function") {
+          await options.run();
+          return;
+        }
         await handleInsertPicturesRibbonCommand(commandId, app);
       },
-      { category: commandCategoryInsert },
+      { category: commandCategoryInsert, when: options.when ?? null },
     );
   };
   registerInsertPicturesCommand("insert.illustrations.pictures", "Pictures…");
-  registerInsertPicturesCommand("insert.illustrations.pictures.thisDevice", "Pictures: This Device…");
-  registerInsertPicturesCommand("insert.illustrations.pictures.stockImages", "Pictures: Stock Images…");
-  registerInsertPicturesCommand("insert.illustrations.pictures.onlinePictures", "Pictures: Online Pictures…");
-  registerInsertPicturesCommand("insert.illustrations.onlinePictures", "Online Pictures…");
+  registerInsertPicturesCommand("insert.illustrations.pictures.thisDevice", "Pictures: This Device…", {
+    // `insert.illustrations.pictures` is treated as the canonical command (it maps to
+    // "This Device" today). Keep the ribbon menu id registered as an alias so ribbon + recents
+    // tracking still land on the canonical command id.
+    when: "false",
+    run: () => commandRegistry.executeCommand("insert.illustrations.pictures"),
+  });
+  // Stock Images is not implemented yet; keep it registered for ribbon coverage, but hide it from
+  // context-aware UI surfaces (command palette, etc) until it is functional.
+  registerInsertPicturesCommand("insert.illustrations.pictures.stockImages", "Pictures: Stock Images…", { when: "false" });
+  registerInsertPicturesCommand("insert.illustrations.pictures.onlinePictures", "Pictures: Online Pictures…", {
+    // Alias of the standalone Online Pictures command (both ids route through the same handler today).
+    when: "false",
+    run: () => commandRegistry.executeCommand("insert.illustrations.onlinePictures"),
+  });
+  // Online Pictures is not implemented yet; keep it registered for ribbon coverage, but hide it from
+  // context-aware UI surfaces (command palette, etc) until it is functional.
+  registerInsertPicturesCommand("insert.illustrations.onlinePictures", "Online Pictures…", { when: "false" });
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleStrikethrough",
