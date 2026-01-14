@@ -485,9 +485,9 @@ Notable keys:
     - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.
     - We also include `com.apple.security.network.client` so outbound network access (updater/HTTPS) keeps working if the App Sandbox is ever enabled.
     - If `com.apple.security.app-sandbox` is enabled, we also need `com.apple.security.network.server` for the OAuth loopback redirect listener.
-    - Guardrail: `node scripts/check-macos-entitlements.mjs` (also run in CI; enforces required + forbidden keys).
+    - Guardrail: `node scripts/check-macos-entitlements.mjs` (also run in CI; enforces required + forbidden keys and rejects unexpected entitlements).
   - `bundle.windows.timestampUrl` should be an **HTTPS** timestamp server (avoid plaintext HTTP Authenticode timestamping). Release CI guardrails enforce this (see `scripts/ci/check-windows-timestamp-url.mjs` and `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
-- `bundle.windows.webviewInstallMode` controls how Windows installers ensure the Microsoft Edge **WebView2** runtime is present.
+  - `bundle.windows.webviewInstallMode` controls how Windows installers ensure the Microsoft Edge **WebView2** runtime is present.
   - This repo pins the Evergreen bootstrapper mode (`downloadBootstrapper`, `silent: true`) so installs work on machines without WebView2 (requires internet if the runtime is missing). See `docs/release.md` for details and offline alternatives.
 
 ### Distribution (GitHub Releases)

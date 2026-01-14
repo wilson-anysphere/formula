@@ -577,6 +577,9 @@ This guardrail enforces:
   - `com.apple.security.cs.disable-library-validation`
   - `com.apple.security.cs.disable-executable-page-protection`
   - `com.apple.security.cs.allow-dyld-environment-variables`
+- Additional safety checks:
+  - The entitlements plist must not contain any unexpected keys (keep the signed entitlement surface minimal; allowlisted keys are the ones above, plus `com.apple.security.app-sandbox` when enabled).
+  - All entitlements must be boolean `<true/>` values (no `<false/>` / non-boolean payloads).
 
 Release workflow note: when macOS signing secrets are configured, CI extracts the entitlements from the built `.app` (`codesign -d --entitlements :-`) and validates them with `node scripts/check-macos-entitlements.mjs`. This ensures the entitlements are actually embedded in the signed bundle (protects against config drift where the plist exists but isn’t used during signing).
 

@@ -4407,6 +4407,7 @@ mod tests {
             )
             .expect("set CELL(width) formula for A1");
         let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
+        // Excel's CELL("width") uses the first decimal digit as a "custom width" flag.
         match c1.value {
             CellScalar::Number(v) => assert!(
                 (v - 20.1).abs() < 0.2,

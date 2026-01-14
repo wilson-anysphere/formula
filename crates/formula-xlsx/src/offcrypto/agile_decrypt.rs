@@ -25,6 +25,17 @@ const KEY_ENCRYPTOR_URI_PASSWORD: &str =
 const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordKeyIvDerivation {
+    /// MS-OFFCRYPTO compliant: use `p:saltValue` (truncated to `blockSize`) directly as the AES-CBC IV
+    /// for the password key encryptor blobs.
+    SaltValue,
+    /// Compatibility mode: some producers appear to derive the IV using the same `saltValue`+blockKey
+    /// scheme used elsewhere in the Agile spec. Try this when decrypting with SaltValue yields
+    /// `WrongPassword`.
+    Derived,
+}
+
 #[derive(Debug, Clone)]
 struct KeyData {
     salt_value: Vec<u8>,
@@ -59,16 +70,6 @@ struct AgileEncryptionInfo {
     data_integrity: Option<DataIntegrity>,
     password_key: PasswordKeyEncryptor,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PasswordKeyIvDerivation {
-    /// MS-OFFCRYPTO spec behavior: use `p:encryptedKey.saltValue` truncated to `blockSize`.
-    SaltValue,
-    /// Compatibility behavior observed in some producers: derive the IV using the standard Agile
-    /// `derive_iv(saltValue, blockKey, blockSize, hashAlgorithm)` scheme.
-    Derived,
-}
-
 fn decrypt_agile_package_key_from_password(
     info: &AgileEncryptionInfo,
     password_hash: &[u8],

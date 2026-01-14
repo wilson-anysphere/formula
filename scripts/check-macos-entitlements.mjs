@@ -67,6 +67,27 @@ function hasTrueEntitlement(xml, key) {
 }
 
 /**
+ * Best-effort scan of entitlement keys in a plist XML string.
+ *
+ * This is intentionally lightweight so it can run on non-macOS CI runners without
+ * depending on `plutil` or third-party plist parsers.
+ *
+ * @param {string} xml
+ * @returns {string[]}
+ */
+function extractEntitlementKeys(xml) {
+  /** @type {string[]} */
+  const keys = [];
+  const re = /<key>([^<]+)<\/key>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const key = m[1]?.trim();
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
+/**
  * @param {string[]} argv
  * @returns {{ repoRoot: string; entitlementsPathOverride: string }}
  */
@@ -245,6 +266,39 @@ function main() {
     return;
   }
 
+  const allKeys = extractEntitlementKeys(xmlForScan);
+  if (allKeys.length === 0) {
+    errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
+      `No <key>...</key> entries found.`,
+      `Expected at least one entitlement key/value in the top-level plist <dict>.`,
+    ]);
+    return;
+  }
+
+  /** @type {Map<string, number>} */
+  const keyCounts = new Map();
+  for (const key of allKeys) {
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+
+  const duplicateKeys = [...keyCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([key, count]) => `${key} (x${count})`);
+  if (duplicateKeys.length > 0) {
+    errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
+      `Duplicate keys detected (plist dict keys should be unique):`,
+      ...duplicateKeys,
+    ]);
+  }
+
+  const nonTrueKeys = [...keyCounts.keys()].filter((key) => !hasTrueEntitlement(xmlForScan, key));
+  if (nonTrueKeys.length > 0) {
+    errBlock(`Invalid macOS entitlements (${relativeEntitlementsPath})`, [
+      `All entitlement keys must be set to boolean <true/> (no <false/>, strings, arrays, or dict values).`,
+      ...nonTrueKeys.map((key) => `${key} — not set to <true/>`),
+    ]);
+  }
+
   // Hardened Runtime + WKWebView (wry) commonly require these two entitlements
   // for JavaScript/WASM execution in signed/notarized builds.
   //
@@ -275,6 +329,23 @@ function main() {
       reason:
         "Incoming network access (required when sandboxing is enabled because Formula runs a loopback HTTP listener for OAuth redirects).",
     });
+  }
+
+  /** @type {Set<string>} */
+  const allowlisted = new Set(required.map(({ key }) => key));
+  if (hasTrueEntitlement(xmlForScan, "com.apple.security.app-sandbox")) {
+    // App Sandbox is currently unused in this repo, but we allow it as an opt-in
+    // (and already require network.server above when enabled).
+    allowlisted.add("com.apple.security.app-sandbox");
+  }
+  const unexpectedKeys = [...keyCounts.keys()].filter((key) => !allowlisted.has(key));
+  if (unexpectedKeys.length > 0) {
+    errBlock(`Unexpected macOS entitlements enabled (${relativeEntitlementsPath})`, [
+      `Keep the signed entitlement surface minimal. The following keys are present but not allowlisted:`,
+      ...unexpectedKeys,
+      ``,
+      `If you believe an additional entitlement is required, add a justification to entitlements.plist and update scripts/check-macos-entitlements.mjs accordingly.`,
+    ]);
   }
 
   const missing = required.filter(({ key }) => !hasTrueEntitlement(xmlForScan, key));

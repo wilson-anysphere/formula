@@ -225,10 +225,14 @@ describe("AI chat panel", () => {
         checkbox!.click();
       });
 
-      expect(window.localStorage.getItem("formula.ai.includeFormulaValues")).toBe("true");
-      // When enabled, the chat panel should consult SpreadsheetApp for computed values.
-      expect(getSpreadsheetApp).toHaveBeenCalled();
-      expect(mocks.createAiChatOrchestrator.mock.calls.length).toBeGreaterThan(priorCalls);
+      await waitFor(() => {
+        expect(window.localStorage.getItem("formula.ai.includeFormulaValues")).toBe("true");
+      });
+      await waitFor(() => {
+        // When enabled, the chat panel should consult SpreadsheetApp for computed values.
+        expect(getSpreadsheetApp).toHaveBeenCalled();
+        expect(mocks.createAiChatOrchestrator.mock.calls.length).toBeGreaterThan(priorCalls);
+      });
 
       const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
       expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(true);

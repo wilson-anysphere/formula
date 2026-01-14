@@ -5258,6 +5258,8 @@ export class SpreadsheetApp {
 
     // Drawings/images GC + persistence.
     this.workbookImageManager.dispose();
+    // `drawingImages` is an `ImageStore` implementation, but concrete implementations (and tests)
+    // may or may not expose `clear()`. Keep teardown resilient.
     try {
       (this.drawingImages as any)?.clear?.();
     } catch {
@@ -17124,17 +17126,23 @@ export class SpreadsheetApp {
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
     //
     // In unit tests, this handler may be invoked directly with a synthetic PointerEvent (not
-    // dispatched through the DOM), bypassing the controller. Forward those synthetic events so
-    // shared-grid selection remains testable and behavior matches real pointer dispatch.
+    // dispatched through the DOM), bypassing the controller. Forward those synthetic events, but
+    // fall back to the legacy capture handler if the controller doesn't expose a handler.
     if (this.drawingInteractionController) {
       if (!target) {
         try {
-          (this.drawingInteractionController as any).onPointerDown?.(e);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const handler = (this.drawingInteractionController as any).onPointerDown;
+          if (typeof handler === "function") {
+            handler.call(this.drawingInteractionController, e);
+            return;
+          }
         } catch {
           // ignore
         }
+      } else {
+        return;
       }
-      return;
     }
     // If another capture listener already claimed the event (e.g. chart interactions),
     // do not compete.
@@ -22049,6 +22057,7 @@ export class SpreadsheetApp {
       });
 
       this.renderDrawings();
+      // Ensure selection handles reflect the final position.
       this.renderSelection();
       return;
     }

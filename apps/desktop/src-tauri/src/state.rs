@@ -5950,6 +5950,7 @@ mod tests {
         )
             .expect("set width formula");
         let c1 = state.get_cell(&app_sheet_id, 0, 2).expect("read C1");
+        // Excel's CELL("width") uses the first decimal digit as a "custom width" flag.
         match c1.value {
             CellScalar::Number(v) => assert!(
                 (v - 20.1).abs() < 0.2,
@@ -9814,7 +9815,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: "Sales".into(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -10093,7 +10094,7 @@ mod tests {
             row_fields: vec![PivotField::new("Date")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: "Amount".into(),
+                source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
