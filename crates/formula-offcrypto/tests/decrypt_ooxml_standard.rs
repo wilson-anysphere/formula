@@ -4,7 +4,7 @@ use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_offcrypto::{
     decrypt_ooxml_standard, standard_derive_key, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionInfo, StandardEncryptionVerifier,
+    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
 };
 use sha1::{Digest as _, Sha1};
 use std::io::{Cursor, Read, Write};
@@ -45,7 +45,9 @@ fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) 
 
     let mut info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: CALG_AES_128,
             alg_id_hash: CALG_SHA1,
@@ -88,7 +90,7 @@ fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) 
     out.extend_from_slice(&0u32.to_le_bytes()); // flags
 
     let mut header_bytes = Vec::new();
-    header_bytes.extend_from_slice(&info.header.flags.to_le_bytes());
+    header_bytes.extend_from_slice(&info.header.flags.raw.to_le_bytes());
     header_bytes.extend_from_slice(&info.header.size_extra.to_le_bytes());
     header_bytes.extend_from_slice(&info.header.alg_id.to_le_bytes());
     header_bytes.extend_from_slice(&info.header.alg_id_hash.to_le_bytes());
