@@ -1316,31 +1316,8 @@ pub fn open_workbook_model_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    match try_decrypt_ooxml_encrypted_package_from_path(path, password) {
-        Ok(Some(bytes)) => return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes),
-        Ok(None) => {}
-        Err(err) => {
-            // For the password-aware APIs, treat "can't decrypt" as an invalid password when the
-            // container claims a supported OOXML encryption version. This enables callers (UIs) to
-            // prompt/retry without surfacing internal format compatibility details.
-            if password.is_some() {
-                if let Error::UnsupportedOoxmlEncryption {
-                    version_major,
-                    version_minor,
-                    ..
-                } = &err
-                {
-                    let supported = (*version_major, *version_minor) == (4, 4)
-                        || (*version_minor == 2 && matches!(*version_major, 2 | 3 | 4));
-                    if supported {
-                        return Err(Error::InvalidPassword {
-                            path: path.to_path_buf(),
-                        });
-                    }
-                }
-            }
-            return Err(err);
-        }
+    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -1404,28 +1381,8 @@ pub fn open_workbook_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    match try_decrypt_ooxml_encrypted_package_from_path(path, password) {
-        Ok(Some(bytes)) => return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes),
-        Ok(None) => {}
-        Err(err) => {
-            if password.is_some() {
-                if let Error::UnsupportedOoxmlEncryption {
-                    version_major,
-                    version_minor,
-                    ..
-                } = &err
-                {
-                    let supported = (*version_major, *version_minor) == (4, 4)
-                        || (*version_minor == 2 && matches!(*version_major, 2 | 3 | 4));
-                    if supported {
-                        return Err(Error::InvalidPassword {
-                            path: path.to_path_buf(),
-                        });
-                    }
-                }
-            }
-            return Err(err);
-        }
+    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
+        return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -1902,11 +1859,14 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     // `EncryptedPackage` streams should start with an 8-byte plaintext length header.
     //
     // If the stream is too short (and we didn't already detect a plaintext ZIP payload above),
-    // treat it as a decryption failure so callers using the password-capable API can prompt/retry
-    // without needing to surface format-level diagnostics.
+    // treat it as a malformed/unsupported encryption container rather than an invalid password.
+    // A wrong password should still surface as `InvalidPassword` once we can actually attempt a
+    // verifier/integrity check.
     if encrypted_package.len() <= 8 {
-        return Err(Error::InvalidPassword {
+        return Err(Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
+            version_major,
+            version_minor,
         });
     }
     let decrypted = if (version_major, version_minor) == (4, 4) {
