@@ -516,6 +516,7 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
   keyIdForCell(cell: { sheetId: string; row: number; col: number }): string | null;
 } {
   const mgr = new EncryptedRangeManager({ doc });
+  const sheetsRoot = getWorkbookRoots(doc).sheets;
 
   function normalizeCell(cell: { sheetId: string; row: number; col: number }): { sheetId: string; row: number; col: number } | null {
     const sheetId = String(cell?.sheetId ?? "").trim();
@@ -527,13 +528,37 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     return { sheetId, row, col };
   }
 
+  function resolveSheetName(sheetId: string): string | null {
+    try {
+      const entries = typeof (sheetsRoot as any)?.toArray === "function" ? (sheetsRoot as any).toArray() : [];
+      for (const entry of entries) {
+        const map = getYMap(entry);
+        const obj = map ? null : entry && typeof entry === "object" ? (entry as any) : null;
+        const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
+        const entryId = coerceString(get("id"))?.trim() ?? "";
+        if (!entryId || entryId !== sheetId) continue;
+        const name = coerceString(get("name"))?.trim() ?? "";
+        return name || null;
+      }
+    } catch {
+      // Best-effort; fall back to matching by id only.
+    }
+    return null;
+  }
+
   function findMatch(cell: { sheetId: string; row: number; col: number }): EncryptedRange | null {
     const normalized = normalizeCell(cell);
     if (!normalized) return null;
 
     const { sheetId, row, col } = normalized;
+    let sheetName: string | null = null;
     for (const range of mgr.list()) {
-      if (range.sheetId !== sheetId) continue;
+      if (range.sheetId !== sheetId) {
+        // Legacy support: older clients stored `sheetName` instead of the stable
+        // workbook sheet id. Match those entries against the current sheet name.
+        sheetName ??= resolveSheetName(sheetId);
+        if (!sheetName || range.sheetId !== sheetName) continue;
+      }
       if (row < range.startRow || row > range.endRow) continue;
       if (col < range.startCol || col > range.endCol) continue;
       return range;
