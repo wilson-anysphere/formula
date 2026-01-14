@@ -224,4 +224,31 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("restores focus when the file picker is dismissed without selecting a file", async () => {
+    vi.useFakeTimers();
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const focusSpy = vi.spyOn(app, "focus");
+
+    app.insertImageFromLocalFile();
+
+    // Simulate closing the picker without selecting a file. Some browsers do not
+    // fire `change`, so SpreadsheetApp uses a focus-based fallback.
+    window.dispatchEvent(new Event("focus"));
+
+    vi.runOnlyPendingTimers();
+
+    expect(focusSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });

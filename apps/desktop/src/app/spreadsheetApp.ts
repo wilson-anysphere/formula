@@ -8997,8 +8997,19 @@ export class SpreadsheetApp {
     const input = this.ensureInsertImageInput();
     // Allow selecting the same file repeatedly.
     input.value = "";
-    input.onchange = () => {
-      const file = input.files?.[0] ?? null;
+    // Some browsers do not fire `change` when the user cancels the file picker.
+    // Use a focus-based fallback so Ctrl/Cmd+Shift+I reliably returns keyboard
+    // focus to the grid after the picker is dismissed.
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener("focus", onWindowFocus, true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      input.removeEventListener("cancel" as any, onCancel as any);
+    };
+    const finish = (file: File | null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       if (!file) {
         this.focus();
         return;
@@ -9011,11 +9022,25 @@ export class SpreadsheetApp {
           this.focus();
         });
     };
+    const onCancel = () => finish(null);
+    const onWindowFocus = () => {
+      // Defer a tick to allow the `change` event to win the race when a file is selected.
+      setTimeout(() => {
+        if (settled) return;
+        finish(input.files?.[0] ?? null);
+      }, 0);
+    };
+    input.onchange = () => finish(input.files?.[0] ?? null);
+    // Some browsers (Chrome) fire a `cancel` event for `<input type="file">`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    input.addEventListener("cancel" as any, onCancel as any, { once: true, signal: this.domAbort.signal } as any);
+    window.addEventListener("focus", onWindowFocus, { capture: true, signal: this.domAbort.signal });
 
     try {
       input.click();
     } catch {
       // Best-effort; some environments (tests) may not support programmatic clicks.
+      cleanup();
     }
   }
 
