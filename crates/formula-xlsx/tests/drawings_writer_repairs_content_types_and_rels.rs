@@ -8,6 +8,7 @@ use formula_model::drawings::{
 use formula_model::CellRef;
 use formula_xlsx::drawings::DrawingPart;
 use formula_xlsx::load_from_bytes;
+use formula_xlsx::XlsxDocument;
 use roxmltree::Document;
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -328,5 +329,63 @@ fn save_preserves_existing_sheet_drawing_relationship_id() {
         rel.attribute("Target"),
         Some(original_target.as_str()),
         "expected writer to preserve existing drawing relationship Target"
+    );
+}
+
+#[test]
+fn save_adds_content_types_default_for_jpg_media() {
+    let mut workbook = formula_model::Workbook::default();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+
+    let image_id = workbook.images.ensure_unique_name("image", "jpg");
+    workbook.images.insert(
+        image_id.clone(),
+        ImageData {
+            // Minimal JPEG header/footer (not intended to render, but sufficient for writer paths).
+            bytes: vec![0xFF, 0xD8, 0xFF, 0xD9],
+            content_type: Some("image/jpeg".to_string()),
+        },
+    );
+
+    let ext = EmuSize::new(914_400, 914_400);
+    let drawing = DrawingObject {
+        id: DrawingObjectId(1),
+        kind: DrawingObjectKind::Image { image_id },
+        anchor: Anchor::OneCell {
+            from: AnchorPoint::new(CellRef::new(0, 0), CellOffset::new(0, 0)),
+            ext,
+        },
+        z_order: 0,
+        size: Some(ext),
+        preserved: HashMap::new(),
+    };
+
+    workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .drawings = vec![drawing];
+
+    let doc = XlsxDocument::new(workbook);
+    let saved = doc.save_to_vec().expect("save xlsx");
+
+    let cursor = Cursor::new(saved);
+    let mut archive = ZipArchive::new(cursor).expect("open saved zip");
+
+    let mut ct_xml = String::new();
+    archive
+        .by_name("[Content_Types].xml")
+        .expect("ct part exists")
+        .read_to_string(&mut ct_xml)
+        .expect("read ct xml");
+    let ct_doc = Document::parse(&ct_xml).expect("parse ct xml");
+
+    assert!(
+        ct_doc.descendants().any(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Default"
+                && n.attribute("Extension") == Some("jpg")
+                && n.attribute("ContentType") == Some("image/jpeg")
+        }),
+        "expected jpg Default content type to be present, got:\n{ct_xml}"
     );
 }
