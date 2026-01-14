@@ -843,6 +843,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_sort12_alt_frt_record_with_embedded_one_key_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(
+                RT_SORT12_ALT,
+                RT_SORT12_ALT,
+                &canonical_sort_payload_one_key_b_desc_with_header(),
+            ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
     fn parses_sort12_frt_record_continued_via_continuefrt12() {
         // AutoFilter range: A1:C5.
         let af = Range::from_a1("A1:C5").unwrap();
@@ -933,6 +962,35 @@ mod tests {
             frt_record(
                 RT_SORTDATA12,
                 RT_SORTDATA12,
+                &canonical_sort_payload_one_key_b_desc_with_header(),
+            ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_sortdata12_alt_frt_record_with_embedded_one_key_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(
+                RT_SORTDATA12_ALT,
+                RT_SORTDATA12_ALT,
                 &canonical_sort_payload_one_key_b_desc_with_header(),
             ),
             record(RECORD_EOF, &[]),
