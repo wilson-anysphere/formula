@@ -40,6 +40,9 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
       createPattern: () => null,
       getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
       putImageData: noop,
+      rotate: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
     },
     {
       get(target, prop) {
@@ -462,6 +465,50 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       selectionCanvas!.dispatchEvent(event);
 
       expect(selectSpy).toHaveBeenCalledWith(1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("renders rotated drawing selections in the selection canvas layer", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      const rotated: DrawingObject = {
+        id: 1,
+        kind: { type: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+        transform: { rotationDeg: 90, flipH: false, flipV: false },
+      };
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => [rotated];
+
+      (app as any).selectedDrawingId = 1;
+      const selectionCtx = (app as any).selectionCtx as any;
+      selectionCtx.rotate.mockClear();
+
+      (app as any).renderSelection();
+
+      expect(selectionCtx.rotate).toHaveBeenCalledWith(Math.PI / 2);
 
       app.destroy();
       root.remove();

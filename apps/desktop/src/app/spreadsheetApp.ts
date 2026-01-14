@@ -10036,6 +10036,11 @@ export class SpreadsheetApp {
       if (selected) {
         const viewport = this.getDrawingInteractionViewport();
         const rootRect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
+        const transform = selected.transform;
+        const hasNonIdentityTransform = !!(
+          transform &&
+          (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
+        );
 
         const stroke = resolveCssVar("--selection-border", { fallback: "CanvasText" });
         const handleFill = resolveCssVar("--bg-primary", { fallback: "Canvas" });
@@ -10050,12 +10055,23 @@ export class SpreadsheetApp {
         this.selectionCtx.strokeStyle = stroke;
         this.selectionCtx.lineWidth = 2;
         this.selectionCtx.setLineDash([]);
-        this.selectionCtx.strokeRect(rootRect.x, rootRect.y, rootRect.width, rootRect.height);
+        if (hasNonIdentityTransform) {
+          const cx = rootRect.x + rootRect.width / 2;
+          const cy = rootRect.y + rootRect.height / 2;
+          this.selectionCtx.save();
+          this.selectionCtx.translate(cx, cy);
+          this.selectionCtx.rotate((transform!.rotationDeg * Math.PI) / 180);
+          this.selectionCtx.scale(transform!.flipH ? -1 : 1, transform!.flipV ? -1 : 1);
+          this.selectionCtx.strokeRect(-rootRect.width / 2, -rootRect.height / 2, rootRect.width, rootRect.height);
+          this.selectionCtx.restore();
+        } else {
+          this.selectionCtx.strokeRect(rootRect.x, rootRect.y, rootRect.width, rootRect.height);
+        }
 
         this.selectionCtx.fillStyle = handleFill;
         this.selectionCtx.strokeStyle = stroke;
         this.selectionCtx.lineWidth = 1;
-        for (const c of getResizeHandleCenters(rootRect)) {
+        for (const c of getResizeHandleCenters(rootRect, transform)) {
           this.selectionCtx.beginPath();
           this.selectionCtx.rect(c.x - half, c.y - half, handleSize, handleSize);
           this.selectionCtx.fill();
