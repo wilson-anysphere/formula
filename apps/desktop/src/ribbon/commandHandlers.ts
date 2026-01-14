@@ -322,6 +322,16 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     return true;
   }
 
+  if (commandId === "format.increaseFontSize" || commandId === "format.decreaseFontSize") {
+    const direction = commandId === "format.increaseFontSize" ? "increase" : "decrease";
+    const current = activeCellFontSizePt(ctx);
+    const next = stepFontSize(current, direction);
+    if (next !== current) {
+      ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+    }
+    return true;
+  }
+
   const fillColorPrefix = "format.fillColor.";
   if (commandId.startsWith(fillColorPrefix)) {
     const preset = commandId.slice(fillColorPrefix.length);
@@ -678,22 +688,6 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "home.font.fontSize":
       ctx.executeCommand?.("format.fontSize.set");
       return true;
-    case "home.font.increaseFont": {
-      const current = activeCellFontSizePt(ctx);
-      const next = stepFontSize(current, "increase");
-      if (next !== current) {
-        ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
-      }
-      return true;
-    }
-    case "home.font.decreaseFont": {
-      const current = activeCellFontSizePt(ctx);
-      const next = stepFontSize(current, "decrease");
-      if (next !== current) {
-        ctx.applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
-      }
-      return true;
-    }
     case "home.alignment.alignLeft":
       ctx.applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
       return true;
