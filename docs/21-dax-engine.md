@@ -47,6 +47,26 @@ reuse DAX `CALCULATE`-style filter syntax:
 
 - `DaxEngine::apply_calculate_filters(model, filter, &[filter_arg_strs...]) -> FilterContext`
 
+### Case-insensitive identifiers (`normalize_ident`)
+
+Like Tabular / Power Pivot, `formula-dax` resolves identifiers **case-insensitively**:
+
+- table names (`Orders`)
+- column names (`Orders[Amount]`)
+- measures (`[Total Sales]`)
+- relationship endpoints (e.g. `USERELATIONSHIP(orders[customerid], CUSTOMERS[CUSTOMERID])`)
+
+Internally, schema and filter lookups normalize identifiers via `normalize_ident` (see
+`crates/formula-dax/src/model.rs`):
+
+- ASCII identifiers are uppercased (`orders` → `ORDERS`)
+- non-ASCII identifiers use Unicode-aware uppercasing (e.g. `ß` → `SS`) to approximate Excel/Tabular
+  matching
+
+As a consequence, duplicates that differ only by case are rejected up-front (e.g. two columns named
+`Col` and `col`, two measures named `Total` and `[TOTAL]`, or two tables named `Straße` and
+`STRASSE`).
+
 ### `Table` and `TableBackend`
 
 `Table` is a thin wrapper around a `TableBackend` implementation (see `crates/formula-dax/src/backend.rs`).
@@ -159,13 +179,20 @@ Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`),
 
 - `from_idx: usize` — resolved column index of `from_column` in `from_table`
 - `to_idx: usize` — resolved column index of `to_column` in `to_table`
-- `to_index: HashMap<Value, RowSet>` mapping **to_table key → matching to_table row(s)**  
-  `RowSet` is an internal compact representation:
-  - `RowSet::One(row)` for the common unique-key case (no allocation)
-  - `RowSet::Many(Vec<row>)` when a key matches multiple `to_table` rows (many-to-many)
-- `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**
-  (only materialized for in-memory fact tables; for columnar fact tables it stays `None` and the engine
-  relies on backend primitives like `filter_eq` / `filter_in` instead)
+- `to_index: ToIndex` — lookup structure for the `to_table[to_column]` key:
+  - `ToIndex::RowSets { map: HashMap<Value, RowSet>, has_duplicates }`  
+    Full mapping from **to_table key → matching to_table row(s)**. `RowSet` is an internal compact
+    representation:
+    - `RowSet::One(row)` for the common unique-key case (no allocation)
+    - `RowSet::Many(Vec<row>)` when a non-blank key matches multiple `to_table` rows (many-to-many)
+  - `ToIndex::KeySet { keys: HashSet<Value>, has_duplicates }`  
+    Scalable representation for **columnar many-to-many** relationships where the `to_table` side may
+    contain a very large number of duplicate keys. Instead of storing `Vec<usize>` row lists per key,
+    the engine stores only the **distinct key set** and relies on backend primitives like
+    `filter_eq` / `filter_in` to retrieve matching row indices on demand.
+- `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**  
+  Materialized only for in-memory fact tables. For columnar fact tables it stays `None` and the engine
+  relies on backend primitives like `filter_eq` / `filter_in` instead.
 - `unmatched_fact_rows: Option<UnmatchedFactRows>` containing **from_table rows whose foreign key is
   `BLANK` or does not exist in `to_index`** (used for the virtual blank member behavior when
   `from_index` is not materialized). `UnmatchedFactRows` is stored either as:
@@ -366,9 +393,14 @@ into the in-memory table (note: `insert_row` is not supported for columnar table
 `FilterContext` (`engine.rs`) currently contains:
 
 - `column_filters: HashMap<(table, column), HashSet<Value>>`  
-  Allowed values per column.
-- `row_filters: HashMap<table, HashSet<usize>>`  
-  Allowed row indices per table (usually produced by table expressions like `FILTER(...)`).
+  Allowed values per column. Keys are normalized via `normalize_ident` (case-insensitive).
+- `row_filters: HashMap<table, RowFilter>`  
+  Allowed physical rows per table (usually produced by table expressions like `FILTER(...)`). The
+  internal `RowFilter` representation is:
+  - `All` (all physical rows; used to avoid allocating huge sets for some filters, while still
+    suppressing the relationship-generated blank member)
+  - `Rows(HashSet<usize>)` (sparse row set)
+  - `Mask(Arc<BitVec>)` (dense bitmap)
 - `active_relationship_overrides: HashSet<usize>`  
   Activated relationships (via `USERELATIONSHIP`).
 - `cross_filter_overrides: HashMap<usize, RelationshipOverride>`  
@@ -379,6 +411,9 @@ into the in-memory table (note: `insert_row` is not supported for columnar table
     reverse direction (`ONEWAY_LEFTFILTERSRIGHT` / `ONEWAY_RIGHTFILTERSLEFT`)
 - `suppress_implicit_measure_context_transition: bool`  
   Internal flag used to keep `CALCULATE` semantics correct.
+- `in_scope_columns: HashSet<(table, column)>`  
+  Pivot-driven “scope” metadata used to implement `ISINSCOPE`. The pivot engine populates this with
+  its axis columns; standalone DAX evaluation does not infer scope, so the set is empty by default.
 
 Note: `column_filters` is currently a **set-based** representation (allowed values), not a predicate/range-based one.
 This matters for PivotTables / timelines: expressing a date range like `[start, end]` requires either materializing a
@@ -586,6 +621,9 @@ pub fn pivot(
 - `measures`: list of named expressions to evaluate per group.
   - A `PivotMeasure` is *not* required to correspond to a named model measure; `expression` is parsed as DAX.
 - `filter`: the initial filter context applied to the pivot query.
+  - When evaluating each group, pivot clones this filter, adds equality filters for the group key values, and
+    populates `FilterContext.in_scope_columns` with the group-by columns. This is what makes `ISINSCOPE`
+    behave like it does in pivot visuals; standalone `DaxEngine::evaluate(...)` calls do not infer scope.
 
 `PivotResult` contains:
 
@@ -787,6 +825,9 @@ If a function is not listed here, it is currently unsupported and will evaluate 
   with Excel-like case-insensitive ordering; otherwise sorting is numeric. Mixed text+numeric keys are allowed and
   will sort as text.)
 - `HASONEVALUE(Table[Column])`
+- `ISINSCOPE(Table[Column])`  
+  (pivot-driven: returns `TRUE` when the pivot engine marks the column as “in scope” via
+  `FilterContext.in_scope_columns`; standalone DAX evaluation does not infer scope)
 - `SELECTEDVALUE(Table[Column], [alternateResult])`
 - `LOOKUPVALUE(ResultTable[ResultCol], SearchTable[SearchCol1], SearchValue1, ..., [alternateResult])`  
   (current MVP restriction: all search columns must be in the same table as the result column)
@@ -809,12 +850,14 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `CALCULATETABLE(tableExpr, filter1, filter2, ...)`
 - `SUMMARIZE(tableExpr, Table[GroupCol1], Table[GroupCol2], ...)`  
   (limited: currently only grouping columns are supported; group columns may be on the base table or on
-  related tables reachable via a unique active relationship path; the base table must be physical; it
+  related tables reachable via a unique active relationship path; grouping across many-to-many hops uses
+  the expansion semantics described in the Relationships section; the base table must be physical; it
   returns a **virtual table** containing the grouping columns only)
 - `SUMMARIZECOLUMNS(Table[GroupCol1], Table[GroupCol2], ..., [filterArgs...])`  
   (limited: supports leading grouping columns plus optional `CALCULATE`-style filter arguments; the
   engine picks a base table that can reach all grouped tables via active relationships; it returns a
-  **virtual table** containing the grouping columns only; name/expression pairs are accepted but are
+  **virtual table** containing the grouping columns only; grouping across many-to-many hops uses the
+  expansion semantics described in the Relationships section; name/expression pairs are accepted but are
   not yet materialized in the returned table representation)
 - `RELATEDTABLE(Table)` (requires row context)
 
@@ -907,10 +950,9 @@ This is not an exhaustive list, but the most common contributor-facing constrain
   - `OneToMany`, `OneToOne`, and `ManyToMany` are supported (many-to-many uses distinct-key propagation).
   - Only single-column relationships are supported.
   - `RELATED` errors when a relationship key matches multiple rows on the `to_table` side (ambiguous scalar lookup).
-  - Grouping/pivoting by columns across a many-to-many relationship uses expansion semantics: a base row can
-    contribute to multiple group keys (and combinations), which can duplicate measure contributions.
-  - `SUMMARIZECOLUMNS` grouping currently expects unique lookups when traversing relationships and will error
-    if a hop matches multiple rows (many-to-many).
+  - Grouping by columns across a many-to-many relationship uses expansion semantics (used by pivot, `SUMMARIZE`,
+    and `SUMMARIZECOLUMNS`): a base row can contribute to multiple group keys (and combinations), which can
+    duplicate measure contributions.
 - **DAX language coverage**
   - Variables (`VAR`/`RETURN`) are supported.
   - Table constructors (`{ ... }`) support both one-column and multi-column row tuples (no nesting),
