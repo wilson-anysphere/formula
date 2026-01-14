@@ -14,6 +14,7 @@ duplicated follow-up work across the task queue.
 - DONE — Task 377: `SHEET()` external index when sheet order exists
 - DONE — Task 379: Unit tests for external key parsing helpers
 - DONE — Task 380: External invalidation (sheet/workbook) + external dependency indexing
+- DONE — Task 383: Copy rewrite for external refs (`90719fa5f`)
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
 - DONE — INDIRECT rejects external workbook refs (bytecode + AST) (`a3a4632c`, `dfbd573f`)
@@ -24,5 +25,3 @@ duplicated follow-up work across the task queue.
   - Pointers:
     - `crates/formula-engine/src/engine.rs`
       - `analyze_external_dependencies` + `set_cell_external_refs`
-- TODO — Task 383: Copy rewrite for external refs
-  - Pointers: `crates/formula-engine/src/editing/rewrite.rs` (`rewrite_formula_for_copy_delta`, etc.)
