@@ -52,6 +52,12 @@ pub struct DrawingPart {
     /// these namespace declarations must be preserved to avoid emitting invalid XML with
     /// undeclared prefixes.
     root_xmlns: BTreeMap<String, String>,
+    /// Non-namespace attributes found on the root `<xdr:wsDr>` element.
+    ///
+    /// Office producers sometimes add additional root-level attributes (e.g. `mc:Ignorable`) that
+    /// are required for proper Markup Compatibility behavior. Preserve them when round-tripping
+    /// existing drawing parts.
+    root_attrs: BTreeMap<String, String>,
 }
 
 impl DrawingPart {
@@ -68,6 +74,7 @@ impl DrawingPart {
             objects: Vec::new(),
             relationships: Relationships::default(),
             root_xmlns: BTreeMap::new(),
+            root_attrs: BTreeMap::new(),
         }
     }
 
@@ -167,6 +174,7 @@ impl DrawingPart {
             objects,
             relationships,
             root_xmlns: BTreeMap::new(),
+            root_attrs: BTreeMap::new(),
         })
     }
 
@@ -185,7 +193,9 @@ impl DrawingPart {
         let mut part = Self::from_objects(sheet_index, path, objects, existing_rels_xml)?;
         if let Some(xml) = existing_drawing_xml {
             if let Ok(doc) = Document::parse(xml) {
-                part.root_xmlns = extract_root_xmlns(doc.root_element());
+                let root = doc.root_element();
+                part.root_xmlns = extract_root_xmlns(root);
+                part.root_attrs = extract_root_attrs(root, &part.root_xmlns);
             }
         }
         Ok(part)
@@ -215,10 +225,12 @@ impl DrawingPart {
             .map_err(|e| XlsxError::Invalid(format!("drawing xml not utf-8: {e}")))?;
 
         let doc = Document::parse(drawing_xml)?;
-        let root_xmlns = extract_root_xmlns(doc.root_element());
+        let root = doc.root_element();
+        let root_xmlns = extract_root_xmlns(root);
+        let root_attrs = extract_root_attrs(root, &root_xmlns);
         let mut objects = Vec::new();
 
-        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(doc.root_element())
+        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(root)
             .into_iter()
             .enumerate()
         {
@@ -425,6 +437,7 @@ impl DrawingPart {
             objects,
             relationships,
             root_xmlns,
+            root_attrs,
         })
     }
 
@@ -453,10 +466,12 @@ impl DrawingPart {
             .map_err(|e| XlsxError::Invalid(format!("drawing xml not utf-8: {e}")))?;
 
         let doc = Document::parse(drawing_xml)?;
-        let root_xmlns = extract_root_xmlns(doc.root_element());
+        let root = doc.root_element();
+        let root_xmlns = extract_root_xmlns(root);
+        let root_attrs = extract_root_attrs(root, &root_xmlns);
         let mut objects = Vec::new();
 
-        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(doc.root_element())
+        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(root)
             .into_iter()
             .enumerate()
         {
@@ -643,6 +658,7 @@ impl DrawingPart {
             objects,
             relationships,
             root_xmlns,
+            root_attrs,
         })
     }
 
@@ -712,7 +728,7 @@ impl DrawingPart {
 
         let mut xml = String::new();
         xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
-        xml.push_str(&build_wsdr_root_start_tag(&self.root_xmlns));
+        xml.push_str(&build_wsdr_root_start_tag(&self.root_xmlns, &self.root_attrs));
 
         for object in &self.objects {
             match &object.kind {
@@ -784,7 +800,47 @@ fn extract_root_xmlns(root: Node<'_, '_>) -> BTreeMap<String, String> {
     out
 }
 
-fn build_wsdr_root_start_tag(root_xmlns: &BTreeMap<String, String>) -> String {
+fn extract_root_attrs(
+    root: Node<'_, '_>,
+    root_xmlns: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    const XMLNS_NS: &str = "http://www.w3.org/2000/xmlns/";
+    const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+
+    let mut out = BTreeMap::new();
+    for attr in root.attributes() {
+        // Namespace declarations are handled separately via `root.namespaces()`.
+        if attr.name() == "xmlns" || attr.namespace().is_some_and(|ns| ns == XMLNS_NS) {
+            continue;
+        }
+
+        // Preserve the attribute name with its prefix (when applicable) so we can re-emit it on
+        // `<xdr:wsDr>`. roxmltree exposes the attribute namespace URI but not always the original
+        // prefix, so we re-map it via the preserved root namespace declarations.
+        let mut name = attr.name().to_string();
+
+        if !name.contains(':') {
+            if let Some(ns) = attr.namespace() {
+                if ns == XML_NS {
+                    name = format!("xml:{name}");
+                } else if let Some((prefix, _)) = root_xmlns
+                    .iter()
+                    .find(|(p, uri)| !p.is_empty() && uri.as_str() == ns)
+                {
+                    name = format!("{prefix}:{name}");
+                }
+            }
+        }
+
+        out.insert(name, attr.value().to_string());
+    }
+    out
+}
+
+fn build_wsdr_root_start_tag(
+    root_xmlns: &BTreeMap<String, String>,
+    root_attrs: &BTreeMap<String, String>,
+) -> String {
     let mut xmlns = BTreeMap::new();
     // Required namespaces for drawings generated by this module.
     xmlns.insert("xdr".to_string(), XDR_NS.to_string());
@@ -809,6 +865,13 @@ fn build_wsdr_root_start_tag(root_xmlns: &BTreeMap<String, String>) -> String {
             out.push_str("=\"");
         }
         escape_xml_attr(&mut out, &uri);
+        out.push('"');
+    }
+    for (k, v) in root_attrs {
+        out.push(' ');
+        out.push_str(k);
+        out.push_str("=\"");
+        escape_xml_attr(&mut out, v);
         out.push('"');
     }
     out.push('>');
