@@ -46,6 +46,13 @@ describe("sheetFormulaRewrite", () => {
     it("rewrites sheet-qualified refs using Unicode NFKC matching (e.g. Å == Å)", () => {
       expect(rewriteDeletedSheetReferencesInFormula("='Å'!A1+1", "Å", ["Å"])).toBe("=#REF!+1");
     });
+
+    it("does not rewrite external workbook sheet refs when deleting a local sheet", () => {
+      // Match Rust backend semantics: `[Book.xlsx]Sheet1!A1` refers to an external workbook and
+      // should not be invalidated when deleting a local `Sheet1`.
+      const input = "=SUM([Book.xlsx]Sheet1!A1,Sheet1!A1)";
+      expect(rewriteDeletedSheetReferencesInFormula(input, "Sheet1", ["Sheet1"])).toBe("=SUM([Book.xlsx]Sheet1!A1,#REF!)");
+    });
   });
 
   describe("rewriteDocumentFormulasForSheetRename", () => {

@@ -431,6 +431,10 @@ function rewriteSheetSpecForDelete(
   sheetOrder: string[],
 ): DeleteSheetSpecRewrite {
   const { workbookPrefix, remainder } = splitWorkbookPrefix(sheetSpec);
+  // Deleting a local sheet must not rewrite references that explicitly target an external workbook
+  // (e.g. `[Book.xlsx]Sheet1!A1`). Those are independent from the current workbook's sheet list,
+  // even if the sheet name happens to match.
+  if (workbookPrefix != null) return { kind: "unchanged" };
   const [start, end] = split3d(remainder);
 
   if (end == null) {
