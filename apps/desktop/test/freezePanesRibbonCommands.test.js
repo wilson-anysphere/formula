@@ -24,6 +24,81 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function extractObjectLiteralAfter(source, anchorRegex) {
+  const match = source.match(anchorRegex);
+  assert.ok(match, `Expected to find anchor ${anchorRegex} in source`);
+  const anchorIndex = match.index ?? -1;
+  assert.ok(anchorIndex >= 0, `Expected match.index for ${anchorRegex}`);
+
+  const braceStart = source.indexOf("{", anchorIndex);
+  assert.ok(braceStart !== -1, `Expected to find '{' after ${anchorRegex}`);
+
+  let depth = 0;
+  let inString = null;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = braceStart; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+
+    if (inLineComment) {
+      if (char === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (char === "\\") {
+        i += 1;
+        continue;
+      }
+      if (char === inString) {
+        inString = null;
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(braceStart, i + 1);
+      }
+    }
+  }
+
+  assert.fail(`Expected to find matching '}' for object literal after ${anchorRegex}`);
+}
+
 function readRibbonSchemaSource() {
   const schemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
   try {
@@ -75,6 +150,18 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
     "Expected ribbon Freeze First Column action to not call app.freezeFirstColumn() directly in main.ts",
   );
   assert.doesNotMatch(main, /\bapp\.unfreezePanes\(/, "Expected ribbon Unfreeze Panes action to not call app.unfreezePanes() directly in main.ts");
+});
+
+test("Desktop main.ts does not disable Freeze Panes commands in read-only mode", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  const readOnlyOverrides = extractObjectLiteralAfter(main, /\.\.\.\(isReadOnly\b/);
+  const ids = ["view.window.freezePanes", ...CANONICAL_FREEZE_PANES_IDS];
+  for (const id of ids) {
+    const pattern = new RegExp(`[\"']${escapeRegExp(id)}[\"']\\s*:\\s*true`);
+    assert.doesNotMatch(readOnlyOverrides, pattern, `Expected read-only ribbon overrides to not disable ${id}`);
+  }
 });
 
 test("Builtin command catalog exposes canonical Freeze Panes ids (and does not register the dropdown trigger id)", () => {
