@@ -213,7 +213,10 @@ export interface DlpOptions {
   classification_store?: { list(documentId: string): DlpClassificationRecord[]; [key: string]: unknown } | null;
   includeRestrictedContent?: boolean;
   include_restricted_content?: boolean;
-  auditLogger?: { log(event: unknown): void; [key: string]: unknown };
+  /**
+   * Optional audit sink. Return type is intentionally flexible to allow both sync and async loggers.
+   */
+  auditLogger?: { log(event: unknown): unknown; [key: string]: unknown };
   /**
    * Optional sheet name <-> id resolver used for structured DLP enforcement.
    */

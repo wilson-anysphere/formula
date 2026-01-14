@@ -72,20 +72,23 @@ type _ClearCacheOptionsNotAny = Assert<
   IsAny<Parameters<ContextManager["clearSheetIndexCache"]>[0]> extends false ? true : false
 >;
 
-const cm = new ContextManager({
-  // Ensure the single-sheet cache knobs are part of the public surface.
-  cacheSheetIndex: true,
-  sheetIndexCacheLimit: 32,
-  workbookRag: {
-    vectorStore: { query: async () => [] },
-    embedder: { embedTexts: async () => [new Float32Array(1)] },
-  },
-});
+ const cm = new ContextManager({
+   // Ensure the single-sheet cache knobs are part of the public surface.
+   cacheSheetIndex: true,
+   sheetIndexCacheLimit: 32,
+   // Ensure the wide-sheet safety cap is part of the public surface.
+   maxContextCols: 500,
+   workbookRag: {
+     vectorStore: { query: async () => [] },
+     embedder: { embedTexts: async () => [new Float32Array(1)] },
+   },
+ });
 
-const result = await cm.buildContext({
-  sheet: { name: "Sheet1", values: [[1]] },
-  query: "hi",
-});
+ const result = await cm.buildContext({
+   sheet: { name: "Sheet1", values: [[1]] },
+   query: "hi",
+   limits: { maxContextCols: 10 },
+ });
 
 // If \`schema\` were \`any\`, this assignment would still typecheck. The \`IsAny\`
 // assertions above ensure it is not \`any\`.
