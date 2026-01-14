@@ -505,6 +505,29 @@ fn cell_format_color_and_parentheses_reflect_number_format() {
 }
 
 #[test]
+fn cell_format_color_and_parentheses_fallback_to_general_for_external_refs() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=CELL("format",[Book.xlsx]Sheet1!A1)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=CELL("color",[Book.xlsx]Sheet1!A1)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=CELL("parentheses",[Book.xlsx]Sheet1!A1)"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // The engine does not track number formats for external workbooks, so these should fall back
+    // to General semantics.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("G".to_string()));
+    assert_number(&engine.get_cell_value("Sheet1", "A2"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "A3"), 0.0);
+}
+
+#[test]
 fn cell_errors_for_unknown_info_types() {
     let mut sheet = TestSheet::new();
 
