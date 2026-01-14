@@ -588,17 +588,21 @@ fn cell_format_classifies_locale_variant_datetime_formats() {
 
     // Day-first dates + ISO-ish year-first dates should classify like the canonical short date.
     let b1 = engine.get_cell_value("Sheet1", "B1");
-    assert_eq!(b1, Value::Text("D1".to_string()));
+    // Excel uses `D4` for numeric short dates like `m/d/yy` (ordering is locale-dependent).
+    assert_eq!(b1, Value::Text("D4".to_string()));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), b1);
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), b1);
 
-    // hh:mm should classify like h:mm.
+    // hh:mm should classify like h:mm (`D9`).
     let b4 = engine.get_cell_value("Sheet1", "B4");
-    assert_eq!(b4, Value::Text("T3".to_string()));
+    assert_eq!(b4, Value::Text("D9".to_string()));
     assert_eq!(engine.get_cell_value("Sheet1", "B5"), b4);
 
-    // hh:mm:ss should classify as a time-with-seconds.
-    assert_eq!(engine.get_cell_value("Sheet1", "B6"), Value::Text("T4".to_string()));
+    // hh:mm:ss should classify as a time-with-seconds (`D8`).
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B6"),
+        Value::Text("D8".to_string())
+    );
 
     // System long date tokens should classify as some date code (not currency).
     match engine.get_cell_value("Sheet1", "B7") {
