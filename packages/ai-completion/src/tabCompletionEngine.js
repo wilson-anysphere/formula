@@ -966,6 +966,16 @@ const CUMULATIVE_BOOLEAN_ENUM = [
   { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
 ];
 
+const TEXT_MATCH_MODE_ENUM_0_1 = [
+  { replacement: "0", displayText: "0 (case-sensitive)", confidence: 0.64 },
+  { replacement: "1", displayText: "1 (case-insensitive)", confidence: 0.63 },
+];
+
+const TEXT_MATCH_END_ENUM_0_1 = [
+  { replacement: "0", displayText: "0 (match from beginning)", confidence: 0.63 },
+  { replacement: "1", displayText: "1 (match from end)", confidence: 0.62 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1075,10 +1085,19 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "FALSE", displayText: "FALSE (keep empty)", confidence: 0.62 },
     ],
     // match_mode
-    4: [
-      { replacement: "0", displayText: "0 (case-sensitive)", confidence: 0.64 },
-      { replacement: "1", displayText: "1 (case-insensitive)", confidence: 0.63 },
-    ],
+    4: TEXT_MATCH_MODE_ENUM_0_1,
+  },
+  TEXTBEFORE: {
+    // match_mode
+    3: TEXT_MATCH_MODE_ENUM_0_1,
+    // match_end
+    4: TEXT_MATCH_END_ENUM_0_1,
+  },
+  TEXTAFTER: {
+    // match_mode
+    3: TEXT_MATCH_MODE_ENUM_0_1,
+    // match_end
+    4: TEXT_MATCH_END_ENUM_0_1,
   },
   TEXTJOIN: {
     // ignore_empty

@@ -2176,6 +2176,49 @@ test("TEXTSPLIT match_mode suggests 0 and 1", async () => {
   );
 });
 
+test("TEXTAFTER match_mode suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTAFTER("aXb", "x", 1, ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", "x", 1, 0'),
+    `Expected TEXTAFTER to suggest match_mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", "x", 1, 1'),
+    `Expected TEXTAFTER to suggest match_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TEXTAFTER match_end suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  // Leave match_mode blank so we're completing match_end (5th arg).
+  const currentInput = '=TEXTAFTER("aXb", "x", 1, , ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", "x", 1, , 0'),
+    `Expected TEXTAFTER to suggest match_end=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTAFTER("aXb", "x", 1, , 1'),
+    `Expected TEXTAFTER to suggest match_end=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TEXTJOIN ignore_empty suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
